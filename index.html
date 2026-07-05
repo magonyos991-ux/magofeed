@@ -165,6 +165,12 @@ body.dark .search-mode-btn.on{background:#f0f0f0;color:#1a1714}
 
 /* ── Chips ── */
 .chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;margin-bottom:22px}
+.brands-rail{display:flex;gap:10px;overflow-x:auto;padding:2px 0 8px;margin-bottom:14px;-webkit-overflow-scrolling:touch}
+.brand-tile{flex-shrink:0;width:76px;cursor:pointer;text-align:center}
+.brand-tile .bt-ico{width:60px;height:60px;margin:0 auto 6px;border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:26px;border:1.5px solid var(--border);position:relative}
+.brand-tile .bt-count{position:absolute;bottom:-4px;right:-4px;background:var(--s1);color:var(--app-bg);font-size:9.5px;font-weight:800;border-radius:999px;padding:2px 6px;border:2px solid var(--app-bg)}
+.brand-tile .bt-name{font-size:11px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brand-banner{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;padding:12px 14px;margin-bottom:14px;cursor:pointer}
 .chip{
   flex:none;cursor:pointer;
   padding:8px 16px;border-radius:var(--radius-chip);
@@ -731,6 +737,11 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
     </div>
     <div class="scroll" style="padding-top:16px">
       <div class="chips" id="cats-home"></div>
+      <div class="sec-hd">
+        <div class="t-section" id="t-brands">Marques</div>
+        <div class="sec-count" id="brands-count"></div>
+      </div>
+      <div class="brands-rail" id="brands-rail"></div>
       <div class="sec-hd">
         <div class="t-section" id="t-trends">Tendances</div>
         <div class="sec-count" id="trends-count"></div>
@@ -1799,6 +1810,7 @@ var leaderboardRows=null;
 var leaderboardLoadedAt=0;
 var userStreak=JSON.parse(localStorage.getItem("magoStreak")||'{"streak":0,"last":"","best":0}');
 var scanHist=JSON.parse(localStorage.getItem("magoScanHist")||"[]");
+var curBrandFilter=null;
 var offlineDataApplied=false;
 
 /* ================================
@@ -2684,10 +2696,89 @@ function pick(d){
   renderRecents();renderResults();show("results");
   playSound("pop");
 }
+/* ================================
+   MARQUES
+   Regroupement du catalogue par marque (champ brand, correspondance exacte) :
+   contrairement a une recherche texte, aucune boisson de la marque ne peut
+   manquer a l'appel. Le rail de l'accueil ouvre la vue marque complete.
+================================ */
+function getBrandGroups(){
+  var map={};
+  DRINKS.forEach(function(d){
+    var b=d.brand||"Autre";
+    if(!map[b])map[b]={brand:b,drinks:[]};
+    map[b].drinks.push(d);
+  });
+  var groups=Object.keys(map).map(function(k){
+    map[k].drinks.sort(function(a,b){return b.stars-a.stars;});
+    map[k].top=map[k].drinks[0];
+    return map[k];
+  });
+  groups.sort(function(a,b){return b.drinks.length-a.drinks.length||a.brand.localeCompare(b.brand);});
+  return groups;
+}
+function renderBrandsRail(){
+  var el=document.getElementById("brands-rail");if(!el)return;
+  var groups=getBrandGroups();
+  var cnt=document.getElementById("brands-count");
+  if(cnt)cnt.textContent=groups.length+" marques";
+  el.innerHTML="";
+  groups.forEach(function(g){
+    var div=document.createElement("div");div.className="brand-tile";
+    div.innerHTML='<div class="bt-ico" style="background:'+g.top.light+'">'+g.top.emoji+
+      '<span class="bt-count">'+g.drinks.length+'</span></div>'+
+      '<div class="bt-name">'+sanitize(g.brand)+'</div>';
+    div.onclick=function(){openBrand(g.brand);};
+    a11yCard(div,"Marque "+g.brand+", "+g.drinks.length+" boisson"+(g.drinks.length>1?"s":""));
+    el.appendChild(div);
+  });
+}
+function openBrand(brand){
+  curBrandFilter=brand;
+  curCat="Tous";
+  navTo("search");
+  setTimeout(function(){
+    var q=document.getElementById("q");if(q)q.value="";
+    if(searchMode!=="drinks"){setSearchMode("drinks");}
+    else{renderCats("cats-search");renderList();}
+  },60);
+  playSound("pop");
+}
+function clearBrandFilter(){
+  curBrandFilter=null;
+  renderList();
+  playSound("pop");
+}
+/* Entrelace les boissons par marque (tour de role) pour eviter les murs
+   de 5 variantes identiques a la suite sur l'accueil */
+function interleaveByBrand(list){
+  var map={},order=[];
+  list.forEach(function(d){
+    var b=d.brand||"Autre";
+    if(!map[b]){map[b]=[];order.push(b);}
+    map[b].push(d);
+  });
+  order.sort(function(a,b){return map[b][0].stars-map[a][0].stars;});
+  var out=[],added=true,i;
+  while(added){
+    added=false;
+    for(i=0;i<order.length;i++){
+      var arr=map[order[i]];
+      if(arr.length){out.push(arr.shift());added=true;}
+    }
+  }
+  return out;
+}
 function renderTrends(){
   var el=document.getElementById("trends");if(!el)return;el.innerHTML="";
-  var f=DRINKS.filter(function(d){return curCat==="Tous"||d.cat===curCat;});
-  var cnt=document.getElementById("trends-count");if(cnt)cnt.textContent=f.length+" boissons";
+  var all=DRINKS.filter(function(d){return curCat==="Tous"||d.cat===curCat;});
+  var f=interleaveByBrand(all);
+  var capped=false;
+  // Sur "Tous", une selection variee suffit : le reste est accessible via
+  // les marques, les categories et la recherche
+  if(curCat==="Tous"&&f.length>18){f=f.slice(0,18);capped=true;}
+  var cnt=document.getElementById("trends-count");
+  if(cnt)cnt.textContent=capped?"Top "+f.length+" \u00B7 "+all.length+" au total":all.length+" boissons";
   f.forEach(function(d){
     var div=document.createElement("div");div.className="dcard";div.dataset.id=d.id;
     var isFav=favorites.indexOf(d.id)!==-1;
@@ -2702,6 +2793,23 @@ function renderTrends(){
     a11yCard(div,d.name+", "+d.brand);
     el.appendChild(div);
   });
+  if(capped){
+    var more=document.createElement("div");more.className="dcard";
+    more.innerHTML='<div class="dcard-photo" style="background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:30px">\uD83D\uDD0D</div>'+
+      '<div class="dcard-info"><div class="dcard-name">Voir tout</div>'+
+      '<div class="dcard-bottom"><span class="dcard-cat">'+all.length+' boissons</span></div></div>';
+    more.onclick=function(){
+      curBrandFilter=null;
+      navTo("search");
+      setTimeout(function(){
+        var qi=document.getElementById("q");if(qi)qi.value="";
+        if(searchMode!=="drinks"){setSearchMode("drinks");}
+        else{renderCats("cats-search");renderList();}
+      },60);
+    };
+    a11yCard(more,"Voir les "+all.length+" boissons");
+    el.appendChild(more);
+  }
 }
 function renderRecents(){
   var el=document.getElementById("recents");if(!el)return;el.innerHTML="";
@@ -2715,6 +2823,7 @@ function renderRecents(){
 }
 function onSearchInput(){clearTimeout(searchDebounce);searchDebounce=setTimeout(renderList,150);}
 function setSearchMode(mode){
+  if(mode==="stores")curBrandFilter=null;
   searchMode=mode;
   document.querySelectorAll(".search-mode-btn").forEach(function(b){b.classList.toggle("on",b.dataset.mode===mode);});
   var catsEl=document.getElementById("cats-search");if(catsEl)catsEl.style.display=mode==="drinks"?"flex":"none";
@@ -2727,18 +2836,54 @@ function renderList(){
   if(searchMode==="stores"){renderStoreSearchList();return;}
   var qEl=document.getElementById("q"),el=document.getElementById("search-list");if(!el)return;
   var q=qEl?qEl.value.toLowerCase():"";el.innerHTML="";
-  var f=DRINKS.filter(function(d){return(curCat==="Tous"||d.cat===curCat)&&(!q||d.name.toLowerCase().includes(q)||d.brand.toLowerCase().includes(q));});
+  var base=curBrandFilter?DRINKS.filter(function(d){return d.brand===curBrandFilter;}):DRINKS;
+  var f=base.filter(function(d){return(curCat==="Tous"||d.cat===curCat)&&(!q||d.name.toLowerCase().includes(q)||d.brand.toLowerCase().includes(q));});
   // Repli tolerant aux fautes de frappe : uniquement si la recherche exacte ne donne rien,
   // pour ne jamais melanger des approximations avec des resultats exacts.
   var isFuzzy=false;
   if(q&&!f.length){
-    f=DRINKS.filter(function(d){return(curCat==="Tous"||d.cat===curCat)&&fuzzyIncludes(q,d.name+" "+d.brand);});
+    f=base.filter(function(d){return(curCat==="Tous"||d.cat===curCat)&&fuzzyIncludes(q,d.name+" "+d.brand);});
     isFuzzy=f.length>0;
+  }
+  // Bandeau du filtre marque actif : liste complete garantie (champ brand exact)
+  if(curBrandFilter){
+    var bb=document.createElement("div");bb.className="brand-banner";
+    var nb=DRINKS.filter(function(d){return d.brand===curBrandFilter;}).length;
+    bb.innerHTML='<span style="font-size:18px">\uD83C\uDFF7\uFE0F</span>'+
+      '<span style="flex:1;font-size:13px;font-weight:700;color:var(--s1)">Marque : '+sanitize(curBrandFilter)+' <span style="font-weight:600;color:var(--s2)">\u00B7 '+nb+' boisson'+(nb>1?"s":"")+'</span></span>'+
+      '<span style="font-size:15px;font-weight:700;color:var(--s2)" aria-hidden="true">\u2715</span>';
+    bb.onclick=clearBrandFilter;
+    a11yCard(bb,"Retirer le filtre marque "+curBrandFilter);
+    el.appendChild(bb);
+  } else if(q&&q.length>=3){
+    // La requete correspond a une marque -> proposer la liste complete de la marque
+    var bMatch=getBrandGroups().find(function(g){
+      var gb=normTxt(g.brand),qn=normTxt(q);
+      return gb===qn||gb.indexOf(qn)===0;
+    });
+    if(bMatch){
+      var bb2=document.createElement("div");bb2.className="brand-banner";
+      bb2.innerHTML='<span style="font-size:18px">'+bMatch.top.emoji+'</span>'+
+        '<span style="flex:1;font-size:13px;font-weight:700;color:var(--s1)">Toute la marque '+sanitize(bMatch.brand)+' <span style="font-weight:600;color:var(--s2)">\u00B7 '+bMatch.drinks.length+' boisson'+(bMatch.drinks.length>1?"s":"")+'</span></span>'+
+        '<span style="font-size:16px;color:var(--s2)" aria-hidden="true">\u203A</span>';
+      bb2.onclick=function(){
+        curBrandFilter=bMatch.brand;
+        var qi=document.getElementById("q");if(qi)qi.value="";
+        renderList();playSound("pop");
+      };
+      a11yCard(bb2,"Voir toute la marque "+bMatch.brand);
+      el.appendChild(bb2);
+    }
   }
   // Les découvertes suggérées par la communauté (via scan) ne sont pas encore au catalogue officiel,
   // mais on les fait quand même remonter en recherche pour qu'elles restent trouvables.
   var matchingDiscoveries=q?DISCOVERIES.filter(function(d){return d.name&&d.name.toLowerCase().includes(q);}):[];
-  if(!f.length&&!matchingDiscoveries.length){el.innerHTML='<div style="padding:48px;text-align:center;font-size:14px;font-weight:500;color:var(--s3)">Aucun résultat 😕</div>';return;}
+  if(!f.length&&!matchingDiscoveries.length){
+    var empty=document.createElement("div");
+    empty.style.cssText="padding:48px;text-align:center;font-size:14px;font-weight:500;color:var(--s3)";
+    empty.textContent=curBrandFilter?"Aucune boisson "+curBrandFilter+" dans cette cat\u00E9gorie":"Aucun r\u00E9sultat \uD83D\uDE15";
+    el.appendChild(empty);return;
+  }
   if(isFuzzy){
     var fzHdr=document.createElement("div");
     fzHdr.style.cssText="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px";
@@ -3796,7 +3941,7 @@ try{
   setLang(savedLang||"fr");
   initSoundToggle();
   initSettingsPseudo();
-  renderCats("cats-home");renderCats("cats-search");
+  renderCats("cats-home");renderCats("cats-search");renderBrandsRail();
   renderTrends();renderRecents();renderList();
   renderLangGrid();renderDiscoveries();
   renderFavs();
