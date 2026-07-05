@@ -11,12 +11,12 @@
 <meta property="og:site_name" content="Magofeed">
 <meta property="og:title" content="Magofeed — Trouve ta boisson dans les magasins proches">
 <meta property="og:description" content="Localise en un instant les sodas, ice tea, energy drinks et jus disponibles dans les magasins autour de toi, grâce à une communauté qui confirme le stock en temps réel.">
-<meta property="og:image" content="https://magofeed.netlify.app/icons/icon-512.png">
-<meta property="og:url" content="https://magofeed.netlify.app/">
+<meta property="og:image" content="https://magonyos991-ux.github.io/magofeed/icons/icon-512.png">
+<meta property="og:url" content="https://magonyos991-ux.github.io/magofeed/">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Magofeed — Trouve ta boisson dans les magasins proches">
 <meta name="twitter:description" content="Localise en un instant les sodas, ice tea, energy drinks et jus disponibles dans les magasins autour de toi.">
-<meta name="twitter:image" content="https://magofeed.netlify.app/icons/icon-512.png">
+<meta name="twitter:image" content="https://magonyos991-ux.github.io/magofeed/icons/icon-512.png">
 
 <!-- PWA -->
 <link rel="manifest" href="manifest.json">
@@ -828,6 +828,10 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div id="scan-result" class="scan-result"></div>
       <button id="scan-btn" class="scan-btn" style="background:var(--accent)" onclick="startScan()">Activer la caméra</button>
       <div id="rescan-link" onclick="rescan()" style="display:none;text-align:center;padding:14px;font-size:13px;font-weight:600;color:var(--s2);cursor:pointer">🔄 Scanner un autre produit</div>
+      <div id="scan-history-wrap" style="display:none;padding:6px 20px 24px">
+        <div class="t-section" style="margin-bottom:4px">Derniers scans</div>
+        <div id="scan-history"></div>
+      </div>
     </div>
   </div>
 
@@ -1480,7 +1484,7 @@ window.fbAddReport = async function(storeId, drinkId, type) {
 // les règles Firestore refusent un deuxième vote du même utilisateur en vérifiant que ce
 // document n'existe pas encore. Contrairement au suivi localStorage seul, ceci est infalsifiable
 // même en vidant le cache du navigateur ou en changeant de session locale.
-window.fbAddDiscovery = async function(barcode, name, brand) {
+window.fbAddDiscovery = async function(barcode, name, brand, cat) {
   var user = auth.currentUser;
   if (!user) throw new Error("Connexion requise pour contribuer");
   try {
@@ -1504,6 +1508,7 @@ window.fbAddDiscovery = async function(barcode, name, brand) {
       return { isNew: false, data: Object.assign({}, existing, updates) };
     }
     var data = { name: name, brand: brand || "", votes: 1, barcode: String(barcode), createdAt: serverTimestamp() };
+    if (cat) data.cat = cat;
     batch.set(ref, data);
     batch.set(votedRef, { votedAt: serverTimestamp() });
     await batch.commit();
@@ -1793,6 +1798,7 @@ var priceHist=JSON.parse(localStorage.getItem("magoPriceHist")||"{}");
 var leaderboardRows=null;
 var leaderboardLoadedAt=0;
 var userStreak=JSON.parse(localStorage.getItem("magoStreak")||'{"streak":0,"last":"","best":0}');
+var scanHist=JSON.parse(localStorage.getItem("magoScanHist")||"[]");
 var offlineDataApplied=false;
 
 /* ================================
@@ -1963,7 +1969,7 @@ function show(s){
   if(s==="search")setTimeout(function(){var q=document.getElementById("q");if(q)q.focus();},transitioning?260:120);
   if(s==="discover"){renderDiscoveries();renderTopScanned();}
   if(s==="profile"){renderLeaderboard();refreshLeaderboard();renderStreak();}
-  if(s==="scan"&&!scanActive)resetScanUI();
+  if(s==="scan"){if(!scanActive)resetScanUI();renderScanHistory();}
 }
 
 /* ================================
@@ -2165,6 +2171,114 @@ function resetScanUI(){
   if(rescanLink)rescanLink.style.display="none";
 }
 function rescan(){resetScanUI();startScan();}
+
+/* ================================
+   SCAN : memoire locale + extraction OpenFoodFacts fiabilisee
+   - Chaque code-barre identifie est memorise (localStorage, 50 derniers) :
+     un rescan repond instantanement sans dependre du reseau ni d'OpenFoodFacts.
+   - Les fiches OpenFoodFacts portent souvent un nom generique ("Boisson
+     energisante") : on choisit le meilleur nom disponible et on prefixe par
+     la marque quand le nom seul est generique.
+   - La categorie est deduite des categories_tags de la fiche.
+   - Garde anti-alcool : une fiche alcoolisee ne peut pas etre ajoutee
+     (regle produit non negociable, y compris bieres 0.0%).
+================================ */
+var OFF_GENERIC_NAMES=["boisson energisante","energy drink","energie drink","boisson gazeuse","soda","soft drink","softdrink","ice tea","the glace","iced tea","jus de fruit","jus de fruits","jus","nectar","eau minerale","eau de source","eau gazeuse","eau","limonade","lemonade","boisson rafraichissante","boisson rafraichissante aux fruits","boisson aux fruits","boisson","drink","beverage","cola"];
+function isGenericProductName(name){
+  var n=normTxt(name).replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim();
+  if(!n||n.length<3)return true;
+  return OFF_GENERIC_NAMES.indexOf(n)!==-1;
+}
+function offGuessCategory(p){
+  var tags=(p.categories_tags||[]).join(" ").toLowerCase();
+  if(/energy-drink|energy_drink|boissons-energisantes/.test(tags))return"Energy";
+  if(/ice-tea|iced-tea|tea-based|the-glace/.test(tags))return"Ice Tea";
+  if(/juice|jus-de|nectar/.test(tags))return"Jus";
+  if(/water|eaux/.test(tags))return"Eau";
+  if(/soda|carbonated|gazeuse|lemonade|limonade|cola/.test(tags))return"Soda";
+  return"";
+}
+function offIsAlcoholic(p){
+  var abv=parseFloat(p.alcohol_by_volume||((p.nutriments||{}).alcohol)||0);
+  if(abv>0)return true;
+  var tags=(p.categories_tags||[]).join(" ").toLowerCase();
+  // Inclut volontairement les bieres/vins 0.0% : choix produit du fondateur
+  return /alcohol|beer|biere|wine|vin[s]?\b|cider|cidre|spirit|liqueur|vodka|whisk|rhum|gin\b/.test(tags);
+}
+function offBestProduct(p){
+  var brand=sanitize(((p.brands||"").split(",")[0]||"").trim());
+  var candidates=[p.product_name_fr,p.product_name,p.generic_name_fr,p.generic_name];
+  var name="",generic="";
+  for(var i=0;i<candidates.length;i++){
+    var c=(candidates[i]||"").trim();
+    if(!c)continue;
+    if(!isGenericProductName(c)){name=c;break;}
+    if(!generic)generic=c;
+  }
+  var cat=offGuessCategory(p);
+  if(!name){
+    // Tous les noms sont generiques : la marque devient le nom principal
+    // (ex : "Golden Power" plutot que "Boisson energisante"). On ne garde le
+    // nom generique entre parentheses que si aucune categorie n'a ete deduite,
+    // sinon il ferait doublon avec la categorie affichee a cote.
+    if(brand)name=brand+(generic&&!cat?" ("+generic+")":"");
+    else name=generic||"Inconnu";
+  } else if(brand&&normTxt(name).indexOf(normTxt(brand))===-1){
+    name=brand+" "+name;
+  }
+  return{name:sanitize(name),brand:brand,cat:cat,alcohol:offIsAlcoholic(p)};
+}
+function fetchWithTimeout(url,ms){
+  return new Promise(function(resolve,reject){
+    var ctrl=("AbortController"in window)?new AbortController():null;
+    var done=false;
+    var t=setTimeout(function(){if(done)return;done=true;if(ctrl)ctrl.abort();reject(new Error("timeout"));},ms);
+    fetch(url,ctrl?{signal:ctrl.signal}:{}).then(function(r){if(done)return;done=true;clearTimeout(t);resolve(r);},function(e){if(done)return;done=true;clearTimeout(t);reject(e);});
+  });
+}
+function fetchOFFProduct(code){
+  var url="https://world.openfoodfacts.org/api/v0/product/"+encodeURIComponent(code)+".json";
+  // L'API OpenFoodFacts est souvent lente : timeout court puis une seconde tentative
+  return fetchWithTimeout(url,6000).then(function(r){return r.json();})
+    .catch(function(){return fetchWithTimeout(url,9000).then(function(r){return r.json();});});
+}
+function findCachedScan(code){
+  return scanHist.find(function(e){return String(e.code)===String(code);});
+}
+function recordScan(code,name,brand,cat,src){
+  scanHist=scanHist.filter(function(e){return String(e.code)!==String(code);});
+  scanHist.unshift({code:String(code),name:name,brand:brand||"",cat:cat||"",ts:Date.now(),src:src||""});
+  scanHist=scanHist.slice(0,50);
+  try{localStorage.setItem("magoScanHist",JSON.stringify(scanHist));}catch(e){/* quota */}
+  renderScanHistory();
+}
+function scanCatEmoji(cat){
+  return{Energy:"\u26A1",Soda:"\uD83E\uDD64","Ice Tea":"\uD83E\uDDCB",Jus:"\uD83E\uDDC3",Eau:"\uD83D\uDCA7",Exotique:"\uD83C\uDF34"}[cat]||"\uD83D\uDD0D";
+}
+function renderScanHistory(){
+  var el=document.getElementById("scan-history");if(!el)return;
+  var wrap=document.getElementById("scan-history-wrap");
+  if(!scanHist.length){if(wrap)wrap.style.display="none";return;}
+  if(wrap)wrap.style.display="block";
+  el.innerHTML="";
+  scanHist.slice(0,8).forEach(function(e){
+    var div=document.createElement("div");
+    div.style.cssText="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)";
+    var d=e.ts?new Date(e.ts):null;
+    var when=d?d.toLocaleDateString("fr-BE",{day:"numeric",month:"short"}):"";
+    div.innerHTML='<div style="font-size:20px;flex-shrink:0">'+scanCatEmoji(e.cat)+'</div>'+
+      '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(e.name)+'</div>'+
+      '<div style="font-size:11px;font-weight:500;color:var(--s2)">'+(e.cat?e.cat+" \u00B7 ":"")+when+'</div></div>'+
+      '<span class="c3" style="font-size:16px">\u203A</span>';
+    div.onclick=function(){
+      var inCatalog=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(e.code)!==-1;});
+      if(inCatalog){pick(inCatalog);return;}
+      show("discover");
+    };
+    a11yCard(div,e.name+(e.cat?", "+e.cat:""));
+    el.appendChild(div);
+  });
+}
 function onBarcodeDetected(r){
   var code=r.codeResult.code;stopScan();playSound("beep");
   document.getElementById("scan-hint").textContent="✅ Code : "+code;
@@ -2178,6 +2292,7 @@ function onBarcodeDetected(r){
     res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="width:40px;height:40px;flex-shrink:0;font-size:28px;border-radius:10px;overflow:hidden">'+drinkIconHTML(found)+'</div><div><div style="font-size:15px;font-weight:700;color:#166534">'+found.name+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">Reconnu ✓</div></div></div>';
     btn.textContent="🗺️ Voir les magasins";btn.style.background=found.color;btn.style.display="block";
     btn.onclick=function(){stopScan();pick(found);};
+    recordScan(code,found.name,found.brand,found.cat,"catalog");
     playSound("win");toast("✅ "+found.name+" !");
   } else if(foundDiscovery){
     var alreadyVoted=hasVotedDiscovery(foundDiscovery.id);
@@ -2189,22 +2304,41 @@ function onBarcodeDetected(r){
       btn.textContent="👍 Voter pour cette découverte";btn.style.background="#e67e22";btn.style.display="block";
       btn.onclick=function(){voteDisc(foundDiscovery.id);};
     }
+    recordScan(code,foundDiscovery.name,foundDiscovery.brand||"",foundDiscovery.cat||"","discovery");
     playSound("win");toast("Déjà connu : "+foundDiscovery.name);
+  } else if(findCachedScan(code)){
+    // Deja scanne par cet utilisateur : reponse instantanee depuis la memoire locale,
+    // sans dependre du reseau ni des humeurs d'OpenFoodFacts
+    var cached=findCachedScan(code);
+    var cd=cached.ts?new Date(cached.ts).toLocaleDateString("fr-BE",{day:"numeric",month:"short"}):"";
+    res.className="scan-result found";
+    res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="font-size:28px">'+scanCatEmoji(cached.cat)+'</div><div><div style="font-size:15px;font-weight:700;color:#166534">'+sanitize(cached.name)+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">Déjà scanné par toi'+(cd?" le "+cd:"")+(cached.cat?" · "+cached.cat:"")+'</div></div></div>';
+    btn.textContent="➕ Ajouter aux découvertes";btn.style.background="#e67e22";btn.style.display="block";
+    btn.onclick=function(){addDiscovery(cached.name,cached.brand,code,cached.cat);};
+    recordScan(code,cached.name,cached.brand,cached.cat,cached.src);
+    playSound("win");toast("Déjà scanné : "+cached.name);
   } else {
     res.className="scan-result";
     res.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:60px;gap:8px"><div class="spinner"></div><div style="font-size:13px;color:var(--s2)">Recherche...</div></div>';
     btn.style.display="none";
-    fetch("https://world.openfoodfacts.org/api/v0/product/"+code+".json")
-      .then(function(r){return r.json();})
+    fetchOFFProduct(code)
       .then(function(data){
         if(data.status===1){
-          var p=data.product;
-          var nom=sanitize(p.product_name||p.product_name_fr||"Inconnu");
-          var marque=sanitize(p.brands||"");
+          var p=data.product||{};
+          var best=offBestProduct(p);
+          if(best.alcohol){
+            // Regle produit non negociable : aucune boisson alcoolisee, meme 0.0%
+            res.className="scan-result notfound";
+            res.innerHTML='<div style="text-align:center"><div style="font-size:14px;color:#991b1b;font-weight:600;margin-bottom:2px">🚫 Boisson alcoolisée</div><div style="font-size:12px;color:var(--s2)">Magofeed reste 100% sans alcool — ce produit ne peut pas être ajouté.</div></div>';
+            btn.style.display="none";
+            playSound("err");
+            return;
+          }
           res.className="scan-result found";
-          res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="font-size:28px">🔍</div><div><div style="font-size:15px;font-weight:700;color:#166534">'+nom+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">'+(marque?"Marque : "+marque+" · ":"")+'Pas encore dans Magofeed</div></div></div>';
+          res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="font-size:28px">'+scanCatEmoji(best.cat)+'</div><div><div style="font-size:15px;font-weight:700;color:#166534">'+best.name+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">'+(best.cat?best.cat+" · ":"")+(best.brand?"Marque : "+best.brand+" · ":"")+'Pas encore dans Magofeed</div></div></div>';
           btn.textContent="➕ Ajouter aux découvertes";btn.style.background="#e67e22";btn.style.display="block";
-          btn.onclick=function(){addDiscovery(nom,marque,code);};
+          btn.onclick=function(){addDiscovery(best.name,best.brand,code,best.cat);};
+          recordScan(code,best.name,best.brand,best.cat,"off");
           playSound("win");
         } else {
           res.className="scan-result notfound";
@@ -2218,6 +2352,7 @@ function onBarcodeDetected(r){
             var input=document.getElementById("unknown-name-input");
             var typedName=input?input.value.trim():"";
             if(!typedName){toast("Indique le nom du produit d'abord");if(input)input.focus();playSound("err");return;}
+            recordScan(code,typedName,"","","manual");
             addDiscovery(typedName,"",code);
           };
           playSound("err");
@@ -3243,7 +3378,7 @@ function markVotedDiscovery(id){
   votedDiscoveries.push(String(id));
   localStorage.setItem("magoVotedDisc",JSON.stringify(votedDiscoveries));
 }
-function addDiscovery(name,brand,barcode){
+function addDiscovery(name,brand,barcode,cat){
   var already=DISCOVERIES.find(function(d){return String(d.barcode)===String(barcode);});
   if(already){
     // Corrige un nom générique "Produit <code>" laissé par un premier scan sans nom saisi
@@ -3259,7 +3394,7 @@ function addDiscovery(name,brand,barcode){
       toast("Déjà suggérée · vote ajouté +2 pts");
     }
   } else {
-    DISCOVERIES.unshift({id:barcode,name:name,brand:brand,votes:1,barcode:barcode});
+    DISCOVERIES.unshift({id:barcode,name:name,brand:brand,votes:1,barcode:barcode,cat:cat||""});
     markVotedDiscovery(barcode);
     userStats.signals++;userStats.pts+=20;
     toast("🆕 Ajouté aux découvertes · +20 pts");
@@ -3268,7 +3403,7 @@ function addDiscovery(name,brand,barcode){
   updateProfileStats();renderDiscoveries();
   stopScan();playSound("win");show("discover");
   // Partagé avec toute la communauté via Firestore (dédoublonné par code-barre)
-  if(window.fbAddDiscovery)window.fbAddDiscovery(barcode,name,brand).catch(function(){});
+  if(window.fbAddDiscovery)window.fbAddDiscovery(barcode,name,brand,cat).catch(function(){});
 }
 function renderDiscoveries(){
   var el=document.getElementById("disc-list");if(!el)return;el.innerHTML="";
