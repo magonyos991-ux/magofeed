@@ -874,8 +874,8 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       </div>
       <div style="padding:0 20px 20px;text-align:center">
         <div id="profile-avatar" style="width:76px;height:76px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:34px;margin:0 auto 12px;background:repeating-linear-gradient(45deg,#eceae5 0 6px,#f4f2ee 6px 12px)">🧑</div>
-        <div id="profile-name-display" style="font-size:18px;font-weight:800;letter-spacing:-.3px" class="c1">Magonyos</div>
-        <div id="profile-status-display" style="font-size:12px;font-weight:500;margin-top:3px" class="c2">Fondateur · Magofeed</div>
+        <div id="profile-name-display" style="font-size:18px;font-weight:800;letter-spacing:-.3px" class="c1"></div>
+        <div id="profile-status-display" style="font-size:12px;font-weight:500;margin-top:3px" class="c2">Membre Magofeed</div>
       </div>
       <div class="stat-grid">
         <div class="stat-card"><div class="stat-num" id="stat-signals">0</div><div class="stat-lbl" id="t-sig">Signalements</div></div>
@@ -918,8 +918,8 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;gap:14px">
           <div id="avatar-initials" style="width:46px;height:46px;border-radius:50%;background:var(--s1);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:#fff;flex-shrink:0">M</div>
           <div style="flex:1">
-            <div style="font-size:13px;font-weight:600;color:var(--s1)" id="profile-pseudo-display">Magonyos</div>
-            <div style="font-size:11px;color:var(--s2);margin-top:2px">Fondateur · Magofeed</div>
+            <div style="font-size:13px;font-weight:600;color:var(--s1)" id="profile-pseudo-display"></div>
+            <div style="font-size:11px;color:var(--s2);margin-top:2px">Appuie pour changer ton pseudo</div>
           </div>
           <div onclick="editPseudo()" style="font-size:12px;font-weight:600;color:var(--s2);cursor:pointer;padding:6px 12px;border-radius:8px;background:var(--bg3)">Modifier</div>
         </div>
@@ -1254,7 +1254,7 @@ window.fbSyncUserStats = function(stats) {
     var st = {};
     try { st = JSON.parse(localStorage.getItem("magoStreak") || "{}"); } catch(e) {}
     setDoc(userDocRef(user.uid), {
-      pseudo: localStorage.getItem("magopseudo") || "Magonyos",
+      pseudo: localStorage.getItem("magopseudo") || "Explorateur",
       points: stats.pts || 0,
       signals: stats.signals || 0,
       confirms: stats.confirms || 0,
@@ -1285,7 +1285,7 @@ onAuthStateChanged(auth, async function(user) {
       window.dispatchEvent(new CustomEvent("fbUserStatsLoaded", { detail: snap.data() }));
     } else {
       await setDoc(userDocRef(user.uid), {
-        pseudo: localStorage.getItem("magopseudo") || "Magonyos",
+        pseudo: localStorage.getItem("magopseudo") || "Explorateur",
         points: 0, signals: 0, confirms: 0,
         createdAt: serverTimestamp()
       });
@@ -3801,10 +3801,37 @@ function initSplash(){
 /* ================================
    SETTINGS
 ================================ */
-var userPseudo=localStorage.getItem("magopseudo")||"Magonyos";
+/* Identite : chaque nouvel utilisateur recoit un pseudo unique genere au
+   premier lancement (modifiable a tout moment). Avant, "Magonyos" etait le
+   pseudo par defaut de tout le monde : chaque nouvel utilisateur croyait
+   etre sur le compte du fondateur et le classement devenait illisible. */
+function generatePseudo(){
+  var animaux=["Panda","Tigre","Colibri","Renard","Loutre","Fennec","Koala","Lynx","Gecko","Toucan"];
+  var boissons=["P\u00E9tillant","Glac\u00E9","Tropical","Fruit\u00E9","Vitamin\u00E9","Givr\u00E9","Exotique","Sucr\u00E9"];
+  var a=animaux[Math.floor(Math.random()*animaux.length)];
+  var b=boissons[Math.floor(Math.random()*boissons.length)];
+  return a+" "+b+" "+String(Math.floor(100+Math.random()*900));
+}
+var userPseudo=localStorage.getItem("magopseudo");
+if(!userPseudo){
+  userPseudo=generatePseudo();
+  try{localStorage.setItem("magopseudo",userPseudo);}catch(e){}
+}
+function applyPseudoDisplays(){
+  var name=document.getElementById("profile-name-display");if(name)name.textContent=userPseudo;
+  var el=document.getElementById("profile-pseudo-display");if(el)el.textContent=userPseudo;
+  var initials=document.getElementById("avatar-initials");if(initials)initials.textContent=userPseudo.charAt(0).toUpperCase();
+}
 function editPseudo(){
-  var current=localStorage.getItem("magopseudo")||"Magonyos";var newName=prompt("Ton pseudo :",current);
-  if(newName&&newName.trim()){userPseudo=newName.trim();localStorage.setItem("magopseudo",userPseudo);var el=document.getElementById("profile-pseudo-display");if(el)el.textContent=userPseudo;var initials=document.getElementById("avatar-initials");if(initials)initials.textContent=userPseudo.charAt(0).toUpperCase();toast("Pseudo mis à jour !");playSound("pop");}
+  var current=localStorage.getItem("magopseudo")||userPseudo;var newName=prompt("Ton pseudo :",current);
+  if(newName&&newName.trim()){
+    userPseudo=newName.trim().slice(0,24);
+    localStorage.setItem("magopseudo",userPseudo);
+    applyPseudoDisplays();
+    // Le classement lit le pseudo dans Firestore : on synchronise tout de suite
+    if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+    toast("Pseudo mis à jour !");playSound("pop");
+  }
 }
 function clearHistory(){if(!confirm("Effacer tout l'historique ?"))return;searchHistory=[];localStorage.removeItem("magosearchhist");toast("Historique effacé");playSound("pop");}
 function showPrivacy(){show("privacy");}
@@ -3812,7 +3839,7 @@ function showTerms(){show("terms");}
 function reportBug(){window.open("mailto:magofeed@outlook.com?subject=Bug%20report%20Magofeed","_blank");}
 function resetTuto(){localStorage.removeItem("magotuto");show("home");setTimeout(tutoStart,400);toast("Tutoriel relancé !");}
 function resetOnboarding(){localStorage.removeItem("magoob");localStorage.removeItem("magotuto");location.reload();}
-function initSettingsPseudo(){var el=document.getElementById("profile-pseudo-display");if(el)el.textContent=userPseudo;var initials=document.getElementById("avatar-initials");if(initials)initials.textContent=userPseudo.charAt(0).toUpperCase();}
+function initSettingsPseudo(){applyPseudoDisplays();}
 function signInGoogle(){
   if(!window.fbSignInWithGoogle){toast("Connexion indisponible pour le moment");return;}
   toast("Connexion à Google…");
