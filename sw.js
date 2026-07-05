@@ -1,13 +1,17 @@
 /* Service Worker Magofeed — cache l'app shell pour un chargement instantané et un mode offline basique.
    Les données Firestore, la géocodification et les tuiles de carte restent toujours en direct (jamais mises en cache). */
-const CACHE_NAME = "magofeed-v2";
+const CACHE_NAME = "magofeed-v3";
+/* Chemins RELATIFS au scope du service worker : fonctionne aussi bien a la racine
+   d'un domaine (Netlify) que dans un sous-dossier (GitHub Pages /magofeed/).
+   Les chemins absolus "/index.html" pointaient hors du sous-dossier sur GitHub
+   Pages -> 404 -> le service worker ne s'installait jamais. */
 const APP_SHELL = [
-  "/",
-  "/index.html",
-  "/manifest.json",
-  "/icons/icon-192.png",
-  "/icons/icon-512.png",
-  "/icons/apple-touch-icon.png"
+  "./",
+  "./index.html",
+  "./manifest.json",
+  "./icons/icon-192.png",
+  "./icons/icon-512.png",
+  "./icons/apple-touch-icon.png"
 ];
 
 self.addEventListener("install", function(event) {
@@ -50,10 +54,10 @@ self.addEventListener("fetch", function(event) {
       fetch(req)
         .then(function(res) {
           var copy = res.clone();
-          caches.open(CACHE_NAME).then(function(cache) { cache.put("/index.html", copy); });
+          caches.open(CACHE_NAME).then(function(cache) { cache.put("./index.html", copy); });
           return res;
         })
-        .catch(function() { return caches.match("/index.html"); })
+        .catch(function() { return caches.match("./index.html"); })
     );
     return;
   }
