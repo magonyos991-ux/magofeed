@@ -3848,7 +3848,22 @@ function signInGoogle(){
     playSound("win");
   }).catch(function(e){
     console.warn("Google sign-in failed:",e);
-    toast("Connexion annulée ou indisponible");
+    var code=(e&&e.code)||"";
+    // Messages cibles : le cas "unauthorized-domain" est celui qui a produit
+    // la page blanche "The requested action is invalid" chez les testeurs
+    if(code==="auth/unauthorized-domain"){
+      toast("\u26A0\uFE0F Domaine non autoris\u00E9 dans Firebase (Console \u2192 Authentication \u2192 Settings \u2192 Authorized domains)");
+    }else if(code==="auth/operation-not-allowed"){
+      toast("\u26A0\uFE0F Connexion Google d\u00E9sactiv\u00E9e (Console \u2192 Authentication \u2192 Sign-in method)");
+    }else if(code==="auth/popup-blocked"){
+      toast("Fen\u00EAtre bloqu\u00E9e par le navigateur \u2014 r\u00E9essaie");
+    }else if(code==="auth/credential-already-in-use"||code==="auth/email-already-in-use"){
+      toast("Ce compte Google est d\u00E9j\u00E0 li\u00E9 \u00E0 un autre profil Magofeed");
+    }else if(code==="auth/popup-closed-by-user"||code==="auth/cancelled-popup-request"){
+      toast("Connexion annul\u00E9e");
+    }else{
+      toast("Connexion indisponible ("+(code||"erreur inconnue")+")");
+    }
   });
 }
 function updateAccountUI(user){
