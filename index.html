@@ -993,7 +993,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0607b</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0607d</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1314,6 +1314,7 @@ onAuthStateChanged(auth, async function(user) {
   window._fbUser = user;
   window.fbCheckAdmin();
   window.fbLoadCatalog();
+  window.fbLoadDrinkImages();
   try {
     var snap = await getDoc(userDocRef(user.uid));
     if (snap.exists()) {
@@ -1335,7 +1336,11 @@ onAuthStateChanged(auth, async function(user) {
    côté client avec la formule de Haversine. */
 const DEFAULT_CENTER = { lat: 50.8503, lng: 4.3517 }; // Bruxelles, utilisé tant que le GPS n'a pas répondu
 const CACHE_KEY = "magoNearbyCache";
-const CACHE_TTL_MS = 20 * 60 * 1000;
+// Sobriete Firestore : cache "frais" 6h (zero lecture reseau), rafraichi en
+// silence entre 6h et 24h, requete complete au-dela. Les magasins bougent
+// rarement ; les confirmations/prix, eux, arrivent par les mises a jour locales.
+const CACHE_SOFT_TTL_MS = 6 * 60 * 60 * 1000;
+const CACHE_HARD_TTL_MS = 24 * 60 * 60 * 1000;
 
 function haversineKm(lat1, lng1, lat2, lng2) {
   var R = 6371, dLat = (lat2 - lat1) * Math.PI / 180, dLng = (lng2 - lng1) * Math.PI / 180;
@@ -1401,19 +1406,29 @@ window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
   var banner = document.getElementById("fb-status");
   var now = Date.now();
 
+  var servedFromCache = false;
   if (!opts.skipCache) {
     try {
       var cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
-      if (cached && (now - cached.ts) < CACHE_TTL_MS && cached.radiusKm >= radiusKm) {
+      if (cached && (now - cached.ts) < CACHE_HARD_TTL_MS && cached.radiusKm >= radiusKm) {
         var driftKm = haversineKm(lat, lng, cached.lat, cached.lng);
-        if (driftKm < radiusKm * 0.5) applyStores(cached.stores, banner, true);
+        if (driftKm < radiusKm * 0.5) {
+          applyStores(cached.stores, banner, true);
+          servedFromCache = true;
+          window._fbLastQuery = { lat: cached.lat, lng: cached.lng, radiusKm: cached.radiusKm };
+          // Cache frais : ON S'ARRETE LA. Avant ce correctif, la requete reseau
+          // complete partait quand meme a chaque ouverture (des centaines de
+          // lectures Firestore inutiles par session).
+          if ((now - cached.ts) < CACHE_SOFT_TTL_MS) return cached.stores;
+          // Cache entre 6h et 24h : on continue vers un rafraichissement SILENCIEUX
+        }
       }
     } catch (e) { /* cache corrompu, ignoré */ }
   }
 
   window._fbLoading = true;
   try {
-    if (banner) { banner.style.display = "block"; banner.textContent = "🔥 Recherche des magasins à proximité…"; }
+    if (banner && !servedFromCache) { banner.style.display = "block"; banner.textContent = "🔥 Recherche des magasins à proximité…"; }
     var stores = await queryNearbyStores(lat, lng, radiusKm);
     window._fbLastQuery = { lat: lat, lng: lng, radiusKm: radiusKm };
     applyStores(stores, banner, false);
@@ -1446,11 +1461,21 @@ window.fbEnsureStoresForDrink = async function(drinkId, lat, lng) {
     });
   }
   if (hasMatch()) return true;
+  // Cache negatif 24h : si l'elargissement 25/50km n'a rien donne hier pour
+  // cette boisson, inutile de relancer ces grosses requetes aujourd'hui.
+  // (Indispensable depuis l'extension du catalogue : les nouvelles boissons
+  // sans magasin confirme declenchaient l'elargissement a chaque fiche.)
+  var negKey = "magoExpandNeg";
+  var neg = {};
+  try { neg = JSON.parse(localStorage.getItem(negKey) || "{}"); } catch (e) {}
+  if (neg[drinkId] && (Date.now() - neg[drinkId]) < 24 * 60 * 60 * 1000) return false;
   var radii = [25, 50];
   for (var i = 0; i < radii.length; i++) {
     await window.fbLoadNearbyStores(centerLat, centerLng, radii[i], { skipCache: true });
     if (hasMatch()) return true;
   }
+  neg[drinkId] = Date.now();
+  try { localStorage.setItem(negKey, JSON.stringify(neg)); } catch (e) {}
   return false;
 };
 
@@ -1491,6 +1516,36 @@ window.fbSavePrice = async function(storeId, drinkId, price) {
 /* Catalogue vivant : boissons promues depuis les decouvertes de la communaute.
    Collection "catalog" en lecture publique ; ecriture reservee aux admins
    (controle fait par firestore.rules via la collection "admins", pas par le client). */
+/* Carte partagee des photos verifiees : un seul document meta/drinkImages
+   { map: { drinkId: url } }. Lecture par tous au demarrage ; ecriture reservee
+   aux admins (firestore.rules) pour eviter tout vandalisme d'URLs. */
+window.fbLoadDrinkImages = async function() {
+  try {
+    var snap = await getDoc(doc(db, "meta", "drinkImages"));
+    var map = snap.exists() ? (snap.data().map || {}) : {};
+    window.dispatchEvent(new CustomEvent("fbDrinkImagesLoaded", { detail: map }));
+    return map;
+  } catch (e) {
+    console.warn("Firestore drinkImages error:", e);
+    window.dispatchEvent(new CustomEvent("fbDrinkImagesLoaded", { detail: {} }));
+    return {};
+  }
+};
+window.fbSaveDrinkImage = async function(drinkId, url) {
+  var updates = {};
+  updates["map." + drinkId] = url;
+  try {
+    await updateDoc(doc(db, "meta", "drinkImages"), updates);
+  } catch (e) {
+    // Le document n'existe peut-etre pas encore : premiere ecriture via setDoc merge
+    try {
+      var data = { map: {} };
+      data.map[drinkId] = url;
+      await setDoc(doc(db, "meta", "drinkImages"), data, { merge: true });
+    } catch (e2) { console.warn("drinkImages save error:", e2); }
+  }
+};
+
 window.fbLoadCatalog = async function() {
   try {
     var snap = await getDocs(collection(db, "catalog"));
@@ -3038,6 +3093,7 @@ function renderTrends(){
   var cnt=document.getElementById("trends-count");
   if(cnt)cnt.textContent=capped?"Top "+f.length+" \u00B7 "+all.length+" au total":all.length+" boissons";
   f.forEach(function(d){
+    queueImageFetch(d);
     var div=document.createElement("div");div.className="dcard";div.dataset.id=d.id;
     var isFav=favorites.indexOf(d.id)!==-1;
     div.innerHTML='<div class="dcard-photo" style="background:'+d.light+'">'+
@@ -3149,6 +3205,7 @@ function renderList(){
     el.appendChild(fzHdr);
   }
   f.forEach(function(d){
+    queueImageFetch(d);
     var div=document.createElement("div");div.className="ritem";
     div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
       '<div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.brand+' · '+d.cat+' · ★ '+d.stars+'</div></div>'+
@@ -3418,9 +3475,39 @@ function fetchVerifiedOFFImage(d){
       imgCache[key]=best?{url:best.image_front_url||best.image_front_small_url,ts:Date.now()}:{url:null,ts:Date.now()};
       try{localStorage.setItem("magoImgCache",JSON.stringify(imgCache));}catch(e){/* quota */}
       delete imgFetchInFlight[key];
-      if(best)refreshDrinkVisual(d);
+      if(best){
+        refreshDrinkVisual(d);
+        // Partage communautaire : un admin qui navigue remplit la carte pour tout le monde
+        if(isAdmin&&window.fbSaveDrinkImage)window.fbSaveDrinkImage(key,imgCache[key].url);
+      }
     })
     .catch(function(){delete imgFetchInFlight[key];});
+}
+/* File de prechargement : les boissons affichees a l'ecran font la queue,
+   une recherche toutes les 2.5s max, 40 par session — assez pour remplir
+   vite le catalogue en usage reel sans maltraiter l'API Open Food Facts. */
+var imgQueue=[];
+var imgQueueTimer=null;
+var imgFetchedThisSession=0;
+var IMG_SESSION_LIMIT=40;
+function queueImageFetch(d){
+  if(!d||d.img)return;
+  if(!navigator.onLine)return;
+  if(imgFetchedThisSession>=IMG_SESSION_LIMIT)return;
+  var key=String(d.id);
+  var cached=imgCache[key];
+  if(cached&&(cached.url||Date.now()-(cached.ts||0)<30*86400000))return;
+  if(imgFetchInFlight[key])return;
+  if(imgQueue.some(function(x){return String(x.id)===key;}))return;
+  imgQueue.push(d);
+  if(!imgQueueTimer)processImgQueue();
+}
+function processImgQueue(){
+  if(!imgQueue.length){imgQueueTimer=null;return;}
+  var d=imgQueue.shift();
+  imgFetchedThisSession++;
+  fetchVerifiedOFFImage(d);
+  imgQueueTimer=setTimeout(processImgQueue,2500);
 }
 function refreshDrinkVisual(d){
   // Photo de la fiche ouverte (le visuel des listes se mettra a jour au prochain rendu via le cache)
@@ -3531,8 +3618,11 @@ function loadStoresForMapViewport(map){
   radiusKm=Math.min(Math.max(radiusKm,2),40);
   var last=window._fbLastQuery;
   var driftKm=last?haversine(center.lat,center.lng,last.lat,last.lng)/1000:999;
-  var needsReload=!last||driftKm>last.radiusKm*0.35||radiusKm>last.radiusKm*1.15;
+  var needsReload=!last||driftKm>last.radiusKm*0.5||radiusKm>last.radiusKm*1.3;
   if(!needsReload)return;
+  // Throttle : au plus une requete viewport toutes les 15s, meme en balade sur la carte
+  if(window._fbLastViewportLoad&&Date.now()-window._fbLastViewportLoad<15000)return;
+  window._fbLastViewportLoad=Date.now();
   window._fbViewportLoading=true;
   window.fbLoadNearbyStores(center.lat,center.lng,radiusKm,{skipCache:true}).then(function(){
     window._fbViewportLoading=false;
@@ -4461,6 +4551,23 @@ try{
   window.addEventListener("fbLeaderboardLoaded", function(e) {
     leaderboardRows=e.detail||[];
     renderLeaderboard();
+  });
+  // Photos verifiees partagees par la communaute (carte meta/drinkImages)
+  window.addEventListener("fbDrinkImagesLoaded", function(e) {
+    var map=e.detail||{};
+    var applied=0;
+    Object.keys(map).forEach(function(k){
+      var url=map[k];
+      if(typeof url!=="string"||url.indexOf("https://images.openfoodfacts.org/")!==0)return;
+      if(!imgCache[k]||!imgCache[k].url){imgCache[k]={url:url,ts:Date.now()};applied++;}
+    });
+    if(applied){
+      try{localStorage.setItem("magoImgCache",JSON.stringify(imgCache));}catch(err){}
+      renderTrends();
+      var sEl=document.getElementById("s-search");
+      if(sEl&&sEl.classList.contains("on"))renderList();
+      if(curSel)refreshDrinkVisual(curSel);
+    }
   });
   // Catalogue vivant : fusion des boissons promues par la communaute
   window.addEventListener("fbCatalogLoaded", function(e) {
