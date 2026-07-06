@@ -993,11 +993,15 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0607a</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0607b</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
           <div style="font-size:13px;font-weight:500;color:var(--s2)">@magofeed.app ›</div>
+        </div>
+        <div style="background:var(--bg2);border-radius:16px;padding:14px">
+          <div style="font-size:14px;font-weight:600;color:var(--s1)">Photos produits</div>
+          <div style="font-size:11.5px;font-weight:500;color:var(--s2);margin-top:2px">Open Food Facts · licence CC-BY-SA · openfoodfacts.org</div>
         </div>
         <div onclick="reportBug()" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Signaler un bug</div>
@@ -2002,6 +2006,8 @@ var userStreak=JSON.parse(localStorage.getItem("magoStreak")||'{"streak":0,"last
 var scanHist=JSON.parse(localStorage.getItem("magoScanHist")||"[]");
 var curBrandFilter=null;
 var isAdmin=false;
+var imgCache=JSON.parse(localStorage.getItem("magoImgCache")||"{}");
+var imgFetchInFlight={};
 var communityCatalogLoaded=false;
 var offlineDataApplied=false;
 
@@ -2875,6 +2881,8 @@ function storeSkeletonHTML(n){
   return html;
 }
 function pick(d){
+  // Recherche (une seule fois, mise en cache) de la vraie photo du produit sur OpenFoodFacts
+  fetchVerifiedOFFImage(d);
   // Si Firebase pas encore chargé, attendre : on bascule déjà sur l'écran résultats avec un skeleton
   if(!window._fbReady && window._fbLoading) {
     curSel=d;setAccent(d);
@@ -3335,17 +3343,101 @@ function storeIconHTML(s){
   return '<img src="https://logo.clearbit.com/'+domain+'?size=128" alt="" style="width:100%;height:100%;object-fit:contain;padding:6px;box-sizing:border-box;border-radius:inherit;background:#fff" onerror="if(this.parentNode)this.outerHTML=\''+emoji+'\'">';
 }
 // Icone d'une boisson pour les petites vignettes carrées : vraie photo produit (OpenFoodFacts) si connue, sinon emoji.
+/* ================================
+   VISUELS DES BOISSONS
+   Priorite : 1) photo curatee du catalogue (d.img)  2) photo OpenFoodFacts
+   VERIFIEE (marque + nom compares avant affichage, cache local permanent)
+   3) canette stylisee SVG aux couleurs de la boisson.
+   Jamais d'image non verifiee : une mauvaise photo est pire que pas de photo
+   (l'incident de la photo de vin sur un soda ne doit jamais se reproduire).
+   Photos OpenFoodFacts sous licence CC-BY-SA (attribution dans A propos).
+================================ */
+function shadeHex(hex,pct){
+  var n=parseInt(hex.slice(1),16),r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  function s(c){c=Math.round(pct>0?c+(255-c)*pct:c*(1+pct));return Math.max(0,Math.min(255,c));}
+  return "#"+((1<<24)+(s(r)<<16)+(s(g)<<8)+s(b)).toString(16).slice(1);
+}
+function drinkCanSVG(d,emojiSize){
+  var c=d.color||"#e67e22";
+  var top=shadeHex(c,0.35),dark=shadeHex(c,-0.25);
+  var gid="cg"+String(d.id).replace(/[^a-zA-Z0-9]/g,"");
+  return '<svg viewBox="0 0 64 88" style="width:72%;height:88%;display:block;margin:auto" aria-hidden="true">'+
+    '<defs><linearGradient id="'+gid+'" x1="0" y1="0" x2="1" y2="0">'+
+    '<stop offset="0" stop-color="'+top+'"/><stop offset="0.45" stop-color="'+c+'"/><stop offset="1" stop-color="'+dark+'"/></linearGradient></defs>'+
+    '<rect x="10" y="10" width="44" height="70" rx="9" fill="url(#'+gid+')"/>'+
+    '<ellipse cx="32" cy="11" rx="21" ry="5" fill="#d9dadb"/>'+
+    '<ellipse cx="32" cy="11" rx="15" ry="3.2" fill="#c2c4c6"/>'+
+    '<rect x="28" y="8" width="8" height="3.4" rx="1.7" fill="#9ea1a4"/>'+
+    '<rect x="14" y="34" width="36" height="24" rx="6" fill="rgba(255,255,255,.82)"/>'+
+    '<text x="32" y="51.5" text-anchor="middle" dominant-baseline="middle" font-size="'+(emojiSize||15)+'">'+d.emoji+'</text>'+
+    '<rect x="13" y="14" width="5" height="60" rx="2.5" fill="rgba(255,255,255,.28)"/>'+
+  '</svg>';
+}
+function getCachedDrinkImage(d){
+  if(d.img)return d.img;
+  var e=imgCache[String(d.id)];
+  return(e&&e.url)?e.url:null;
+}
 function drinkIconHTML(d){
   if(!d)return"";
-  if(!d.img)return d.emoji;
-  return '<img src="'+d.img+'" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" onerror="if(this.parentNode)this.outerHTML=\''+d.emoji+'\'">';
+  var url=getCachedDrinkImage(d);
+  if(!url)return drinkCanSVG(d,15);
+  return '<img src="'+url+'" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" onerror="if(this.parentNode)this.outerHTML=\''+d.emoji+'\'">';
+}
+/* Verification stricte du produit OpenFoodFacts avant d'accepter sa photo :
+   la marque doit correspondre ET la majorite des mots du nom aussi. */
+function offImageMatches(d,p){
+  var pBrands=normTxt(p.brands||"");
+  var dBrand=normTxt(d.brand||"");
+  if(dBrand&&pBrands.indexOf(dBrand)===-1)return false;
+  var pName=normTxt((p.product_name_fr||p.product_name||""));
+  if(!pName)return false;
+  var words=normTxt(d.name).split(/[^a-z0-9]+/).filter(function(w){return w.length>=3&&w!==dBrand;});
+  if(!words.length)return pBrands.indexOf(dBrand)!==-1;
+  var hits=0;
+  words.forEach(function(w){if(pName.indexOf(w)!==-1||pBrands.indexOf(w)!==-1)hits++;});
+  return hits/words.length>=0.6;
+}
+function fetchVerifiedOFFImage(d){
+  var key=String(d.id);
+  if(d.img||imgFetchInFlight[key])return;
+  var cached=imgCache[key];
+  // Cache permanent pour les photos trouvees ; nouvel essai apres 30 jours pour les echecs
+  if(cached&&(cached.url||Date.now()-(cached.ts||0)<30*86400000))return;
+  imgFetchInFlight[key]=true;
+  var q=encodeURIComponent((d.brand+" "+d.name).slice(0,60));
+  var url="https://world.openfoodfacts.org/cgi/search.pl?search_terms="+q+"&search_simple=1&action=process&json=1&page_size=5&fields=product_name,product_name_fr,brands,image_front_url,image_front_small_url";
+  fetchWithTimeout(url,7000)
+    .then(function(r){return r.json();})
+    .then(function(data){
+      var prods=(data&&data.products)||[];
+      var best=null;
+      for(var i=0;i<prods.length;i++){
+        if(offImageMatches(d,prods[i])&&(prods[i].image_front_url||prods[i].image_front_small_url)){best=prods[i];break;}
+      }
+      imgCache[key]=best?{url:best.image_front_url||best.image_front_small_url,ts:Date.now()}:{url:null,ts:Date.now()};
+      try{localStorage.setItem("magoImgCache",JSON.stringify(imgCache));}catch(e){/* quota */}
+      delete imgFetchInFlight[key];
+      if(best)refreshDrinkVisual(d);
+    })
+    .catch(function(){delete imgFetchInFlight[key];});
+}
+function refreshDrinkVisual(d){
+  // Photo de la fiche ouverte (le visuel des listes se mettra a jour au prochain rendu via le cache)
+  if(curSel&&curSel.id===d.id){
+    var ph=document.getElementById("res-emoji");
+    if(ph)ph.innerHTML=drinkIconHTML(d);
+  }
 }
 // Photo pleine largeur pour les grandes cartes (dcard) : l'emoji reste toujours en dessous comme repli automatique,
 // la photo (si dispo) le recouvre ; en cas d'echec de chargement elle se retire et l'emoji reapparait naturellement.
 function drinkCardPhotoHTML(d){
-  var emojiLayer='<div style="position:absolute;bottom:9px;right:9px;font-size:36px;z-index:1">'+d.emoji+'</div>';
-  if(!d.img)return emojiLayer;
-  return emojiLayer+'<img src="'+d.img+'" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:2" onerror="this.remove()">';
+  var url=getCachedDrinkImage(d);
+  if(!url){
+    return '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">'+drinkCanSVG(d,16)+'</div>';
+  }
+  var canLayer='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:1">'+drinkCanSVG(d,16)+'</div>';
+  return canLayer+'<img src="'+url+'" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:2" onerror="this.remove()">';
 }
 function centerMapOnUser(){
   if(!window._leafletMap)return;
