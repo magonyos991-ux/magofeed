@@ -1224,7 +1224,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, linkWithPopup, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, linkWithPopup, signInWithPopup, signInWithCredential } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 /* ── Firebase Config ── */
 const firebaseConfig = {
@@ -1285,7 +1285,19 @@ window.fbSyncUserStats = function(stats) {
 window.fbSignInWithGoogle = async function() {
   var provider = new GoogleAuthProvider();
   if (auth.currentUser && auth.currentUser.isAnonymous) {
-    return (await linkWithPopup(auth.currentUser, provider)).user;
+    try {
+      return (await linkWithPopup(auth.currentUser, provider)).user;
+    } catch (e) {
+      // Le compte Google est deja lie a un profil Magofeed (cree sur un autre
+      // appareil) : au lieu d'echouer, on se CONNECTE a ce profil existant.
+      // C'est le comportement attendu : ton compte te suit d'un appareil a l'autre.
+      if (e && e.code === "auth/credential-already-in-use") {
+        var cred = GoogleAuthProvider.credentialFromError(e);
+        if (cred) return (await signInWithCredential(auth, cred)).user;
+        return (await signInWithPopup(auth, provider)).user;
+      }
+      throw e;
+    }
   }
   return (await signInWithPopup(auth, provider)).user;
 };
@@ -4318,6 +4330,13 @@ try{
     userStats.pts=Math.max(userStats.pts,d.points||0);
     userStats.signals=Math.max(userStats.signals,d.signals||0);
     userStats.confirms=Math.max(userStats.confirms,d.confirms||0);
+    // Le pseudo du compte Firestore fait foi : on l'adopte localement pour que
+    // le pseudo genere sur ce nouvel appareil n'ecrase pas celui du compte
+    if(d.pseudo&&d.pseudo!==userPseudo){
+      userPseudo=String(d.pseudo).slice(0,24);
+      try{localStorage.setItem("magopseudo",userPseudo);}catch(err){}
+      applyPseudoDisplays();
+    }
     updateProfileStats();
   });
   window.addEventListener("fbAuthChanged", function(e) {
