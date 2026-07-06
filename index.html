@@ -960,6 +960,13 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
           <div><div style="font-size:14px;font-weight:600;color:var(--s1)">Effacer l'historique</div><div style="font-size:12px;margin-top:2px;color:var(--s2)">Supprimer tes recherches récentes</div></div>
           <span style="font-size:18px">🗑️</span>
         </div>
+        <div id="admin-row" onclick="showAdmin()" style="display:none;background:var(--bg2);border-radius:16px;padding:14px;align-items:center;justify-content:space-between;cursor:pointer;margin-bottom:10px" role="button" tabindex="0" aria-label="Administration" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showAdmin();}">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:var(--s1)">🛠️ Administration</div>
+            <div style="font-size:11px;color:var(--s2);margin-top:2px">Promouvoir les découvertes au catalogue</div>
+          </div>
+          <span class="c3" style="font-size:16px">›</span>
+        </div>
         <div onclick="showPrivacy()" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Politique de confidentialité</div>
           <span style="color:var(--s3)">›</span>
@@ -1012,6 +1019,16 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
   </div>
 
   <!-- PRIVACY -->
+  <div id="s-admin" class="screen">
+    <div class="wrap" style="padding-top:24px;padding-bottom:110px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+        <div class="backbtn" onclick="navTo('settings')" role="button" tabindex="0" aria-label="Retour" onkeydown="if(event.key==='Enter'){navTo('settings');}">←</div>
+        <div style="font-size:20px;font-weight:800" class="c1">Administration</div>
+      </div>
+      <div style="font-size:12.5px;color:var(--s2);margin:0 0 18px 46px">Découvertes de la communauté à valider</div>
+      <div id="admin-list"></div>
+    </div>
+  </div>
   <div id="s-privacy" class="screen">
     <div class="scroll">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
@@ -1279,6 +1296,8 @@ onAuthStateChanged(auth, async function(user) {
     return;
   }
   window._fbUser = user;
+  window.fbCheckAdmin();
+  window.fbLoadCatalog();
   try {
     var snap = await getDoc(userDocRef(user.uid));
     if (snap.exists()) {
@@ -1453,6 +1472,49 @@ window.fbSavePrice = async function(storeId, drinkId, price) {
 // Classement des meilleurs contributeurs (points stockés dans users/ par fbSyncUserStats).
 // En cas d'erreur (regles Firestore, hors ligne), on emet une liste vide : l'UI affiche
 // alors un etat neutre au lieu de casser l'ecran profil.
+/* Catalogue vivant : boissons promues depuis les decouvertes de la communaute.
+   Collection "catalog" en lecture publique ; ecriture reservee aux admins
+   (controle fait par firestore.rules via la collection "admins", pas par le client). */
+window.fbLoadCatalog = async function() {
+  try {
+    var snap = await getDocs(collection(db, "catalog"));
+    var rows = [];
+    snap.forEach(function(d) { var x = d.data(); x.docId = d.id; rows.push(x); });
+    window.dispatchEvent(new CustomEvent("fbCatalogLoaded", { detail: rows }));
+    return rows;
+  } catch (e) {
+    console.warn("Firestore catalog error:", e);
+    window.dispatchEvent(new CustomEvent("fbCatalogLoaded", { detail: [] }));
+    return [];
+  }
+};
+
+window.fbCheckAdmin = async function() {
+  try {
+    var user = auth.currentUser;
+    if (!user) { window.dispatchEvent(new CustomEvent("fbAdminChecked", { detail: false })); return false; }
+    var snap = await getDoc(doc(db, "admins", user.uid));
+    var ok = snap.exists();
+    window.dispatchEvent(new CustomEvent("fbAdminChecked", { detail: ok }));
+    return ok;
+  } catch (e) {
+    window.dispatchEvent(new CustomEvent("fbAdminChecked", { detail: false }));
+    return false;
+  }
+};
+
+window.fbPromoteDiscovery = async function(disc, entry) {
+  var data = Object.assign({}, entry, { createdAt: serverTimestamp(), fromBarcode: String(disc.barcode || "") });
+  await setDoc(doc(db, "catalog", String(entry.id)), data);
+  try {
+    await updateDoc(doc(db, "discoveries", String(disc.fbId || disc.barcode || disc.id)), { promoted: true });
+  } catch (e) { console.warn("Discovery flag error:", e); }
+};
+
+window.fbRejectDiscovery = async function(disc) {
+  await updateDoc(doc(db, "discoveries", String(disc.fbId || disc.barcode || disc.id)), { rejected: true });
+};
+
 window.fbLoadLeaderboard = async function() {
   try {
     var lbQuery = query(collection(db, "users"), orderBy("points", "desc"), limit(10));
@@ -1907,7 +1969,6 @@ var scanCounts=JSON.parse(localStorage.getItem("magoscans")||"{}");
 var curSort="distance";
 var soundEnabled=localStorage.getItem("magosound")!=="0";
 var deferredInstallPrompt=null;
-var curBrandFilter=null;
 var searchMode="drinks";
 var curStoreDetail=null;
 var storeDetailReturn="search";
@@ -1928,6 +1989,8 @@ var leaderboardLoadedAt=0;
 var userStreak=JSON.parse(localStorage.getItem("magoStreak")||'{"streak":0,"last":"","best":0}');
 var scanHist=JSON.parse(localStorage.getItem("magoScanHist")||"[]");
 var curBrandFilter=null;
+var isAdmin=false;
+var communityCatalogLoaded=false;
 var offlineDataApplied=false;
 
 /* ================================
@@ -2070,7 +2133,7 @@ function haversine(a,b,c,d){
 /* ================================
    NAVIGATION
 ================================ */
-var NAV_SCREENS=["home","search","results","scan","discover","profile","settings","privacy","terms","storedetail"];
+var NAV_SCREENS=["home","search","results","scan","discover","profile","settings","privacy","terms","storedetail","admin"];
 function navTo(s){if(scanActive&&s!=="scan")stopScan();show(s);}
 function show(s){
   if(s!=="scan"&&scanActive)stopScan();
@@ -2098,6 +2161,7 @@ function show(s){
   if(s==="search")setTimeout(function(){var q=document.getElementById("q");if(q)q.focus();},transitioning?260:120);
   if(s==="discover"){renderDiscoveries();renderTopScanned();}
   if(s==="profile"){renderLeaderboard();refreshLeaderboard();renderStreak();}
+  if(s==="admin")renderAdmin();
   if(s==="scan"){if(!scanActive)resetScanUI();renderScanHistory();}
 }
 
@@ -2719,6 +2783,10 @@ function offlineFallbackCheck(){
     if(curSel)renderStoreList();
     renderList();
   });
+  idbGet("catalog:last",function(data){
+    if(communityCatalogLoaded||!data||!data.rows)return;
+    mergeCatalog(data.rows);
+  });
   idbGet("discoveries:last",function(data){
     if(!data||!data.list||!data.list.length)return;
     if(DISCOVERIES&&DISCOVERIES.length>4)return;
@@ -2822,6 +2890,56 @@ function pick(d){
    contrairement a une recherche texte, aucune boisson de la marque ne peut
    manquer a l'appel. Le rail de l'accueil ouvre la vue marque complete.
 ================================ */
+/* ================================
+   CATALOGUE VIVANT
+   Fusionne les boissons promues (collection Firestore "catalog") dans DRINKS.
+   Dedoublonnage par id ET par nom normalise ; donnees communautaires toujours
+   passees par sanitize(). Les boissons du fichier restent la base.
+================================ */
+var CAT_DEFAULTS={
+  "Soda":{emoji:"\uD83E\uDD64",color:"#e67e22",light:"#fef3e2"},
+  "Ice Tea":{emoji:"\uD83E\uDDCB",color:"#d68910",light:"#fdf2e3"},
+  "Energy":{emoji:"\u26A1",color:"#d4ac0d",light:"#fcf8e3"},
+  "Jus":{emoji:"\uD83E\uDDC3",color:"#f39c12",light:"#fef5e7"},
+  "Eau":{emoji:"\uD83D\uDCA7",color:"#5dade2",light:"#ebf5fb"},
+  "Exotique":{emoji:"\uD83C\uDF34",color:"#ec7063",light:"#fdedec"}
+};
+var VALID_CATS=["Soda","Ice Tea","Energy","Jus","Eau","Exotique"];
+function mergeCatalog(rows){
+  if(!rows||!rows.length)return 0;
+  var added=0;
+  function nameKey(s){return normTxt(s).replace(/\s+/g," ").trim();}
+  rows.forEach(function(r){
+    if(!r||!r.name)return;
+    var rid=Number(r.id)||r.id;
+    var nn=nameKey(r.name);
+    var exists=DRINKS.some(function(d){return d.id===rid||nameKey(d.name)===nn;});
+    if(exists)return;
+    var cat=VALID_CATS.indexOf(r.cat)!==-1?r.cat:"Exotique";
+    var def=CAT_DEFAULTS[cat];
+    DRINKS.push({
+      id:rid,
+      name:sanitize(String(r.name).slice(0,60)),
+      brand:sanitize(String(r.brand||"Autre").slice(0,30)),
+      emoji:r.emoji&&String(r.emoji).length<=4?r.emoji:def.emoji,
+      color:/^#[0-9a-fA-F]{6}$/.test(r.color||"")?r.color:def.color,
+      light:/^#[0-9a-fA-F]{6}$/.test(r.light||"")?r.light:def.light,
+      cat:cat,
+      tag:sanitize(String(r.tag||r.name).toUpperCase().slice(0,20)),
+      stars:(typeof r.stars==="number"&&r.stars>=1&&r.stars<=5)?r.stars:4.0,
+      barcodes:Array.isArray(r.barcodes)?r.barcodes.map(String).slice(0,5):[],
+      community:true
+    });
+    added++;
+  });
+  if(added){
+    renderBrandsRail();
+    renderTrends();
+    var sEl=document.getElementById("s-search");
+    if(sEl&&sEl.classList.contains("on"))renderList();
+  }
+  return added;
+}
 function getBrandGroups(){
   var map={};
   DRINKS.forEach(function(d){
@@ -3673,7 +3791,7 @@ function addDiscovery(name,brand,barcode,cat){
 function renderDiscoveries(){
   var el=document.getElementById("disc-list");if(!el)return;el.innerHTML="";
   var T=LANGS[curLang];
-  DISCOVERIES.forEach(function(d){
+  DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected;}).forEach(function(d){
     var desc=d.desc||((d.brand?d.brand+" · ":"")+"Suggéré par la communauté");
     var voted=hasVotedDiscovery(d.id);
     var div=document.createElement("div");div.className="disc-card";
@@ -3954,6 +4072,82 @@ function editPseudo(){
   }
 }
 function clearHistory(){if(!confirm("Effacer tout l'historique ?"))return;searchHistory=[];localStorage.removeItem("magosearchhist");toast("Historique effacé");playSound("pop");}
+function showAdmin(){if(!isAdmin){toast("Acc\u00E8s r\u00E9serv\u00E9");return;}show("admin");}
+var ADMIN_VOTE_THRESHOLD=3;
+var adminCatChoice={};
+function renderAdmin(){
+  var el=document.getElementById("admin-list");if(!el)return;
+  el.innerHTML="";
+  var pending=DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected;});
+  if(!pending.length){
+    el.innerHTML='<div style="text-align:center;padding:40px 20px;font-size:13px;color:var(--s3)">Aucune d\u00E9couverte en attente \uD83C\uDF89</div>';
+    return;
+  }
+  // Les plus votees d'abord ; seuil de votes = pretes a promouvoir
+  pending.sort(function(a,b){return(b.votes||0)-(a.votes||0);});
+  pending.forEach(function(d){
+    var ready=(d.votes||0)>=ADMIN_VOTE_THRESHOLD;
+    var key=String(d.barcode||d.id);
+    var chosenCat=adminCatChoice[key]||d.cat||"";
+    var card=document.createElement("div");
+    card.style.cssText="background:var(--bg2);border:1.5px solid "+(ready?"#22c55e":"var(--border)")+";border-radius:16px;padding:14px;margin-bottom:12px";
+    var chipsHtml=VALID_CATS.map(function(c){
+      return '<button class="admin-cat-chip" data-cat="'+c+'" style="padding:5px 10px;border-radius:999px;border:1.5px solid var(--border);background:'+(chosenCat===c?"var(--s1)":"var(--bg3)")+';color:'+(chosenCat===c?"var(--app-bg)":"var(--s2)")+';font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">'+c+'</button>';
+    }).join("");
+    card.innerHTML=
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'+
+        '<div style="flex:1;min-width:0"><div style="font-size:14.5px;font-weight:800;color:var(--s1)">'+sanitize(d.name)+'</div>'+
+        '<div style="font-size:11.5px;color:var(--s2);margin-top:2px">'+(d.brand?sanitize(d.brand)+" \u00B7 ":"")+(d.barcode?"Code "+sanitize(String(d.barcode))+" \u00B7 ":"")+(d.votes||0)+' vote'+((d.votes||0)>1?"s":"")+'</div></div>'+
+        (ready?'<span style="font-size:10.5px;font-weight:800;background:#dcfce7;color:#166534;padding:4px 8px;border-radius:999px;flex-shrink:0">PR\u00CATE</span>':'<span style="font-size:10.5px;font-weight:700;color:var(--s3);flex-shrink:0">'+(ADMIN_VOTE_THRESHOLD-(d.votes||0))+' vote(s) manquant(s)</span>')+
+      '</div>'+
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+chipsHtml+'</div>'+
+      '<div style="display:flex;gap:8px">'+
+        '<button class="admin-promote" style="flex:1;padding:10px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">\u2705 Promouvoir</button>'+
+        '<button class="admin-reject" style="padding:10px 14px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s2);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">\uD83D\uDDD1\uFE0F</button>'+
+      '</div>';
+    card.querySelectorAll(".admin-cat-chip").forEach(function(btn){
+      btn.onclick=function(){adminCatChoice[key]=btn.getAttribute("data-cat");renderAdmin();};
+    });
+    card.querySelector(".admin-promote").onclick=function(){promoteDiscovery(d);};
+    card.querySelector(".admin-reject").onclick=function(){rejectDiscovery(d);};
+    el.appendChild(card);
+  });
+}
+function promoteDiscovery(d){
+  var key=String(d.barcode||d.id);
+  var cat=adminCatChoice[key]||d.cat;
+  if(VALID_CATS.indexOf(cat)===-1){toast("Choisis d'abord une cat\u00E9gorie");playSound("err");return;}
+  var def=CAT_DEFAULTS[cat];
+  var entry={
+    id:Date.now(),
+    name:String(d.name).slice(0,60),
+    brand:String(d.brand||"Autre").slice(0,30),
+    cat:cat,
+    emoji:def.emoji,color:def.color,light:def.light,
+    tag:String(d.name).toUpperCase().slice(0,20),
+    stars:4.0,
+    barcodes:d.barcode?[String(d.barcode)]:[]
+  };
+  d.promoted=true;
+  mergeCatalog([entry]);
+  renderDiscoveries();renderAdmin();
+  playSound("win");toast("\u2705 \u00AB "+d.name+" \u00BB promue au catalogue !");
+  if(window.fbPromoteDiscovery){
+    window.fbPromoteDiscovery(d,entry).catch(function(e){
+      console.warn("Promotion Firestore error:",e);
+      toast("\u26A0\uFE0F Promotion locale seulement (erreur Firestore, v\u00E9rifie les r\u00E8gles)");
+    });
+  }
+}
+function rejectDiscovery(d){
+  if(!confirm("Rejeter \u00AB "+d.name+" \u00BB ? Elle dispara\u00EEtra des d\u00E9couvertes."))return;
+  d.rejected=true;
+  renderDiscoveries();renderAdmin();
+  toast("D\u00E9couverte rejet\u00E9e");
+  if(window.fbRejectDiscovery){
+    window.fbRejectDiscovery(d).catch(function(e){console.warn("Reject error:",e);});
+  }
+}
 function showPrivacy(){show("privacy");}
 function showTerms(){show("terms");}
 function reportBug(){window.open("mailto:magofeed@outlook.com?subject=Bug%20report%20Magofeed","_blank");}
@@ -4156,6 +4350,21 @@ try{
   window.addEventListener("fbLeaderboardLoaded", function(e) {
     leaderboardRows=e.detail||[];
     renderLeaderboard();
+  });
+  // Catalogue vivant : fusion des boissons promues par la communaute
+  window.addEventListener("fbCatalogLoaded", function(e) {
+    var rows=e.detail||[];
+    communityCatalogLoaded=true;
+    var n=mergeCatalog(rows);
+    if(rows.length)idbSet("catalog:last",{ts:Date.now(),rows:rows});
+  });
+  // Acces admin : la securite reelle est dans firestore.rules (collection admins),
+  // ceci ne fait qu'afficher ou cacher le menu
+  window.addEventListener("fbAdminChecked", function(e) {
+    isAdmin=e.detail===true;
+    var row=document.getElementById("admin-row");
+    if(row)row.style.display=isAdmin?"flex":"none";
+    if(!isAdmin&&document.getElementById("s-admin").classList.contains("on"))navTo("settings");
   });
   // Mode hors-ligne : photographier les donnees recues dans IndexedDB
   window.addEventListener("fbStoresLoaded", function(e) {
