@@ -993,7 +993,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0607g</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0607h</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -3493,10 +3493,28 @@ function fetchVerifiedOFFImage(d){
   // Cache permanent pour les photos trouvees ; nouvel essai apres 30 jours pour les echecs
   if(cached&&(cached.url||Date.now()-(cached.ts||0)<30*86400000))return;
   imgFetchInFlight[key]=true;
+  // 1) Si la boisson a un code-barre : la fiche EXACTE du produit d'abord.
+  //    C'est la qu'on trouve les fiches canoniques aux belles photos
+  //    (l'effet "Ice Tea Peche"). La verification v2 s'applique quand meme :
+  //    un vieux code-barre errone du catalogue donnerait un nom qui ne
+  //    correspond pas -> rejet, et on retombe sur la recherche par nom.
+  var byBarcode=(d.barcodes&&d.barcodes.length)
+    ? fetchOFFProduct(d.barcodes[0]).then(function(data){
+        if(data&&data.status===1&&data.product&&offImageMatches(d,data.product)&&(data.product.image_front_url||data.product.image_front_small_url)){
+          return data.product;
+        }
+        return null;
+      }).catch(function(){return null;})
+    : Promise.resolve(null);
+  // 2) Recherche par nom triee par popularite (les fiches les plus scannees
+  //    ont les meilleures photos), utilisee seulement si le code-barre n'a rien donne
   var q=encodeURIComponent((d.brand+" "+d.name).slice(0,60));
-  var url="https://world.openfoodfacts.org/cgi/search.pl?search_terms="+q+"&search_simple=1&action=process&json=1&page_size=5&fields=product_name,product_name_fr,brands,image_front_url,image_front_small_url";
-  fetchWithTimeout(url,7000)
-    .then(function(r){return r.json();})
+  var url="https://world.openfoodfacts.org/cgi/search.pl?search_terms="+q+"&search_simple=1&action=process&json=1&page_size=5&sort_by=unique_scans_n&fields=product_name,product_name_fr,brands,image_front_url,image_front_small_url";
+  byBarcode
+    .then(function(fromBarcode){
+      if(fromBarcode)return{products:[fromBarcode]};
+      return fetchWithTimeout(url,7000).then(function(r){return r.json();});
+    })
     .then(function(data){
       var prods=(data&&data.products)||[];
       var best=null;
