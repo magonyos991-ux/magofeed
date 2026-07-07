@@ -783,6 +783,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div class="res-back" onclick="show('search')">
           <div style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff">←</div>
           <span id="res-title" style="font-size:15px;font-weight:700;color:#fff;flex:1"></span>
+          <div id="res-fixphoto" onclick="event.stopPropagation();adminFixPhoto()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px;cursor:pointer;flex-shrink:0;margin-right:6px" role="button" tabindex="0" aria-label="Corriger la photo (admin)" onkeydown="if(event.key==='Enter'){event.stopPropagation();adminFixPhoto();}">🛠️</div>
           <div id="res-share" onclick="event.stopPropagation();shareDrink()" style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;flex-shrink:0;margin-right:6px" role="button" tabindex="0" aria-label="Partager cette boisson" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();shareDrink();}">📤</div>
           <div id="res-fav" onclick="event.stopPropagation();toggleFav(curSel.id,this)" style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer;flex-shrink:0" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();toggleFav(curSel.id,this);}">🤍</div>
         </div>
@@ -993,7 +994,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0607h</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0607i</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -2950,6 +2951,8 @@ function pick(d){
   fetchVerifiedOFFImage(d);
   // Rafraichir le visuel de fiche (badge loupe si une photo est deja en cache)
   setTimeout(function(){refreshDrinkVisual(d);},80);
+  var fixBtn=document.getElementById("res-fixphoto");
+  if(fixBtn)fixBtn.style.display=isAdmin?"flex":"none";
   // Si Firebase pas encore chargé, attendre : on bascule déjà sur l'écran résultats avec un skeleton
   if(!window._fbReady && window._fbLoading) {
     curSel=d;setAccent(d);
@@ -3592,6 +3595,51 @@ function closeDrinkZoom(){
 document.addEventListener("keydown",function(ev){
   if(ev.key==="Escape")closeDrinkZoom();
 });
+/* Correction manuelle de photo (admin) : colle un code-barre OU une URL
+   Open Food Facts (fiche produit ou image directe). La photo choisie est
+   appliquee, publiee dans la carte partagee, et marquee "manual" pour que
+   le pipeline automatique ne l'ecrase jamais. Toujours limite au domaine
+   images.openfoodfacts.org : pas d'URL arbitraire, meme pour un admin. */
+function adminFixPhoto(){
+  if(!isAdmin||!curSel)return;
+  var input=prompt("Corriger la photo de \u00AB "+curSel.name+" \u00BB :\n\u2022 colle le CODE-BARRE du bon produit\n\u2022 ou l'URL de sa fiche openfoodfacts.org\n\u2022 ou l'URL directe d'une image images.openfoodfacts.org\n\u2022 ou tape X pour retirer la photo");
+  if(input===null)return;
+  input=input.trim();
+  var d=curSel;
+  var key=String(d.id);
+  if(/^x$/i.test(input)){
+    imgCache[key]={url:null,ts:Date.now(),manual:true};
+    try{localStorage.setItem("magoImgCache2",JSON.stringify(imgCache));}catch(e){}
+    refreshDrinkVisual(d);
+    toast("Photo retir\u00E9e (canette stylis\u00E9e) \u2014 sur cet appareil");
+    return;
+  }
+  function applyUrl(url){
+    if(!url||url.indexOf("https://images.openfoodfacts.org/")!==0){
+      toast("\u26A0\uFE0F URL non valide : il faut une image images.openfoodfacts.org");
+      playSound("err");return;
+    }
+    imgCache[key]={url:url,ts:Date.now(),manual:true};
+    try{localStorage.setItem("magoImgCache2",JSON.stringify(imgCache));}catch(e){}
+    refreshDrinkVisual(d);
+    renderTrends();
+    if(window.fbSaveDrinkImage)window.fbSaveDrinkImage(key,url);
+    playSound("win");toast("\u2705 Photo corrig\u00E9e et partag\u00E9e");
+  }
+  // URL d'image directe
+  if(input.indexOf("https://images.openfoodfacts.org/")===0){applyUrl(input.split("?")[0]);return;}
+  // URL de fiche produit -> extraire le code-barre
+  var m=input.match(/openfoodfacts\.org\/(?:produit|product)\/(\d{8,14})/);
+  var code=m?m[1]:(/^\d{8,14}$/.test(input)?input:null);
+  if(!code){toast("Format non reconnu (code-barre ou URL Open Food Facts)");playSound("err");return;}
+  toast("Recherche de la fiche "+code+"\u2026");
+  fetchOFFProduct(code).then(function(data){
+    var p=(data&&data.status===1)?data.product:null;
+    var url=p?(p.image_front_url||p.image_front_small_url):null;
+    if(!url){toast("\u26A0\uFE0F Cette fiche n'a pas de photo");playSound("err");return;}
+    applyUrl(url);
+  }).catch(function(){toast("Fiche introuvable (r\u00E9seau ?)");playSound("err");});
+}
 function refreshDrinkVisual(d){
   // Photo de la fiche ouverte (le visuel des listes se mettra a jour au prochain rendu via le cache)
   if(curSel&&curSel.id===d.id){
