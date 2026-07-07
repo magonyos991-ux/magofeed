@@ -994,7 +994,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0607i</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0608a</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1530,7 +1530,7 @@ window.fbLoadDrinkImages = async function() {
   try {
     var snap = await getDoc(doc(db, "meta", "drinkImages"));
     // v2 : on ignore les cartes ecrites par l'ancienne verification
-    var map = (snap.exists() && snap.data().v === 2) ? (snap.data().map || {}) : {};
+    var map = (snap.exists() && snap.data().v === 3) ? (snap.data().map || {}) : {};
     window.dispatchEvent(new CustomEvent("fbDrinkImagesLoaded", { detail: map }));
     return map;
   } catch (e) {
@@ -1540,14 +1540,14 @@ window.fbLoadDrinkImages = async function() {
   }
 };
 window.fbSaveDrinkImage = async function(drinkId, url) {
-  var updates = { v: 2 };
+  var updates = { v: 3 };
   updates["map." + drinkId] = url;
   try {
     await updateDoc(doc(db, "meta", "drinkImages"), updates);
   } catch (e) {
     // Le document n'existe peut-etre pas encore : premiere ecriture via setDoc merge
     try {
-      var data = { map: {}, v: 2 };
+      var data = { map: {}, v: 3 };
       data.map[drinkId] = url;
       await setDoc(doc(db, "meta", "drinkImages"), data, { merge: true });
     } catch (e2) { console.warn("drinkImages save error:", e2); }
@@ -2069,10 +2069,24 @@ var userStreak=JSON.parse(localStorage.getItem("magoStreak")||'{"streak":0,"last
 var scanHist=JSON.parse(localStorage.getItem("magoScanHist")||"[]");
 var curBrandFilter=null;
 var isAdmin=false;
-// v2 : cle changee volontairement pour purger les photos mal associees
-// mises en cache par l'ancienne verification (incident Monster Ultra White)
-var imgCache=JSON.parse(localStorage.getItem("magoImgCache2")||"{}");
-try{localStorage.removeItem("magoImgCache");}catch(e){}
+// v3 : purge des resolutions automatiques de l'ancienne verification (incident
+// chips Stax sur le Pepsi) en CONSERVANT les corrections manuelles de l'admin
+var imgCache=(function(){
+  var v3={};
+  try{v3=JSON.parse(localStorage.getItem("magoImgCache3")||"{}");}catch(e){}
+  try{
+    var v2=JSON.parse(localStorage.getItem("magoImgCache2")||"null");
+    if(v2){
+      Object.keys(v2).forEach(function(k){
+        if(v2[k]&&v2[k].manual&&!v3[k])v3[k]=v2[k];
+      });
+      localStorage.removeItem("magoImgCache2");
+      localStorage.setItem("magoImgCache3",JSON.stringify(v3));
+    }
+    localStorage.removeItem("magoImgCache");
+  }catch(e){}
+  return v3;
+})();
 var imgFetchInFlight={};
 var communityCatalogLoaded=false;
 var offlineDataApplied=false;
@@ -3467,7 +3481,17 @@ function drinkIconHTML(d){
       le Monster Energy original. */
 var OFF_OPTIONAL_WORDS=["original","originale","classic","classique","regular","nature","energy","drink"];
 var OFF_VARIANT_WORDS=["zero","light","diet","sugarfree","ultra","white","blanc","blanche","noir","black","cherry","cerise","vanille","vanilla","mango","mangue","watermelon","pasteque","citron","lemon","lime","peach","peche","tropical","paradise","rosa","gold","punch","exotic","exotique","fraise","strawberry","framboise","raspberry","orange","pomme","apple","raisin","grape","ananas","pineapple","coco","coconut","menthe","mint","mojito","cassis","myrtille","blueberry","grenade","pomegranate","abricot","apricot","poire","pear","kiwi","litchi","lychee","passion","goyave","guava","gingembre","ginger","sans","cafeine","decaf","max","intense","fusion","touch","sparkling","petillante","petillant","plate","green","vert","verte","rouge","red","blue","bleu","yellow","jaune","pink","rose","juiced","juice","assault","khaos","ripper","rehab","pipeline","loco"];
+/* Verrou categorie : la fiche doit etre une BOISSON. Les marques ombrelles
+   (PepsiCo...) taguent aussi leurs chips et snacks avec la marque mere :
+   sans ce verrou, un tube de chips Stax a illustre le Pepsi Original. */
+function offIsBeverage(p){
+  var tags=(p.categories_tags||[]).join(" ").toLowerCase();
+  if(!tags)return true; // fiche peu renseignee : les autres verrous (marque, nom, variantes) decident
+  if(/snack|chips|crisps|biscuit|cookie|cracker|chocolat|candy|bonbon|confection|cereal|cereale|sauce|soup|soupe|yaourt|yogurt|fromage|cheese|pizza|dessert|ice-cream|creme-glacee|pet-food|baby-food/.test(tags))return false;
+  return /beverage|boisson|drink|water|eaux|soda|juice|jus-de|nectar|\btea\b|the-glace|iced-tea|coffee|cafe|energy|smoothie|limonade|lemonade|sirop|syrup/.test(tags);
+}
 function offImageMatches(d,p){
+  if(!offIsBeverage(p))return false;
   var pBrands=normTxt(p.brands||"");
   var dBrand=normTxt(d.brand||"");
   if(dBrand&&pBrands.indexOf(dBrand)===-1)return false;
@@ -3512,7 +3536,7 @@ function fetchVerifiedOFFImage(d){
   // 2) Recherche par nom triee par popularite (les fiches les plus scannees
   //    ont les meilleures photos), utilisee seulement si le code-barre n'a rien donne
   var q=encodeURIComponent((d.brand+" "+d.name).slice(0,60));
-  var url="https://world.openfoodfacts.org/cgi/search.pl?search_terms="+q+"&search_simple=1&action=process&json=1&page_size=5&sort_by=unique_scans_n&fields=product_name,product_name_fr,brands,image_front_url,image_front_small_url";
+  var url="https://world.openfoodfacts.org/cgi/search.pl?search_terms="+q+"&search_simple=1&action=process&json=1&page_size=5&sort_by=unique_scans_n&fields=product_name,product_name_fr,brands,categories_tags,image_front_url,image_front_small_url";
   byBarcode
     .then(function(fromBarcode){
       if(fromBarcode)return{products:[fromBarcode]};
@@ -3525,7 +3549,7 @@ function fetchVerifiedOFFImage(d){
         if(offImageMatches(d,prods[i])&&(prods[i].image_front_url||prods[i].image_front_small_url)){best=prods[i];break;}
       }
       imgCache[key]=best?{url:best.image_front_url||best.image_front_small_url,ts:Date.now()}:{url:null,ts:Date.now()};
-      try{localStorage.setItem("magoImgCache2",JSON.stringify(imgCache));}catch(e){/* quota */}
+      try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){/* quota */}
       delete imgFetchInFlight[key];
       if(best){
         refreshDrinkVisual(d);
@@ -3609,7 +3633,7 @@ function adminFixPhoto(){
   var key=String(d.id);
   if(/^x$/i.test(input)){
     imgCache[key]={url:null,ts:Date.now(),manual:true};
-    try{localStorage.setItem("magoImgCache2",JSON.stringify(imgCache));}catch(e){}
+    try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
     refreshDrinkVisual(d);
     toast("Photo retir\u00E9e (canette stylis\u00E9e) \u2014 sur cet appareil");
     return;
@@ -3620,7 +3644,7 @@ function adminFixPhoto(){
       playSound("err");return;
     }
     imgCache[key]={url:url,ts:Date.now(),manual:true};
-    try{localStorage.setItem("magoImgCache2",JSON.stringify(imgCache));}catch(e){}
+    try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
     refreshDrinkVisual(d);
     renderTrends();
     if(window.fbSaveDrinkImage)window.fbSaveDrinkImage(key,url);
@@ -4697,7 +4721,7 @@ try{
       if(!imgCache[k]||!imgCache[k].url){imgCache[k]={url:url,ts:Date.now()};applied++;}
     });
     if(applied){
-      try{localStorage.setItem("magoImgCache2",JSON.stringify(imgCache));}catch(err){}
+      try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(err){}
       renderTrends();
       var sEl=document.getElementById("s-search");
       if(sEl&&sEl.classList.contains("on"))renderList();
