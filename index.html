@@ -787,7 +787,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
           <div id="res-fav" onclick="event.stopPropagation();toggleFav(curSel.id,this)" style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer;flex-shrink:0" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();toggleFav(curSel.id,this);}">🤍</div>
         </div>
         <div class="res-product">
-          <div class="res-emoji" id="res-emoji"></div>
+          <div class="res-emoji" id="res-emoji" onclick="openDrinkZoom()" role="button" tabindex="0" aria-label="Agrandir la photo" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrinkZoom();}" style="cursor:pointer;position:relative"></div>
           <div style="flex:1">
             <div id="res-sub" style="font-size:12px;color:rgba(255,255,255,.8);font-weight:500"></div>
             <div id="res-stars" style="font-size:11px;font-weight:600;color:rgba(255,255,255,.9);margin-top:3px"></div>
@@ -993,7 +993,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0607e</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0607g</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1221,6 +1221,12 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
     </div>
   </nav>
 
+  <div id="img-zoom" role="dialog" aria-modal="true" aria-label="Photo du produit" style="display:none;position:fixed;inset:0;z-index:4000;background:rgba(12,10,8,.94);align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:20px" onclick="closeDrinkZoom()">
+    <img id="img-zoom-pic" alt="" style="max-width:92vw;max-height:74vh;object-fit:contain;border-radius:18px;background:#fff">
+    <div id="img-zoom-name" style="font-size:15px;font-weight:800;color:#fff;text-align:center"></div>
+    <div id="img-zoom-credit" style="font-size:10.5px;font-weight:500;color:rgba(255,255,255,.55)">Photo : Open Food Facts (CC-BY-SA)</div>
+    <div id="img-zoom-close" role="button" tabindex="0" aria-label="Fermer" onkeydown="if(event.key==='Enter'){closeDrinkZoom();}" style="position:absolute;top:18px;right:18px;width:40px;height:40px;border-radius:14px;background:rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;font-size:17px;color:#fff;cursor:pointer">✕</div>
+  </div>
   <div class="toast" id="toast"></div>
 </div>
 
@@ -1740,7 +1746,7 @@ window.fbLoadCommunityData();
    DATA — Boissons (reste local, immuable)
 ================================ */
 var DRINKS=[
-  {id:1,name:"Coca-Cola Original",brand:"Coca-Cola",emoji:"🥤",color:"#c0392b",light:"#fdecea",cat:"Soda",tag:"COCA",barcodes:["5449000000996"],stars:4.7,img:"https://images.openfoodfacts.org/images/products/544/900/000/0996/front_en.1035.400.jpg",formats:[{type:"canette",cl:33,img:"https://images.openfoodfacts.org/images/products/544/900/000/0996/front_en.1035.400.jpg"},{type:"bouteille",cl:150}]},
+  {id:1,name:"Coca-Cola Original",brand:"Coca-Cola",emoji:"🥤",color:"#c0392b",light:"#fdecea",cat:"Soda",tag:"COCA",barcodes:["5449000000996"],stars:4.7,formats:[{type:"canette",cl:33,img:"https://images.openfoodfacts.org/images/products/544/900/000/0996/front_en.1035.400.jpg"},{type:"bouteille",cl:150}]},
   {id:101,name:"Coca-Cola Zéro",brand:"Coca-Cola",emoji:"⬛",color:"#1a1714",light:"#f0eee9",cat:"Soda",tag:"COCA ZERO",barcodes:["5449000133328"],stars:4.5,formats:[{type:"canette",cl:33},{type:"bouteille",cl:100,img:"https://images.openfoodfacts.org/images/products/544/900/013/3328/front_fr.286.400.jpg"}]},
   {id:102,name:"Coca-Cola Cherry",brand:"Coca-Cola",emoji:"🍒",color:"#922b21",light:"#fdedec",cat:"Soda",tag:"COCA CHERRY",barcodes:["5449000054227"],stars:4.3},
   {id:103,name:"Coca-Cola Vanille",brand:"Coca-Cola",emoji:"🍦",color:"#c0392b",light:"#fdecea",cat:"Soda",tag:"COCA VANILLE",barcodes:["5449000133304"],stars:4.2},
@@ -2942,6 +2948,8 @@ function storeSkeletonHTML(n){
 function pick(d){
   // Recherche (une seule fois, mise en cache) de la vraie photo du produit sur OpenFoodFacts
   fetchVerifiedOFFImage(d);
+  // Rafraichir le visuel de fiche (badge loupe si une photo est deja en cache)
+  setTimeout(function(){refreshDrinkVisual(d);},80);
   // Si Firebase pas encore chargé, attendre : on bascule déjà sur l'écran résultats avec un skeleton
   if(!window._fbReady && window._fbLoading) {
     curSel=d;setAccent(d);
@@ -3443,7 +3451,7 @@ function drinkIconHTML(d){
   if(!d)return"";
   var url=getCachedDrinkImage(d);
   if(!url)return drinkCanSVG(d,15);
-  return '<img src="'+url+'" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" onerror="if(this.parentNode)this.outerHTML=\''+d.emoji+'\'">';
+  return '<img src="'+url+'" alt="" style="width:100%;height:100%;object-fit:contain;background:#fff;padding:7%;box-sizing:border-box;border-radius:inherit" onerror="if(this.parentNode)this.outerHTML=\''+d.emoji+'\'">';
 }
 /* Verification stricte du produit OpenFoodFacts avant d'accepter sa photo :
    1) la marque doit correspondre ;
@@ -3532,11 +3540,49 @@ function processImgQueue(){
   fetchVerifiedOFFImage(d);
   imgQueueTimer=setTimeout(processImgQueue,2500);
 }
+/* Visionneuse photo plein ecran : tap sur le visuel de la fiche.
+   Les URLs Open Food Facts en .400.jpg ont une version .full.jpg haute
+   resolution ; on la tente d'abord, avec repli automatique sur la 400
+   si elle n'existe pas (onerror). */
+function offFullResURL(url){
+  return url.replace(/\.(400|200|100)\.jpg(\?|$)/,".full.jpg$2");
+}
+function openDrinkZoom(){
+  if(!curSel)return;
+  var url=getCachedDrinkImage(curSel);
+  if(!url){toast("Photo pas encore disponible pour cette boisson");return;}
+  var ov=document.getElementById("img-zoom");
+  var pic=document.getElementById("img-zoom-pic");
+  var full=offFullResURL(url);
+  pic.onerror=function(){
+    // La version haute resolution n'existe pas : repli sur la version standard
+    if(pic.src!==url){pic.onerror=null;pic.src=url;}
+  };
+  pic.src=full;
+  document.getElementById("img-zoom-name").textContent=curSel.name;
+  ov.style.display="flex";
+  var closeBtn=document.getElementById("img-zoom-close");
+  if(closeBtn)closeBtn.focus();
+  playSound("pop");
+}
+function closeDrinkZoom(){
+  var ov=document.getElementById("img-zoom");
+  if(ov)ov.style.display="none";
+  var pic=document.getElementById("img-zoom-pic");
+  if(pic)pic.src="";
+}
+document.addEventListener("keydown",function(ev){
+  if(ev.key==="Escape")closeDrinkZoom();
+});
 function refreshDrinkVisual(d){
   // Photo de la fiche ouverte (le visuel des listes se mettra a jour au prochain rendu via le cache)
   if(curSel&&curSel.id===d.id){
     var ph=document.getElementById("res-emoji");
-    if(ph)ph.innerHTML=drinkIconHTML(d);
+    if(!ph)return;
+    ph.innerHTML=drinkIconHTML(d);
+    if(getCachedDrinkImage(d)){
+      ph.innerHTML+='<span aria-hidden="true" style="position:absolute;bottom:-4px;right:-4px;width:20px;height:20px;border-radius:8px;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-size:10px">\uD83D\uDD0D</span>';
+    }
   }
 }
 // Photo pleine largeur pour les grandes cartes (dcard) : l'emoji reste toujours en dessous comme repli automatique,
@@ -3547,7 +3593,7 @@ function drinkCardPhotoHTML(d){
     return '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">'+drinkCanSVG(d,16)+'</div>';
   }
   var canLayer='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:1">'+drinkCanSVG(d,16)+'</div>';
-  return canLayer+'<img src="'+url+'" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:2" onerror="this.remove()">';
+  return canLayer+'<img src="'+url+'" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#fff;padding:10px;box-sizing:border-box;z-index:2" onerror="this.remove()">';
 }
 function centerMapOnUser(){
   if(!window._leafletMap)return;
