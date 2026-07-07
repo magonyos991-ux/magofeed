@@ -993,7 +993,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0607d</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0607e</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1522,7 +1522,8 @@ window.fbSavePrice = async function(storeId, drinkId, price) {
 window.fbLoadDrinkImages = async function() {
   try {
     var snap = await getDoc(doc(db, "meta", "drinkImages"));
-    var map = snap.exists() ? (snap.data().map || {}) : {};
+    // v2 : on ignore les cartes ecrites par l'ancienne verification
+    var map = (snap.exists() && snap.data().v === 2) ? (snap.data().map || {}) : {};
     window.dispatchEvent(new CustomEvent("fbDrinkImagesLoaded", { detail: map }));
     return map;
   } catch (e) {
@@ -1532,14 +1533,14 @@ window.fbLoadDrinkImages = async function() {
   }
 };
 window.fbSaveDrinkImage = async function(drinkId, url) {
-  var updates = {};
+  var updates = { v: 2 };
   updates["map." + drinkId] = url;
   try {
     await updateDoc(doc(db, "meta", "drinkImages"), updates);
   } catch (e) {
     // Le document n'existe peut-etre pas encore : premiere ecriture via setDoc merge
     try {
-      var data = { map: {} };
+      var data = { map: {}, v: 2 };
       data.map[drinkId] = url;
       await setDoc(doc(db, "meta", "drinkImages"), data, { merge: true });
     } catch (e2) { console.warn("drinkImages save error:", e2); }
@@ -2061,7 +2062,10 @@ var userStreak=JSON.parse(localStorage.getItem("magoStreak")||'{"streak":0,"last
 var scanHist=JSON.parse(localStorage.getItem("magoScanHist")||"[]");
 var curBrandFilter=null;
 var isAdmin=false;
-var imgCache=JSON.parse(localStorage.getItem("magoImgCache")||"{}");
+// v2 : cle changee volontairement pour purger les photos mal associees
+// mises en cache par l'ancienne verification (incident Monster Ultra White)
+var imgCache=JSON.parse(localStorage.getItem("magoImgCache2")||"{}");
+try{localStorage.removeItem("magoImgCache");}catch(e){}
 var imgFetchInFlight={};
 var communityCatalogLoaded=false;
 var offlineDataApplied=false;
@@ -3442,15 +3446,34 @@ function drinkIconHTML(d){
   return '<img src="'+url+'" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" onerror="if(this.parentNode)this.outerHTML=\''+d.emoji+'\'">';
 }
 /* Verification stricte du produit OpenFoodFacts avant d'accepter sa photo :
-   la marque doit correspondre ET la majorite des mots du nom aussi. */
+   1) la marque doit correspondre ;
+   2) la majorite des mots distinctifs du nom aussi (les mots "original/classic"
+      sont optionnels : la fiche OFF de l'original s'appelle souvent juste
+      "Monster Energy") ;
+   3) et surtout : si la fiche OFF contient un mot de VARIANTE (white, zero,
+      cherry, mango...) que la boisson n'a pas, on REFUSE. C'est ce point qui
+      manquait et qui a fait accepter la photo du Monster Ultra White pour
+      le Monster Energy original. */
+var OFF_OPTIONAL_WORDS=["original","originale","classic","classique","regular","nature","energy","drink"];
+var OFF_VARIANT_WORDS=["zero","light","diet","sugarfree","ultra","white","blanc","blanche","noir","black","cherry","cerise","vanille","vanilla","mango","mangue","watermelon","pasteque","citron","lemon","lime","peach","peche","tropical","paradise","rosa","gold","punch","exotic","exotique","fraise","strawberry","framboise","raspberry","orange","pomme","apple","raisin","grape","ananas","pineapple","coco","coconut","menthe","mint","mojito","cassis","myrtille","blueberry","grenade","pomegranate","abricot","apricot","poire","pear","kiwi","litchi","lychee","passion","goyave","guava","gingembre","ginger","sans","cafeine","decaf","max","intense","fusion","touch","sparkling","petillante","petillant","plate","green","vert","verte","rouge","red","blue","bleu","yellow","jaune","pink","rose","juiced","juice","assault","khaos","ripper","rehab","pipeline","loco"];
 function offImageMatches(d,p){
   var pBrands=normTxt(p.brands||"");
   var dBrand=normTxt(d.brand||"");
   if(dBrand&&pBrands.indexOf(dBrand)===-1)return false;
   var pName=normTxt((p.product_name_fr||p.product_name||""));
   if(!pName)return false;
-  var words=normTxt(d.name).split(/[^a-z0-9]+/).filter(function(w){return w.length>=3&&w!==dBrand;});
-  if(!words.length)return pBrands.indexOf(dBrand)!==-1;
+  var dTokens=normTxt(d.name+" "+d.brand).split(/[^a-z0-9]+/).filter(Boolean);
+  // 3) mots de variante etrangers dans la fiche OFF -> refus
+  var pTokens=pName.split(/[^a-z0-9]+/).filter(Boolean);
+  for(var i=0;i<pTokens.length;i++){
+    if(OFF_VARIANT_WORDS.indexOf(pTokens[i])!==-1&&dTokens.indexOf(pTokens[i])===-1)return false;
+  }
+  // 2) mots distinctifs requis (hors tokens de la marque et hors mots optionnels)
+  var brandTokens=dBrand.split(/[^a-z0-9]+/).filter(Boolean);
+  var words=normTxt(d.name).split(/[^a-z0-9]+/).filter(function(w){
+    return w.length>=3&&brandTokens.indexOf(w)===-1&&OFF_OPTIONAL_WORDS.indexOf(w)===-1;
+  });
+  if(!words.length)return true;
   var hits=0;
   words.forEach(function(w){if(pName.indexOf(w)!==-1||pBrands.indexOf(w)!==-1)hits++;});
   return hits/words.length>=0.6;
@@ -3473,7 +3496,7 @@ function fetchVerifiedOFFImage(d){
         if(offImageMatches(d,prods[i])&&(prods[i].image_front_url||prods[i].image_front_small_url)){best=prods[i];break;}
       }
       imgCache[key]=best?{url:best.image_front_url||best.image_front_small_url,ts:Date.now()}:{url:null,ts:Date.now()};
-      try{localStorage.setItem("magoImgCache",JSON.stringify(imgCache));}catch(e){/* quota */}
+      try{localStorage.setItem("magoImgCache2",JSON.stringify(imgCache));}catch(e){/* quota */}
       delete imgFetchInFlight[key];
       if(best){
         refreshDrinkVisual(d);
@@ -4562,7 +4585,7 @@ try{
       if(!imgCache[k]||!imgCache[k].url){imgCache[k]={url:url,ts:Date.now()};applied++;}
     });
     if(applied){
-      try{localStorage.setItem("magoImgCache",JSON.stringify(imgCache));}catch(err){}
+      try{localStorage.setItem("magoImgCache2",JSON.stringify(imgCache));}catch(err){}
       renderTrends();
       var sEl=document.getElementById("s-search");
       if(sEl&&sEl.classList.contains("on"))renderList();
