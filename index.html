@@ -1008,7 +1008,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0608h</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0608i</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1039,6 +1039,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
 
   <!-- PRIVACY -->
   <div id="s-admin" class="screen">
+    <div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch">
     <div class="wrap" style="padding-top:24px;padding-bottom:110px">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
         <div class="backbtn" onclick="navTo('settings')" role="button" tabindex="0" aria-label="Retour" onkeydown="if(event.key==='Enter'){navTo('settings');}">←</div>
@@ -1046,6 +1047,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       </div>
       <div style="font-size:12.5px;color:var(--s2);margin:0 0 18px 46px">Découvertes de la communauté à valider</div>
       <div id="admin-list"></div>
+    </div>
     </div>
   </div>
   <div id="s-privacy" class="screen">
@@ -1279,7 +1281,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
 <!-- Firebase SDK -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, linkWithPopup, signInWithPopup, signInWithCredential } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 /* ── Firebase Config ── */
@@ -1722,6 +1724,27 @@ window.fbAddDrinkToStore = async function(storeId, drinkId) {
    document SEPARE, lu uniquement par l'admin dans l'ecran Administration.
    Zero service supplementaire a configurer, zero image non moderee en public,
    et les utilisateurs ne telechargent jamais ces photos (quota preserve). */
+window.fbSavePhotoSuggestion = async function(drinkId, drinkName, base64) {
+  await setDoc(doc(db, "photoSuggestions", String(drinkId) + "_" + Date.now()), {
+    drinkId: Number(drinkId) || drinkId,
+    drinkName: String(drinkName).slice(0, 60),
+    data: String(base64),
+    by: (auth.currentUser && auth.currentUser.uid) || "",
+    createdAt: serverTimestamp()
+  });
+};
+window.fbLoadPhotoSuggestions = async function() {
+  try {
+    var snap = await getDocs(query(collection(db, "photoSuggestions"), limit(25)));
+    var rows = [];
+    snap.forEach(function(d) { var x = d.data(); x.docId = d.id; rows.push(x); });
+    return rows;
+  } catch (e) { console.warn("Photo suggestions error:", e); return []; }
+};
+window.fbDeletePhotoSuggestion = async function(docId) {
+  try { await deleteDoc(doc(db, "photoSuggestions", String(docId))); } catch (e) { console.warn(e); }
+};
+
 window.fbSaveDiscoveryPhoto = async function(discId, base64) {
   await setDoc(doc(db, "discoveryPhotos", String(discId)), {
     data: String(base64),
@@ -2132,7 +2155,7 @@ var LANGS={
   es:{name:"🇪🇸 Español",greeting:"Hola 👋 ¿Qué bebemos?",trends:"Tendencias",recents:"Recientes",search:"Buscar",scanner:"Escanear",scanSub:"Apunta la cámara al código",disc:"🔍 Descubrimientos",discSub:"Productos sugeridos",stores:"Tiendas cercanas",profile:"Mi perfil",badges:"Medallas",activity:"Actividad",noact:"Sin actividad aún",home:"Inicio",chercher:"Buscar",scan:"Escanear",discover:"Descubrir",profil:"Perfil",sig:"Reportes",conf:"Confirmaciones",rstock:"En stock",rrupture:"Sin stock",rfake:"Posible falso",rnew:"Nuevo producto",vote:"Votar",placeholder:"Buscar…"},
   de:{name:"🇩🇪 Deutsch",greeting:"Hallo 👋 Was trinken wir?",trends:"Trends",recents:"Zuletzt",search:"Suchen",scanner:"Produkt scannen",scanSub:"Kamera auf Barcode richten",disc:"🔍 Entdeckungen",discSub:"Von der Community vorgeschlagen",stores:"Nahe Geschäfte",profile:"Mein Profil",badges:"Abzeichen",activity:"Aktivität",noact:"Keine Aktivität",home:"Start",chercher:"Suchen",scan:"Scannen",discover:"Entdecken",profil:"Profil",sig:"Berichte",conf:"Bestätigungen",rstock:"Vorrätig",rrupture:"Nicht vorrätig",rfake:"Mögliche Fälschung",rnew:"Neues Produkt",vote:"Abstimmen",placeholder:"Suchen…"}
 };
-var CATS=["Tous","Soda","Ice Tea","Exotique","Energy","Jus","Eau"];
+var CATS=["Tous","Soda","Ice Tea","Exotique","Energy","Jus","Eau","Autre"];
 
 /* ================================
    STATE
@@ -2989,7 +3012,7 @@ function tagScanToStore(s){
   else{renderWhereFound(null);}
 }
 function scanCatEmoji(cat){
-  return{Energy:"\u26A1",Soda:"\uD83E\uDD64","Ice Tea":"\uD83E\uDDCB",Jus:"\uD83E\uDDC3",Eau:"\uD83D\uDCA7",Exotique:"\uD83C\uDF34"}[cat]||"\uD83D\uDD0D";
+  return{Energy:"\u26A1",Soda:"\uD83E\uDD64","Ice Tea":"\uD83E\uDDCB",Jus:"\uD83E\uDDC3",Eau:"\uD83D\uDCA7",Exotique:"\uD83C\uDF34",Autre:"\uD83E\uDDC3"}[cat]||"\uD83D\uDD0D";
 }
 function renderScanHistory(){
   var el=document.getElementById("scan-history");if(!el)return;
@@ -3025,7 +3048,15 @@ function onBarcodeDetected(r){
   res.style.display="block";
   if(found){
     res.className="scan-result found";
-    res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="width:40px;height:40px;flex-shrink:0;font-size:28px;border-radius:10px;overflow:hidden">'+drinkIconHTML(found)+'</div><div><div style="font-size:15px;font-weight:700;color:#166534">'+found.name+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">Reconnu ✓</div></div></div>';
+    var hasPhoto=!!getCachedDrinkImage(found);
+    res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="width:40px;height:40px;flex-shrink:0;font-size:28px;border-radius:10px;overflow:hidden">'+drinkIconHTML(found)+'</div><div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:700;color:#166534">'+found.name+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">\u2705 D\u00E9j\u00E0 au catalogue Magofeed</div></div></div>'+
+      '<div id="scan-photo-suggest" role="button" tabindex="0" style="margin-top:10px;padding:9px 12px;border-radius:12px;border:1.5px dashed rgba(22,163,74,.4);font-size:12px;font-weight:700;color:#166534;cursor:pointer;text-align:center">'+
+      (hasPhoto?"\uD83D\uDCF7 La photo est mauvaise ? Propose la tienne":"\uD83D\uDCF7 Pas encore de photo \u2014 prends-la en photo !")+'</div>';
+    var sps=document.getElementById("scan-photo-suggest");
+    if(sps){
+      sps.onclick=function(){openPhotoSuggest(found.id);};
+      sps.onkeydown=function(ev){if(ev.key==="Enter")openPhotoSuggest(found.id);};
+    }
     btn.textContent="🗺️ Voir les magasins";btn.style.background=found.color;btn.style.display="block";
     btn.onclick=function(){stopScan();pick(found);};
     recordScan(code,found.name,found.brand,found.cat,"catalog");
@@ -3455,9 +3486,10 @@ var CAT_DEFAULTS={
   "Energy":{emoji:"\u26A1",color:"#d4ac0d",light:"#fcf8e3"},
   "Jus":{emoji:"\uD83E\uDDC3",color:"#f39c12",light:"#fef5e7"},
   "Eau":{emoji:"\uD83D\uDCA7",color:"#5dade2",light:"#ebf5fb"},
-  "Exotique":{emoji:"\uD83C\uDF34",color:"#ec7063",light:"#fdedec"}
+  "Exotique":{emoji:"\uD83C\uDF34",color:"#ec7063",light:"#fdedec"},
+  "Autre":{emoji:"\uD83E\uDDC3",color:"#7d6b8f",light:"#f1edf6"}
 };
-var VALID_CATS=["Soda","Ice Tea","Energy","Jus","Eau","Exotique"];
+var VALID_CATS=["Soda","Ice Tea","Energy","Jus","Eau","Exotique","Autre"];
 function mergeCatalog(rows){
   if(!rows||!rows.length)return 0;
   var added=0;
@@ -4068,6 +4100,46 @@ function closeDrinkZoom(){
 document.addEventListener("keydown",function(ev){
   if(ev.key==="Escape")closeDrinkZoom();
 });
+/* ================================
+   GESTE RETOUR (glissement depuis le bord gauche, comme iOS)
+   Un swipe demarrant a moins de 26px du bord et parcourant 64px vers la
+   droite declenche le retour de l'ecran courant (le meme que son bouton ←).
+   Si un panneau est ouvert (visionneuse, selecteur, proposition), le geste
+   le ferme au lieu de naviguer.
+================================ */
+var edgeSwipe=null;
+document.addEventListener("touchstart",function(ev){
+  var t=ev.touches&&ev.touches[0];
+  if(!t)return;
+  edgeSwipe=(t.clientX<=26)?{x:t.clientX,y:t.clientY}:null;
+},{passive:true});
+document.addEventListener("touchend",function(ev){
+  if(!edgeSwipe)return;
+  var t=ev.changedTouches&&ev.changedTouches[0];
+  var start=edgeSwipe;edgeSwipe=null;
+  if(!t)return;
+  var dx=t.clientX-start.x,dy=Math.abs(t.clientY-start.y);
+  if(dx<64||dy>60)return;
+  // Panneaux ouverts : le geste les ferme
+  var zoom=document.getElementById("img-zoom");
+  if(zoom&&zoom.style.display==="flex"){closeDrinkZoom();return;}
+  var picker=document.getElementById("store-picker");
+  if(picker&&picker.style.display==="block"){closeStorePicker();return;}
+  var propose=document.getElementById("propose-sheet");
+  if(propose&&propose.style.display==="block"){closeProposeForm();return;}
+  // Sinon : declenche le bouton ← de l'ecran actif s'il existe
+  var scr=document.querySelector(".screen.on");
+  if(!scr)return;
+  var backs=[].slice.call(scr.querySelectorAll("div,span"));
+  for(var i=0;i<backs.length;i++){
+    var el=backs[i];
+    if(el.textContent&&el.textContent.trim()==="\u2190"&&el.offsetParent!==null){
+      el.click();
+      playSound("pop");
+      return;
+    }
+  }
+},{passive:true});
 /* Correction manuelle de photo (admin) : colle un code-barre OU une URL
    Open Food Facts (fiche produit ou image directe). La photo choisie est
    appliquee, publiee dans la carte partagee, et marquee "manual" pour que
@@ -4623,20 +4695,34 @@ function discFoundInHTML(d){
    qualite degressive jusqu'a < 250 Ko) pour tenir confortablement dans un
    document Firestore (limite 1 Mo) sans exploser le quota. */
 var proposePhotoData=null;
+var photoSuggestTarget=null; // drinkId quand on suggere une photo pour une boisson existante
+function openPhotoSuggest(drinkId){
+  var d=DRINKS.find(function(x){return x.id===drinkId;});
+  if(!d)return;
+  photoSuggestTarget=drinkId;
+  openProposeForm();
+  var n=document.getElementById("propose-name");
+  if(n){n.value=d.name;n.disabled=true;}
+  var b=document.getElementById("propose-brand");
+  if(b){b.value=d.brand||"";b.disabled=true;}
+  var t=document.querySelector("#propose-sheet [aria-label]");
+}
 function openProposeForm(){
+  photoSuggestTarget=photoSuggestTarget||null;
   proposePhotoData=null;
   var ov=document.getElementById("propose-sheet");if(!ov)return;
   var pv=document.getElementById("propose-photo-preview");
   var hint=document.getElementById("propose-photo-hint");
   if(pv){pv.style.display="none";pv.src="";}
   if(hint)hint.style.display="block";
-  var n=document.getElementById("propose-name");if(n)n.value="";
-  var b=document.getElementById("propose-brand");if(b)b.value="";
+  var n=document.getElementById("propose-name");if(n){if(!photoSuggestTarget)n.value="";n.disabled=!!photoSuggestTarget;}
+  var b=document.getElementById("propose-brand");if(b){if(!photoSuggestTarget)b.value="";b.disabled=!!photoSuggestTarget;}
   ov.style.display="block";
   playSound("pop");
 }
 function closeProposeForm(){
   var ov=document.getElementById("propose-sheet");if(ov)ov.style.display="none";
+  photoSuggestTarget=null;
 }
 function proposePhotoChosen(input){
   var file=input.files&&input.files[0];
@@ -4671,6 +4757,22 @@ function submitProposal(){
   if(name.length<2){toast("Donne le nom de la boisson");playSound("err");return;}
   if(!proposePhotoData){toast("Ajoute une photo du produit");playSound("err");return;}
   var brand=((document.getElementById("propose-brand")||{}).value||"").trim();
+  // Suggestion de photo pour une boisson deja au catalogue : pas de nouvelle
+  // decouverte, la photo part directement a l'admin pour verification
+  if(photoSuggestTarget){
+    var did=photoSuggestTarget;
+    if(window.fbSavePhotoSuggestion){
+      window.fbSavePhotoSuggestion(did,name,proposePhotoData).catch(function(e){
+        console.warn(e);toast("\u26A0\uFE0F Suggestion non envoy\u00E9e (r\u00E8gle photoSuggestions ?)");
+      });
+    }
+    userStats.pts+=1;updateProfileStats();
+    if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+    closeProposeForm();
+    playSound("win");
+    toast("\uD83D\uDCF7 Photo sugg\u00E9r\u00E9e \u00B7 +1 pt \u2014 l'admin va la v\u00E9rifier");
+    return;
+  }
   var id="m"+Date.now();
   var d={id:id,name:sanitize(name),brand:sanitize(brand),votes:1,cat:"",foundIn:[],hasPhoto:true,manualProposal:true};
   DISCOVERIES.unshift(d);
@@ -5000,6 +5102,7 @@ var adminCatChoice={};
 function renderAdmin(){
   var el=document.getElementById("admin-list");if(!el)return;
   el.innerHTML="";
+  renderPhotoSuggestions();
   var pending=DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected;});
   if(!pending.length){
     el.innerHTML='<div style="text-align:center;padding:40px 20px;font-size:13px;color:var(--s3)">Aucune d\u00E9couverte en attente \uD83C\uDF89</div>';
@@ -5050,6 +5153,49 @@ function renderAdmin(){
     card.querySelector(".admin-promote").onclick=function(){promoteDiscovery(d);};
     card.querySelector(".admin-reject").onclick=function(){rejectDiscovery(d);};
     el.appendChild(card);
+  });
+}
+/* Suggestions de photos pour des boissons du catalogue : l'admin les
+   examine ("cette photo est-elle meilleure ?") puis les traite. Pour
+   appliquer une meilleure photo publiquement, l'outil 🛠️ de la fiche
+   (fiche Open Food Facts) reste la voie officielle. */
+function renderPhotoSuggestions(){
+  var host=document.getElementById("admin-photo-suggestions");
+  if(!host){
+    host=document.createElement("div");
+    host.id="admin-photo-suggestions";
+    var list=document.getElementById("admin-list");
+    if(list&&list.parentNode)list.parentNode.insertBefore(host,list);
+  }
+  host.innerHTML="";
+  if(!window.fbLoadPhotoSuggestions)return;
+  window.fbLoadPhotoSuggestions().then(function(rows){
+    if(!rows.length)return;
+    var hd=document.createElement("div");
+    hd.style.cssText="font-size:13px;font-weight:800;color:var(--s1);margin:4px 0 10px";
+    hd.textContent="\uD83D\uDCF7 Photos sugg\u00E9r\u00E9es ("+rows.length+")";
+    host.appendChild(hd);
+    rows.forEach(function(r){
+      var card=document.createElement("div");
+      card.style.cssText="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:12px;margin-bottom:12px";
+      card.innerHTML='<div style="font-size:13.5px;font-weight:800;color:var(--s1);margin-bottom:8px">'+sanitize(r.drinkName||("Boisson "+r.drinkId))+'</div>'+
+        '<img alt="Photo sugg\u00E9r\u00E9e" style="width:100%;max-height:240px;object-fit:contain;background:#fff;border-radius:12px;margin-bottom:10px">'+
+        '<div style="display:flex;gap:8px">'+
+        '<button class="ps-open" style="flex:1;padding:9px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">\uD83D\uDD0D Ouvrir la fiche (outil \uD83D\uDEE0\uFE0F)</button>'+
+        '<button class="ps-done" style="padding:9px 14px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">\u2713 Trait\u00E9</button>'+
+        '</div>';
+      card.querySelector("img").src=r.data;
+      card.querySelector(".ps-open").onclick=function(){
+        var d=DRINKS.find(function(x){return x.id===r.drinkId;});
+        if(d)pick(d);else toast("Boisson introuvable au catalogue");
+      };
+      card.querySelector(".ps-done").onclick=function(){
+        if(window.fbDeletePhotoSuggestion)window.fbDeletePhotoSuggestion(r.docId);
+        card.remove();
+        toast("Suggestion trait\u00E9e");
+      };
+      host.appendChild(card);
+    });
   });
 }
 function promoteDiscovery(d){
