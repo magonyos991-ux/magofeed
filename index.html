@@ -1007,7 +1007,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0608d</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0608e</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1235,6 +1235,16 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
     </div>
   </nav>
 
+  <div id="store-picker" role="dialog" aria-modal="true" aria-label="Choisir un magasin" style="display:none;position:fixed;inset:0;z-index:3500;background:rgba(12,10,8,.55)" onclick="closeStorePicker()">
+    <div onclick="event.stopPropagation()" style="position:absolute;left:0;right:0;bottom:0;max-height:72vh;background:var(--app-bg);border-radius:22px 22px 0 0;padding:18px 20px 26px;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-size:15px;font-weight:800;color:var(--s1)">Dans quel magasin ?</div>
+        <div onclick="closeStorePicker()" role="button" tabindex="0" aria-label="Fermer" onkeydown="if(event.key==='Enter'){closeStorePicker();}" style="width:34px;height:34px;border-radius:12px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer">✕</div>
+      </div>
+      <input id="store-picker-q" type="text" placeholder="Cherche : Colruyt, Delhaize, night shop…" oninput="renderStorePicker()" style="width:100%;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:'Space Grotesk',sans-serif;outline:none;margin-bottom:10px">
+      <div id="store-picker-list" style="overflow-y:auto;flex:1"></div>
+    </div>
+  </div>
   <div id="img-zoom" role="dialog" aria-modal="true" aria-label="Photo du produit" style="display:none;position:fixed;inset:0;z-index:4000;background:rgba(12,10,8,.94);align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:20px" onclick="closeDrinkZoom()">
     <img id="img-zoom-pic" alt="" style="max-width:92vw;max-height:74vh;object-fit:contain;border-radius:18px;background:#fff">
     <div id="img-zoom-name" style="font-size:15px;font-weight:800;color:#fff;text-align:center"></div>
@@ -2604,7 +2614,7 @@ function renderWhereFound(ctx){
   if(!ctx)return;
   var near=(STORES||[]).filter(function(s){return typeof s.dist==="number";})
     .sort(function(a,b){return a.dist-b.dist;}).slice(0,3);
-  if(!near.length)return; // pas de GPS / pas de magasins : on n'invente rien
+  if(!near.length&&!(STORES||[]).length)return; // aucun magasin charge : rien a proposer
   var title=document.createElement("div");
   title.style.cssText="font-size:12px;font-weight:700;color:var(--s2);margin-bottom:8px";
   title.textContent="\uD83D\uDCCD O\u00F9 l'as-tu trouv\u00E9 ?";
@@ -2621,6 +2631,12 @@ function renderWhereFound(ctx){
     a11yCard(row,"Trouv\u00E9 chez "+s.name+", "+dist);
     host.appendChild(row);
   });
+  var other=document.createElement("div");
+  other.style.cssText="display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;background:var(--bg3);border:1.5px dashed var(--border);border-radius:14px;margin-bottom:8px;cursor:pointer;font-size:12.5px;font-weight:700;color:var(--s1)";
+  other.innerHTML='\uD83D\uDD0E Autre magasin\u2026';
+  other.onclick=openStorePicker;
+  a11yCard(other,"Chercher un autre magasin");
+  host.appendChild(other);
   var skip=document.createElement("div");
   skip.style.cssText="text-align:center;font-size:11.5px;font-weight:600;color:var(--s3);padding:4px;cursor:pointer";
   skip.textContent="Ailleurs / passer";
@@ -2628,6 +2644,76 @@ function renderWhereFound(ctx){
   a11yCard(skip,"Passer");
   host.appendChild(skip);
   host.style.display="block";
+}
+function openStorePicker(){
+  var ov=document.getElementById("store-picker");if(!ov)return;
+  ov.style.display="block";
+  var q=document.getElementById("store-picker-q");
+  if(q){q.value="";setTimeout(function(){q.focus();},120);}
+  renderStorePicker();
+}
+function closeStorePicker(){
+  var ov=document.getElementById("store-picker");if(ov)ov.style.display="none";
+}
+function renderStorePicker(){
+  var el=document.getElementById("store-picker-list");if(!el)return;
+  var q=(document.getElementById("store-picker-q")||{}).value||"";
+  var list=(STORES||[]).slice();
+  if(q){
+    var exact=list.filter(function(s){return normTxt((s.name||"")+" "+(s.brand||"")+" "+(s.address||"")).indexOf(normTxt(q))!==-1;});
+    list=exact.length?exact:list.filter(function(s){return fuzzyIncludes(q,(s.name||"")+" "+(s.brand||"")+" "+(s.address||""));});
+  }
+  list.sort(function(a,b){return (a.dist||1e9)-(b.dist||1e9);});
+  list=list.slice(0,20);
+  el.innerHTML="";
+  if(!list.length){
+    el.innerHTML='<div style="text-align:center;padding:24px;font-size:13px;color:var(--s3)">Aucun magasin trouv\u00E9</div>';
+    return;
+  }
+  list.forEach(function(s){
+    var row=document.createElement("div");
+    row.style.cssText="display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--border);cursor:pointer";
+    var dist=(typeof s.dist==="number")?(s.dist<1000?Math.round(s.dist)+" m":(s.dist/1000).toFixed(1)+" km"):"";
+    row.innerHTML='<span style="font-size:16px">'+(s.emoji||"\uD83C\uDFEA")+'</span>'+
+      '<span style="flex:1;min-width:0"><span style="display:block;font-size:13.5px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(s.name)+'</span>'+
+      (s.address?'<span style="display:block;font-size:11px;color:var(--s2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(s.address)+'</span>':"")+'</span>'+
+      (dist?'<span style="font-size:11.5px;font-weight:600;color:var(--s2);flex-shrink:0">'+dist+'</span>':"");
+    row.onclick=function(){closeStorePicker();tagScanToStore(s);};
+    a11yCard(row,s.name+(dist?", "+dist:""));
+    el.appendChild(row);
+  });
+}
+/* Prix facultatif juste apres le rattachement (boissons du catalogue uniquement :
+   une decouverte n'a pas encore d'identite catalogue pour porter un prix) */
+function renderPriceAfterTag(s,did){
+  var host=document.getElementById("scan-where");if(!host)return;
+  host.innerHTML='<div style="display:flex;align-items:center;gap:8px;background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;padding:10px 12px">'+
+    '<span style="font-size:12px;font-weight:600;color:var(--s2);flex-shrink:0">\uD83D\uDCB6 Prix vu ? (facultatif)</span>'+
+    '<input id="scan-price-input" type="number" step="0.10" min="0" max="20" placeholder="1.30" style="flex:1;min-width:0;padding:8px 10px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:13px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none">'+
+    '<button id="scan-price-ok" style="padding:8px 12px;border-radius:10px;border:none;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">OK</button>'+
+    '<span id="scan-price-skip" role="button" tabindex="0" style="font-size:11.5px;font-weight:600;color:var(--s3);cursor:pointer;flex-shrink:0">Passer</span>'+
+  '</div>';
+  host.style.display="block";
+  document.getElementById("scan-price-skip").onclick=function(){renderWhereFound(null);};
+  document.getElementById("scan-price-ok").onclick=function(){
+    var v=parseFloat((document.getElementById("scan-price-input")||{}).value);
+    if(!v||v<=0){renderWhereFound(null);return;}
+    var sid=String(s.id);
+    if(!storePrices[sid])storePrices[sid]={};
+    storePrices[sid][did]=v;
+    try{localStorage.setItem("magoPrices",JSON.stringify(storePrices));}catch(e){}
+    if(!s.prices)s.prices={};
+    s.prices[did]=v;
+    trackLocalPrice(sid,did,v);
+    if(!s.priceHistory)s.priceHistory={};
+    if(!s.priceHistory[did])s.priceHistory[did]=[];
+    s.priceHistory[did].push({p:v,t:Date.now()});
+    if(window.fbSavePrice)window.fbSavePrice(s.fbId||sid,did,v);
+    userStats.pts+=2;updateProfileStats();
+    if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+    renderWhereFound(null);
+    playSound("win");toast("\uD83D\uDCB6 "+v.toFixed(2)+"\u20AC enregistr\u00E9 \u00B7 +2 pts");
+  };
 }
 function tagScanToStore(s){
   var ctx=lastScanContext;
@@ -2658,9 +2744,10 @@ function tagScanToStore(s){
   trackStoreContribution(sid);
   updateProfileStats();
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
-  renderWhereFound(null);
   playSound("win");
   toast("\uD83D\uDCCD Rattach\u00E9 \u00E0 "+s.name+" \u00B7 +3 pts");
+  if(ctx.drinkId!=null){renderPriceAfterTag(s,ctx.drinkId);}
+  else{renderWhereFound(null);}
 }
 function scanCatEmoji(cat){
   return{Energy:"\u26A1",Soda:"\uD83E\uDD64","Ice Tea":"\uD83E\uDDCB",Jus:"\uD83E\uDDC3",Eau:"\uD83D\uDCA7",Exotique:"\uD83C\uDF34"}[cat]||"\uD83D\uDD0D";
