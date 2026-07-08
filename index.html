@@ -1007,7 +1007,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0608f</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0608g</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1671,6 +1671,24 @@ window.fbAddReport = async function(storeId, drinkId, type) {
 /* Rattache une boisson a un magasin (disponibilite communautaire) :
    arrayUnion sur le tableau drinks + premiere confirmation. C'est ce qui
    rend une boisson TROUVABLE — le maillon qui manquait au flux de scan. */
+/* Creation d'un magasin par la communaute : les petites boutiques et night
+   shops sont tres mal recenses dans OpenStreetMap — c'est la communaute qui
+   complete la carte. Necessite la regle stores.create pour les connectes. */
+window.fbCreateStore = async function(store) {
+  var data = {
+    name: String(store.name).slice(0, 60),
+    emoji: store.emoji || "\uD83C\uDFEA",
+    lat: Number(store.lat),
+    lng: Number(store.lng),
+    drinks: [],
+    confirmations: {},
+    community: true,
+    addedBy: (auth.currentUser && auth.currentUser.uid) || "",
+    createdAt: serverTimestamp()
+  };
+  await setDoc(doc(db, "stores", String(store.id)), data);
+};
+
 window.fbAddDrinkToStore = async function(storeId, drinkId) {
   var s = window.STORES.find(function(x){ return x.id === storeId || x.fbId === storeId; });
   if (!s || !s.fbId) return;
@@ -2669,7 +2687,12 @@ function toggleStorePickerMap(){
   if(!box)return;
   box.style.display=pickerMapOn?"block":"none";
   if(pickerMapOn){
-    ensurePickerMap(function(){renderStorePicker();});
+    ensurePickerMap(function(){
+      // Formulaire d'ajout ouvert : ne pas reconstruire la liste (ca
+      // effacerait le formulaire) — juste rafraichir les marqueurs
+      if(document.getElementById("add-store-name")){updatePickerMapMarkers(pickerFilteredList());}
+      else{renderStorePicker();}
+    });
   }
 }
 function ensurePickerMap(cb){
@@ -2679,6 +2702,7 @@ function ensurePickerMap(cb){
     window._pickerMap=L.map("store-picker-map",{zoomControl:false,attributionControl:false}).setView(center,13);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(window._pickerMap);
     window._pickerMarkers=L.layerGroup().addTo(window._pickerMap);
+    window._pickerMap.on("click",function(e){onPickerMapClick(e.latlng);});
     if(userLat){
       L.circleMarker([userLat,userLng],{radius:7,color:"#fff",weight:2,fillColor:"#2e86c1",fillOpacity:1}).addTo(window._pickerMap);
     }
@@ -2690,6 +2714,104 @@ function ensurePickerMap(cb){
   var script=document.createElement("script");script.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
   script.onload=build;
   document.head.appendChild(script);
+}
+/* Ajout d'un magasin manquant : nom + type + position (GPS sur place, ou
+   tap sur la carte du selecteur depuis chez soi). Le magasin est cree pour
+   toute la communaute et immediatement selectionnable. */
+var addStorePos=null;
+var addStorePlacing=false;
+function openAddStoreForm(){
+  var el=document.getElementById("store-picker-list");if(!el)return;
+  addStorePos=userLat?{lat:userLat,lng:userLng,src:"gps"}:null;
+  addStorePlacing=false;
+  var q=(document.getElementById("store-picker-q")||{}).value||"";
+  el.innerHTML='<div style="padding:4px 2px">'+
+    '<div style="font-size:13px;font-weight:800;color:var(--s1);margin-bottom:10px">\u2795 Nouveau magasin</div>'+
+    '<input id="add-store-name" type="text" maxlength="60" placeholder="Nom (ex : ARARAT Night Shop)" value="'+sanitize(q)+'" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none;margin-bottom:10px">'+
+    '<div id="add-store-types" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>'+
+    '<div id="add-store-pos" style="font-size:12px;font-weight:600;color:var(--s2);background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:10px"></div>'+
+    '<div style="display:flex;gap:8px">'+
+      '<button id="add-store-save" style="flex:1;padding:12px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Cr\u00E9er le magasin</button>'+
+      '<button id="add-store-cancel" style="padding:12px 16px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s2);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Annuler</button>'+
+    '</div></div>';
+  var types=[["\uD83C\uDFEA","Sup\u00E9rette"],["\uD83D\uDED2","Supermarch\u00E9"],["\uD83C\uDF19","Night shop"],["\uD83C\uDF0D","\u00C9picerie exotique"]];
+  var tEl=document.getElementById("add-store-types");
+  types.forEach(function(t,i){
+    var b=document.createElement("button");
+    b.type="button";b.dataset.emoji=t[0];
+    b.style.cssText="padding:8px 12px;border-radius:999px;border:1.5px solid var(--border);background:"+(i===0?"var(--s1)":"var(--bg3)")+";color:"+(i===0?"var(--app-bg)":"var(--s2)")+";font-size:12px;font-weight:700;cursor:pointer;font-family:inherit";
+    b.textContent=t[0]+" "+t[1];
+    b.onclick=function(){
+      tEl.querySelectorAll("button").forEach(function(x){x.style.background="var(--bg3)";x.style.color="var(--s2)";});
+      b.style.background="var(--s1)";b.style.color="var(--app-bg)";
+      tEl.dataset.emoji=t[0];
+    };
+    tEl.appendChild(b);
+  });
+  tEl.dataset.emoji=types[0][0];
+  renderAddStorePos();
+  document.getElementById("add-store-cancel").onclick=function(){addStorePlacing=false;renderStorePicker();};
+  document.getElementById("add-store-save").onclick=saveNewStore;
+}
+function renderAddStorePos(){
+  var el=document.getElementById("add-store-pos");if(!el)return;
+  var html="";
+  if(addStorePos){
+    html="\uD83D\uDCCD Position : "+(addStorePos.src==="gps"?"ta position GPS actuelle":"choisie sur la carte")+" \u2713";
+  }else{
+    html="\uD83D\uDCCD Position requise \u2014 pas de GPS d\u00E9tect\u00E9";
+  }
+  html+='<br><span id="add-store-place" role="button" tabindex="0" style="color:var(--s1);font-weight:700;cursor:pointer;text-decoration:underline">'+(addStorePlacing?"Tape sur la carte pour placer le magasin\u2026":"\uD83D\uDDFA\uFE0F Pointer sur la carte")+'</span>';
+  el.innerHTML=html;
+  var pl=document.getElementById("add-store-place");
+  if(pl)pl.onclick=function(){
+    addStorePlacing=true;
+    if(!pickerMapOn)toggleStorePickerMap();
+    renderAddStorePos();
+    toast("Tape sur la carte \u00E0 l'emplacement exact du magasin");
+  };
+}
+function onPickerMapClick(latlng){
+  if(!addStorePlacing)return;
+  addStorePos={lat:latlng.lat,lng:latlng.lng,src:"map"};
+  addStorePlacing=false;
+  if(window._pickerMarkers&&window.L){
+    L.circleMarker([latlng.lat,latlng.lng],{radius:9,color:"#fff",weight:2,fillColor:"#c69a57",fillOpacity:1}).addTo(window._pickerMarkers);
+  }
+  renderAddStorePos();
+  playSound("pop");
+}
+function saveNewStore(){
+  var name=((document.getElementById("add-store-name")||{}).value||"").trim();
+  if(name.length<2){toast("Donne un nom au magasin");playSound("err");return;}
+  if(!addStorePos){toast("Place le magasin : GPS ou carte");playSound("err");return;}
+  var emoji=(document.getElementById("add-store-types")||{dataset:{}}).dataset.emoji||"\uD83C\uDFEA";
+  var s={
+    id:"u"+Date.now(),
+    name:name,
+    emoji:emoji,
+    lat:addStorePos.lat,lng:addStorePos.lng,
+    drinks:[],confirmations:{},community:true
+  };
+  s.fbId=s.id;
+  // Distance calculee localement (haversineKm vit dans le module Firebase,
+  // inaccessible depuis ce script — reference directe = ReferenceError)
+  if(typeof userLat==="number"&&userLat){
+    var R=6371000,dLat=(s.lat-userLat)*Math.PI/180,dLng=(s.lng-userLng)*Math.PI/180;
+    var a=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(userLat*Math.PI/180)*Math.cos(s.lat*Math.PI/180)*Math.sin(dLng/2)*Math.sin(dLng/2);
+    s.dist=R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+  }
+  STORES.push(s);
+  if(window.fbCreateStore){
+    window.fbCreateStore(s).catch(function(e){
+      console.warn("Create store error:",e);
+      toast("\u26A0\uFE0F Magasin cr\u00E9\u00E9 localement seulement (v\u00E9rifie la r\u00E8gle stores.create)");
+    });
+  }
+  playSound("win");
+  toast("\uD83C\uDFEA \u00AB "+name+" \u00BB ajout\u00E9 \u00E0 la carte !");
+  if(lastScanContext){closeStorePicker();tagScanToStore(s);}
+  else{renderStorePicker();}
 }
 function pickerSelectStore(id){
   var s=(STORES||[]).find(function(x){return String(x.id)===String(id);});
@@ -2719,8 +2841,7 @@ function updatePickerMapMarkers(list){
 function closeStorePicker(){
   var ov=document.getElementById("store-picker");if(ov)ov.style.display="none";
 }
-function renderStorePicker(){
-  var el=document.getElementById("store-picker-list");if(!el)return;
+function pickerFilteredList(){
   var q=(document.getElementById("store-picker-q")||{}).value||"";
   var list=(STORES||[]).slice();
   if(q){
@@ -2728,11 +2849,25 @@ function renderStorePicker(){
     list=exact.length?exact:list.filter(function(s){return fuzzyIncludes(q,(s.name||"")+" "+(s.brand||"")+" "+(s.address||""));});
   }
   list.sort(function(a,b){return (a.dist||1e9)-(b.dist||1e9);});
+  return list;
+}
+function renderStorePicker(){
+  var el=document.getElementById("store-picker-list");if(!el)return;
+  var list=pickerFilteredList();
   updatePickerMapMarkers(list);
   list=list.slice(0,20);
   el.innerHTML="";
+  function addRow(){
+    var row=document.createElement("div");
+    row.style.cssText="display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border:1.5px dashed var(--border);border-radius:14px;margin:8px 0;cursor:pointer;font-size:12.5px;font-weight:700;color:var(--s1)";
+    row.innerHTML="\u2795 Il manque ? Ajouter un magasin";
+    row.onclick=openAddStoreForm;
+    a11yCard(row,"Ajouter un magasin manquant");
+    return row;
+  }
   if(!list.length){
-    el.innerHTML='<div style="text-align:center;padding:24px;font-size:13px;color:var(--s3)">Aucun magasin trouv\u00E9</div>';
+    el.innerHTML='<div style="text-align:center;padding:16px;font-size:13px;color:var(--s3)">Aucun magasin trouv\u00E9</div>';
+    el.appendChild(addRow());
     return;
   }
   list.forEach(function(s){
@@ -2747,6 +2882,7 @@ function renderStorePicker(){
     a11yCard(row,s.name+(dist?", "+dist:""));
     el.appendChild(row);
   });
+  el.appendChild(addRow());
 }
 /* Prix facultatif juste apres le rattachement (boissons du catalogue uniquement :
    une decouverte n'a pas encore d'identite catalogue pour porter un prix) */
@@ -2804,6 +2940,7 @@ function tagScanToStore(s){
       if(d.foundIn.indexOf(sid)===-1)d.foundIn.push(sid);
     }
     if(window.fbTagDiscoveryStore)window.fbTagDiscoveryStore(ctx.discoveryId,sid).catch(function(e){console.warn(e);});
+    renderDiscoveries();
   }
   userStats.pts+=3;
   trackStoreContribution(sid);
@@ -4427,6 +4564,28 @@ function addDiscovery(name,brand,barcode,cat){
   // Partagé avec toute la communauté via Firestore (dédoublonné par code-barre)
   if(window.fbAddDiscovery)window.fbAddDiscovery(barcode,name,brand,cat).catch(function(){});
 }
+/* Localisation des decouvertes : ou la boisson a ete reperee (magasins des
+   scans) + "Je sais ou !" pour l'indiquer soi-meme, depuis chez soi,
+   via le selecteur (recherche + carte). Clics geres par delegation. */
+function discFoundInHTML(d){
+  var ids=d.foundIn||[];
+  var names=ids.map(function(sid){
+    var s=(STORES||[]).find(function(x){return String(x.id)===String(sid);});
+    return s?s.name:null;
+  }).filter(Boolean);
+  var label;
+  if(!ids.length)label="\uD83D\uDCCD Pas encore localis\u00E9e";
+  else if(names.length)label="\uD83D\uDCCD Rep\u00E9r\u00E9e chez "+sanitize(names.slice(0,2).join(", "))+(ids.length>2?" +"+(ids.length-2):"");
+  else label="\uD83D\uDCCD Rep\u00E9r\u00E9e dans "+ids.length+" magasin"+(ids.length>1?"s":"");
+  return '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">'+
+    '<span style="font-size:11px;font-weight:600;color:var(--s2)">'+label+'</span>'+
+    '<span class="disc-locate" data-disc="'+sanitize(String(d.id))+'" role="button" tabindex="0" aria-label="Indiquer un magasin" style="font-size:11px;font-weight:800;color:var(--s1);cursor:pointer;text-decoration:underline">Je sais o\u00F9 !</span>'+
+  '</div>';
+}
+function discLocate(discId){
+  lastScanContext={discoveryId:discId};
+  openStorePicker();
+}
 function renderDiscoveries(){
   var el=document.getElementById("disc-list");if(!el)return;el.innerHTML="";
   var T=LANGS[curLang];
@@ -4452,6 +4611,7 @@ function renderDiscoveries(){
       (ready?'<span class="disc-ready" style="flex-shrink:0">PR\u00CATE \u2728</span>':"")+'</div>'+
       '<div style="font-size:12px;margin-top:2px;color:var(--s2)">'+desc+'</div>'+
       '<div class="vote-progress" role="progressbar" aria-valuemin="0" aria-valuemax="'+ADMIN_VOTE_THRESHOLD+'" aria-valuenow="'+votes+'"><div style="width:'+pct+'%"></div></div>'+
+      discFoundInHTML(d)+
       '<div style="font-size:11px;font-weight:600;margin-top:5px;color:'+(ready?"#16a34a":"#c69a57")+'">'+
       (ready?"\u2728 Pr\u00EAte \u00E0 entrer au catalogue !":votes+"/"+ADMIN_VOTE_THRESHOLD+" votes \u00B7 encore "+missing+" pour le catalogue")+'</div></div>'+
       (voted?'<span style="font-size:12px;font-weight:700;color:var(--s3);flex-shrink:0">✓ Voté</span>':'<button class="vote-btn" style="background:'+(document.body.classList.contains("dark")?"#f0f0f0":accentColor)+';color:'+(document.body.classList.contains("dark")?"#1a1714":"#fff")+'" onclick="voteDisc(\''+String(d.id).replace(/'/g,"\\'")+'\')">'+T.vote+'</button>');
@@ -4958,6 +5118,16 @@ try{
   initSoundToggle();
   initSettingsPseudo();
   renderCats("cats-home");renderCats("cats-search");renderBrandsRail();
+  var dl=document.getElementById("disc-list");
+  if(dl)dl.addEventListener("click",function(ev){
+    var t=ev.target.closest?ev.target.closest(".disc-locate"):null;
+    if(t){ev.stopPropagation();discLocate(t.getAttribute("data-disc"));}
+  });
+  if(dl)dl.addEventListener("keydown",function(ev){
+    if(ev.key!=="Enter")return;
+    var t=ev.target.closest?ev.target.closest(".disc-locate"):null;
+    if(t){ev.stopPropagation();discLocate(t.getAttribute("data-disc"));}
+  });
   renderTrends();renderRecents();renderList();
   renderLangGrid();renderDiscoveries();
   renderFavs();
