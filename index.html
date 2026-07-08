@@ -1008,7 +1008,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0608i</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0608j</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -2362,8 +2362,43 @@ function haversine(a,b,c,d){
    NAVIGATION
 ================================ */
 var NAV_SCREENS=["home","search","results","scan","discover","profile","settings","privacy","terms","storedetail","admin"];
+/* ================================
+   NAVIGATION "COMME LES APPS PRO"
+   - Les 5 onglets (barre du bas) sont des racines : y aller vide la pile.
+   - Les ecrans pousses (fiche, parametres, admin...) s'empilent.
+   - Chaque empilement ecrit une entree dans l'historique du navigateur :
+     le geste natif iOS (glissement du bord en PWA installee) declenche
+     alors un VRAI retour via popstate, au lieu de partir dans le vide.
+   - En plus : glissement interactif maison (l'ecran suit le doigt).
+================================ */
+var TAB_SCREENS=["home","search","scan","discover","profile"];
+var navStack=[];
+function navBack(){
+  if(!navStack.length)return false;
+  var prev=navStack.pop();
+  _showRaw(prev);
+  return true;
+}
+window.addEventListener("popstate",function(){
+  // Le systeme (geste iOS / bouton Android) vient de reculer dans
+  // l'historique : on recule d'un ecran dans l'app.
+  if(navStack.length)navBack();
+});
 function navTo(s){if(scanActive&&s!=="scan")stopScan();show(s);}
 function show(s){
+  var cur=document.querySelector(".screen.on");
+  var curId=cur?cur.id.replace(/^s-/,""):null;
+  if(curId&&curId!==s){
+    if(TAB_SCREENS.indexOf(s)!==-1){
+      navStack=[]; // racine : la pile repart de zero
+    }else{
+      navStack.push(curId);
+      try{history.pushState({mago:navStack.length},"");}catch(e){}
+    }
+  }
+  _showRaw(s);
+}
+function _showRaw(s){
   if(s!=="scan"&&scanActive)stopScan();
   var target=document.getElementById("s-"+s);
   var current=document.querySelector(".screen.on");
@@ -4101,45 +4136,94 @@ document.addEventListener("keydown",function(ev){
   if(ev.key==="Escape")closeDrinkZoom();
 });
 /* ================================
-   GESTE RETOUR (glissement depuis le bord gauche, comme iOS)
-   Un swipe demarrant a moins de 26px du bord et parcourant 64px vers la
-   droite declenche le retour de l'ecran courant (le meme que son bouton ←).
-   Si un panneau est ouvert (visionneuse, selecteur, proposition), le geste
-   le ferme au lieu de naviguer.
+   GESTE RETOUR INTERACTIF (style Zalando/Uber Eats)
+   Glissement depuis le bord gauche (40px) : l'ecran courant suit le doigt
+   et revele l'ecran precedent dessous. Relache au-dela d'un tiers de la
+   largeur -> retour ; sinon l'ecran se remet en place. Les panneaux
+   ouverts (visionneuse, selecteur, proposition) se ferment au geste.
+   Complement : chaque ecran empile ecrit dans l'historique navigateur,
+   donc le geste NATIF iOS (PWA installee) declenche aussi un vrai retour.
 ================================ */
-var edgeSwipe=null;
+var _drag=null;
+function _dragOverlayOpen(){
+  var z=document.getElementById("img-zoom");
+  if(z&&z.style.display==="flex")return z;
+  var pk=document.getElementById("store-picker");
+  if(pk&&pk.style.display==="block")return pk;
+  var pr=document.getElementById("propose-sheet");
+  if(pr&&pr.style.display==="block")return pr;
+  return null;
+}
+function _dragCloseOverlay(el){
+  if(el.id==="img-zoom")closeDrinkZoom();
+  else if(el.id==="store-picker")closeStorePicker();
+  else closeProposeForm();
+}
 document.addEventListener("touchstart",function(ev){
   var t=ev.touches&&ev.touches[0];
-  if(!t)return;
-  edgeSwipe=(t.clientX<=26)?{x:t.clientX,y:t.clientY}:null;
+  if(!t||t.clientX>40){_drag=null;return;}
+  var cur=document.querySelector(".screen.on");
+  _drag={x:t.clientX,y:t.clientY,dx:0,started:false,
+    overlay:_dragOverlayOpen(),
+    cur:cur,
+    prevId:(!_dragOverlayOpen()&&navStack.length)?navStack[navStack.length-1]:null};
 },{passive:true});
-document.addEventListener("touchend",function(ev){
-  if(!edgeSwipe)return;
-  var t=ev.changedTouches&&ev.changedTouches[0];
-  var start=edgeSwipe;edgeSwipe=null;
-  if(!t)return;
-  var dx=t.clientX-start.x,dy=Math.abs(t.clientY-start.y);
-  if(dx<64||dy>60)return;
-  // Panneaux ouverts : le geste les ferme
-  var zoom=document.getElementById("img-zoom");
-  if(zoom&&zoom.style.display==="flex"){closeDrinkZoom();return;}
-  var picker=document.getElementById("store-picker");
-  if(picker&&picker.style.display==="block"){closeStorePicker();return;}
-  var propose=document.getElementById("propose-sheet");
-  if(propose&&propose.style.display==="block"){closeProposeForm();return;}
-  // Sinon : declenche le bouton ← de l'ecran actif s'il existe
-  var scr=document.querySelector(".screen.on");
-  if(!scr)return;
-  var backs=[].slice.call(scr.querySelectorAll("div,span"));
-  for(var i=0;i<backs.length;i++){
-    var el=backs[i];
-    if(el.textContent&&el.textContent.trim()==="\u2190"&&el.offsetParent!==null){
-      el.click();
-      playSound("pop");
-      return;
+document.addEventListener("touchmove",function(ev){
+  if(!_drag)return;
+  var t=ev.touches&&ev.touches[0];if(!t)return;
+  var dx=t.clientX-_drag.x,dy=Math.abs(t.clientY-_drag.y);
+  _drag.dx=Math.max(0,dx);
+  if(!_drag.started){
+    if(dy>34&&dy>dx){_drag=null;return;} // c'est un defilement vertical
+    if(dx<14)return;
+    if(_drag.overlay||!_drag.prevId)return; // panneau/racine : pas de drag visuel
+    _drag.started=true;
+    var prev=document.getElementById("s-"+_drag.prevId);
+    if(prev){
+      prev.style.cssText+=";display:flex;position:fixed;inset:0;z-index:55;transform:translateX(-28%);transition:none";
+      _drag.prev=prev;
     }
+    var c=_drag.cur;
+    if(c)c.style.cssText+=";position:fixed;inset:0;z-index:60;transition:none;box-shadow:-14px 0 32px rgba(0,0,0,.2)";
+  }
+  if(_drag.started){
+    var w=window.innerWidth||430;
+    var d=Math.min(_drag.dx,w);
+    if(_drag.cur)_drag.cur.style.transform="translateX("+d+"px)";
+    if(_drag.prev)_drag.prev.style.transform="translateX("+(-28+28*d/w)+"%)";
   }
 },{passive:true});
+document.addEventListener("touchend",function(ev){
+  if(!_drag)return;
+  var d=_drag;_drag=null;
+  var t=ev.changedTouches&&ev.changedTouches[0];
+  var dx=t?Math.max(d.dx,t.clientX-d.x):d.dx;
+  var dy=t?Math.abs(t.clientY-d.y):0;
+  var w=window.innerWidth||430;
+  function cleanup(){
+    if(d.cur){d.cur.style.position="";d.cur.style.inset="";d.cur.style.zIndex="";d.cur.style.transform="";d.cur.style.transition="";d.cur.style.boxShadow="";}
+    if(d.prev){d.prev.style.position="";d.prev.style.inset="";d.prev.style.zIndex="";d.prev.style.transform="";d.prev.style.transition="";d.prev.style.display="";}
+  }
+  // Panneau ouvert : le geste le ferme
+  if(d.overlay&&dx>=64&&dy<=80){_dragCloseOverlay(d.overlay);cleanup();playSound("pop");return;}
+  if(!d.started){
+    // Pas de drag visuel engage (geste rapide) : seuil simple
+    if(!d.overlay&&dx>=64&&dy<=60&&navStack.length){navBack();playSound("pop");}
+    cleanup();return;
+  }
+  if(dx>w*0.33){
+    // Termine le glissement puis navigue
+    if(d.cur){d.cur.style.transition="transform .16s ease-out";d.cur.style.transform="translateX(100%)";}
+    if(d.prev){d.prev.style.transition="transform .16s ease-out";d.prev.style.transform="translateX(0)";}
+    setTimeout(function(){cleanup();if(navStack.length)navBack();playSound("pop");},170);
+  }else{
+    // Pas assez loin : remise en place
+    if(d.cur){d.cur.style.transition="transform .18s ease";d.cur.style.transform="translateX(0)";}
+    if(d.prev){d.prev.style.transition="transform .18s ease";d.prev.style.transform="translateX(-28%)";}
+    setTimeout(cleanup,190);
+  }
+},{passive:true});
+
 /* Correction manuelle de photo (admin) : colle un code-barre OU une URL
    Open Food Facts (fiche produit ou image directe). La photo choisie est
    appliquee, publiee dans la carte partagee, et marquee "manual" pour que
