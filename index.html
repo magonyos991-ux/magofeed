@@ -1007,7 +1007,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0608e</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0608f</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1241,7 +1241,11 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div style="font-size:15px;font-weight:800;color:var(--s1)">Dans quel magasin ?</div>
         <div onclick="closeStorePicker()" role="button" tabindex="0" aria-label="Fermer" onkeydown="if(event.key==='Enter'){closeStorePicker();}" style="width:34px;height:34px;border-radius:12px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer">✕</div>
       </div>
-      <input id="store-picker-q" type="text" placeholder="Cherche : Colruyt, Delhaize, night shop…" oninput="renderStorePicker()" style="width:100%;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:'Space Grotesk',sans-serif;outline:none;margin-bottom:10px">
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <input id="store-picker-q" type="text" placeholder="Cherche : Colruyt, Delhaize…" oninput="renderStorePicker()" style="flex:1;min-width:0;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:'Space Grotesk',sans-serif;outline:none">
+        <button id="store-picker-maptoggle" onclick="toggleStorePickerMap()" style="flex-shrink:0;padding:0 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">🗺️ Carte</button>
+      </div>
+      <div id="store-picker-map" style="display:none;height:36vh;border-radius:14px;overflow:hidden;margin-bottom:10px;flex-shrink:0"></div>
       <div id="store-picker-list" style="overflow-y:auto;flex:1"></div>
     </div>
   </div>
@@ -2652,6 +2656,66 @@ function openStorePicker(){
   if(q){q.value="";setTimeout(function(){q.focus();},120);}
   renderStorePicker();
 }
+/* Carte du selecteur : tous les magasins correspondant a la recherche
+   ("colruyt" -> tous les Colruyt autour), tap sur un marqueur -> "C'est ici".
+   Resout l'ambiguite des enseignes multiples au meme nom. */
+var pickerMapOn=false;
+function toggleStorePickerMap(){
+  pickerMapOn=!pickerMapOn;
+  var box=document.getElementById("store-picker-map");
+  var btn=document.getElementById("store-picker-maptoggle");
+  if(btn)btn.style.background=pickerMapOn?"var(--s1)":"var(--bg2)";
+  if(btn)btn.style.color=pickerMapOn?"var(--app-bg)":"var(--s1)";
+  if(!box)return;
+  box.style.display=pickerMapOn?"block":"none";
+  if(pickerMapOn){
+    ensurePickerMap(function(){renderStorePicker();});
+  }
+}
+function ensurePickerMap(cb){
+  if(window._pickerMap){setTimeout(function(){window._pickerMap.invalidateSize();cb&&cb();},180);return;}
+  function build(){
+    var center=[userLat||50.8466,userLng||4.3528];
+    window._pickerMap=L.map("store-picker-map",{zoomControl:false,attributionControl:false}).setView(center,13);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(window._pickerMap);
+    window._pickerMarkers=L.layerGroup().addTo(window._pickerMap);
+    if(userLat){
+      L.circleMarker([userLat,userLng],{radius:7,color:"#fff",weight:2,fillColor:"#2e86c1",fillOpacity:1}).addTo(window._pickerMap);
+    }
+    setTimeout(function(){window._pickerMap.invalidateSize();cb&&cb();},180);
+  }
+  if(window.L){build();return;}
+  // Leaflet pas encore charge (l'utilisateur n'a jamais ouvert la carte principale)
+  var link=document.createElement("link");link.rel="stylesheet";link.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";document.head.appendChild(link);
+  var script=document.createElement("script");script.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
+  script.onload=build;
+  document.head.appendChild(script);
+}
+function pickerSelectStore(id){
+  var s=(STORES||[]).find(function(x){return String(x.id)===String(id);});
+  if(!s)return;
+  closeStorePicker();
+  tagScanToStore(s);
+}
+function updatePickerMapMarkers(list){
+  if(!pickerMapOn||!window._pickerMap||!window._pickerMarkers)return;
+  window._pickerMarkers.clearLayers();
+  var pts=[];
+  list.slice(0,60).forEach(function(s){
+    if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
+    var dist=(typeof s.dist==="number")?(s.dist<1000?Math.round(s.dist)+" m":(s.dist/1000).toFixed(1)+" km"):"";
+    var m=L.marker([s.lat,s.lng]).addTo(window._pickerMarkers);
+    m.bindPopup('<div style="font-family:\'Space Grotesk\',sans-serif;text-align:center;min-width:130px">'+
+      '<div style="font-weight:700;font-size:13px;margin-bottom:2px">'+sanitize(s.name)+'</div>'+
+      (dist?'<div style="font-size:11px;color:#777;margin-bottom:6px">'+dist+'</div>':"")+
+      '<button onclick="pickerSelectStore(\''+String(s.id).replace(/'/g,"")+'\')" style="padding:7px 14px;border-radius:10px;border:none;background:#1a1714;color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">\uD83D\uDCCD C\'est ici</button></div>');
+    pts.push([s.lat,s.lng]);
+  });
+  if(userLat)pts.push([userLat,userLng]);
+  if(pts.length){
+    try{window._pickerMap.fitBounds(pts,{padding:[28,28],maxZoom:15});}catch(e){}
+  }
+}
 function closeStorePicker(){
   var ov=document.getElementById("store-picker");if(ov)ov.style.display="none";
 }
@@ -2664,6 +2728,7 @@ function renderStorePicker(){
     list=exact.length?exact:list.filter(function(s){return fuzzyIncludes(q,(s.name||"")+" "+(s.brand||"")+" "+(s.address||""));});
   }
   list.sort(function(a,b){return (a.dist||1e9)-(b.dist||1e9);});
+  updatePickerMapMarkers(list);
   list=list.slice(0,20);
   el.innerHTML="";
   if(!list.length){
@@ -2676,7 +2741,7 @@ function renderStorePicker(){
     var dist=(typeof s.dist==="number")?(s.dist<1000?Math.round(s.dist)+" m":(s.dist/1000).toFixed(1)+" km"):"";
     row.innerHTML='<span style="font-size:16px">'+(s.emoji||"\uD83C\uDFEA")+'</span>'+
       '<span style="flex:1;min-width:0"><span style="display:block;font-size:13.5px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(s.name)+'</span>'+
-      (s.address?'<span style="display:block;font-size:11px;color:var(--s2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(s.address)+'</span>':"")+'</span>'+
+      (s.address?'<span style="display:block;font-size:11px;color:var(--s2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(s.address)+'</span>':'<span style="display:block;font-size:11px;color:var(--s3)">Vérifie sur la carte 🗺️</span>')+'</span>'+
       (dist?'<span style="font-size:11.5px;font-weight:600;color:var(--s2);flex-shrink:0">'+dist+'</span>':"");
     row.onclick=function(){closeStorePicker();tagScanToStore(s);};
     a11yCard(row,s.name+(dist?", "+dist:""));
