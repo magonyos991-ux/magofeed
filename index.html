@@ -866,6 +866,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:50px 20px 16px">
         <div style="display:flex;align-items:center;justify-content:space-between">
           <span style="display:flex;align-items:baseline;gap:7px"><span class="t-section" id="t-disc">Découvertes</span><span id="disc-count" style="font-size:11px;font-weight:700;color:var(--s3)"></span></span>
+          <button onclick="openProposeForm()" style="padding:8px 13px;border-radius:999px;border:none;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer;font-family:inherit;flex-shrink:0">📷 Proposer</button>
           <button onclick="show('scan');startScan()" style="background:var(--s1);border:1.5px solid var(--border);color:var(--app-bg);padding:6px 14px;border-radius:var(--radius-chip);font-size:12px;font-weight:600;cursor:pointer;font-family:'Space Grotesk',sans-serif">+ Suggérer</button>
         </div>
         <p style="font-size:12px;margin-top:4px;font-weight:500" class="c2" id="t-disc-sub">Produits suggérés par la communauté</p>
@@ -1007,7 +1008,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0608g</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0608h</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1235,6 +1236,23 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
     </div>
   </nav>
 
+  <div id="propose-sheet" role="dialog" aria-modal="true" aria-label="Proposer une boisson" style="display:none;position:fixed;inset:0;z-index:3500;background:rgba(12,10,8,.55)" onclick="closeProposeForm()">
+    <div onclick="event.stopPropagation()" style="position:absolute;left:0;right:0;bottom:0;max-height:80vh;overflow-y:auto;background:var(--app-bg);border-radius:22px 22px 0 0;padding:18px 20px 28px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div style="font-size:15px;font-weight:800;color:var(--s1)">📷 Proposer une boisson</div>
+        <div onclick="closeProposeForm()" role="button" tabindex="0" aria-label="Fermer" onkeydown="if(event.key==='Enter'){closeProposeForm();}" style="width:34px;height:34px;border-radius:12px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer">✕</div>
+      </div>
+      <div style="font-size:12px;color:var(--s2);margin-bottom:14px">Pas le produit sous la main pour scanner ? Une photo suffit — elle sera vérifiée avant d'entrer au catalogue.</div>
+      <label for="propose-photo-input" id="propose-photo-zone" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:120px;border:2px dashed var(--border);border-radius:16px;cursor:pointer;margin-bottom:12px;background:var(--bg2);overflow:hidden">
+        <span id="propose-photo-hint" style="font-size:13px;font-weight:700;color:var(--s2)">📸 Prendre une photo / choisir dans la pellicule</span>
+        <img id="propose-photo-preview" alt="" style="display:none;max-width:100%;max-height:220px;border-radius:12px">
+      </label>
+      <input id="propose-photo-input" type="file" accept="image/*" style="display:none" onchange="proposePhotoChosen(this)">
+      <input id="propose-name" type="text" maxlength="60" placeholder="Nom de la boisson *" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:'Space Grotesk',sans-serif;outline:none;margin-bottom:10px">
+      <input id="propose-brand" type="text" maxlength="30" placeholder="Marque (facultatif)" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:'Space Grotesk',sans-serif;outline:none;margin-bottom:14px">
+      <button id="propose-send" onclick="submitProposal()" style="width:100%;padding:14px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">Envoyer la proposition</button>
+    </div>
+  </div>
   <div id="store-picker" role="dialog" aria-modal="true" aria-label="Choisir un magasin" style="display:none;position:fixed;inset:0;z-index:3500;background:rgba(12,10,8,.55)" onclick="closeStorePicker()">
     <div onclick="event.stopPropagation()" style="position:absolute;left:0;right:0;bottom:0;max-height:72vh;background:var(--app-bg);border-radius:22px 22px 0 0;padding:18px 20px 26px;display:flex;flex-direction:column">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -1700,13 +1718,31 @@ window.fbAddDrinkToStore = async function(storeId, drinkId) {
 
 /* Memorise le magasin ou une decouverte a ete scannee : a la promotion,
    la boisson entrera au catalogue deja localisee dans ces magasins. */
+/* Photo d'une proposition manuelle : stockee compressee (base64) dans un
+   document SEPARE, lu uniquement par l'admin dans l'ecran Administration.
+   Zero service supplementaire a configurer, zero image non moderee en public,
+   et les utilisateurs ne telechargent jamais ces photos (quota preserve). */
+window.fbSaveDiscoveryPhoto = async function(discId, base64) {
+  await setDoc(doc(db, "discoveryPhotos", String(discId)), {
+    data: String(base64),
+    by: (auth.currentUser && auth.currentUser.uid) || "",
+    createdAt: serverTimestamp()
+  });
+};
+window.fbLoadDiscoveryPhoto = async function(discId) {
+  try {
+    var snap = await getDoc(doc(db, "discoveryPhotos", String(discId)));
+    return snap.exists() ? snap.data().data : null;
+  } catch (e) { console.warn("Photo load error:", e); return null; }
+};
+
 window.fbTagDiscoveryStore = async function(discId, storeId) {
   try {
     await updateDoc(doc(db, "discoveries", String(discId)), { foundIn: arrayUnion(String(storeId)) });
   } catch (e) { console.warn("Tag discovery store error:", e); }
 };
 
-window.fbAddDiscovery = async function(barcode, name, brand, cat) {
+window.fbAddDiscovery = async function(barcode, name, brand, cat, extra) {
   var user = auth.currentUser;
   if (!user) throw new Error("Connexion requise pour contribuer");
   try {
@@ -1731,6 +1767,7 @@ window.fbAddDiscovery = async function(barcode, name, brand, cat) {
     }
     var data = { name: name, brand: brand || "", votes: 1, barcode: String(barcode), createdAt: serverTimestamp() };
     if (cat) data.cat = cat;
+    if (extra) Object.assign(data, extra); // ex : hasPhoto/manualProposal des propositions photo
     batch.set(ref, data);
     batch.set(votedRef, { votedAt: serverTimestamp() });
     await batch.commit();
@@ -4574,13 +4611,83 @@ function discFoundInHTML(d){
     return s?s.name:null;
   }).filter(Boolean);
   var label;
-  if(!ids.length)label="\uD83D\uDCCD Pas encore localis\u00E9e";
+  if(!ids.length)label=(d.hasPhoto?"\uD83D\uDCF7 Propos\u00E9e en photo \u00B7 ":"")+"\uD83D\uDCCD Pas encore localis\u00E9e";
   else if(names.length)label="\uD83D\uDCCD Rep\u00E9r\u00E9e chez "+sanitize(names.slice(0,2).join(", "))+(ids.length>2?" +"+(ids.length-2):"");
   else label="\uD83D\uDCCD Rep\u00E9r\u00E9e dans "+ids.length+" magasin"+(ids.length>1?"s":"");
   return '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">'+
     '<span style="font-size:11px;font-weight:600;color:var(--s2)">'+label+'</span>'+
     '<span class="disc-locate" data-disc="'+sanitize(String(d.id))+'" role="button" tabindex="0" aria-label="Indiquer un magasin" style="font-size:11px;font-weight:800;color:var(--s1);cursor:pointer;text-decoration:underline">Je sais o\u00F9 !</span>'+
   '</div>';
+}
+/* Proposition manuelle avec photo : compression canvas (max 900px, JPEG
+   qualite degressive jusqu'a < 250 Ko) pour tenir confortablement dans un
+   document Firestore (limite 1 Mo) sans exploser le quota. */
+var proposePhotoData=null;
+function openProposeForm(){
+  proposePhotoData=null;
+  var ov=document.getElementById("propose-sheet");if(!ov)return;
+  var pv=document.getElementById("propose-photo-preview");
+  var hint=document.getElementById("propose-photo-hint");
+  if(pv){pv.style.display="none";pv.src="";}
+  if(hint)hint.style.display="block";
+  var n=document.getElementById("propose-name");if(n)n.value="";
+  var b=document.getElementById("propose-brand");if(b)b.value="";
+  ov.style.display="block";
+  playSound("pop");
+}
+function closeProposeForm(){
+  var ov=document.getElementById("propose-sheet");if(ov)ov.style.display="none";
+}
+function proposePhotoChosen(input){
+  var file=input.files&&input.files[0];
+  if(!file)return;
+  var img=new Image();
+  var url=URL.createObjectURL(file);
+  img.onload=function(){
+    URL.revokeObjectURL(url);
+    var maxSide=900;
+    var scale=Math.min(1,maxSide/Math.max(img.width,img.height));
+    var canvas=document.createElement("canvas");
+    canvas.width=Math.round(img.width*scale);
+    canvas.height=Math.round(img.height*scale);
+    canvas.getContext("2d").drawImage(img,0,0,canvas.width,canvas.height);
+    var quality=0.72,data=canvas.toDataURL("image/jpeg",quality);
+    while(data.length>250*1024&&quality>0.3){
+      quality-=0.12;
+      data=canvas.toDataURL("image/jpeg",quality);
+    }
+    proposePhotoData=data;
+    var pv=document.getElementById("propose-photo-preview");
+    var hint=document.getElementById("propose-photo-hint");
+    if(pv){pv.src=data;pv.style.display="block";}
+    if(hint)hint.style.display="none";
+    playSound("pop");
+  };
+  img.onerror=function(){URL.revokeObjectURL(url);toast("Impossible de lire cette image");playSound("err");};
+  img.src=url;
+}
+function submitProposal(){
+  var name=((document.getElementById("propose-name")||{}).value||"").trim();
+  if(name.length<2){toast("Donne le nom de la boisson");playSound("err");return;}
+  if(!proposePhotoData){toast("Ajoute une photo du produit");playSound("err");return;}
+  var brand=((document.getElementById("propose-brand")||{}).value||"").trim();
+  var id="m"+Date.now();
+  var d={id:id,name:sanitize(name),brand:sanitize(brand),votes:1,cat:"",foundIn:[],hasPhoto:true,manualProposal:true};
+  DISCOVERIES.unshift(d);
+  markVotedDiscovery(id);
+  if(window.fbAddDiscovery)window.fbAddDiscovery(id,d.name,d.brand,"",{hasPhoto:true,manualProposal:true}).catch(function(e){console.warn(e);});
+  if(window.fbSaveDiscoveryPhoto){
+    window.fbSaveDiscoveryPhoto(id,proposePhotoData).catch(function(e){
+      console.warn("Photo save error:",e);
+      toast("\u26A0\uFE0F Photo non envoy\u00E9e (v\u00E9rifie la r\u00E8gle discoveryPhotos)");
+    });
+  }
+  userStats.pts+=2;updateProfileStats();
+  if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+  closeProposeForm();
+  renderDiscoveries();
+  playSound("win");
+  toast("\uD83D\uDCE8 Proposition envoy\u00E9e \u00B7 +2 pts \u2014 \u00E0 la communaut\u00E9 de voter !");
 }
 function discLocate(discId){
   lastScanContext={discoveryId:discId};
@@ -4920,6 +5027,23 @@ function renderAdmin(){
         '<button class="admin-promote" style="flex:1;padding:10px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">\u2705 Promouvoir</button>'+
         '<button class="admin-reject" style="padding:10px 14px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s2);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">\uD83D\uDDD1\uFE0F</button>'+
       '</div>';
+    if(d.hasPhoto){
+      var photoBtn=document.createElement("button");
+      photoBtn.style.cssText="width:100%;margin-bottom:10px;padding:9px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit";
+      photoBtn.textContent="\uD83D\uDCF7 Voir la photo envoy\u00E9e";
+      photoBtn.onclick=function(){
+        photoBtn.textContent="Chargement\u2026";
+        var load=window.fbLoadDiscoveryPhoto?window.fbLoadDiscoveryPhoto(key):Promise.resolve(null);
+        load.then(function(data){
+          if(!data){photoBtn.textContent="\u26A0\uFE0F Photo introuvable";return;}
+          var img=document.createElement("img");
+          img.src=data;img.alt="Photo de "+d.name;
+          img.style.cssText="width:100%;max-height:260px;object-fit:contain;background:#fff;border-radius:12px;margin-bottom:10px";
+          photoBtn.replaceWith(img);
+        });
+      };
+      card.insertBefore(photoBtn,card.querySelector(".admin-cat-chip")?card.children[1]:null);
+    }
     card.querySelectorAll(".admin-cat-chip").forEach(function(btn){
       btn.onclick=function(){adminCatChoice[key]=btn.getAttribute("data-cat");renderAdmin();};
     });
