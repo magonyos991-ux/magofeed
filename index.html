@@ -986,6 +986,10 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div id="admin-row" onclick="showAdmin()" style="display:none;background:var(--bg2);border-radius:16px;padding:14px;align-items:center;justify-content:space-between;cursor:pointer;margin-bottom:10px" role="button" tabindex="0" aria-label="Administration" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showAdmin();}">
           <div>
             <div style="font-size:14px;font-weight:700;color:var(--s1)">🛠️ Administration</div>
+      <div id="osm-import-row" onclick="openOsmImport()" style="display:none;background:var(--bg2);border-radius:16px;padding:14px;align-items:center;justify-content:space-between;cursor:pointer;margin-bottom:10px" role="button" tabindex="0" aria-label="Importer les magasins OSM" onkeydown="if(event.key==='Enter'){openOsmImport();}">
+        <span style="font-size:13.5px;font-weight:700;color:var(--s1)">🗺️ Importer les magasins (OSM)</span>
+        <span style="font-size:13px;color:var(--s3)">›</span>
+      </div>
             <div style="font-size:11px;color:var(--s2);margin-top:2px">Promouvoir les découvertes au catalogue</div>
           </div>
           <span class="c3" style="font-size:16px">›</span>
@@ -1016,7 +1020,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609a</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609b</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1723,6 +1727,37 @@ window.fbAddReport = async function(storeId, drinkId, type) {
 /* Creation d'un magasin par la communaute : les petites boutiques et night
    shops sont tres mal recenses dans OpenStreetMap — c'est la communaute qui
    complete la carte. Necessite la regle stores.create pour les connectes. */
+/* Outils d'import admin : requete d'une zone (pour dedoublonner) et
+   creation par lots (writeBatch, 400 par lot) des magasins OSM manquants.
+   On ne touche JAMAIS aux magasins existants — creation pure. */
+window.fbQueryZone = async function(lat, lng, radiusKm) {
+  return queryNearbyStores(lat, lng, radiusKm);
+};
+window.fbImportStores = async function(list, onProgress) {
+  await ensureAuthed();
+  var done = 0;
+  for (var i = 0; i < list.length; i += 400) {
+    var chunk = list.slice(i, i + 400);
+    var batch = writeBatch(db);
+    chunk.forEach(function(s) {
+      batch.set(doc(db, "stores", String(s.id)), {
+        name: String(s.name).slice(0, 60),
+        emoji: s.emoji || "\uD83C\uDFEA",
+        lat: Number(s.lat),
+        lng: Number(s.lng),
+        drinks: [],
+        confirmations: {},
+        osmImport: true,
+        createdAt: serverTimestamp()
+      });
+    });
+    await batch.commit();
+    done += chunk.length;
+    if (onProgress) onProgress(done, list.length);
+  }
+  return done;
+};
+
 window.fbCreateStore = async function(store) {
   var user = await ensureAuthed();
   var data = {
@@ -5017,6 +5052,142 @@ function openPhotoSuggest(drinkId){
    change a tout moment, synchronise dans le doc utilisateur pour apparaitre
    dans le classement et la recherche d'utilisateurs. */
 var AVATAR_EMOJIS=["\uD83E\uDD64","\u26A1","\uD83C\uDF4B","\uD83C\uDF49","\uD83E\uDDCB","\uD83C\uDF34","\uD83E\uDD8A","\uD83D\uDC3C","\uD83E\uDD81","\uD83D\uDC28","\uD83E\uDD9C","\uD83D\uDE80"];
+/* ================================
+   IMPORT OSM (admin) — chantier "tous les magasins n'y sont pas"
+   Interroge Overpass avec un filet LARGE (superettes, kiosques, marchands
+   de journaux, epiceries, boissons, surgeles...) autour de la position,
+   dedoublonne contre la base (id OSM + proximite/nom) et cree UNIQUEMENT
+   les nouveaux. Ville par ville : le meme bouton remplira Paris un jour.
+================================ */
+var OSM_SHOP_TYPES="convenience|supermarket|kiosk|beverages|greengrocer|deli|newsagent|frozen_food|health_food|farm|general|food|pastry|confectionery";
+var osmCandidates=null;
+function osmShopEmoji(t){
+  if(t==="supermarket")return "\uD83D\uDED2";
+  if(t==="greengrocer"||t==="deli"||t==="health_food"||t==="farm")return "\uD83C\uDF0D";
+  return "\uD83C\uDFEA";
+}
+function openOsmImport(){
+  var host=document.getElementById("osm-import");
+  if(!host){
+    host=document.createElement("div");
+    host.id="osm-import";
+    host.setAttribute("role","dialog");host.setAttribute("aria-modal","true");host.setAttribute("aria-label","Importer les magasins");
+    host.style.cssText="position:fixed;inset:0;z-index:3600;background:rgba(12,10,8,.55);display:none";
+    host.onclick=function(){host.style.display="none";};
+    var inner=document.createElement("div");
+    inner.onclick=function(ev){ev.stopPropagation();};
+    inner.style.cssText="position:absolute;left:0;right:0;bottom:0;background:var(--app-bg);border-radius:22px 22px 0 0;padding:18px 20px 30px";
+    inner.innerHTML='<div style="font-size:15px;font-weight:800;color:var(--s1);margin-bottom:6px">\uD83D\uDDFA\uFE0F Importer les magasins d\'une zone</div>'+
+      '<div style="font-size:12px;color:var(--s2);margin-bottom:14px">Va chercher dans OpenStreetMap les commerces \u00E0 boissons (sup\u00E9rettes, kiosques, \u00E9piceries, journaux\u2026) autour de ta position. Les magasins d\u00E9j\u00E0 connus ne sont jamais touch\u00E9s.</div>'+
+      '<div id="osm-radius" style="display:flex;gap:8px;margin-bottom:14px"></div>'+
+      '<button id="osm-analyze" style="width:100%;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:13.5px;font-weight:800;cursor:pointer;font-family:inherit">Analyser la zone</button>'+
+      '<div id="osm-status" style="font-size:12.5px;font-weight:600;color:var(--s2);text-align:center;padding:12px 4px 0"></div>'+
+      '<button id="osm-run" style="display:none;width:100%;margin-top:10px;padding:13px;border-radius:14px;border:none;background:#16a34a;color:#fff;font-size:13.5px;font-weight:800;cursor:pointer;font-family:inherit"></button>';
+    host.appendChild(inner);
+    document.body.appendChild(host);
+    var radios=inner.querySelector("#osm-radius");
+    [[1,"1 km"],[3,"3 km"],[10,"10 km"]].forEach(function(r,i){
+      var b=document.createElement("button");
+      b.textContent=r[1];b.dataset.km=r[0];
+      b.style.cssText="flex:1;padding:10px;border-radius:999px;border:1.5px solid var(--border);background:"+(i===1?"var(--s1)":"var(--bg3)")+";color:"+(i===1?"var(--app-bg)":"var(--s2)")+";font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit";
+      b.onclick=function(){
+        radios.querySelectorAll("button").forEach(function(x){x.style.background="var(--bg3)";x.style.color="var(--s2)";});
+        b.style.background="var(--s1)";b.style.color="var(--app-bg)";
+        radios.dataset.km=r[0];
+      };
+      radios.appendChild(b);
+    });
+    radios.dataset.km=3;
+    inner.querySelector("#osm-analyze").onclick=osmAnalyze;
+    inner.querySelector("#osm-run").onclick=osmRunImport;
+  }
+  osmCandidates=null;
+  host.querySelector("#osm-status").textContent="";
+  host.querySelector("#osm-run").style.display="none";
+  host.style.display="block";
+}
+function osmAnalyze(){
+  var status=document.getElementById("osm-status");
+  var runBtn=document.getElementById("osm-run");
+  if(typeof userLat!=="number"||!userLat){status.textContent="\u26A0\uFE0F Position GPS requise pour d\u00E9finir la zone";playSound("err");return;}
+  var km=Number((document.getElementById("osm-radius")||{dataset:{}}).dataset.km||3);
+  status.textContent="Interrogation d'OpenStreetMap\u2026";
+  runBtn.style.display="none";
+  var dLat=km/111,dLng=km/(111*Math.cos(userLat*Math.PI/180));
+  var bbox=(userLat-dLat)+","+(userLng-dLng)+","+(userLat+dLat)+","+(userLng+dLng);
+  var q='[out:json][timeout:60];(node["shop"~"^('+OSM_SHOP_TYPES+')$"]('+bbox+');way["shop"~"^('+OSM_SHOP_TYPES+')$"]('+bbox+'););out center 3000;';
+  fetchWithTimeout("https://overpass-api.de/api/interpreter?data="+encodeURIComponent(q),55000)
+    .then(function(r){return r.json();})
+    .then(function(data){
+      var els=(data&&data.elements)||[];
+      var seen={};
+      var found=els.map(function(e){
+        var lat=e.lat!=null?e.lat:(e.center&&e.center.lat);
+        var lng=e.lon!=null?e.lon:(e.center&&e.center.lon);
+        var name=e.tags&&(e.tags.name||e.tags["name:fr"]||e.tags.brand);
+        if(lat==null||lng==null||!name)return null;
+        return {id:"o"+e.id,osm:e.id,name:name,emoji:osmShopEmoji(e.tags.shop),lat:lat,lng:lng};
+      }).filter(Boolean).filter(function(s){
+        var k=s.id;if(seen[k])return false;seen[k]=1;return true;
+      });
+      status.textContent=found.length+" commerces trouv\u00E9s \u00B7 d\u00E9doublonnage\u2026";
+      var zone=window.fbQueryZone?window.fbQueryZone(userLat,userLng,km+0.5):Promise.resolve(STORES||[]);
+      return zone.then(function(existing){
+        var news=found.filter(function(c){
+          return !existing.some(function(s){
+            if(String(s.id)===c.id||String(s.id)===String(c.osm))return true;
+            if(typeof s.lat!=="number")return false;
+            var dLa=(s.lat-c.lat)*111000,dLo=(s.lng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
+            var dist=Math.sqrt(dLa*dLa+dLo*dLo);
+            return dist<60&&(normTxt(s.name)===normTxt(c.name)||fuzzyIncludes(c.name,s.name)||fuzzyIncludes(s.name,c.name));
+          });
+        });
+        osmCandidates=news;
+        if(!news.length){
+          status.textContent="\u2705 "+found.length+" trouv\u00E9s \u2014 tous d\u00E9j\u00E0 dans Magofeed, rien \u00E0 importer";
+          playSound("pop");
+          return;
+        }
+        status.textContent=found.length+" trouv\u00E9s \u00B7 "+(found.length-news.length)+" d\u00E9j\u00E0 connus \u00B7 "+news.length+" nouveaux";
+        runBtn.textContent="Importer "+news.length+" magasin"+(news.length>1?"s":"");
+        runBtn.style.display="block";
+        playSound("pop");
+      });
+    })
+    .catch(function(e){
+      console.warn("Overpass:",e);
+      status.textContent="\u26A0\uFE0F OpenStreetMap ne r\u00E9pond pas (r\u00E9essaie dans une minute)";
+      playSound("err");
+    });
+}
+function osmRunImport(){
+  if(!osmCandidates||!osmCandidates.length)return;
+  var status=document.getElementById("osm-status");
+  var runBtn=document.getElementById("osm-run");
+  runBtn.style.display="none";
+  var list=osmCandidates;
+  var doImport=window.fbImportStores?window.fbImportStores(list,function(done,total){
+    status.textContent="Import\u2026 "+done+"/"+total;
+  }):Promise.reject(new Error("module indisponible"));
+  doImport.then(function(done){
+    // fusion locale immediate
+    list.forEach(function(c){
+      if(!(STORES||[]).some(function(s){return String(s.id)===c.id;})){
+        var dLa=(userLat-c.lat)*111000,dLo=(userLng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
+        STORES.push({id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,drinks:[],confirmations:{},dist:Math.sqrt(dLa*dLa+dLo*dLo)});
+      }
+    });
+    status.textContent="\u2705 "+done+" magasins ajout\u00E9s \u00E0 Magofeed !";
+    playSound("win");
+    toast("\uD83D\uDDFA\uFE0F +"+done+" magasins \u2014 la carte s'\u00E9paissit !");
+    osmCandidates=null;
+  }).catch(function(e){
+    console.warn(e);
+    status.textContent="\u26A0\uFE0F Import interrompu ("+(e&&e.message||"erreur")+")";
+    runBtn.style.display="block";
+    playSound("err");
+  });
+}
 function openAvatarPicker(){
   var host=document.getElementById("avatar-picker");
   if(!host){
@@ -6116,6 +6287,8 @@ try{
   window.addEventListener("fbAdminChecked", function(e) {
     isAdmin=e.detail===true;
     var row=document.getElementById("admin-row");
+    var osmRow=document.getElementById("osm-import-row");
+    if(osmRow)osmRow.style.display=isAdmin?"flex":"none";
     if(row)row.style.display=isAdmin?"flex":"none";
     if(!isAdmin&&document.getElementById("s-admin").classList.contains("on"))navTo("settings");
   });
