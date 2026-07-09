@@ -802,6 +802,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div class="res-back" onclick="show('search')">
           <div style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff">←</div>
           <span id="res-title" style="font-size:15px;font-weight:700;color:#fff;flex:1"></span>
+          <div id="res-remove" onclick="event.stopPropagation();adminRemoveDrink()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px;cursor:pointer;flex-shrink:0;margin-right:6px" role="button" tabindex="0" aria-label="Retirer du catalogue (admin)" onkeydown="if(event.key==='Enter'){event.stopPropagation();adminRemoveDrink();}">🗑️</div>
           <div id="res-fixphoto" onclick="event.stopPropagation();adminFixPhoto()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px;cursor:pointer;flex-shrink:0;margin-right:6px" role="button" tabindex="0" aria-label="Corriger la photo (admin)" onkeydown="if(event.key==='Enter'){event.stopPropagation();adminFixPhoto();}">🛠️</div>
           <div id="res-share" onclick="event.stopPropagation();shareDrink()" style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;flex-shrink:0;margin-right:6px" role="button" tabindex="0" aria-label="Partager cette boisson" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();shareDrink();}">📤</div>
           <div id="res-fav" onclick="event.stopPropagation();toggleFav(curSel.id,this)" style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer;flex-shrink:0" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();toggleFav(curSel.id,this);}">🤍</div>
@@ -1020,7 +1021,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609b</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609c</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1665,6 +1666,15 @@ window.fbCheckAdmin = async function() {
 window.fbPromoteDiscovery = async function(disc, entry) {
   var data = Object.assign({}, entry, { createdAt: serverTimestamp(), fromBarcode: String(disc.barcode || "") });
   await setDoc(doc(db, "catalog", String(entry.id)), data);
+  try { await updateDoc(doc(db, "discoveries", String(disc.fbId || disc.barcode || disc.id)), { decidedAt: serverTimestamp() }); } catch (e) {}
+  // La photo envoyee avec la proposition suit la boisson : elle devient
+  // son image publique (les marques exotiques n'ont souvent rien sur OFF)
+  if (disc.hasPhoto && window.fbLoadDiscoveryPhoto) {
+    try {
+      var photo = await window.fbLoadDiscoveryPhoto(disc.fbId || disc.barcode || disc.id);
+      if (photo) await window.fbApplyDrinkPhoto(entry.id, photo);
+    } catch (e) { console.warn("Photo carry error:", e); }
+  }
   // La boisson promue est immediatement disponible dans les magasins ou elle a ete scannee
   var foundIn = disc.foundIn || [];
   for (var i = 0; i < foundIn.length; i++) {
@@ -1675,8 +1685,29 @@ window.fbPromoteDiscovery = async function(disc, entry) {
   } catch (e) { console.warn("Discovery flag error:", e); }
 };
 
+/* Photo publique d'une boisson (marques exotiques absentes d'OpenFoodFacts) :
+   appliquee par l'admin depuis une proposition/suggestion, lue par tous. */
+window.fbApplyDrinkPhoto = async function(drinkId, base64) {
+  await setDoc(doc(db, "drinkPhotos", String(drinkId)), {
+    data: String(base64),
+    createdAt: serverTimestamp()
+  });
+};
+window.fbLoadDrinkPhoto = async function(drinkId) {
+  try {
+    var snap = await getDoc(doc(db, "drinkPhotos", String(drinkId)));
+    return snap.exists() ? snap.data().data : null;
+  } catch (e) { return null; }
+};
+/* Retrait d'une boisson promue par erreur (doublon Golden Power...) :
+   supprime du catalogue partage — reserve a l'admin par les regles. */
+window.fbRemoveCatalogDrink = async function(drinkId) {
+  await deleteDoc(doc(db, "catalog", String(drinkId)));
+  try { await deleteDoc(doc(db, "drinkPhotos", String(drinkId))); } catch (e) {}
+};
+
 window.fbRejectDiscovery = async function(disc) {
-  await updateDoc(doc(db, "discoveries", String(disc.fbId || disc.barcode || disc.id)), { rejected: true });
+  await updateDoc(doc(db, "discoveries", String(disc.fbId || disc.barcode || disc.id)), { rejected: true, decidedAt: serverTimestamp() });
 };
 
 window.fbLoadLeaderboard = async function() {
@@ -3195,7 +3226,12 @@ function tagScanToStore(s){
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
   playSound("win");
   toast("\uD83D\uDCCD Rattach\u00E9 \u00E0 "+s.name+" \u00B7 +3 pts");
-  if(ctx.drinkId!=null){renderPriceAfterTag(s,ctx.drinkId);}
+  if(ctx.from==="fiche"){
+    renderWhereFound(null);
+    if(curSel&&Number(curSel.id)===Number(ctx.drinkId)&&typeof renderStoreList==="function"){
+      try{renderStoreList();}catch(e){}
+    }
+  }else if(ctx.drinkId!=null){renderPriceAfterTag(s,ctx.drinkId);}
   else{renderWhereFound(null);}
 }
 /* ================================
@@ -3269,6 +3305,47 @@ function confirmFamilyFormat(family,barcode,fmt){
   if(btn){btn.textContent="\uD83D\uDDFA\uFE0F Voir les magasins";btn.style.background=family.color;btn.onclick=function(){stopScan();pick(family);};}
   playSound("win");
   toast("\uD83E\uDDE9 Format ajout\u00E9 \u00E0 "+family.name+" \u00B7 +2 pts");
+}
+function findBrandFamily(offBrand,offName){
+  var hay=normTxt((offBrand||"")+" "+(offName||""));
+  if(!hay.trim())return [];
+  var out=[];
+  var seenBrand={};
+  DRINKS.forEach(function(d){
+    var db=normTxt(d.brand||"");
+    if(db.length<3)return;
+    if(hay.indexOf(db)!==-1){out.push(d);seenBrand[db]=1;}
+  });
+  // ne proposer que si UNE seule marque du catalogue correspond (sinon ambigu)
+  return Object.keys(seenBrand).length===1?out:[];
+}
+function renderBrandKinChoice(kin,best,code,p){
+  var res=document.getElementById("scan-result");
+  var btn=document.getElementById("scan-btn");
+  if(!res||!btn)return;
+  var fmt=parseFormatFromOFF(p);
+  res.className="scan-result found";
+  res.innerHTML='<div style="font-size:13px;font-weight:700;color:#166534;margin-bottom:8px">\uD83E\uDDE9 Marque reconnue \u2014 c\'est peut-\u00EAtre\u2026</div>'+
+    kin.map(function(d){
+      return '<div class="kin-choice" data-id="'+d.id+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:10px;padding:9px 11px;background:var(--bg2);border:1.5px solid var(--border);border-radius:13px;margin-bottom:7px;cursor:pointer">'+
+        '<div style="width:34px;height:34px;border-radius:10px;overflow:hidden;background:'+d.light+';display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0">'+drinkIconHTML(d)+'</div>'+
+        '<span style="flex:1;font-size:13px;font-weight:700;color:var(--s1)">'+sanitize(d.name)+'</span>'+
+        '<span style="font-size:11px;font-weight:800;color:var(--s1)">C\'est \u00E7a \u2192</span></div>';
+    }).join("");
+  res.querySelectorAll(".kin-choice").forEach(function(row){
+    var did=Number(row.getAttribute("data-id"));
+    row.onclick=function(){
+      var d=DRINKS.find(function(x){return Number(x.id)===did;});
+      if(d)confirmFamilyFormat(d,code,fmt);
+    };
+    row.onkeydown=function(ev){if(ev.key==="Enter")row.onclick();};
+  });
+  btn.textContent="Aucun des deux \u2014 nouveau produit";
+  btn.style.background="#e67e22";btn.style.display="block";
+  btn.onclick=function(){addDiscovery(best.name,best.brand,code,best.cat);};
+  recordScan(code,best.name,best.brand,best.cat,"off");
+  renderWhereFound({pendingBarcode:code});
+  playSound("win");
 }
 function scanCatEmoji(cat){
   return{Energy:"\u26A1",Soda:"\uD83E\uDD64","Ice Tea":"\uD83E\uDDCB",Jus:"\uD83E\uDDC3",Eau:"\uD83D\uDCA7",Exotique:"\uD83C\uDF34",Autre:"\uD83E\uDDC3"}[cat]||"\uD83D\uDD0D";
@@ -3367,6 +3444,17 @@ function onBarcodeDetected(r){
           }
           // Famille reconnue ? (ex : bouteille 50cl d'un Coca deja au catalogue)
           var family=findFamilyDrink(best.name,best.brand);
+          // Repli par MARQUE : la fiche OFF a un nom generique ("Boisson
+          // energisante") mais une marque connue -> proposer les boissons
+          // de cette marque plutot que de laisser creer un doublon
+          if(!family){
+            var brandKin=findBrandFamily(best.brand,best.name);
+            if(brandKin.length===1){family=brandKin[0];}
+            else if(brandKin.length>1&&brandKin.length<=4){
+              renderBrandKinChoice(brandKin,best,code,p);
+              return;
+            }
+          }
           if(family){
             var fmt=parseFormatFromOFF(p);
             var fmtLabel=(fmt.type||"format")+(fmt.cl?" "+fmt.cl+" cl":"");
@@ -3737,6 +3825,10 @@ function pick(d){
   setTimeout(function(){refreshDrinkVisual(d);},80);
   var fixBtn=document.getElementById("res-fixphoto");
   if(fixBtn)fixBtn.style.display=isAdmin?"flex":"none";
+  // Le retrait n'est propose que pour les boissons PROMUES (id horodate) :
+  // impossible de supprimer une boisson du catalogue de base par accident
+  var rmBtn=document.getElementById("res-remove");
+  if(rmBtn)rmBtn.style.display=(isAdmin&&Number(d.id)>100000000000)?"flex":"none";
   // Si Firebase pas encore chargé, attendre : on bascule déjà sur l'écran résultats avec un skeleton
   if(!window._fbReady && window._fbLoading) {
     curSel=d;setAccent(d);
@@ -4321,6 +4413,20 @@ function fetchVerifiedOFFImage(d){
       for(var i=0;i<prods.length;i++){
         if(offImageMatches(d,prods[i])&&(prods[i].image_front_url||prods[i].image_front_small_url)){best=prods[i];break;}
       }
+      if(!best&&window.fbLoadDrinkPhoto){
+        // Rien sur OpenFoodFacts : peut-etre une photo communautaire validee
+        // par l'admin (marques exotiques absentes des bases mondiales)
+        return window.fbLoadDrinkPhoto(d.id).then(function(userPhoto){
+          delete imgFetchInFlight[key];
+          if(userPhoto){
+            imgCache[key]={url:userPhoto,ts:Date.now(),community:true};
+          }else{
+            imgCache[key]={url:null,ts:Date.now()};
+          }
+          try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+          if(userPhoto){refreshDrinkVisual(d);renderTrends();}
+        });
+      }
       imgCache[key]=best?{url:best.image_front_url||best.image_front_small_url,ts:Date.now()}:{url:null,ts:Date.now()};
       try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){/* quota */}
       delete imgFetchInFlight[key];
@@ -4486,6 +4592,21 @@ document.addEventListener("touchend",function(ev){
    appliquee, publiee dans la carte partagee, et marquee "manual" pour que
    le pipeline automatique ne l'ecrase jamais. Toujours limite au domaine
    images.openfoodfacts.org : pas d'URL arbitraire, meme pour un admin. */
+function adminRemoveDrink(){
+  if(!isAdmin||!curSel)return;
+  var d=curSel;
+  if(Number(d.id)<=100000000000){toast("Cette boisson fait partie du catalogue de base");return;}
+  if(!confirm("Retirer \u00AB "+d.name+" \u00BB du catalogue pour tout le monde ?\n(doublon, erreur de promotion\u2026)"))return;
+  var idx=DRINKS.findIndex(function(x){return x.id===d.id;});
+  if(idx!==-1)DRINKS.splice(idx,1);
+  delete imgCache[String(d.id)];
+  try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+  if(window.fbRemoveCatalogDrink)window.fbRemoveCatalogDrink(d.id).catch(function(e){console.warn(e);toast("\u26A0\uFE0F Suppression distante \u00E9chou\u00E9e");});
+  playSound("pop");
+  toast("\uD83D\uDDD1\uFE0F \u00AB "+d.name+" \u00BB retir\u00E9e du catalogue");
+  navTo("search");
+  renderList();renderTrends();
+}
 function adminFixPhoto(){
   if(!isAdmin||!curSel)return;
   var input=prompt("Corriger la photo de \u00AB "+curSel.name+" \u00BB :\n\u2022 colle le CODE-BARRE du bon produit\n\u2022 ou l'URL de sa fiche openfoodfacts.org\n\u2022 ou l'URL directe d'une image images.openfoodfacts.org\n\u2022 ou tape X pour retirer la photo");
@@ -4744,10 +4865,12 @@ function renderStoreList(){
     '</div>'
   ):"";
 
-  el.innerHTML=stores.length?renderSortBar()+brandBar+budgetBar:brandBar+budgetBar+'<div style="padding:32px 20px;text-align:center"><div style="font-size:32px;margin-bottom:12px">🔍</div><div style="font-size:15px;font-weight:700;color:var(--s1);margin-bottom:6px">Aucun magasin trouvé</div><div style="font-size:13px;color:var(--s2);line-height:1.5">Cette boisson n\'est pas encore dans nos données.<br>Aide la communauté !</div></div>';
+  var locateBtn='<div style="padding:4px 20px 10px"><button onclick="drinkLocate()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border-radius:14px;border:1.5px dashed var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">\uD83D\uDCCD Je sais o\u00F9 la trouver !</button></div>';
+  el.innerHTML=stores.length?renderSortBar()+brandBar+budgetBar:brandBar+budgetBar+'<div style="padding:26px 20px 8px;text-align:center"><div style="font-size:32px;margin-bottom:12px">🔍</div><div style="font-size:15px;font-weight:700;color:var(--s1);margin-bottom:6px">Aucun magasin trouvé</div><div style="font-size:13px;color:var(--s2);line-height:1.5">Cette boisson n\'est pas encore localis\u00E9e par ici.</div></div>'+locateBtn;
 
   if(!stores.length)return;
   var sid=curSel.id;
+  el.insertAdjacentHTML("beforeend",'<div style="padding:8px 20px 4px"><button onclick="drinkLocate()" style="width:100%;padding:10px;border-radius:12px;border:1.5px dashed var(--border);background:transparent;color:var(--s2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">\uD83D\uDCCD Ajouter un autre magasin qui la vend</button></div>');
   stores.forEach(function(s){
     var dist=s.dist?(s.dist<1000?s.dist+"m":(s.dist/1000).toFixed(1)+"km"):"~?km";
     var confs=s.confirmations[sid]||0,trust=Math.min(confs*20,100);
@@ -4998,6 +5121,12 @@ function addDiscovery(name,brand,barcode,cat){
       toast("Déjà suggérée · vote ajouté +2 pts");
     }
   } else {
+    // Anti-doublon : le nom tape correspond a une boisson du catalogue ?
+    var kin=findFamilyDrink(name,brand)||((findBrandFamily(brand,name)||[])[0]||null);
+    if(kin&&confirm("\u00AB "+kin.name+" \u00BB existe d\u00E9j\u00E0 au catalogue.\nC'est ce produit ? (OK = oui, ne pas cr\u00E9er de doublon)")){
+      confirmFamilyFormat(kin,barcode,{type:null,cl:null});
+      return;
+    }
     var pendingStore=pendingFoundIn[String(barcode)]||null;
     DISCOVERIES.unshift({id:barcode,name:name,brand:brand,votes:1,barcode:barcode,cat:cat||"",foundIn:pendingStore?[pendingStore]:[]});
     if(pendingStore){
@@ -5423,6 +5552,14 @@ function discLocate(discId){
   lastScanContext={discoveryId:discId};
   openStorePicker();
 }
+/* "Je sais ou la trouver" depuis la fiche d'une boisson du catalogue :
+   meme selecteur complet (recherche + carte + ajout de magasin), retour
+   visuel sur la fiche elle-meme */
+function drinkLocate(){
+  if(!curSel)return;
+  lastScanContext={drinkId:curSel.id,from:"fiche"};
+  openStorePicker();
+}
 function renderDiscoveries(){
   var el=document.getElementById("disc-list");if(!el)return;el.innerHTML="";
   var T=LANGS[curLang];
@@ -5752,6 +5889,7 @@ function renderAdmin(){
   el.innerHTML="";
   renderPhotoSuggestions();
   renderFormatSuggestions();
+  renderAdminHistory();
   var pending=DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected;});
   if(!pending.length){
     el.innerHTML='<div style="text-align:center;padding:40px 20px;font-size:13px;color:var(--s3)">Aucune d\u00E9couverte en attente \uD83C\uDF89</div>';
@@ -5851,6 +5989,49 @@ function renderFormatSuggestions(){
     });
   });
 }
+/* Historique des decisions : les decouvertes promues/rejetees restent en
+   base (flags promoted/rejected) — on les liste, repliees par defaut. */
+function renderAdminHistory(){
+  var host=document.getElementById("admin-history");
+  if(!host){
+    host=document.createElement("div");
+    host.id="admin-history";
+    var list=document.getElementById("admin-list");
+    if(list&&list.parentNode)list.parentNode.appendChild(host);
+  }
+  host.innerHTML="";
+  var done=(DISCOVERIES||[]).filter(function(d){return d.promoted||d.rejected;});
+  if(!done.length)return;
+  done.sort(function(a,b){
+    var ta=(a.decidedAt&&a.decidedAt.seconds)||0,tb=(b.decidedAt&&b.decidedAt.seconds)||0;
+    return tb-ta;
+  });
+  var hd=document.createElement("div");
+  hd.setAttribute("role","button");hd.setAttribute("tabindex","0");
+  hd.style.cssText="display:flex;align-items:center;justify-content:space-between;font-size:13px;font-weight:800;color:var(--s1);margin:18px 0 10px;cursor:pointer";
+  hd.innerHTML='<span>\uD83D\uDDC2\uFE0F Historique des d\u00E9cisions ('+done.length+')</span><span id="ah-arrow" style="font-size:12px;color:var(--s3)">\u25BE</span>';
+  host.appendChild(hd);
+  var body=document.createElement("div");
+  body.style.display="none";
+  done.slice(0,30).forEach(function(d){
+    var when=d.decidedAt?timeAgoShort(d.decidedAt):null;
+    var row=document.createElement("div");
+    row.style.cssText="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--bg2);border:1.5px solid var(--border);border-radius:13px;margin-bottom:7px";
+    row.innerHTML='<span style="font-size:15px;flex-shrink:0">'+(d.promoted?"\u2705":"\uD83D\uDDD1\uFE0F")+'</span>'+
+      '<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(d.name)+'</div>'+
+      '<div style="font-size:10.5px;color:var(--s2)">'+(d.promoted?"Promue au catalogue":"Rejet\u00E9e")+(when?" \u00B7 "+when:"")+'</div></div>'+
+      '<span style="font-size:10.5px;font-weight:600;color:var(--s3)">'+(d.votes||0)+' votes</span>';
+    body.appendChild(row);
+  });
+  host.appendChild(body);
+  hd.onclick=function(){
+    var open=body.style.display!=="none";
+    body.style.display=open?"none":"block";
+    var ar=document.getElementById("ah-arrow");
+    if(ar)ar.textContent=open?"\u25BE":"\u25B4";
+  };
+  hd.onkeydown=function(ev){if(ev.key==="Enter")hd.onclick();};
+}
 function renderPhotoSuggestions(){
   var host=document.getElementById("admin-photo-suggestions");
   if(!host){
@@ -5873,10 +6054,24 @@ function renderPhotoSuggestions(){
       card.innerHTML='<div style="font-size:13.5px;font-weight:800;color:var(--s1);margin-bottom:8px">'+sanitize(r.drinkName||("Boisson "+r.drinkId))+'</div>'+
         '<img alt="Photo sugg\u00E9r\u00E9e" style="width:100%;max-height:240px;object-fit:contain;background:#fff;border-radius:12px;margin-bottom:10px">'+
         '<div style="display:flex;gap:8px">'+
-        '<button class="ps-open" style="flex:1;padding:9px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">\uD83D\uDD0D Ouvrir la fiche (outil \uD83D\uDEE0\uFE0F)</button>'+
-        '<button class="ps-done" style="padding:9px 14px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">\u2713 Trait\u00E9</button>'+
+        '<button class="ps-use" style="flex:1;padding:9px;border-radius:12px;border:none;background:#16a34a;color:#fff;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit">\u2705 Utiliser comme photo</button>'+
+        '<button class="ps-open" style="padding:9px 12px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">\uD83D\uDD0D</button>'+
+        '<button class="ps-done" style="padding:9px 12px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">\u2715</button>'+
         '</div>';
       card.querySelector("img").src=r.data;
+      card.querySelector(".ps-use").onclick=function(){
+        var did=String(r.drinkId);
+        if(window.fbApplyDrinkPhoto)window.fbApplyDrinkPhoto(did,r.data).catch(function(e){console.warn(e);});
+        imgCache[did]={url:r.data,ts:Date.now(),community:true,manual:true};
+        try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+        var dr=DRINKS.find(function(x){return Number(x.id)===Number(r.drinkId);});
+        if(dr)refreshDrinkVisual(dr);
+        renderTrends();
+        if(window.fbDeletePhotoSuggestion)window.fbDeletePhotoSuggestion(r.docId);
+        card.remove();
+        playSound("win");
+        toast("\uD83D\uDCF8 Photo appliqu\u00E9e \u00E0 "+r.drinkName+" \u2014 visible par tous !");
+      };
       card.querySelector(".ps-open").onclick=function(){
         var d=DRINKS.find(function(x){return x.id===r.drinkId;});
         if(d)pick(d);else toast("Boisson introuvable au catalogue");
