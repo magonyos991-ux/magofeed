@@ -3079,17 +3079,30 @@ function saveNewStore(){
     var a=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(userLat*Math.PI/180)*Math.cos(s.lat*Math.PI/180)*Math.sin(dLng/2)*Math.sin(dLng/2);
     s.dist=Math.round(R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)));
   }
-  STORES.push(s);
+  // Creation VERIFIEE : pas de celebration avant la confirmation de la base.
+  // (Le bug ARARAT : une ecriture echouee en silence = magasin fantome qui
+  // disparait au rechargement. Plus jamais.)
+  var createBtn=document.getElementById("add-store-save");
+  if(createBtn){createBtn.disabled=true;createBtn.textContent="Enregistrement\u2026";}
+  var finishOk=function(){
+    STORES.push(s);
+    playSound("win");
+    toast("\uD83C\uDFEA \u00AB "+name+" \u00BB enregistr\u00E9 pour tout le monde !");
+    if(createBtn){createBtn.disabled=false;createBtn.textContent="Cr\u00E9er le magasin";}
+    if(lastScanContext){closeStorePicker();tagScanToStore(s);}
+    else{renderStorePicker();}
+  };
+  var finishFail=function(e){
+    console.warn("Create store error:",e);
+    if(createBtn){createBtn.disabled=false;createBtn.textContent="Cr\u00E9er le magasin";}
+    playSound("err");
+    alert("\u26A0\uFE0F Le magasin n'a PAS pu \u00EAtre enregistr\u00E9 dans la base.\n\nRaison : "+((e&&(e.code||e.message))||"inconnue")+"\n\nV\u00E9rifie ta connexion et r\u00E9essaie \u2014 rien n'a \u00E9t\u00E9 perdu, le formulaire est encore l\u00E0.");
+  };
   if(window.fbCreateStore){
-    window.fbCreateStore(s).catch(function(e){
-      console.warn("Create store error:",e);
-      toast("\u26A0\uFE0F Magasin cr\u00E9\u00E9 localement seulement (v\u00E9rifie la r\u00E8gle stores.create)");
-    });
+    window.fbCreateStore(s).then(finishOk).catch(finishFail);
+  }else{
+    finishFail(new Error("connexion \u00E0 la base indisponible"));
   }
-  playSound("win");
-  toast("\uD83C\uDFEA \u00AB "+name+" \u00BB ajout\u00E9 \u00E0 la carte !");
-  if(lastScanContext){closeStorePicker();tagScanToStore(s);}
-  else{renderStorePicker();}
 }
 function pickerSelectStore(id){
   var s=(STORES||[]).find(function(x){return String(x.id)===String(id);});
