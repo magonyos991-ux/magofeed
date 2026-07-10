@@ -3077,7 +3077,7 @@ function saveNewStore(){
   if(typeof userLat==="number"&&userLat){
     var R=6371000,dLat=(s.lat-userLat)*Math.PI/180,dLng=(s.lng-userLng)*Math.PI/180;
     var a=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(userLat*Math.PI/180)*Math.cos(s.lat*Math.PI/180)*Math.sin(dLng/2)*Math.sin(dLng/2);
-    s.dist=R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+    s.dist=Math.round(R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)));
   }
   STORES.push(s);
   if(window.fbCreateStore){
@@ -4223,7 +4223,7 @@ function renderStoreSearchList(){
     el.appendChild(sfHdr);
   }
   list.forEach(function(s){
-    var dist=s.dist?(s.dist<1000?s.dist+"m":(s.dist/1000).toFixed(1)+"km"):"";
+    var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):"";
     var div=document.createElement("div");div.className="ritem";
     div.innerHTML='<div class="rphoto" style="background:var(--bg2)">'+storeIconHTML(s)+'</div>'+
       '<div style="flex:1"><div class="rname">'+s.name+'</div><div class="rsub">'+(s.brand||s.type||"")+(dist?" · "+dist:"")+(s.open===false?" · Fermé":s.open?" · Ouvert":"")+'</div></div>'+
@@ -4872,7 +4872,7 @@ function renderStoreList(){
   var sid=curSel.id;
   el.insertAdjacentHTML("beforeend",'<div style="padding:8px 20px 4px"><button onclick="drinkLocate()" style="width:100%;padding:10px;border-radius:12px;border:1.5px dashed var(--border);background:transparent;color:var(--s2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">\uD83D\uDCCD Ajouter un autre magasin qui la vend</button></div>');
   stores.forEach(function(s){
-    var dist=s.dist?(s.dist<1000?s.dist+"m":(s.dist/1000).toFixed(1)+"km"):"~?km";
+    var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):"~?km";
     var confs=s.confirmations[sid]||0,trust=Math.min(confs*20,100);
     var storePriceVal=getStorePrice(s,sid);
     var storePrice=storePriceVal?storePriceVal.toFixed(2)+"€":null;
@@ -4961,7 +4961,7 @@ function openBudgetFilterSheet(){
 function openStoreSheet(storeId){
   var s=STORES.find(function(x){return x.id===storeId||x.fbId===storeId;});
   if(!s)return;
-  var dist=s.dist?(s.dist<1000?s.dist+"m":(s.dist/1000).toFixed(1)+"km"):"";
+  var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):"";
   var drinkIds=(s.drinks||[]).map(Number);
   var drinkCount=DRINKS.filter(function(d){return drinkIds.indexOf(d.id)!==-1;}).length;
   var storeIdStr=String(s.id).replace(/'/g,"\\'");
@@ -5051,7 +5051,7 @@ function renderStoreDetail(){
   var addr=s.address||"";
   document.getElementById("sd-sub").textContent=(s.brand?s.brand+" · ":"")+(s.type||"")+(addr?" · "+addr:"");
   if(!addr)resolveStoreAddress(s);
-  var dist=s.dist?(s.dist<1000?s.dist+"m":(s.dist/1000).toFixed(1)+"km"):null;
+  var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):null;
   document.getElementById("sd-badges").innerHTML=
     '<span class="rbadge" style="background:'+(s.open?"rgba(34,197,94,.3)":"rgba(239,68,68,.3)")+'">'+(s.open?"Ouvert":"Fermé")+' · '+(s.hours||"")+'</span>'+
     (dist?'<span class="rbadge">'+dist+'</span>':"");
@@ -5303,7 +5303,7 @@ function osmRunImport(){
     list.forEach(function(c){
       if(!(STORES||[]).some(function(s){return String(s.id)===c.id;})){
         var dLa=(userLat-c.lat)*111000,dLo=(userLng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
-        STORES.push({id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,drinks:[],confirmations:{},dist:Math.sqrt(dLa*dLa+dLo*dLo)});
+        STORES.push({id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,drinks:[],confirmations:{},dist:Math.round(Math.sqrt(dLa*dLa+dLo*dLo))});
       }
     });
     status.textContent="\u2705 "+done+" magasins ajout\u00E9s \u00E0 Magofeed !";
