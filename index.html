@@ -1015,7 +1015,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609d</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609f</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1181,6 +1181,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div class="res-back" onclick="closeStoreDetail()">
           <div style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff">←</div>
           <span style="font-size:15px;font-weight:700;color:#fff;flex:1">Magasin</span>
+          <div id="sd-remove" onclick="event.stopPropagation();adminRemoveStore()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px;cursor:pointer" role="button" tabindex="0" aria-label="Supprimer ce magasin (admin)" onkeydown="if(event.key==='Enter'){event.stopPropagation();adminRemoveStore();}">🗑️</div>
         </div>
         <div class="res-product">
           <div class="res-emoji" id="sd-emoji"></div>
@@ -1755,6 +1756,10 @@ window.fbAddReport = async function(storeId, drinkId, type) {
 /* Outils d'import admin : requete d'une zone (pour dedoublonner) et
    creation par lots (writeBatch, 400 par lot) des magasins OSM manquants.
    On ne touche JAMAIS aux magasins existants — creation pure. */
+/* Suppression d'un magasin (doublon, fermeture) — admin par les regles */
+window.fbDeleteStore = async function(storeId) {
+  await deleteDoc(doc(db, "stores", String(storeId)));
+};
 window.fbQueryZone = async function(lat, lng, radiusKm) {
   return queryNearbyStores(lat, lng, radiusKm);
 };
@@ -4649,6 +4654,17 @@ document.addEventListener("touchend",function(ev){
    appliquee, publiee dans la carte partagee, et marquee "manual" pour que
    le pipeline automatique ne l'ecrase jamais. Toujours limite au domaine
    images.openfoodfacts.org : pas d'URL arbitraire, meme pour un admin. */
+function adminRemoveStore(){
+  if(!isAdmin||!curStoreDetail)return;
+  var s=curStoreDetail;
+  if(!confirm("Supprimer \u00AB "+s.name+" \u00BB de la carte pour tout le monde ?\n(doublon, magasin ferm\u00E9\u2026)"))return;
+  var idx=STORES.findIndex(function(x){return String(x.id)===String(s.id);});
+  if(idx!==-1)STORES.splice(idx,1);
+  if(window.fbDeleteStore)window.fbDeleteStore(s.fbId||s.id).catch(function(e){console.warn(e);toast("\u26A0\uFE0F Suppression distante \u00E9chou\u00E9e");});
+  playSound("pop");
+  toast("\uD83D\uDDD1\uFE0F \u00AB "+s.name+" \u00BB supprim\u00E9 de la carte");
+  closeStoreDetail();
+}
 function adminRemoveDrink(){
   if(!isAdmin||!curSel)return;
   var d=curSel;
@@ -5052,6 +5068,8 @@ function openStoreDetail(storeId){
   storeDetailReturn=current?current.id.replace("s-",""):"search";
   curStoreDetail=s;
   curStoreDetailQuery="";curStoreDetailCat="Tous";
+  var rmS=document.getElementById("sd-remove");
+  if(rmS)rmS.style.display=isAdmin?"flex":"none";
   var sdSearch=document.getElementById("sd-search");if(sdSearch)sdSearch.value="";
   renderStoreDetail();
   show("storedetail");
@@ -5245,6 +5263,7 @@ var AVATAR_EMOJIS=["\uD83E\uDD64","\u26A1","\uD83C\uDF4B","\uD83C\uDF49","\uD83E
    dedoublonne contre la base (id OSM + proximite/nom) et cree UNIQUEMENT
    les nouveaux. Ville par ville : le meme bouton remplira Paris un jour.
 ================================ */
+var osmCenter=null; // null = ma position ; sinon {lat,lng,label} d'une ville
 var OSM_SHOP_TYPES="convenience|supermarket|kiosk|beverages|greengrocer|deli|newsagent|frozen_food|health_food|farm|general|food|pastry|confectionery";
 var osmCandidates=null;
 function osmShopEmoji(t){
@@ -5265,7 +5284,13 @@ function openOsmImport(){
     inner.style.cssText="position:absolute;left:0;right:0;bottom:0;background:var(--app-bg);border-radius:22px 22px 0 0;padding:18px 20px 30px";
     inner.innerHTML='<div style="font-size:15px;font-weight:800;color:var(--s1);margin-bottom:6px">\uD83D\uDDFA\uFE0F Importer les magasins d\'une zone</div>'+
       '<div style="font-size:12px;color:var(--s2);margin-bottom:14px">Va chercher dans OpenStreetMap les commerces \u00E0 boissons (sup\u00E9rettes, kiosques, \u00E9piceries, journaux\u2026) autour de ta position. Les magasins d\u00E9j\u00E0 connus ne sont jamais touch\u00E9s.</div>'+
-      '<div id="osm-radius" style="display:flex;gap:8px;margin-bottom:14px"></div>'+
+      '<div id="osm-radius" style="display:flex;gap:8px;margin-bottom:12px"></div>'+
+      '<div style="display:flex;gap:8px;margin-bottom:6px">'+
+        '<input id="osm-city-q" placeholder="Ville : S\u00E9oul, Paris, Casablanca\u2026" style="flex:1;padding:11px 13px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-family:inherit">'+
+        '<button id="osm-city-go" aria-label="Chercher la ville" style="padding:11px 15px;border-radius:13px;border:none;background:var(--bg3);color:var(--s1);font-size:14px;cursor:pointer;font-family:inherit">\uD83D\uDD0D</button>'+
+      '</div>'+
+      '<div id="osm-city-results"></div>'+
+      '<div id="osm-center-label" style="font-size:11.5px;font-weight:700;color:var(--s2);padding:2px 2px 12px">\uD83D\uDCCD Zone : autour de ma position</div>'+
       '<button id="osm-analyze" style="width:100%;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:13.5px;font-weight:800;cursor:pointer;font-family:inherit">Analyser la zone</button>'+
       '<div id="osm-status" style="font-size:12.5px;font-weight:600;color:var(--s2);text-align:center;padding:12px 4px 0"></div>'+
       '<button id="osm-run" style="display:none;width:100%;margin-top:10px;padding:13px;border-radius:14px;border:none;background:#16a34a;color:#fff;font-size:13.5px;font-weight:800;cursor:pointer;font-family:inherit"></button>';
@@ -5285,22 +5310,67 @@ function openOsmImport(){
     });
     radios.dataset.km=3;
     inner.querySelector("#osm-analyze").onclick=osmAnalyze;
+    inner.querySelector("#osm-city-go").onclick=osmSearchCity;
+    inner.querySelector("#osm-city-q").addEventListener("keydown",function(ev){if(ev.key==="Enter")osmSearchCity();});
     inner.querySelector("#osm-run").onclick=osmRunImport;
   }
   osmCandidates=null;
+  osmCenter=null;
+  var cl=host.querySelector("#osm-center-label");
+  if(cl)cl.textContent="\uD83D\uDCCD Zone : autour de ma position";
+  var cr=host.querySelector("#osm-city-results");if(cr)cr.innerHTML="";
+  var cq=host.querySelector("#osm-city-q");if(cq)cq.value="";
   host.querySelector("#osm-status").textContent="";
   host.querySelector("#osm-run").style.display="none";
   host.style.display="block";
 }
+function osmSearchCity(){
+  var q=((document.getElementById("osm-city-q")||{}).value||"").trim();
+  var box=document.getElementById("osm-city-results");
+  if(!q||!box)return;
+  box.innerHTML='<div style="font-size:12px;color:var(--s3);padding:6px 2px">Recherche\u2026</div>';
+  fetchWithTimeout("https://nominatim.openstreetmap.org/search?format=json&limit=4&q="+encodeURIComponent(q),15000)
+    .then(function(r){return r.json();})
+    .then(function(rows){
+      box.innerHTML="";
+      if(!rows||!rows.length){
+        box.innerHTML='<div style="font-size:12px;color:var(--s3);padding:6px 2px">Ville introuvable — essaie avec le pays (\u00AB Paris France \u00BB)</div>';
+        return;
+      }
+      rows.forEach(function(r){
+        var b=document.createElement("button");
+        var label=String(r.display_name||"").split(",").slice(0,3).join(",");
+        b.textContent="\uD83D\uDCCD "+label;
+        b.style.cssText="display:block;width:100%;text-align:left;padding:10px 12px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+        b.onclick=function(){
+          osmCenter={lat:Number(r.lat),lng:Number(r.lon),label:label};
+          box.innerHTML="";
+          var cl=document.getElementById("osm-center-label");
+          if(cl)cl.textContent="\uD83C\uDF0D Zone : "+label;
+          var st=document.getElementById("osm-status");if(st)st.textContent="";
+          var run=document.getElementById("osm-run");if(run)run.style.display="none";
+          osmCandidates=null;
+          playSound("pop");
+        };
+        box.appendChild(b);
+      });
+    })
+    .catch(function(e){
+      console.warn("Nominatim:",e);
+      box.innerHTML='<div style="font-size:12px;color:var(--s3);padding:6px 2px">\u26A0\uFE0F Recherche indisponible, r\u00E9essaie dans une minute</div>';
+    });
+}
 function osmAnalyze(){
   var status=document.getElementById("osm-status");
   var runBtn=document.getElementById("osm-run");
-  if(typeof userLat!=="number"||!userLat){status.textContent="\u26A0\uFE0F Position GPS requise pour d\u00E9finir la zone";playSound("err");return;}
+  var cLat=osmCenter?osmCenter.lat:userLat;
+  var cLng=osmCenter?osmCenter.lng:userLng;
+  if(typeof cLat!=="number"||!cLat){status.textContent="\u26A0\uFE0F Position GPS requise (ou choisis une ville ci-dessus)";playSound("err");return;}
   var km=Number((document.getElementById("osm-radius")||{dataset:{}}).dataset.km||3);
   status.textContent="Interrogation d'OpenStreetMap\u2026";
   runBtn.style.display="none";
-  var dLat=km/111,dLng=km/(111*Math.cos(userLat*Math.PI/180));
-  var bbox=(userLat-dLat)+","+(userLng-dLng)+","+(userLat+dLat)+","+(userLng+dLng);
+  var dLat=km/111,dLng=km/(111*Math.cos(cLat*Math.PI/180));
+  var bbox=(cLat-dLat)+","+(cLng-dLng)+","+(cLat+dLat)+","+(cLng+dLng);
   var q='[out:json][timeout:60];(node["shop"~"^('+OSM_SHOP_TYPES+')$"]('+bbox+');way["shop"~"^('+OSM_SHOP_TYPES+')$"]('+bbox+'););out center 3000;';
   fetchWithTimeout("https://overpass-api.de/api/interpreter?data="+encodeURIComponent(q),55000)
     .then(function(r){return r.json();})
@@ -5317,7 +5387,7 @@ function osmAnalyze(){
         var k=s.id;if(seen[k])return false;seen[k]=1;return true;
       });
       status.textContent=found.length+" commerces trouv\u00E9s \u00B7 d\u00E9doublonnage\u2026";
-      var zone=window.fbQueryZone?window.fbQueryZone(userLat,userLng,km+0.5):Promise.resolve(STORES||[]);
+      var zone=window.fbQueryZone?window.fbQueryZone(cLat,cLng,km+0.5):Promise.resolve(STORES||[]);
       return zone.then(function(existing){
         var news=found.filter(function(c){
           return !existing.some(function(s){
@@ -5359,8 +5429,12 @@ function osmRunImport(){
     // fusion locale immediate
     list.forEach(function(c){
       if(!(STORES||[]).some(function(s){return String(s.id)===c.id;})){
-        var dLa=(userLat-c.lat)*111000,dLo=(userLng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
-        STORES.push({id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,drinks:[],confirmations:{},dist:Math.round(Math.sqrt(dLa*dLa+dLo*dLo))});
+        var entry={id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,drinks:[],confirmations:{}};
+        if(typeof userLat==="number"&&userLat){
+          var dLa=(userLat-c.lat)*111000,dLo=(userLng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
+          entry.dist=Math.round(Math.sqrt(dLa*dLa+dLo*dLo));
+        }
+        STORES.push(entry);
       }
     });
     status.textContent="\u2705 "+done+" magasins ajout\u00E9s \u00E0 Magofeed !";
