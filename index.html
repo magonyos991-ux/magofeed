@@ -362,6 +362,8 @@ body.dark .gobtn.closed{background:var(--bg2);color:var(--s2)}
   position:absolute;inset:0;
   display:flex;align-items:center;justify-content:center;pointer-events:none;
 }
+.scan-frame.reading{animation:framePulse .55s ease-in-out infinite}
+@keyframes framePulse{0%,100%{box-shadow:0 0 0 9999px rgba(10,9,7,.55)}50%{box-shadow:0 0 0 9999px rgba(10,9,7,.55),0 0 0 3px rgba(198,154,87,.85)}}
 .scan-frame{
   width:230px;height:140px;
   border:2px solid rgba(255,255,255,.75);border-radius:16px;position:relative;
@@ -858,9 +860,9 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       </div>
       <div style="text-align:center;padding:14px 20px;font-size:13px;font-weight:500" class="c2" id="scan-hint" data-i18n="camWaiting">Caméra en attente</div>
       <div id="scan-result" class="scan-result"></div>
+      <div id="rescan-link" onclick="rescan()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'){rescan();}" aria-label="Scanner un autre produit" style="display:none;margin:2px auto 10px;width:fit-content;padding:9px 18px;border-radius:999px;border:1.5px solid var(--border);background:var(--bg2);font-size:12.5px;font-weight:700;color:var(--s1);cursor:pointer">🔄 Scanner un autre</div>
       <div id="scan-where" style="display:none;padding:0 20px 8px"></div>
       <button id="scan-btn" class="scan-btn" style="background:var(--accent)" onclick="startScan()" data-i18n="activateCam">Activer la caméra</button>
-      <div id="rescan-link" onclick="rescan()" style="display:none;text-align:center;padding:14px;font-size:13px;font-weight:600;color:var(--s2);cursor:pointer">🔄 Scanner un autre produit</div>
       <div id="scan-history-wrap" style="display:none;padding:6px 20px 24px">
         <div class="t-section" style="margin-bottom:4px" data-i18n="lastScans">Derniers scans</div>
         <div id="scan-history"></div>
@@ -1015,7 +1017,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609g</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609i</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1891,6 +1893,9 @@ window.fbSearchUsers = async function(prefix) {
   } catch (e) { console.warn("User search error:", e); return []; }
 };
 
+window.fbMarkDiscoveryPhoto = async function(discId) {
+  await updateDoc(doc(db, "discoveries", String(discId)), { hasPhoto: true });
+};
 window.fbSaveDiscoveryPhoto = async function(discId, base64) {
   var user = await ensureAuthed();
   await setDoc(doc(db, "discoveryPhotos", String(discId)), {
@@ -2840,6 +2845,8 @@ function startScan(){
       Quagga.init({inputStream:{type:"LiveStream",target:video,constraints:{facingMode:"environment"}},decoder:{readers:["ean_reader","ean_8_reader","code_128_reader","upc_reader"]}},
         function(err){
           if(err){hint.textContent="❌ "+err;return;}
+          _scanVotes={code:null,count:0};
+          var fr=document.querySelector(".scan-frame");if(fr)fr.classList.remove("reading");
           quaggaRunning=true;Quagga.start();
           Quagga.offDetected(onBarcodeDetected);Quagga.onDetected(onBarcodeDetected);
         });
@@ -3472,8 +3479,43 @@ function renderScanHistory(){
     el.appendChild(div);
   });
 }
+/* ================================
+   VERROUS ANTI-LECTURE-ERRONEE
+   La camera se trompe regulierement d'un chiffre (reflets, neons, main qui
+   bouge) — et un code errone = un AUTRE produit dans la base mondiale
+   (parfois une bouteille d'alcool sur un scan de Coca, vecu au Lidl).
+   Verrou 1 : la cle de controle GS1 — le dernier chiffre est calcule a
+   partir des autres, une lecture erronee est rejetee mathematiquement.
+   Verrou 2 : le meme code doit etre lu 2 fois d'affilee — une erreur de
+   camera ne se reproduit jamais a l'identique.
+================================ */
+function validGTIN(code){
+  if(!/^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/.test(code))return true; // formats non GS1 : pas de cle a verifier
+  var digits=code.split("").map(Number);
+  var check=digits.pop();
+  var sum=0,w=3;
+  for(var i=digits.length-1;i>=0;i--){sum+=digits[i]*w;w=(w===3)?1:3;}
+  return (10-(sum%10))%10===check;
+}
+var _scanVotes={code:null,count:0};
 function onBarcodeDetected(r){
-  var code=r.codeResult.code;stopScan();playSound("beep");
+  var rawCode=r&&r.codeResult&&r.codeResult.code;
+  if(!rawCode)return;
+  if(!validGTIN(rawCode))return;              // verrou 1 : cle invalide, lecture rejetee
+  if(_scanVotes.code===rawCode){_scanVotes.count++;}
+  else{_scanVotes={code:rawCode,count:1};}
+  if(_scanVotes.count<2){
+    // Premiere lecture : retour visuel immediat, le scan "reflechit"
+    var h=document.getElementById("scan-hint");
+    if(h)h.textContent="\uD83D\uDD0D Lecture\u2026 garde le code stable";
+    var f=document.querySelector(".scan-frame");
+    if(f)f.classList.add("reading");
+    return;                                    // verrou 2 : on attend la confirmation
+  }
+  var f2=document.querySelector(".scan-frame");
+  if(f2)f2.classList.remove("reading");
+  _scanVotes={code:null,count:0};
+  var code=rawCode;stopScan();playSound("beep");
   document.getElementById("scan-hint").textContent="✅ Code : "+code;
   var btn=document.getElementById("scan-btn"),res=document.getElementById("scan-result");
   var rescanLink=document.getElementById("rescan-link");if(rescanLink)rescanLink.style.display="block";
@@ -5216,6 +5258,65 @@ function markVotedDiscovery(id){
   votedDiscoveries.push(String(id));
   localStorage.setItem("magoVotedDisc",JSON.stringify(votedDiscoveries));
 }
+/* Apres l'ajout d'une decouverte scannee : proposer la photo tout de suite.
+   La photo part chez l'admin (discoveryPhotos) et suivra la boisson si elle
+   est promue — la boucle complete, depuis le rayon du magasin. */
+function openDiscPhotoSheet(discId,discName){
+  var host=document.getElementById("disc-photo-sheet");
+  if(!host){
+    host=document.createElement("div");
+    host.id="disc-photo-sheet";
+    host.setAttribute("role","dialog");host.setAttribute("aria-modal","true");host.setAttribute("aria-label","Ajouter une photo");
+    host.style.cssText="position:fixed;inset:0;z-index:3650;background:rgba(12,10,8,.55);display:none";
+    host.innerHTML='<div id="dps-inner" style="position:absolute;left:0;right:0;bottom:0;background:var(--app-bg);border-radius:22px 22px 0 0;padding:20px 20px 32px;text-align:center">'+
+      '<div style="font-size:26px;margin-bottom:6px">\uD83C\uDF89</div>'+
+      '<div style="font-size:15px;font-weight:800;color:var(--s1);margin-bottom:4px">Ajout\u00E9e aux d\u00E9couvertes !</div>'+
+      '<div id="dps-name" style="font-size:12.5px;font-weight:600;color:var(--s2);margin-bottom:14px"></div>'+
+      '<button id="dps-take" style="width:100%;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:13.5px;font-weight:800;cursor:pointer;font-family:inherit;margin-bottom:8px">\uD83D\uDCF8 Ajoute une photo du produit</button>'+
+      '<button id="dps-later" style="width:100%;padding:12px;border-radius:14px;border:1.5px solid var(--border);background:transparent;color:var(--s2);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Plus tard</button>'+
+      '<div style="font-size:10.5px;color:var(--s3);margin-top:10px">Une photo aide \u00E9norm\u00E9ment la validation \u2014 et suivra la boisson au catalogue</div>'+
+      '<input id="dps-input" type="file" accept="image/*" capture="environment" style="display:none">'+
+    '</div>';
+    document.body.appendChild(host);
+    host.onclick=function(ev){if(ev.target===host)host.style.display="none";};
+    host.querySelector("#dps-later").onclick=function(){host.style.display="none";};
+    host.querySelector("#dps-take").onclick=function(){host.querySelector("#dps-input").click();};
+    host.querySelector("#dps-input").addEventListener("change",function(){
+      var file=this.files&&this.files[0];
+      this.value="";
+      if(!file)return;
+      var take=host.querySelector("#dps-take");
+      take.disabled=true;take.textContent="Envoi\u2026";
+      compressPhotoFile(file,function(data){
+        var id=host.dataset.discId;
+        var save=window.fbSaveDiscoveryPhoto?window.fbSaveDiscoveryPhoto(id,data):Promise.reject(new Error("hors-ligne"));
+        save.then(function(){
+          if(window.fbMarkDiscoveryPhoto)window.fbMarkDiscoveryPhoto(id).catch(function(){});
+          var d=DISCOVERIES.find(function(x){return String(x.id)===String(id)||String(x.barcode)===String(id);});
+          if(d)d.hasPhoto=true;
+          renderDiscoveries();
+          host.style.display="none";
+          take.disabled=false;take.textContent="\uD83D\uDCF8 Ajoute une photo du produit";
+          userStats.pts+=3;updateProfileStats();
+          if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+          playSound("win");
+          toast("\uD83D\uDCF8 Photo envoy\u00E9e \u00B7 +3 pts");
+        }).catch(function(e){
+          console.warn(e);
+          take.disabled=false;take.textContent="\uD83D\uDCF8 Ajoute une photo du produit";
+          playSound("err");
+          toast("\u26A0\uFE0F Photo non envoy\u00E9e, r\u00E9essaie");
+        });
+      },function(){playSound("err");toast("Impossible de lire cette image");});
+    });
+  }
+  host.dataset.discId=String(discId);
+  var nm=host.querySelector("#dps-name");
+  if(nm)nm.textContent=discName||"";
+  var take=host.querySelector("#dps-take");
+  if(take){take.disabled=false;take.textContent="\uD83D\uDCF8 Ajoute une photo du produit";}
+  host.style.display="block";
+}
 function addDiscovery(name,brand,barcode,cat){
   var already=DISCOVERIES.find(function(d){return String(d.barcode)===String(barcode);});
   if(already){
@@ -5251,6 +5352,7 @@ function addDiscovery(name,brand,barcode,cat){
   bumpStreak();
   updateProfileStats();renderDiscoveries();
   stopScan();playSound("win");show("discover");
+  if(!already)setTimeout(function(){openDiscPhotoSheet(barcode,name);},450);
   // Partagé avec toute la communauté via Firestore (dédoublonné par code-barre)
   if(window.fbAddDiscovery)window.fbAddDiscovery(barcode,name,brand,cat).catch(function(){});
 }
@@ -5656,8 +5758,8 @@ function closeProposeForm(){
   var ov=document.getElementById("propose-sheet");if(ov)ov.style.display="none";
   photoSuggestTarget=null;
 }
-function proposePhotoChosen(input){
-  var file=input.files&&input.files[0];
+/* Compression partagee : pellicule -> JPEG <250 Ko pret pour Firestore */
+function compressPhotoFile(file,done,fail){
   if(!file)return;
   var img=new Image();
   var url=URL.createObjectURL(file);
@@ -5674,15 +5776,23 @@ function proposePhotoChosen(input){
       quality-=0.12;
       data=canvas.toDataURL("image/jpeg",quality);
     }
+    done(data);
+  };
+  img.onerror=function(){URL.revokeObjectURL(url);if(fail)fail();};
+  img.src=url;
+}
+function proposePhotoChosen(input){
+  var file=input.files&&input.files[0];
+  if(!file)return;
+  compressPhotoFile(file,function(data){
     proposePhotoData=data;
     var pv=document.getElementById("propose-photo-preview");
     var hint=document.getElementById("propose-photo-hint");
     if(pv){pv.src=data;pv.style.display="block";}
     if(hint)hint.style.display="none";
     playSound("pop");
-  };
-  img.onerror=function(){URL.revokeObjectURL(url);toast("Impossible de lire cette image");playSound("err");};
-  img.src=url;
+  });
+  input.value="";
 }
 function submitProposal(){
   var name=((document.getElementById("propose-name")||{}).value||"").trim();
