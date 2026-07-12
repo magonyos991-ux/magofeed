@@ -1017,7 +1017,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609i</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609l</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1305,7 +1305,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
 <!-- Firebase SDK -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion, deleteDoc, startAt, endAt } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion, deleteDoc, startAt, endAt, getCountFromServer, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, linkWithPopup, signInWithPopup, signInWithCredential } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 /* ── Firebase Config ── */
@@ -1840,6 +1840,27 @@ window.fbAddFormatSuggestion = async function(drinkId, drinkName, barcode, fmt) 
     createdAt: serverTimestamp()
   });
 };
+/* Tableau de bord fondateur : les chiffres du jour en 5 comptages agreges
+   (getCountFromServer : ~1 lecture par tranche de 1000, quasi gratuit). */
+window.fbFounderStats = async function() {
+  var midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+  var weekAgo = new Date(Date.now() - 7 * 86400000);
+  var t0 = Timestamp.fromDate(midnight);
+  var t7 = Timestamp.fromDate(weekAgo);
+  async function cnt(q) {
+    try { var s = await getCountFromServer(q); return s.data().count; }
+    catch (e) { console.warn("count:", e); return null; }
+  }
+  var res = await Promise.all([
+    cnt(query(collection(db, "discoveries"), where("createdAt", ">=", t0))),
+    cnt(query(collection(db, "users"), where("updatedAt", ">=", t0))),
+    cnt(query(collection(db, "stores"), where("createdAt", ">=", t7))),
+    cnt(query(collection(db, "users"))),
+    cnt(query(collection(db, "photoSuggestions")))
+  ]);
+  return { discToday: res[0], activeToday: res[1], storesWeek: res[2], totalUsers: res[3], pendingPhotos: res[4] };
+};
+
 window.fbLoadFormatSuggestions = async function() {
   try {
     var snap = await getDocs(query(collection(db, "formatSuggestions"), limit(25)));
@@ -2085,13 +2106,13 @@ var DRINKS=[
   {id:2003,name:"Mountain Dew Voltage",brand:"Mountain Dew",emoji:"⚡",color:"#6c3483",light:"#f5eef8",cat:"Soda",tag:"MTN DEW",barcodes:["4006381333092"],stars:4.4},
 
   // ── PRIME ──
-  {id:300,name:"Prime Tropical Punch",brand:"Prime",emoji:"🌺",color:"#e67e22",light:"#fef3e2",cat:"Energy",tag:"PRIME",barcodes:["0810038960019"],stars:4.7},
-  {id:3001,name:"Prime Ice Pop",brand:"Prime",emoji:"🧊",color:"#0097a7",light:"#e0f7fa",cat:"Energy",tag:"PRIME",barcodes:["0810038960026"],stars:4.5},
-  {id:3002,name:"Prime Lemon Lime",brand:"Prime",emoji:"🍋",color:"#27ae60",light:"#eafaf1",cat:"Energy",tag:"PRIME",barcodes:["0810038960033"],stars:4.6},
-  {id:3003,name:"Prime Meta Moon",brand:"Prime",emoji:"🌙",color:"#8e44ad",light:"#f5eef8",cat:"Energy",tag:"PRIME",barcodes:["0810038960040"],stars:4.4},
-  {id:3004,name:"Prime Blue Raspberry",brand:"Prime",emoji:"🫐",color:"#1a56db",light:"#ebf5fb",cat:"Energy",tag:"PRIME",barcodes:["0810038960057"],stars:4.5},
-  {id:3005,name:"Prime Strawberry Watermelon",brand:"Prime",emoji:"🍓",color:"#e74c3c",light:"#fdecea",cat:"Energy",tag:"PRIME",barcodes:["0810038960064"],stars:4.3},
-  {id:3006,name:"Prime Grape",brand:"Prime",emoji:"🍇",color:"#8e44ad",light:"#f5eef8",cat:"Energy",tag:"PRIME",barcodes:["0810038960071"],stars:4.4},
+  {id:300,name:"Prime Tropical Punch",brand:"Prime",emoji:"🌺",color:"#e67e22",light:"#fef3e2",cat:"Sport",tag:"PRIME",barcodes:["0810038960019"],stars:4.7},
+  {id:3001,name:"Prime Ice Pop",brand:"Prime",emoji:"🧊",color:"#0097a7",light:"#e0f7fa",cat:"Sport",tag:"PRIME",barcodes:["0810038960026"],stars:4.5},
+  {id:3002,name:"Prime Lemon Lime",brand:"Prime",emoji:"🍋",color:"#27ae60",light:"#eafaf1",cat:"Sport",tag:"PRIME",barcodes:["0810038960033"],stars:4.6},
+  {id:3003,name:"Prime Meta Moon",brand:"Prime",emoji:"🌙",color:"#8e44ad",light:"#f5eef8",cat:"Sport",tag:"PRIME",barcodes:["0810038960040"],stars:4.4},
+  {id:3004,name:"Prime Blue Raspberry",brand:"Prime",emoji:"🫐",color:"#1a56db",light:"#ebf5fb",cat:"Sport",tag:"PRIME",barcodes:["0810038960057"],stars:4.5},
+  {id:3005,name:"Prime Strawberry Watermelon",brand:"Prime",emoji:"🍓",color:"#e74c3c",light:"#fdecea",cat:"Sport",tag:"PRIME",barcodes:["0810038960064"],stars:4.3},
+  {id:3006,name:"Prime Grape",brand:"Prime",emoji:"🍇",color:"#8e44ad",light:"#f5eef8",cat:"Sport",tag:"PRIME",barcodes:["0810038960071"],stars:4.4},
 
   // ── DR PEPPER ──
   {id:400,name:"Dr Pepper Original",brand:"Dr Pepper",emoji:"🩸",color:"#7b241c",light:"#f9ebea",cat:"Soda",tag:"DR PEPPER",barcodes:["5000112548464"],stars:4.4},
@@ -2100,7 +2121,7 @@ var DRINKS=[
 
   // ── LUCOZADE ──
   {id:500,name:"Lucozade Energy Original",brand:"Lucozade",emoji:"🟠",color:"#e67e22",light:"#fef3e2",cat:"Energy",tag:"LUCOZADE",barcodes:["5000128003414"],stars:4.2},
-  {id:5001,name:"Lucozade Sport Orange",brand:"Lucozade",emoji:"🍊",color:"#e67e22",light:"#fef3e2",cat:"Energy",tag:"LUCOZADE",barcodes:["5000128003421"],stars:4.1},
+  {id:5001,name:"Lucozade Sport Orange",brand:"Lucozade",emoji:"🍊",color:"#e67e22",light:"#fef3e2",cat:"Sport",tag:"LUCOZADE",barcodes:["5000128003421"],stars:4.1},
   {id:5002,name:"Lucozade Berry",brand:"Lucozade",emoji:"🫐",color:"#8e44ad",light:"#f5eef8",cat:"Energy",tag:"LUCOZADE",barcodes:["5000128003438"],stars:4.0},
 
   // ── ROCKSTAR ──
@@ -2113,13 +2134,13 @@ var DRINKS=[
   {id:7001,name:"Burn Tropical",brand:"Burn",emoji:"🌴",color:"#0097a7",light:"#e0f7fa",cat:"Energy",tag:"BURN",barcodes:["5449000054272"],stars:3.9},
 
   // ── POWERADE ──
-  {id:800,name:"Powerade Mountain Berry Blast",brand:"Powerade",emoji:"🫐",color:"#1a56db",light:"#ebf5fb",cat:"Energy",tag:"POWERADE",barcodes:["5449000054296"],stars:4.0},
-  {id:8001,name:"Powerade Fruit Punch",brand:"Powerade",emoji:"🍹",color:"#e74c3c",light:"#fdecea",cat:"Energy",tag:"POWERADE",barcodes:["5449000054302"],stars:4.1},
+  {id:800,name:"Powerade Mountain Berry Blast",brand:"Powerade",emoji:"🫐",color:"#1a56db",light:"#ebf5fb",cat:"Sport",tag:"POWERADE",barcodes:["5449000054296"],stars:4.0},
+  {id:8001,name:"Powerade Fruit Punch",brand:"Powerade",emoji:"🍹",color:"#e74c3c",light:"#fdecea",cat:"Sport",tag:"POWERADE",barcodes:["5449000054302"],stars:4.1},
 
   // ── GATORADE ──
-  {id:900,name:"Gatorade Lemon-Lime",brand:"Gatorade",emoji:"🍋",color:"#27ae60",light:"#eafaf1",cat:"Energy",tag:"GATORADE",barcodes:["4006381100015"],stars:4.2},
-  {id:9001,name:"Gatorade Orange",brand:"Gatorade",emoji:"🍊",color:"#e67e22",light:"#fef3e2",cat:"Energy",tag:"GATORADE",barcodes:["4006381100022"],stars:4.1},
-  {id:9002,name:"Gatorade Fruit Punch",brand:"Gatorade",emoji:"🍓",color:"#e74c3c",light:"#fdecea",cat:"Energy",tag:"GATORADE",barcodes:["4006381100039"],stars:4.0},
+  {id:900,name:"Gatorade Lemon-Lime",brand:"Gatorade",emoji:"🍋",color:"#27ae60",light:"#eafaf1",cat:"Sport",tag:"GATORADE",barcodes:["4006381100015"],stars:4.2},
+  {id:9001,name:"Gatorade Orange",brand:"Gatorade",emoji:"🍊",color:"#e67e22",light:"#fef3e2",cat:"Sport",tag:"GATORADE",barcodes:["4006381100022"],stars:4.1},
+  {id:9002,name:"Gatorade Fruit Punch",brand:"Gatorade",emoji:"🍓",color:"#e74c3c",light:"#fdecea",cat:"Sport",tag:"GATORADE",barcodes:["4006381100039"],stars:4.0},
 
   // ── CELSIUS ──
   {id:1600,name:"Celsius Sparkling Watermelon",brand:"Celsius",emoji:"🍉",color:"#e74c3c",light:"#fdecea",cat:"Energy",tag:"CELSIUS",barcodes:["0889392000113"],stars:4.4},
@@ -2283,8 +2304,8 @@ var DRINKS=[
   {id:10094,name:"XL Energy",brand:"XL",emoji:"⚡",color:"#2e86c1",light:"#eaf4fb",cat:"Energy",tag:"XL ENERGY",stars:3.9,formats:[{type:"canette",cl:25}]},
   {id:10095,name:"Sting Berry Blast",brand:"Sting",emoji:"🍓",color:"#c0392b",light:"#fdecea",cat:"Energy",tag:"STING BERRY BLAST",stars:4.1},
   {id:10096,name:"Crazy Tiger",brand:"Crazy Tiger",emoji:"🐯",color:"#e67e22",light:"#fef3e2",cat:"Energy",tag:"CRAZY TIGER",stars:3.8,formats:[{type:"canette",cl:25}]},
-  {id:10097,name:"Aquarius Citron",brand:"Aquarius",emoji:"🍋",color:"#f4d03f",light:"#fef9e7",cat:"Energy",tag:"AQUARIUS CITRON",stars:4.1},
-  {id:10098,name:"Aquarius Orange",brand:"Aquarius",emoji:"🍊",color:"#e67e22",light:"#fef3e2",cat:"Energy",tag:"AQUARIUS ORANGE",stars:4.0},
+  {id:10097,name:"Aquarius Citron",brand:"Aquarius",emoji:"🍋",color:"#f4d03f",light:"#fef9e7",cat:"Sport",tag:"AQUARIUS CITRON",stars:4.1},
+  {id:10098,name:"Aquarius Orange",brand:"Aquarius",emoji:"🍊",color:"#e67e22",light:"#fef3e2",cat:"Sport",tag:"AQUARIUS ORANGE",stars:4.0},
   {id:10099,name:"Rani Float Fraise",brand:"Rani",emoji:"🍓",color:"#e74c3c",light:"#fdecea",cat:"Exotique",tag:"RANI FLOAT FRAISE",stars:4.3},
   {id:10100,name:"Rani Float Pêche",brand:"Rani",emoji:"🍑",color:"#e8927c",light:"#fdf0ec",cat:"Exotique",tag:"RANI FLOAT PÊCHE",stars:4.4},
   {id:10101,name:"Rani Float Orange",brand:"Rani",emoji:"🍊",color:"#e67e22",light:"#fef3e2",cat:"Exotique",tag:"RANI FLOAT ORANGE",stars:4.5},
@@ -2327,7 +2348,7 @@ pt:{badgeScan:"Scanner",badgeExplorer:"Explorador",badgeReliable:"Fiável",badge
 tr:{badgeScan:"Tarayıcı",badgeExplorer:"Kâşif",badgeReliable:"Güvenilir",badgeStreak:"Azimli",badgeStar:"Yıldız",badgeFounder:"Kurucu",userSearchHint:"Bir isim yaz (en az 2 harf)<br>bir oyuncu bulmak için 🧑",connectedGoogle:"Google ile bağlı",ptsLabel:"Puan",me:"(ben)",mostSearched:"En çok arananlar",suggestionsT:"Öneriler",noSuggestion:"Henüz öneri yok",noSuggestionSub:"Katalogda olmayan bir ürünü tara<br>ve topluluğa öner!",camWaiting:"Kamera beklemede",activateCam:"Kamerayı aç",lastScans:"Son taramalar",suggestBtn:"+ Öner",streakDay:"gün üst üste",streakRecord:"rekor",streakStart:"Serini başlatmak için bugün katkıda bulun 🔥",streakBroken:"seri bozuldu, yeniden başlat!",settingsT:"Ayarlar",language:"Dil",sounds:"Ses efektleri",account:"Hesap",appSec:"Uygulama",seeIntro:"Tanıtımı tekrar izle",seeTuto:"Eğitimi tekrar izle",privacyL:"Gizlilik politikası",termsL:"Kullanım koşulları",adminL:"Yönetim",installApp:"Uygulamayı yükle",googleLogin:"Google ile giriş yap",leaderboard:"Sıralama",playerProfile:"Oyuncu profili",hisFavs:"Favori içecekleri",modeDrinks:"🥤 İçecekler",modeStores:"🏪 Mağazalar",modePlayers:"🧑 Oyuncular",proposeBtn:"📷 Öner",clearHistory:"Geçmişi temizle",editPseudoHint:"Adını değiştirmek için dokun",name:"🇹🇷 Türkçe",greeting:"Merhaba 👋 Ne içiyoruz?",trends:"Trendler",recents:"Son aramalar",search:"Arama",scanner:"Ürün tara",scanSub:"Kamerayı barkoda doğrult",disc:"🔍 Keşifler",discSub:"Topluluğun önerdiği ürünler",stores:"Yakındaki mağazalar",profile:"Profilim",badges:"Rozetler",activity:"Etkinlik",noact:"Henüz etkinlik yok",home:"Ana sayfa",chercher:"Ara",scan:"Tara",discover:"Keşfet",profil:"Profil",sig:"Bildirimler",conf:"Onaylar",rstock:"Burada stokta",rrupture:"Stokta yok",rfake:"Olası taklit",rnew:"Yeni ürün",vote:"Oy ver",placeholder:"Ara…"},
 pl:{badgeScan:"Skaner",badgeExplorer:"Zwiadowca",badgeReliable:"Solidny",badgeStreak:"Wytrwały",badgeStar:"Gwiazda",badgeFounder:"Założyciel",userSearchHint:"Wpisz nazwę (min. 2 litery)<br>aby znaleźć gracza 🧑",connectedGoogle:"Zalogowano przez Google",ptsLabel:"Punkty",me:"(ja)",mostSearched:"Najczęściej szukane",suggestionsT:"Sugestie",noSuggestion:"Na razie brak sugestii",noSuggestionSub:"Zeskanuj produkt spoza katalogu,<br>aby zaproponować go społeczności!",camWaiting:"Kamera w gotowości",activateCam:"Włącz kamerę",lastScans:"Ostatnie skany",suggestBtn:"+ Zaproponuj",streakDay:"dzień/dni z rzędu",streakRecord:"rekord",streakStart:"Dołóż coś dzisiaj i rozpocznij serię 🔥",streakBroken:"seria przerwana, zacznij od nowa!",settingsT:"Ustawienia",language:"Język",sounds:"Efekty dźwiękowe",account:"Konto",appSec:"Aplikacja",seeIntro:"Zobacz intro ponownie",seeTuto:"Zobacz samouczek ponownie",privacyL:"Polityka prywatności",termsL:"Warunki korzystania",adminL:"Administracja",installApp:"Zainstaluj aplikację",googleLogin:"Zaloguj się przez Google",leaderboard:"Ranking",playerProfile:"Profil gracza",hisFavs:"Ulubione napoje",modeDrinks:"🥤 Napoje",modeStores:"🏪 Sklepy",modePlayers:"🧑 Gracze",proposeBtn:"📷 Zaproponuj",clearHistory:"Wyczyść historię",editPseudoHint:"Dotknij, aby zmienić nazwę",name:"🇵🇱 Polski",greeting:"Cześć 👋 Co pijemy?",trends:"Na czasie",recents:"Ostatnie",search:"Szukaj",scanner:"Skanuj produkt",scanSub:"Skieruj aparat na kod kreskowy",disc:"🔍 Odkrycia",discSub:"Produkty polecane przez społeczność",stores:"Sklepy w pobliżu",profile:"Mój profil",badges:"Odznaki",activity:"Aktywność",noact:"Na razie brak aktywności",home:"Start",chercher:"Szukaj",scan:"Skaner",discover:"Odkrywaj",profil:"Profil",sig:"Zgłoszenia",conf:"Potwierdzenia",rstock:"Dostępne tutaj",rrupture:"Brak w magazynie",rfake:"Możliwa podróbka",rnew:"Nowy produkt",vote:"Głosuj",placeholder:"Szukaj…"}
 };
-var CATS=["Tous","Soda","Ice Tea","Exotique","Energy","Jus","Eau","Autre"];
+var CATS=["Tous","Soda","Ice Tea","Exotique","Energy","Sport","Jus","Eau","Autre"];
 
 /* ================================
    STATE
@@ -2892,6 +2913,7 @@ function isGenericProductName(name){
 }
 function offGuessCategory(p){
   var tags=(p.categories_tags||[]).join(" ").toLowerCase();
+  if(/sports-drink|isotonic|boissons-pour-sportifs|hydration/.test(tags))return"Sport";
   if(/energy-drink|energy_drink|boissons-energisantes/.test(tags))return"Energy";
   if(/ice-tea|iced-tea|tea-based|the-glace/.test(tags))return"Ice Tea";
   if(/juice|jus-de|nectar/.test(tags))return"Jus";
@@ -3411,6 +3433,12 @@ function confirmFamilyFormat(family,barcode,fmt){
   playSound("win");
   toast("\uD83E\uDDE9 Format ajout\u00E9 \u00E0 "+family.name+" \u00B7 +2 pts");
 }
+function hasVariantExtras(offName,candidate){
+  var n=normTxt(offName||"");
+  var toks=normTxt(candidate.name).split(" ").filter(function(t){return t.length>1;});
+  var extras=n.split(" ").filter(function(t){return t.length>1&&toks.indexOf(t)===-1;});
+  return extras.some(function(t){return OFF_VARIANT_WORDS.indexOf(t)!==-1;});
+}
 function findBrandFamily(offBrand,offName){
   var hay=normTxt((offBrand||"")+" "+(offName||""));
   if(!hay.trim())return [];
@@ -3445,7 +3473,7 @@ function renderBrandKinChoice(kin,best,code,p){
     };
     row.onkeydown=function(ev){if(ev.key==="Enter")row.onclick();};
   });
-  btn.textContent="Aucun des deux \u2014 nouveau produit";
+  btn.textContent=(kin.length===1?"Non \u2014 c'est un nouveau produit":"Aucun des deux \u2014 nouveau produit");
   btn.style.background="#e67e22";btn.style.display="block";
   btn.onclick=function(){addDiscovery(best.name,best.brand,code,best.cat);};
   recordScan(code,best.name,best.brand,best.cat,"off");
@@ -3453,7 +3481,7 @@ function renderBrandKinChoice(kin,best,code,p){
   playSound("win");
 }
 function scanCatEmoji(cat){
-  return{Energy:"\u26A1",Soda:"\uD83E\uDD64","Ice Tea":"\uD83E\uDDCB",Jus:"\uD83E\uDDC3",Eau:"\uD83D\uDCA7",Exotique:"\uD83C\uDF34",Autre:"\uD83E\uDDC3"}[cat]||"\uD83D\uDD0D";
+  return{Energy:"\u26A1",Sport:"\uD83C\uDFC3",Soda:"\uD83E\uDD64","Ice Tea":"\uD83E\uDDCB",Jus:"\uD83E\uDDC3",Eau:"\uD83D\uDCA7",Exotique:"\uD83C\uDF34",Autre:"\uD83E\uDDC3"}[cat]||"\uD83D\uDD0D";
 }
 function renderScanHistory(){
   var el=document.getElementById("scan-history");if(!el)return;
@@ -3589,8 +3617,11 @@ function onBarcodeDetected(r){
           // de cette marque plutot que de laisser creer un doublon
           if(!family){
             var brandKin=findBrandFamily(best.brand,best.name);
-            if(brandKin.length===1){family=brandKin[0];}
-            else if(brandKin.length>1&&brandKin.length<=4){
+            // Le piege Red Bull Peche Blanche : marque connue + UN seul candidat
+            // MAIS des mots de variante (peche, blanche, edition...) -> ce n'est
+            // PAS un format, c'est une autre boisson. On demande, jamais en silence.
+            if(brandKin.length===1&&!hasVariantExtras(best.name,brandKin[0])){family=brandKin[0];}
+            else if(brandKin.length>=1&&brandKin.length<=6){
               renderBrandKinChoice(brandKin,best,code,p);
               return;
             }
@@ -4009,9 +4040,10 @@ var CAT_DEFAULTS={
   "Jus":{emoji:"\uD83E\uDDC3",color:"#f39c12",light:"#fef5e7"},
   "Eau":{emoji:"\uD83D\uDCA7",color:"#5dade2",light:"#ebf5fb"},
   "Exotique":{emoji:"\uD83C\uDF34",color:"#ec7063",light:"#fdedec"},
+  "Sport":{emoji:"\uD83C\uDFC3",color:"#148f77",light:"#e8f8f5"},
   "Autre":{emoji:"\uD83E\uDDC3",color:"#7d6b8f",light:"#f1edf6"}
 };
-var VALID_CATS=["Soda","Ice Tea","Energy","Jus","Eau","Exotique","Autre"];
+var VALID_CATS=["Soda","Ice Tea","Energy","Sport","Jus","Eau","Exotique","Autre"];
 function mergeCatalog(rows){
   if(!rows||!rows.length)return 0;
   var added=0;
@@ -4485,7 +4517,7 @@ function drinkIconHTML(d){
       manquait et qui a fait accepter la photo du Monster Ultra White pour
       le Monster Energy original. */
 var OFF_OPTIONAL_WORDS=["original","originale","classic","classique","regular","nature","energy","drink"];
-var OFF_VARIANT_WORDS=["zero","light","diet","sugarfree","ultra","white","blanc","blanche","noir","black","cherry","cerise","vanille","vanilla","mango","mangue","watermelon","pasteque","citron","lemon","lime","peach","peche","tropical","paradise","rosa","gold","punch","exotic","exotique","fraise","strawberry","framboise","raspberry","orange","pomme","apple","raisin","grape","ananas","pineapple","coco","coconut","menthe","mint","mojito","cassis","myrtille","blueberry","grenade","pomegranate","abricot","apricot","poire","pear","kiwi","litchi","lychee","passion","goyave","guava","gingembre","ginger","sans","cafeine","decaf","max","intense","fusion","touch","sparkling","petillante","petillant","plate","green","vert","verte","rouge","red","blue","bleu","yellow","jaune","pink","rose","juiced","juice","assault","khaos","ripper","rehab","pipeline","loco"];
+var OFF_VARIANT_WORDS=["edition","zero","light","diet","sugarfree","ultra","white","blanc","blanche","noir","black","cherry","cerise","vanille","vanilla","mango","mangue","watermelon","pasteque","citron","lemon","lime","peach","peche","tropical","paradise","rosa","gold","punch","exotic","exotique","fraise","strawberry","framboise","raspberry","orange","pomme","apple","raisin","grape","ananas","pineapple","coco","coconut","menthe","mint","mojito","cassis","myrtille","blueberry","grenade","pomegranate","abricot","apricot","poire","pear","kiwi","litchi","lychee","passion","goyave","guava","gingembre","ginger","sans","cafeine","decaf","max","intense","fusion","touch","sparkling","petillante","petillant","plate","green","vert","verte","rouge","red","blue","bleu","yellow","jaune","pink","rose","juiced","juice","assault","khaos","ripper","rehab","pipeline","loco"];
 /* Verrou categorie : la fiche doit etre une BOISSON. Les marques ombrelles
    (PepsiCo...) taguent aussi leurs chips et snacks avec la marque mere :
    sans ce verrou, un tube de chips Stax a illustre le Pepsi Original. */
@@ -5334,7 +5366,13 @@ function addDiscovery(name,brand,barcode,cat){
     }
   } else {
     // Anti-doublon : le nom tape correspond a une boisson du catalogue ?
-    var kin=findFamilyDrink(name,brand)||((findBrandFamily(brand,name)||[])[0]||null);
+    var kin=findFamilyDrink(name,brand);
+    if(!kin){
+      var bkList=findBrandFamily(brand,name)||[];
+      // uniquement si la marque n'a QU'UNE boisson au catalogue : a plusieurs,
+      // le choix est ambigu, on laisse creer la decouverte
+      if(bkList.length===1&&!hasVariantExtras(name,bkList[0]))kin=bkList[0];
+    }
     if(kin&&confirm("\u00AB "+kin.name+" \u00BB existe d\u00E9j\u00E0 au catalogue.\nC'est ce produit ? (OK = oui, ne pas cr\u00E9er de doublon)")){
       confirmFamilyFormat(kin,barcode,{type:null,cl:null});
       return;
@@ -6172,6 +6210,7 @@ var adminCatChoice={};
 function renderAdmin(){
   var el=document.getElementById("admin-list");if(!el)return;
   el.innerHTML="";
+  renderFounderDash();
   renderPhotoSuggestions();
   renderFormatSuggestions();
   renderAdminHistory();
@@ -6276,6 +6315,43 @@ function renderFormatSuggestions(){
 }
 /* Historique des decisions : les decouvertes promues/rejetees restent en
    base (flags promoted/rejected) — on les liste, repliees par defaut. */
+/* 📊 Le coup d'oeil quotidien du fondateur : la vie de l'app en 6 tuiles,
+   sans ouvrir Firestore. Rafraichi a chaque ouverture de l'Administration. */
+function renderFounderDash(){
+  var host=document.getElementById("founder-dash");
+  if(!host){
+    host=document.createElement("div");
+    host.id="founder-dash";
+    var list=document.getElementById("admin-list");
+    if(list&&list.parentNode)list.parentNode.insertBefore(host,list.parentNode.firstChild.nextSibling);
+  }
+  var pendingDisc=(DISCOVERIES||[]).filter(function(d){return !d.promoted&&!d.rejected;}).length;
+  function tile(emoji,val,label,hot){
+    return '<div style="background:var(--bg2);border:1.5px solid '+(hot&&val>0?"var(--s1)":"var(--border)")+';border-radius:16px;padding:12px 6px;text-align:center">'+
+      '<div style="font-size:17px">'+emoji+'</div>'+
+      '<div class="fd-num" style="font-size:19px;font-weight:800;color:var(--s1);margin:2px 0">'+(val==null?"\u2013":val)+'</div>'+
+      '<div style="font-size:9.5px;font-weight:700;color:var(--s2);text-transform:uppercase;letter-spacing:.4px">'+label+'</div></div>';
+  }
+  host.innerHTML='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:2px 0 10px">\uD83D\uDCCA Aujourd\'hui sur Magofeed</div>'+
+    '<div id="fd-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">'+
+    tile("\uD83C\uDD95",null,"d\u00E9couvertes du jour")+
+    tile("\uD83E\uDDD1","...","actifs aujourd'hui")+
+    tile("\uD83C\uDFEA",null,"magasins / 7 j")+
+    tile("\u23F3",pendingDisc,"\u00E0 valider",true)+
+    tile("\uD83D\uDCF8",null,"photos en attente",true)+
+    tile("\uD83C\uDF0D",null,"joueurs au total")+
+    '</div>';
+  if(!window.fbFounderStats)return;
+  window.fbFounderStats().then(function(s){
+    var grid=document.getElementById("fd-grid");if(!grid)return;
+    grid.innerHTML=tile("\uD83C\uDD95",s.discToday,"d\u00E9couvertes du jour")+
+      tile("\uD83E\uDDD1",s.activeToday,"actifs aujourd'hui")+
+      tile("\uD83C\uDFEA",s.storesWeek,"magasins / 7 j")+
+      tile("\u23F3",pendingDisc,"\u00E0 valider",true)+
+      tile("\uD83D\uDCF8",s.pendingPhotos,"photos en attente",true)+
+      tile("\uD83C\uDF0D",s.totalUsers,"joueurs au total");
+  }).catch(function(e){console.warn("dash:",e);});
+}
 function renderAdminHistory(){
   var host=document.getElementById("admin-history");
   if(!host){
