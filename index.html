@@ -745,6 +745,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
+          <div onclick="openExploreMap()" style="font-size:20px;cursor:pointer" role="button" tabindex="0" aria-label="Explorer la carte" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openExploreMap();}">🗺️</div>
           <div id="theme-ico" style="font-size:20px;cursor:pointer" onclick="cycleTheme()" role="button" tabindex="0" aria-label="Changer de thème" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();cycleTheme();}">☀️</div>
           <div class="avatar" onclick="show('profile')" role="button" tabindex="0" aria-label="Voir mon profil" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();show('profile');}"></div>
         </div>
@@ -752,6 +753,14 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div class="searchbox" onclick="show('search')" style="margin-bottom:0">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--s3)" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="var(--s3)" stroke-width="2" stroke-linecap="round"/></svg>
         <input placeholder="Rechercher…" readonly id="t-placeholder">
+      </div>
+      <div onclick="openExploreMap()" role="button" tabindex="0" aria-label="Explorer les magasins autour de moi" onkeydown="if(event.key==='Enter'){openExploreMap();}" style="display:flex;align-items:center;gap:12px;margin-top:10px;padding:12px 14px;border-radius:16px;background:linear-gradient(120deg,var(--bg2),var(--bg3));border:1.5px solid var(--border);cursor:pointer">
+        <span style="font-size:22px">🗺️</span>
+        <div style="flex:1">
+          <div style="font-size:13.5px;font-weight:800;color:var(--s1)">Autour de moi</div>
+          <div style="font-size:11px;font-weight:600;color:var(--s2)">Explore les magasins sur la carte — ici ou à l'autre bout du monde</div>
+        </div>
+        <span style="font-size:14px;color:var(--s3)">›</span>
       </div>
       <div style="height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent);margin:0 -20px"></div>
     </div>
@@ -1018,7 +1027,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609m</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609n</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -5888,7 +5897,43 @@ function discLocate(discId){
    magasins a chaque deplacement (requete de zone, 600ms de repos).
 ================================ */
 var exploreMap=null,exploreLayer=null,_exploreTimer=null,_exploreSeen={};
-function openExploreMap(){
+var exploreFilter=null; // {drinkId,name} : la carte ne montre que les magasins qui vendent cette boisson
+function fmtDist(m){
+  if(m==null)return null;
+  return m<1000?Math.round(m)+" m":(m/1000).toFixed(m<10000?1:0)+" km";
+}
+function exploreShowCard(s){
+  var card=document.getElementById("explore-store-card");
+  if(!card)return;
+  var dist=null;
+  if(typeof userLat==="number"&&userLat&&typeof s.lat==="number"){
+    var dLa=(userLat-s.lat)*111000,dLo=(userLng-s.lng)*111000*Math.cos(s.lat*Math.PI/180);
+    dist=Math.sqrt(dLa*dLa+dLo*dLo);
+  }
+  var nDrinks=(s.drinks||[]).length;
+  card.innerHTML='<div style="width:44px;height:44px;border-radius:13px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">'+(s.emoji||"\uD83C\uDFEA")+'</div>'+
+    '<div style="flex:1;min-width:0">'+
+      '<div style="font-size:14px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(s.name)+'</div>'+
+      '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:2px">'+(dist!=null?"\uD83D\uDCCD "+fmtDist(dist)+" \u00B7 ":"")+nDrinks+" boisson"+(nDrinks>1?"s":"")+" r\u00E9f\u00E9renc\u00E9e"+(nDrinks>1?"s":"")+'</div>'+
+    '</div>'+
+    '<span style="font-size:15px;color:var(--s3)">\u203A</span>';
+  card.style.display="flex";
+  card.onclick=function(){
+    closeExploreMap();
+    openStoreDetail(s.id);
+    playSound("pop");
+  };
+  var status=document.getElementById("explore-status");
+  if(status)status.style.display="none";
+}
+function exploreHideCard(){
+  var card=document.getElementById("explore-store-card");
+  if(card)card.style.display="none";
+  var status=document.getElementById("explore-status");
+  if(status)status.style.display="block";
+}
+function openExploreMap(opts){
+  exploreFilter=(opts&&opts.drinkId!=null)?{drinkId:opts.drinkId,name:opts.name||""}:null;
   var host=document.getElementById("explore-map-host");
   if(!host){
     host=document.createElement("div");
@@ -5900,12 +5945,14 @@ function openExploreMap(){
         '<button id="explore-city-go" aria-label="Chercher" style="width:42px;height:42px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);font-size:15px;cursor:pointer;flex-shrink:0">\uD83D\uDD0D</button>'+
       '</div>'+
       '<div id="explore-map" style="flex:1"></div>'+
+      '<div id="explore-store-card" role="button" tabindex="0" style="display:none;position:absolute;bottom:calc(16px + env(safe-area-inset-bottom));left:14px;right:14px;background:var(--app-bg);border:1.5px solid var(--border);border-radius:18px;padding:12px 14px;align-items:center;gap:12px;box-shadow:0 8px 24px rgba(0,0,0,.22);cursor:pointer;z-index:10"></div>'+
       '<div id="explore-status" style="position:absolute;bottom:calc(18px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--app-bg);border:1.5px solid var(--border);border-radius:999px;padding:8px 16px;font-size:12px;font-weight:700;color:var(--s1);box-shadow:0 4px 14px rgba(0,0,0,.18);white-space:nowrap">Chargement\u2026</div>';
     document.body.appendChild(host);
     host.querySelector("#explore-city-go").onclick=exploreGoCity;
     host.querySelector("#explore-city-q").addEventListener("keydown",function(ev){if(ev.key==="Enter")exploreGoCity();});
   }
   host.style.display="flex";
+  exploreHideCard();
   playSound("pop");
   function build(){
     if(!exploreMap){
@@ -5916,6 +5963,7 @@ function openExploreMap(){
         clearTimeout(_exploreTimer);
         _exploreTimer=setTimeout(exploreLoadStores,600);
       });
+      exploreMap.on("click",exploreHideCard);
       if(typeof userLat==="number"&&userLat){
         L.circleMarker([userLat,userLng],{radius:7,color:"#fff",weight:2,fillColor:"#2e86c1",fillOpacity:1}).addTo(exploreMap);
       }
@@ -5951,6 +5999,11 @@ function exploreLoadStores(){
   var q=window.fbQueryZone?window.fbQueryZone(cLat,cLng,Math.min(radiusKm,25)):Promise.resolve(STORES||[]);
   q.then(function(list){
     list=list||[];
+    if(exploreFilter){
+      list=list.filter(function(s){
+        return (s.drinks||[]).some(function(id){return Number(id)===Number(exploreFilter.drinkId);});
+      });
+    }
     // fusion douce dans STORES (necessaire pour ouvrir la fiche magasin)
     list.forEach(function(s){
       if(!_exploreSeen[String(s.id)]){
@@ -5964,14 +6017,19 @@ function exploreLoadStores(){
       if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
       var mk=L.marker([s.lat,s.lng],{icon:L.divIcon({className:"",html:'<div style="width:30px;height:30px;border-radius:50%;background:var(--app-bg);border:2px solid var(--s1);display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 6px rgba(0,0,0,.25)">'+(s.emoji||"\uD83C\uDFEA")+'</div>',iconSize:[30,30],iconAnchor:[15,15]})});
       mk.on("click",function(){
-        closeExploreMap();
-        openStoreDetail(s.id);
+        exploreShowCard(s);
         playSound("pop");
       });
       exploreLayer.addLayer(mk);
       shown++;
     });
-    if(status)status.textContent=shown?("\uD83C\uDFEA "+shown+" magasin"+(shown>1?"s":"")+" ici"):"Aucun magasin dans cette zone \u2014 sois le premier \u00E0 en ajouter !";
+    if(status){
+      if(exploreFilter){
+        status.textContent=shown?("\uD83C\uDFEA "+shown+" magasin"+(shown>1?"s":"")+" vend"+(shown>1?"ent":"")+" "+exploreFilter.name):"Personne ne vend "+exploreFilter.name+" par ici (encore)";
+      }else{
+        status.textContent=shown?("\uD83C\uDFEA "+shown+" magasin"+(shown>1?"s":"")+" ici"):"Aucun magasin dans cette zone \u2014 sois le premier \u00E0 en ajouter !";
+      }
+    }
   }).catch(function(e){
     console.warn("explore:",e);
     if(status)status.textContent="\u26A0\uFE0F Chargement impossible, r\u00E9essaie";
@@ -6135,6 +6193,7 @@ function renderSortBar(){
   var labels={distance:"Plus proche",open:"Ouvert d'abord",trust:"Plus fiable"};
   var isDark=document.body.classList.contains("dark");
   var html='<div style="display:flex;gap:8px;padding:8px 20px 4px;overflow-x:auto;flex-shrink:0">';
+  html+='<div onclick="openExploreMap({drinkId:curSel.id,name:curSel.name})" role="button" tabindex="0" aria-label="Voir sur la carte" onkeydown="if(event.key===\'Enter\'){openExploreMap({drinkId:curSel.id,name:curSel.name});}" style="flex-shrink:0;padding:8px 14px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap">\uD83D\uDDFA\uFE0F Carte</div>';
   ["distance","open","trust"].forEach(function(s){
     var a=curSort===s;
     var bg=a?(isDark?"#f0f0f0":"#1a1714"):"var(--bg2)";
