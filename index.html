@@ -48,7 +48,7 @@ input,button{font-family:'Space Grotesk',sans-serif;outline:none;border:none;bac
   --bg3:#e8e5df;
   --border:#dedad3;
   --card-bg:#ffffff;
-  --nav-bg:rgba(244,242,238,.96);
+  --nav-bg:rgba(244,242,238,.62);
   --card-shadow:0 1px 3px rgba(0,0,0,.04),0 6px 20px rgba(0,0,0,.06);
   --accent:#1a1714;
   --accent-rgb:26,23,20;
@@ -66,7 +66,7 @@ body.dark{
   --bg2:#222;
   --bg3:#2a2a2a;
   --border:#2e2e2e;
-  --nav-bg:rgba(26,26,26,.94);
+  --nav-bg:rgba(24,22,20,.55);
   --card-shadow:0 1px 3px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);
   --nav-border:#2a2a2a;
 }
@@ -79,6 +79,7 @@ body{
   padding:20px;min-height:100vh;
 }
 #app{
+  position:relative;
   width:100%;max-width:402px;
   border-radius:var(--radius-app);
   overflow:hidden;
@@ -105,7 +106,11 @@ body{
 .screen.on{display:flex}
 .screen.s-enter{opacity:0;transform:translateY(10px)}
 .screen.s-leave{opacity:0;transform:translateY(-6px)}
-.scroll{flex:1;overflow-y:auto;overflow-x:hidden;padding:56px 20px 16px;-webkit-overflow-scrolling:touch}
+.scroll{flex:1;overflow-y:auto;overflow-x:hidden;padding:56px 20px calc(104px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
+/* Les defilements des ecrans passent SOUS la barre translucide : chaque
+   conteneur garde une respiration en bas pour que le dernier element
+   remonte au-dessus du dock quand on arrive en fin de liste. */
+.screen>div[style*="overflow-y:auto"],.screen>div[style*="overflow-y: auto"]{padding-bottom:calc(104px + env(safe-area-inset-bottom))}
 
 /* ── Skeleton loaders ── */
 .skel{background:linear-gradient(90deg,var(--bg2) 25%,var(--bg3) 37%,var(--bg2) 63%);background-size:400% 100%;animation:skel-shimmer 1.4s ease infinite;border-radius:8px}
@@ -116,14 +121,14 @@ body{
 
 /* ── Shared nav ── */
 #nav{
-  flex-shrink:0;
+  position:absolute;left:0;right:0;bottom:0;
   display:flex;justify-content:space-around;align-items:center;
   padding:10px 14px calc(14px + env(safe-area-inset-bottom));
   border-top:1px solid var(--nav-border);
   border-radius:26px 26px 0 0;
   background:var(--nav-bg);
-  backdrop-filter:blur(18px) saturate(1.5);
-  -webkit-backdrop-filter:blur(18px) saturate(1.5);
+  backdrop-filter:blur(20px) saturate(1.6);
+  -webkit-backdrop-filter:blur(20px) saturate(1.6);
   box-shadow:0 -10px 30px rgba(12,10,8,.16);
   z-index:50;
 }
@@ -1082,7 +1087,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609q</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609s</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -5976,6 +5981,7 @@ function exploreShowCard(s){
     '</div>'+
     '<span style="font-size:15px;color:var(--s3)">\u203A</span>';
   card.style.display="flex";
+  _cardOpenedAt=Date.now();
   card.onclick=function(){
     closeExploreMap();
     openStoreDetail(s.id);
@@ -5984,7 +5990,12 @@ function exploreShowCard(s){
   var status=document.getElementById("explore-status");
   if(status)status.style.display="none";
 }
+var _cardOpenedAt=0;
 function exploreHideCard(){
+  // Piege Leaflet mobile : le tap sur un pin remonte aussi en clic-carte,
+  // ce qui refermait la bandelette dans la meme milliseconde. On ignore
+  // les fermetures dans les 450ms suivant une ouverture.
+  if(Date.now()-_cardOpenedAt<450)return;
   var card=document.getElementById("explore-store-card");
   if(card)card.style.display="none";
   var status=document.getElementById("explore-status");
@@ -6010,6 +6021,7 @@ function openExploreMap(opts){
     host.querySelector("#explore-city-q").addEventListener("keydown",function(ev){if(ev.key==="Enter")exploreGoCity();});
   }
   host.style.display="flex";
+  _cardOpenedAt=0;
   exploreHideCard();
   playSound("pop");
   function build(){
@@ -6074,7 +6086,10 @@ function exploreLoadStores(){
     list.slice(0,400).forEach(function(s){
       if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
       var mk=L.marker([s.lat,s.lng],{icon:L.divIcon({className:"",html:'<div style="width:30px;height:30px;border-radius:50%;background:var(--app-bg);border:2px solid var(--s1);display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 6px rgba(0,0,0,.25)">'+(s.emoji||"\uD83C\uDFEA")+'</div>',iconSize:[30,30],iconAnchor:[15,15]})});
-      mk.on("click",function(){
+      mk.on("click",function(e){
+        if(e&&e.originalEvent&&window.L&&L.DomEvent){try{L.DomEvent.stopPropagation(e.originalEvent);}catch(_e){}}
+        // recentrage doux sur le pin (la bandelette couvre le bas)
+        try{if(exploreMap.panTo)exploreMap.panTo([s.lat,s.lng]);}catch(_e){}
         exploreShowCard(s);
         playSound("pop");
       });
