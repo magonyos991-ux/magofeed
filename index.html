@@ -793,6 +793,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <span onclick="document.getElementById('q').value='';renderList()" style="cursor:pointer;font-size:16px" class="c3">✕</span>
       </div>
       <div class="chips" id="cats-search"></div>
+      <div id="explore-map-btn" onclick="openExploreMap()" role="button" tabindex="0" aria-label="Explorer la carte des magasins" onkeydown="if(event.key==='Enter'){openExploreMap();}" style="display:none;margin:0 0 12px;padding:12px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);text-align:center;font-size:13px;font-weight:700;color:var(--s1);cursor:pointer">🗺️ Explorer la carte des magasins</div>
       <div id="search-list"></div>
     </div>
   </div>
@@ -1017,7 +1018,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609l</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609m</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -4205,6 +4206,7 @@ function setSearchMode(mode){
   searchMode=mode;
   document.querySelectorAll(".search-mode-btn").forEach(function(b){b.classList.toggle("on",b.dataset.mode===mode);});
   var catsEl=document.getElementById("cats-search");if(catsEl)catsEl.style.display=mode==="drinks"?"flex":"none";
+  var mapBtn=document.getElementById("explore-map-btn");if(mapBtn)mapBtn.style.display=mode==="stores"?"block":"none";
   var q=document.getElementById("q");
   var TT=LANGS[curLang]||LANGS.fr;
   if(q)q.placeholder=mode==="drinks"?(TT.placeholder||"Rechercher…"):(mode==="users"?(TT.modePlayers?TT.modePlayers.replace(/^[^ ]+ /,"")+"…":"Pseudo…"):(TT.modeStores?TT.modeStores.replace(/^[^ ]+ /,"")+"…":"Magasins…"));
@@ -5878,6 +5880,124 @@ function discLocate(discId){
 /* "Je sais ou la trouver" depuis la fiche d'une boisson du catalogue :
    meme selecteur complet (recherche + carte + ajout de magasin), retour
    visuel sur la fiche elle-meme */
+/* ================================
+   🗺️ EXPLORATEUR DE CARTE — facon Uber Eats
+   Plein ecran, tous les magasins Magofeed de la zone visible, navigation
+   libre dans le monde entier (recherche de ville integree). Tap sur un
+   pin -> la fiche du magasin et ses boissons. La carte recharge les
+   magasins a chaque deplacement (requete de zone, 600ms de repos).
+================================ */
+var exploreMap=null,exploreLayer=null,_exploreTimer=null,_exploreSeen={};
+function openExploreMap(){
+  var host=document.getElementById("explore-map-host");
+  if(!host){
+    host=document.createElement("div");
+    host.id="explore-map-host";
+    host.style.cssText="position:fixed;inset:0;z-index:4100;background:var(--app-bg);display:none;flex-direction:column";
+    host.innerHTML='<div style="display:flex;gap:8px;align-items:center;padding:12px 14px;padding-top:calc(12px + env(safe-area-inset-top))">'+
+        '<div onclick="closeExploreMap()" role="button" tabindex="0" aria-label="Fermer la carte" onkeydown="if(event.key===\'Enter\'){closeExploreMap();}" style="width:38px;height:38px;border-radius:12px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer;flex-shrink:0">✕</div>'+
+        '<input id="explore-city-q" placeholder="Aller \u00E0\u2026 S\u00E9oul, Paris, Tournai" style="flex:1;padding:11px 13px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-family:inherit">'+
+        '<button id="explore-city-go" aria-label="Chercher" style="width:42px;height:42px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);font-size:15px;cursor:pointer;flex-shrink:0">\uD83D\uDD0D</button>'+
+      '</div>'+
+      '<div id="explore-map" style="flex:1"></div>'+
+      '<div id="explore-status" style="position:absolute;bottom:calc(18px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--app-bg);border:1.5px solid var(--border);border-radius:999px;padding:8px 16px;font-size:12px;font-weight:700;color:var(--s1);box-shadow:0 4px 14px rgba(0,0,0,.18);white-space:nowrap">Chargement\u2026</div>';
+    document.body.appendChild(host);
+    host.querySelector("#explore-city-go").onclick=exploreGoCity;
+    host.querySelector("#explore-city-q").addEventListener("keydown",function(ev){if(ev.key==="Enter")exploreGoCity();});
+  }
+  host.style.display="flex";
+  playSound("pop");
+  function build(){
+    if(!exploreMap){
+      exploreMap=L.map("explore-map",{zoomControl:false});
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(exploreMap);
+      exploreLayer=L.layerGroup().addTo(exploreMap);
+      exploreMap.on("moveend",function(){
+        clearTimeout(_exploreTimer);
+        _exploreTimer=setTimeout(exploreLoadStores,600);
+      });
+      if(typeof userLat==="number"&&userLat){
+        L.circleMarker([userLat,userLng],{radius:7,color:"#fff",weight:2,fillColor:"#2e86c1",fillOpacity:1}).addTo(exploreMap);
+      }
+    }
+    exploreMap.setView([typeof userLat==="number"&&userLat?userLat:50.8466,typeof userLng==="number"&&userLng?userLng:4.3528],14);
+    setTimeout(function(){try{exploreMap.invalidateSize();}catch(e){}exploreLoadStores();},120);
+  }
+  if(window.L){build();return;}
+  var link=document.createElement("link");link.rel="stylesheet";link.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";document.head.appendChild(link);
+  var script=document.createElement("script");script.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
+  script.onload=build;
+  document.head.appendChild(script);
+}
+function closeExploreMap(){
+  var host=document.getElementById("explore-map-host");
+  if(host)host.style.display="none";
+}
+function exploreLoadStores(){
+  if(!exploreMap)return;
+  var status=document.getElementById("explore-status");
+  var b=exploreMap.getBounds();
+  var ne=b.getNorthEast(),sw=b.getSouthWest();
+  var cLat=(ne.lat+sw.lat)/2,cLng=(ne.lng+sw.lng)/2;
+  // rayon = demi-diagonale (km)
+  var dLa=(ne.lat-sw.lat)*111/2;
+  var dLo=(ne.lng-sw.lng)*111*Math.cos(cLat*Math.PI/180)/2;
+  var radiusKm=Math.sqrt(dLa*dLa+dLo*dLo);
+  if(radiusKm>30){
+    if(status)status.textContent="\uD83D\uDD0D Zoome pour voir les magasins";
+    return;
+  }
+  if(status)status.textContent="Chargement\u2026";
+  var q=window.fbQueryZone?window.fbQueryZone(cLat,cLng,Math.min(radiusKm,25)):Promise.resolve(STORES||[]);
+  q.then(function(list){
+    list=list||[];
+    // fusion douce dans STORES (necessaire pour ouvrir la fiche magasin)
+    list.forEach(function(s){
+      if(!_exploreSeen[String(s.id)]){
+        _exploreSeen[String(s.id)]=1;
+        if(!(STORES||[]).some(function(x){return String(x.id)===String(s.id);}))STORES.push(s);
+      }
+    });
+    exploreLayer.clearLayers();
+    var shown=0;
+    list.slice(0,400).forEach(function(s){
+      if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
+      var mk=L.marker([s.lat,s.lng],{icon:L.divIcon({className:"",html:'<div style="width:30px;height:30px;border-radius:50%;background:var(--app-bg);border:2px solid var(--s1);display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 6px rgba(0,0,0,.25)">'+(s.emoji||"\uD83C\uDFEA")+'</div>',iconSize:[30,30],iconAnchor:[15,15]})});
+      mk.on("click",function(){
+        closeExploreMap();
+        openStoreDetail(s.id);
+        playSound("pop");
+      });
+      exploreLayer.addLayer(mk);
+      shown++;
+    });
+    if(status)status.textContent=shown?("\uD83C\uDFEA "+shown+" magasin"+(shown>1?"s":"")+" ici"):"Aucun magasin dans cette zone \u2014 sois le premier \u00E0 en ajouter !";
+  }).catch(function(e){
+    console.warn("explore:",e);
+    if(status)status.textContent="\u26A0\uFE0F Chargement impossible, r\u00E9essaie";
+  });
+}
+function exploreGoCity(){
+  var q=((document.getElementById("explore-city-q")||{}).value||"").trim();
+  if(!q)return;
+  var status=document.getElementById("explore-status");
+  if(status)status.textContent="Recherche de \u00AB "+q+" \u00BB\u2026";
+  fetchWithTimeout("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q),15000)
+    .then(function(r){return r.json();})
+    .then(function(rows){
+      if(!rows||!rows.length){
+        if(status)status.textContent="Ville introuvable \u2014 essaie \u00AB "+q+" + pays \u00BB";
+        playSound("err");
+        return;
+      }
+      exploreMap.setView([Number(rows[0].lat),Number(rows[0].lon)],14);
+      playSound("pop");
+    })
+    .catch(function(){
+      if(status)status.textContent="\u26A0\uFE0F Recherche indisponible, r\u00E9essaie";
+      playSound("err");
+    });
+}
 function drinkLocate(){
   if(!curSel)return;
   lastScanContext={drinkId:curSel.id,from:"fiche"};
