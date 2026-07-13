@@ -1095,7 +1095,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609w</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0609y</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1521,8 +1521,9 @@ function boundingBox(lat, lng, radiusKm) {
 function normalizeStore(data, id, distKm) {
   data.fbId = id;
   data.id = data.id || id;
-  data.open = data.open !== undefined ? data.open : true;
-  data.hours = data.hours || "22h";
+  // open/hours ne sont PLUS inventes : l'ouverture se calcule en direct
+  // (storeOpenState) depuis les vrais horaires OSM ou l'heuristique d'enseigne.
+  data.hours = data.hours || null;
   data.emoji = data.emoji || "🏪";
   data.drinks = data.drinks || [];
   data.confirmations = data.confirmations || {};
@@ -1858,6 +1859,7 @@ window.fbImportStores = async function(list, onProgress) {
         emoji: s.emoji || "\uD83C\uDFEA",
         lat: Number(s.lat),
         lng: Number(s.lng),
+        hours: s.hours ? String(s.hours).slice(0, 120) : null,
         drinks: [],
         confirmations: {},
         osmImport: true,
@@ -2530,6 +2532,60 @@ var DRINKS=[
   {id:11183,name:"Cockta Original",brand:"Cockta",emoji:"🌹",color:"#7b241c",light:"#f9ebea",cat:"Exotique",tag:"COCKTA",stars:4.0},
   {id:11184,name:"Materva Yerba Mate",brand:"Materva",emoji:"🧉",color:"#f1c40f",light:"#fef9e7",cat:"Exotique",tag:"MATERVA",stars:4.1},
   {id:11185,name:"Ironbeer Original",brand:"Ironbeer",emoji:"💪",color:"#7b241c",light:"#f9ebea",cat:"Exotique",tag:"IRONBEER",stars:4.0},
+  {id:11200,name:"Breizh Cola",brand:"Breizh Cola",emoji:"⚫",color:"#2c3e50",light:"#eaecee",cat:"Soda",tag:"BREIZH COLA",stars:4.2},
+  {id:11201,name:"Corsica Cola",brand:"Corsica Cola",emoji:"🔴",color:"#7b241c",light:"#f9ebea",cat:"Soda",tag:"CORSICA COLA",stars:4.1},
+  {id:11202,name:"Meuh Cola Bio",brand:"Meuh Cola",emoji:"🐄",color:"#6e2c00",light:"#fbeee6",cat:"Soda",tag:"MEUH COLA",stars:4.0},
+  {id:11203,name:"Pschitt Citron",brand:"Pschitt",emoji:"🍋",color:"#f4d03f",light:"#fef9e7",cat:"Soda",tag:"PSCHITT",stars:4.1},
+  {id:11204,name:"Pschitt Orange",brand:"Pschitt",emoji:"🍊",color:"#f4d03f",light:"#fef9e7",cat:"Soda",tag:"PSCHITT",stars:4.0},
+  {id:11205,name:"Banga Orange",brand:"Banga",emoji:"🍊",color:"#f39c12",light:"#fef5e7",cat:"Jus",tag:"BANGA",stars:4.3},
+  {id:11206,name:"Champomy Pomme",brand:"Champomy",emoji:"🍏",color:"#f9e79f",light:"#fefbea",cat:"Soda",tag:"CHAMPOMY",stars:4.4},
+  {id:11207,name:"Cacolac Original",brand:"Cacolac",emoji:"🍫",color:"#6e2c00",light:"#fbeee6",cat:"Autre",tag:"CACOLAC",stars:4.3},
+  {id:11208,name:"Fruité Tropical",brand:"Fruité",emoji:"🌴",color:"#e67e22",light:"#fef3e2",cat:"Jus",tag:"FRUITÉ",stars:4.0},
+  {id:11209,name:"Caraïbos Goyave",brand:"Caraïbos",emoji:"🍐",color:"#e91e63",light:"#fce4ec",cat:"Jus",tag:"CARAÏBOS",stars:4.2},
+  {id:11210,name:"Caraïbos Mangue",brand:"Caraïbos",emoji:"🥭",color:"#e91e63",light:"#fce4ec",cat:"Jus",tag:"CARAÏBOS",stars:4.2},
+  {id:11211,name:"Pampryl Orange",brand:"Pampryl",emoji:"🍊",color:"#f39c12",light:"#fef5e7",cat:"Jus",tag:"PAMPRYL",stars:3.9},
+  {id:11212,name:"Pressade Multifruits",brand:"Pressade",emoji:"🌈",color:"#27ae60",light:"#e9f7ef",cat:"Jus",tag:"PRESSADE",stars:3.9},
+  {id:11213,name:"Fruit Shoot Multivitamines",brand:"Fruit Shoot",emoji:"🌈",color:"#8e44ad",light:"#f4ecf7",cat:"Jus",tag:"FRUIT SHOOT",stars:4.0},
+  {id:11214,name:"Fruit Shoot Pomme",brand:"Fruit Shoot",emoji:"🍏",color:"#8e44ad",light:"#f4ecf7",cat:"Jus",tag:"FRUIT SHOOT",stars:3.9},
+  {id:11215,name:"Val Citron",brand:"Val",emoji:"🍋",color:"#5dade2",light:"#ebf5fb",cat:"Soda",tag:"VAL",stars:4.0},
+  {id:11216,name:"Val Orange",brand:"Val",emoji:"🍊",color:"#5dade2",light:"#ebf5fb",cat:"Soda",tag:"VAL",stars:4.0},
+  {id:11220,name:"Chocomel Original",brand:"Chocomel",emoji:"🍫",color:"#6e2c00",light:"#fbeee6",cat:"Autre",tag:"CHOCOMEL",stars:4.5},
+  {id:11221,name:"Spa Fruit Citron",brand:"Spa Fruit",emoji:"🍋",color:"#85c1e9",light:"#ebf5fb",cat:"Soda",tag:"SPA FRUIT",stars:4.1},
+  {id:11222,name:"Spa Fruit Orange",brand:"Spa Fruit",emoji:"🍊",color:"#85c1e9",light:"#ebf5fb",cat:"Soda",tag:"SPA FRUIT",stars:4.0},
+  {id:11224,name:"Hawaï Ananas",brand:"Hawaï",emoji:"🍍",color:"#f39c12",light:"#fef5e7",cat:"Soda",tag:"HAWAÏ",stars:4.5},
+  {id:11225,name:"Poms Pomme",brand:"Poms",emoji:"🍏",color:"#a9dfbf",light:"#eafaf1",cat:"Soda",tag:"POMS",stars:4.3},
+  {id:11226,name:"Oulmès Pétillante",brand:"Oulmès",emoji:"🫧",color:"#85c1e9",light:"#ebf5fb",cat:"Eau",tag:"OULMÈS",stars:4.2},
+  {id:11227,name:"Sidi Ali",brand:"Sidi Ali",emoji:"💧",color:"#85c1e9",light:"#ebf5fb",cat:"Eau",tag:"SIDI ALI",stars:4.1},
+  {id:11228,name:"Aïn Saïss",brand:"Aïn Saïss",emoji:"💧",color:"#85c1e9",light:"#ebf5fb",cat:"Eau",tag:"AÏN SAÏSS",stars:4.0},
+  {id:11229,name:"Boga Menthe",brand:"Boga",emoji:"🌿",color:"#27ae60",light:"#e9f7ef",cat:"Soda",tag:"BOGA",stars:4.2},
+  {id:11230,name:"Safia",brand:"Safia",emoji:"💧",color:"#85c1e9",light:"#ebf5fb",cat:"Eau",tag:"SAFIA",stars:3.9},
+  {id:11231,name:"Sim Orange",brand:"Sim",emoji:"🍊",color:"#f39c12",light:"#fef5e7",cat:"Jus",tag:"SIM",stars:4.1},
+  {id:11232,name:"Rouiba Cocktail",brand:"Rouiba",emoji:"🍹",color:"#e67e22",light:"#fef3e2",cat:"Jus",tag:"ROUIBA",stars:4.2},
+  {id:11233,name:"Ngaous Abricot",brand:"Ngaous",emoji:"🍑",color:"#f39c12",light:"#fef5e7",cat:"Jus",tag:"NGAOUS",stars:4.3},
+  {id:11234,name:"Judor Citron",brand:"Judor",emoji:"🍋",color:"#f4d03f",light:"#fef9e7",cat:"Soda",tag:"JUDOR",stars:4.1},
+  {id:11235,name:"Mecca-Cola",brand:"Mecca-Cola",emoji:"🔴",color:"#7b241c",light:"#f9ebea",cat:"Soda",tag:"MECCA-COLA",stars:3.9},
+  {id:11236,name:"Fruko Orange",brand:"Fruko",emoji:"🍊",color:"#e67e22",light:"#fef3e2",cat:"Soda",tag:"FRUKO",stars:4.0},
+  {id:11237,name:"Yedigün Orange",brand:"Yedigün",emoji:"🍊",color:"#f39c12",light:"#fef5e7",cat:"Soda",tag:"YEDIGÜN",stars:4.1},
+  {id:11238,name:"Çamlıca Gazoz",brand:"Çamlıca",emoji:"🫧",color:"#f4d03f",light:"#fef9e7",cat:"Soda",tag:"ÇAMLICA",stars:4.2},
+  {id:11239,name:"Beypazarı Maden Suyu",brand:"Beypazarı",emoji:"🫧",color:"#85c1e9",light:"#ebf5fb",cat:"Eau",tag:"BEYPAZARI",stars:4.4},
+  {id:11240,name:"Kızılay Maden Suyu",brand:"Kızılay",emoji:"🫧",color:"#85c1e9",light:"#ebf5fb",cat:"Eau",tag:"KIZILAY",stars:4.2},
+  {id:11241,name:"Sütaş Ayran",brand:"Sütaş",emoji:"🥛",color:"#aed6f1",light:"#ebf5fb",cat:"Autre",tag:"SÜTAŞ",stars:4.3},
+  {id:11242,name:"Badoit Verte",brand:"Badoit",emoji:"🫧",color:"#27ae60",light:"#e9f7ef",cat:"Eau",tag:"BADOIT",stars:4.3},
+  {id:11243,name:"Badoit Rouge",brand:"Badoit",emoji:"🔴",color:"#27ae60",light:"#e9f7ef",cat:"Eau",tag:"BADOIT",stars:4.2},
+  {id:11244,name:"St-Yorre",brand:"St-Yorre",emoji:"⚡",color:"#e74c3c",light:"#fdedec",cat:"Eau",tag:"ST-YORRE",stars:4.0},
+  {id:11245,name:"Vichy Célestins",brand:"Vichy Célestins",emoji:"🫧",color:"#5dade2",light:"#ebf5fb",cat:"Eau",tag:"VICHY CÉLESTINS",stars:4.0},
+  {id:11246,name:"Salvetat",brand:"Salvetat",emoji:"🫧",color:"#ec7063",light:"#fdedec",cat:"Eau",tag:"SALVETAT",stars:4.1},
+  {id:11247,name:"Rozana",brand:"Rozana",emoji:"🫧",color:"#ec7063",light:"#fdedec",cat:"Eau",tag:"ROZANA",stars:3.9},
+  {id:11248,name:"Quézac",brand:"Quézac",emoji:"🫧",color:"#27ae60",light:"#e9f7ef",cat:"Eau",tag:"QUÉZAC",stars:4.0},
+  {id:11250,name:"Thonon",brand:"Thonon",emoji:"💧",color:"#85c1e9",light:"#ebf5fb",cat:"Eau",tag:"THONON",stars:3.9},
+  {id:11251,name:"Candy'Up Chocolat",brand:"Candy'Up",emoji:"🍫",color:"#e91e63",light:"#fce4ec",cat:"Autre",tag:"CANDY'UP",stars:4.1},
+  {id:11252,name:"Danao Orange-Banane-Fraise",brand:"Danao",emoji:"🍹",color:"#f9e79f",light:"#fefbea",cat:"Jus",tag:"DANAO",stars:4.2},
+  {id:11253,name:"Danao Pêche-Abricot",brand:"Danao",emoji:"🍑",color:"#f9e79f",light:"#fefbea",cat:"Jus",tag:"DANAO",stars:4.1},
+  {id:11254,name:"Nesquik Prêt-à-Boire",brand:"Nesquik",emoji:"🍫",color:"#6e2c00",light:"#fbeee6",cat:"Autre",tag:"NESQUIK",stars:4.2},
+  {id:11255,name:"Starbucks Frappuccino Vanilla",brand:"Starbucks",emoji:"☕",color:"#145a32",light:"#e9f7ef",cat:"Autre",tag:"STARBUCKS",stars:4.2},
+  {id:11256,name:"Starbucks Doubleshot Espresso",brand:"Starbucks",emoji:"☕",color:"#145a32",light:"#e9f7ef",cat:"Autre",tag:"STARBUCKS",stars:4.1},
+  {id:11257,name:"Emmi Caffè Latte Macchiato",brand:"Emmi",emoji:"☕",color:"#d5dbdb",light:"#f8f9f9",cat:"Autre",tag:"EMMI",stars:4.3},
+  {id:11258,name:"Dark Dog Original",brand:"Dark Dog",emoji:"🐕",color:"#2c3e50",light:"#eaecee",cat:"Energy",tag:"DARK DOG",stars:3.8},
 ];
 
 /* Stores — démarrage avec le Carrefour Ixelles qu'on a seedé, Firebase remplace au chargement */
@@ -4586,7 +4642,7 @@ function renderStoreSearchSortBar(){
 function setStoreSearchSort(s){curStoreSearchSort=s;renderStoreSearchList();playSound("pop");}
 function sortedStoreSearchResults(list){
   var arr=list.slice();
-  if(curStoreSearchSort==="open")arr.sort(function(a,b){return(b.open?1:0)-(a.open?1:0);});
+  if(curStoreSearchSort==="open")arr.sort(function(a,b){return openScore(b)-openScore(a);});
   else arr.sort(function(a,b){return(a.dist||9999999)-(b.dist||9999999);});
   return arr;
 }
@@ -4641,7 +4697,7 @@ function renderStoreSearchList(){
     var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):"";
     var div=document.createElement("div");div.className="ritem";
     div.innerHTML='<div class="rphoto" style="background:var(--bg2)">'+storeIconHTML(s)+'</div>'+
-      '<div style="flex:1"><div class="rname">'+s.name+'</div><div class="rsub">'+(s.brand||s.type||"")+(dist?" · "+dist:"")+(s.open===false?" · Fermé":s.open?" · Ouvert":"")+'</div></div>'+
+      '<div style="flex:1"><div class="rname">'+s.name+'</div><div class="rsub">'+(s.brand||s.type||"")+(dist?" · "+dist:"")+(openLabel(s)?" · "+openLabel(s):"")+'</div></div>'+
       '<span class="c3" style="font-size:18px">›</span>';
     div.onclick=function(){openStoreDetail(String(s.id));};
     a11yCard(div,s.name+(s.brand?", "+s.brand:""));
@@ -5313,7 +5369,7 @@ function renderStoreList(){
             (storePrice?'<span style="font-size:12px;font-weight:800;color:var(--s1);background:var(--bg2);padding:2px 8px;border-radius:999px">'+storePrice+'</span>':'<span style="font-size:11px;color:var(--s3);font-weight:500">Prix inconnu</span>')+
           '</div>'+
           '<div class="store-meta"><span>'+dist+'</span><span>·</span>'+
-          '<span class="status" style="background:'+(s.open?"#f0fdf4":"#fef2f2")+';color:'+(s.open?"#15803d":"#b91c1c")+'">'+(s.open?"Ouvert · "+s.hours:"Fermé · "+s.hours)+'</span></div>'+
+          (storeOpenState(s)!==null?'<span class="status" style="background:'+(storeOpenState(s)?"#f0fdf4":"#fef2f2")+';color:'+(storeOpenState(s)?"#15803d":"#b91c1c")+'">'+openLabel(s)+(s.hours?" · "+s.hours:"")+'</span>':'<span class="status" style="background:var(--bg3);color:var(--s2)">Horaires inconnus</span>')+'</div>'+
         '</div>'+
       '</div>'+
       (s.open?'<button class="gobtn" onclick="goToStore('+s.lat+','+s.lng+')">Y aller</button>':'<button class="gobtn closed">Fermé</button>')+
@@ -5397,7 +5453,7 @@ function openStoreSheet(storeId){
       '<div class="store-ico" style="background:'+(s.open?"var(--bg2)":"#fee2e2")+';width:46px;height:46px;font-size:22px;flex-shrink:0">'+storeIconHTML(s)+'</div>'+
       '<div style="flex:1;min-width:0">'+
         '<div style="font-size:16px;font-weight:800;color:var(--s1)">'+s.name+'</div>'+
-        '<div style="font-size:12px;color:var(--s2);margin-top:2px">'+(s.brand?s.brand+" · ":"")+(dist?dist+" · ":"")+(s.open?"Ouvert · "+s.hours:"Fermé · "+s.hours)+'</div>'+
+        '<div style="font-size:12px;color:var(--s2);margin-top:2px">'+(s.brand?s.brand+" · ":"")+(dist?dist+" · ":"")+(openLabel(s)?openLabel(s)+(s.hours?" · "+s.hours:""):"Horaires inconnus")+'</div>'+
       '</div>'+
       '<span onclick="closeStoreSheet()" style="font-size:22px;cursor:pointer;flex-shrink:0" class="c3" role="button" tabindex="0" aria-label="Fermer" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();closeStoreSheet();}">✕</span>'+
     '</div>'+
@@ -5481,7 +5537,7 @@ function renderStoreDetail(){
   if(!addr)resolveStoreAddress(s);
   var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):null;
   document.getElementById("sd-badges").innerHTML=
-    '<span class="rbadge" style="background:'+(s.open?"rgba(34,197,94,.3)":"rgba(239,68,68,.3)")+'">'+(s.open?"Ouvert":"Fermé")+' · '+(s.hours||"")+'</span>'+
+    (openLabel(s)?'<span class="rbadge" style="background:'+(storeOpenState(s)?"rgba(34,197,94,.3)":"rgba(239,68,68,.3)")+'">'+openLabel(s)+(s.hours?" · "+s.hours:"")+'</span>':"")+
     (dist?'<span class="rbadge">'+dist+'</span>':"");
   var gmaps=document.getElementById("sd-gmaps");if(gmaps)gmaps.onclick=function(){goToStore(s.lat,s.lng);};
   var waze=document.getElementById("sd-waze");if(waze)waze.onclick=function(){window.open("https://waze.com/ul?ll="+s.lat+","+s.lng+"&navigate=yes","_blank");};
@@ -5809,7 +5865,7 @@ function osmAnalyze(){
         var lng=e.lon!=null?e.lon:(e.center&&e.center.lon);
         var name=e.tags&&(e.tags.name||e.tags["name:fr"]||e.tags.brand);
         if(lat==null||lng==null||!name)return null;
-        return {id:"o"+e.id,osm:e.id,name:name,emoji:osmShopEmoji(e.tags.shop),lat:lat,lng:lng};
+        return {id:"o"+e.id,osm:e.id,name:name,emoji:osmShopEmoji(e.tags.shop),lat:lat,lng:lng,hours:(e.tags.opening_hours||null)};
       }).filter(Boolean).filter(function(s){
         var k=s.id;if(seen[k])return false;seen[k]=1;return true;
       });
@@ -6146,7 +6202,7 @@ function exploreShowCard(s){
   card.innerHTML='<div style="width:44px;height:44px;border-radius:13px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">'+(s.emoji||"\uD83C\uDFEA")+'</div>'+
     '<div style="flex:1;min-width:0">'+
       '<div style="font-size:14px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(s.name)+'</div>'+
-      '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:2px">'+(dist!=null?"\uD83D\uDCCD "+fmtDist(dist)+" \u00B7 ":"")+nDrinks+" boisson"+(nDrinks>1?"s":"")+" r\u00E9f\u00E9renc\u00E9e"+(nDrinks>1?"s":"")+'</div>'+
+      '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:2px">'+(dist!=null?"\uD83D\uDCCD "+fmtDist(dist)+" \u00B7 ":"")+nDrinks+" boisson"+(nDrinks>1?"s":"")+" r\u00E9f\u00E9renc\u00E9e"+(nDrinks>1?"s":"")+(openLabel(s)?' \u00B7 <span style="color:'+(storeOpenState(s)?"#15803d":"#b91c1c")+';font-weight:800">'+openLabel(s)+"</span>":"")+'</div>'+
     '</div>'+
     '<span style="font-size:15px;color:var(--s3)">\u203A</span>';
   card.style.display="flex";
@@ -6451,7 +6507,87 @@ function renderSortBar(){
   return html+'</div>';
 }
 function setSort(s){curSort=s;renderStoreList();playSound("pop");}
-function sortedStores(stores){var arr=stores.slice();if(curSort==="distance")arr.sort(function(a,b){return(a.dist||999)-(b.dist||999);});else if(curSort==="open")arr.sort(function(a,b){return(b.open?1:0)-(a.open?1:0);});else if(curSort==="trust")arr.sort(function(a,b){var id=curSel?curSel.id:0;return(b.confirmations[id]||0)-(a.confirmations[id]||0);});return arr;}
+/* ================================
+   HORAIRES EN DIRECT
+   Fini le champ "open" statique : l'ouverture se calcule a l'instant T.
+   Source 1 : la chaine opening_hours d'OpenStreetMap (portee par l'import).
+   Source 2 : heuristique par enseigne (un Lidl n'est pas un night shop).
+   Inconnu = inconnu : on n'affiche jamais "Ouvert" sans savoir.
+================================ */
+var _DAYMAP={Su:0,Mo:1,Tu:2,We:3,Th:4,Fr:5,Sa:6};
+function parseOSMHours(str){
+  if(!str||typeof str!=="string")return null;
+  str=str.trim();
+  if(/^24\s*\/\s*7$/.test(str))return[{days:[0,1,2,3,4,5,6],ranges:[[0,1440]]}];
+  var rules=[];
+  var ok=false;
+  str.split(";").forEach(function(seg){
+    seg=seg.trim();if(!seg)return;
+    if(/^PH\b/i.test(seg))return; // jours feries : ignore
+    var m=seg.match(/^([A-Za-z,\- ]*?)\s*((?:\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\s*,?\s*)+|off|closed)$/i);
+    if(!m)return;
+    var daysPart=m[1].trim(),timesPart=m[2].trim();
+    var days=[];
+    if(!daysPart){days=[0,1,2,3,4,5,6];}
+    else{
+      daysPart.split(",").forEach(function(tok){
+        tok=tok.trim();
+        var r=tok.match(/^([A-Za-z]{2})\s*-\s*([A-Za-z]{2})$/);
+        if(r&&_DAYMAP[r[1]]!=null&&_DAYMAP[r[2]]!=null){
+          var a=_DAYMAP[r[1]],b=_DAYMAP[r[2]],d=a;
+          days.push(a);
+          while(d!==b){d=(d+1)%7;days.push(d);}
+        }else if(_DAYMAP[tok]!=null){days.push(_DAYMAP[tok]);}
+      });
+      if(!days.length)return;
+    }
+    var ranges=[];
+    if(!/^off$|^closed$/i.test(timesPart)){
+      timesPart.split(",").forEach(function(t){
+        var tm=t.match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
+        if(tm)ranges.push([Number(tm[1])*60+Number(tm[2]),Number(tm[3])*60+Number(tm[4])]);
+      });
+    }
+    rules.push({days:days,ranges:ranges});
+    ok=true;
+  });
+  return ok?rules:null;
+}
+function heuristicHours(name){
+  var n=(name||"").toLowerCase();
+  if(/night|nuit|24\/24/.test(n))return[{days:[0,1,2,3,4,5,6],ranges:[[18*60,4*60]]}];
+  if(/lidl|aldi|colruyt|delhaize|carrefour|intermarch|okay|spar\b|proxy|match\b|cora\b|leclerc|auchan|casino\b|monoprix|franprix/.test(n))
+    return[{days:[1,2,3,4,5,6],ranges:[[8*60,20*60]]},{days:[0],ranges:[[8*60,13*60]]}];
+  if(/press|kiosque|librairie|tabac|journaux|dagblad/.test(n))
+    return[{days:[1,2,3,4,5,6],ranges:[[7*60,19*60]]},{days:[0],ranges:[[7*60,13*60]]}];
+  return null;
+}
+function storeOpenState(s,at){
+  var now=at||(window.__forceNow?new Date(window.__forceNow):new Date());
+  var rules=parseOSMHours(s.hours)||heuristicHours(s.name);
+  if(!rules)return null; // horaires inconnus : pas de mensonge
+  var day=now.getDay(),t=now.getHours()*60+now.getMinutes();
+  var open=false;
+  rules.forEach(function(r){
+    r.ranges.forEach(function(rg){
+      var a=rg[0],b=rg[1];
+      if(b>a){ if(r.days.indexOf(day)!==-1&&t>=a&&t<b)open=true; }
+      else{ // plage nocturne (ex. 18:00-04:00)
+        if(r.days.indexOf(day)!==-1&&t>=a)open=true;
+        if(r.days.indexOf((day+6)%7)!==-1&&t<b)open=true;
+      }
+    });
+  });
+  return open;
+}
+function openScore(s){var o=storeOpenState(s);return o===true?2:(o===null?1:0);}
+function openLabel(s){
+  var o=storeOpenState(s);
+  if(o===true)return"Ouvert";
+  if(o===false)return"Ferm\u00E9";
+  return"";
+}
+function sortedStores(stores){var arr=stores.slice();if(curSort==="distance")arr.sort(function(a,b){return(a.dist||999)-(b.dist||999);});else if(curSort==="open")arr.sort(function(a,b){return openScore(b)-openScore(a);});else if(curSort==="trust")arr.sort(function(a,b){var id=curSel?curSel.id:0;return(b.confirmations[id]||0)-(a.confirmations[id]||0);});return arr;}
 
 /* ================================
    PULL TO REFRESH
