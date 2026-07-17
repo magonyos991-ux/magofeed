@@ -865,6 +865,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div class="res-back" onclick="show('search')">
           <div style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff">←</div>
           <span id="res-title" style="font-size:15px;font-weight:700;color:#fff;flex:1"></span>
+          <div id="res-admin" onclick="event.stopPropagation();openAdminSheet()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:14px;cursor:pointer;flex-shrink:0;margin-right:6px" role="button" tabindex="0" aria-label="Actions administrateur" onkeydown="if(event.key==='Enter'){event.stopPropagation();openAdminSheet();}">⚙️</div>
           <div id="res-remove" onclick="event.stopPropagation();adminRemoveDrink()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px;cursor:pointer;flex-shrink:0;margin-right:6px" role="button" tabindex="0" aria-label="Retirer du catalogue (admin)" onkeydown="if(event.key==='Enter'){event.stopPropagation();adminRemoveDrink();}">🗑️</div>
           <div id="res-managecodes" onclick="event.stopPropagation();adminManageBarcodes()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px;cursor:pointer;flex-shrink:0;margin-right:6px" role="button" tabindex="0" aria-label="Gérer les codes-barres (admin)" onkeydown="if(event.key==='Enter'){event.stopPropagation();adminManageBarcodes();}">🔢</div>
           <div id="res-fixphoto" onclick="event.stopPropagation();adminFixPhoto()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px;cursor:pointer;flex-shrink:0;margin-right:6px" role="button" tabindex="0" aria-label="Corriger la photo (admin)" onkeydown="if(event.key==='Enter'){event.stopPropagation();adminFixPhoto();}">🛠️</div>
@@ -1080,7 +1081,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0611e</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0611f</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -4409,14 +4410,9 @@ function pick(d){
   fetchVerifiedOFFImage(d);
   // Rafraichir le visuel de fiche (badge loupe si une photo est deja en cache)
   setTimeout(function(){refreshDrinkVisual(d);},80);
-  var fixBtn=document.getElementById("res-fixphoto");
-  if(fixBtn)fixBtn.style.display=isAdmin?"flex":"none";
-  var codesBtn=document.getElementById("res-managecodes");
-  if(codesBtn)codesBtn.style.display=isAdmin?"flex":"none";
-  // Le retrait n'est propose que pour les boissons PROMUES (id horodate) :
-  // impossible de supprimer une boisson du catalogue de base par accident
-  var rmBtn=document.getElementById("res-remove");
-  if(rmBtn)rmBtn.style.display=(isAdmin&&Number(d.id)>100000000000)?"flex":"none";
+  // Un seul bouton admin : les actions sont regroupees dans une feuille (openAdminSheet)
+  var adminBtn=document.getElementById("res-admin");
+  if(adminBtn)adminBtn.style.display=isAdmin?"flex":"none";
   // Si Firebase pas encore chargé, attendre : on bascule déjà sur l'écran résultats avec un skeleton
   if(!window._fbReady && window._fbLoading) {
     curSel=d;setAccent(d);
@@ -5282,6 +5278,33 @@ function adminRemoveDrink(){
   toast("\uD83D\uDDD1\uFE0F \u00AB "+d.name+" \u00BB retir\u00E9e du catalogue");
   navTo("search");
   renderList();renderTrends();
+}
+/* Toutes les actions admin de la fiche regroupees dans UNE feuille :
+   l'en-tete reste propre (3 boutons pour tous, + 1 seul engrenage admin). */
+function openAdminSheet(){
+  if(!isAdmin||!curSel)return;
+  var d=curSel;
+  var old=document.getElementById("admin-sheet");
+  if(old)old.remove();
+  var wrap=document.createElement("div");
+  wrap.id="admin-sheet";
+  wrap.style.cssText="position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center";
+  var canRemove=Number(d.id)>100000000000;
+  wrap.innerHTML='<div style="width:100%;max-width:480px;background:var(--bg2);border-radius:22px 22px 0 0;padding:16px 16px 26px">'+
+    '<div style="width:38px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 12px"></div>'+
+    '<div style="font-size:13px;font-weight:700;color:var(--s2);margin-bottom:10px;text-align:center">Admin \u00B7 '+sanitize(d.name)+'</div>'+
+    '<div id="ash-photo" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">\uD83D\uDEE0\uFE0F Corriger la photo</div>'+
+    '<div id="ash-codes" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">\uD83D\uDD22 G\u00E9rer les codes-barres</div>'+
+    (canRemove?'<div id="ash-remove" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:#b91c1c">\uD83D\uDDD1\uFE0F Retirer du catalogue</div>':'')+
+    '<div id="ash-cancel" role="button" tabindex="0" style="text-align:center;padding:12px;font-size:13px;font-weight:700;color:var(--s3);cursor:pointer">Annuler</div></div>';
+  document.body.appendChild(wrap);
+  function close(){wrap.remove();}
+  wrap.onclick=function(e){if(e.target===wrap)close();};
+  function bind(id,fn){var el=document.getElementById(id);if(!el)return;el.onclick=function(){close();fn();};el.onkeydown=function(ev){if(ev.key==="Enter"){close();fn();}};}
+  bind("ash-photo",adminFixPhoto);
+  bind("ash-codes",adminManageBarcodes);
+  if(canRemove)bind("ash-remove",adminRemoveDrink);
+  bind("ash-cancel",function(){});
 }
 function adminManageBarcodes(){
   if(!isAdmin||!curSel)return;
