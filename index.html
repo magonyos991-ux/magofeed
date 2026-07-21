@@ -1098,7 +1098,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616d</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616e</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -3544,11 +3544,13 @@ function offIsAlcoholic(p){
   var abv=parseFloat(p.alcohol_by_volume||((p.nutriments||{}).alcohol)||0);
   if(abv>0)return true;
   var tags=(p.categories_tags||[]).join(" ").toLowerCase();
-  // Ginger beer et root beer sont des sodas sans alcool (nom historique) :
-  // on les retire avant le test pour eviter une fausse detection
-  tags=tags.replace(/ginger[- ]?beers?|root[- ]?beers?/g,"");
+  // Faux positifs connus : sodas au nom historique, gingembre (contient "gin"),
+  // vinaigres/marinades ("vin"), racines ("root"), origines ("origin" finit par "gin")
+  tags=tags.replace(/ginger[- ]?beers?|root[- ]?beers?|gingembre|ginger|vinaigres?|vinegars?|origins?/g,"");
+  // Frontieres de mots STRICTES des deux cotes : "gin" ne matche plus "gingembre",
+  // "vin" ne matche plus "vinaigre", "beer" ne matche plus "beeren" (baies en allemand)
   // Inclut volontairement les bieres/vins 0.0% : choix produit du fondateur
-  return /alcohol|beer|biere|wine|vin[s]?\b|cider|cidre|spirit|liqueur|vodka|whisk|rhum|gin\b/.test(tags);
+  return /\b(alcohols?|alcools?|beers?|bieres?|wines?|vins?|ciders?|cidres?|spirits?|liqueurs?|vodkas?|whisky|whiskey|whiskies|rhums?|rums?|gins?|sake|tequila|cocktails?[- ]alcoolises?)\b/.test(tags);
 }
 function offBestProduct(p){
   var brand=sanitize(((p.brands||"").split(",")[0]||"").trim());
@@ -4233,10 +4235,12 @@ function onBarcodeDetected(r){
         if(data.status===1){
           var p=data.product||{};
           var best=offBestProduct(p);
+          if(best.alcohol&&window._alcoholOverrides[String(code).replace(/[^0-9]/g,"")]){best.alcohol=false;best.alcoholDisputed=true;}
           if(best.alcohol){
             // Regle produit non negociable : aucune boisson alcoolisee, meme 0.0%
             res.className="scan-result notfound";
-            res.innerHTML='<div style="text-align:center"><div style="font-size:14px;color:#991b1b;font-weight:600;margin-bottom:2px">🚫 Boisson alcoolisée</div><div style="font-size:12px;color:var(--s2)">Magofeed reste 100% sans alcool — ce produit ne peut pas être ajouté.</div></div>';
+            res.innerHTML='<div style="text-align:center"><div style="font-size:14px;color:#991b1b;font-weight:600;margin-bottom:2px">🚫 Boisson alcoolisée</div><div style="font-size:12px;color:var(--s2)">Magofeed reste 100% sans alcool — ce produit ne peut pas être ajouté.</div>'+
+              '<div onclick="overrideAlcohol(\''+String(code).replace(/[^0-9]/g,"")+'\')" role="button" tabindex="0" style="margin-top:10px;font-size:11.5px;font-weight:700;color:var(--s2);cursor:pointer;text-decoration:underline">La fiche se trompe ? Ce produit n\'a PAS d\'alcool</div></div>';
             btn.style.display="none";
             playSound("err");
             return;
@@ -7413,6 +7417,16 @@ function showOnboarding(){
   render();
   document.body.appendChild(wrap);
 }
+/* La base OpenFoodFacts se trompe parfois (fiche mal categorisee) : l'utilisateur
+   peut contester. Le produit passe alors par le circuit decouverte NORMAL (votes +
+   validation admin), marque "alerte alcool contestee" pour verification humaine. */
+window._alcoholOverrides={};
+function overrideAlcohol(code){
+  if(!confirm("Tu confirmes que ce produit ne contient PAS d'alcool ?\n\nIl sera ajout\u00e9 aux d\u00e9couvertes avec une alerte, et v\u00e9rifi\u00e9 avant d'entrer au catalogue."))return;
+  window._alcoholOverrides[String(code)]=true;
+  playSound("pop");
+  toast("OK \u2014 rescanne le code (ou r\u00e9appuie sur Scanner)");
+}
 function drinkLocate(){
   if(!curSel)return;
   lastScanContext={drinkId:curSel.id,from:"fiche"};
@@ -7440,7 +7454,7 @@ function renderDiscoveries(){
     var missing=ADMIN_VOTE_THRESHOLD-votes;
     var div=document.createElement("div");div.className="disc-card";
     div.innerHTML='<div class="disc-img">'+(d.emoji||"🆕")+'</div>'+
-      '<div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:8px"><div style="font-size:14px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(d.name)+'</div>'+
+      '<div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:8px"><div style="font-size:14px;font-weight:700;color:var(--s1);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.3;word-break:break-word">'+sanitize(d.name)+'</div>'+
       (ready?'<span class="disc-ready" style="flex-shrink:0">PR\u00CATE \u2728</span>':"")+'</div>'+
       '<div style="font-size:12px;margin-top:2px;color:var(--s2)">'+sanitize(desc)+'</div>'+
       '<div class="vote-progress" role="progressbar" aria-valuemin="0" aria-valuemax="'+ADMIN_VOTE_THRESHOLD+'" aria-valuenow="'+votes+'"><div style="width:'+pct+'%"></div></div>'+
