@@ -527,6 +527,23 @@ body.dark .toast{background:#f0f0f0;color:#111}
    au lieu d'apparaitre brutalement */
 #explore-map-host{opacity:0;transform:translateY(6%) scale(.97);transition:opacity .26s ease,transform .36s cubic-bezier(.22,1.15,.36,1)}
 #explore-map-host.in{opacity:1;transform:none}
+/* ── Marqueurs de carte : pins pro (fond clair CARTO, ombres, pop-in) ── */
+.mago-pin{position:relative;width:34px;height:44px;filter:drop-shadow(0 4px 8px rgba(0,0,0,.28));transform-origin:50% 100%;animation:pinIn .28s cubic-bezier(.22,1.5,.36,1)}
+@keyframes pinIn{from{transform:scale(.4) translateY(8px);opacity:0}to{transform:scale(1) translateY(0);opacity:1}}
+.mago-pin-head{position:absolute;top:0;left:0;width:34px;height:34px;border-radius:50%;background:var(--pc,#1a1714);border:2.5px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13.5px;font-family:'Space Grotesk',sans-serif;letter-spacing:.3px;z-index:2;transition:transform .15s}
+.mago-pin-tip{position:absolute;left:50%;bottom:3px;width:12px;height:12px;background:var(--pc,#1a1714);border-right:2.5px solid #fff;border-bottom:2.5px solid #fff;transform:translateX(-50%) rotate(45deg);z-index:1}
+.mago-pin.closed{filter:drop-shadow(0 3px 5px rgba(0,0,0,.18)) grayscale(.55);opacity:.72}
+.leaflet-marker-icon:hover .mago-pin-head{transform:scale(1.1)}
+.mago-cluster{display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--cc,#1a1714);color:#fff;font-weight:800;font-family:'Space Grotesk',sans-serif;border:3px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.25),0 0 0 5px color-mix(in srgb,var(--cc,#1a1714) 22%,transparent);transition:transform .15s}
+.leaflet-marker-icon:hover .mago-cluster{transform:scale(1.06)}
+.mago-me{position:relative;width:20px;height:20px}
+.mago-me-dot{position:absolute;inset:3px;border-radius:50%;background:#1a73e8;border:2.5px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.35);z-index:2}
+.mago-me-halo{position:absolute;inset:-12px;border-radius:50%;background:rgba(26,115,232,.22);animation:meHalo 2.2s ease-out infinite}
+@keyframes meHalo{0%{transform:scale(.5);opacity:.9}70%{transform:scale(1);opacity:0}100%{transform:scale(1);opacity:0}}
+.leaflet-container{background:#eae6df;font-family:'Space Grotesk',sans-serif}
+body.dark .leaflet-container{background:#23211f}
+.leaflet-control-attribution{font-size:9px!important;opacity:.65;background:rgba(255,255,255,.7)!important}
+.leaflet-control-zoom a{border:none!important;color:#1a1714!important;font-weight:700}
 #explore-store-card{transform:translateY(12px);opacity:0;transition:transform .3s cubic-bezier(.22,1.2,.36,1),opacity .2s}
 #explore-store-card.in{transform:none;opacity:1}
 
@@ -1989,6 +2006,28 @@ window.fbFillEnseignes = async function(sets) {
   if (n) await batch.commit();
   return counts;
 };
+/* Purge des enseignes JAMAIS verifiees (Lidl/Aldi/Match : pas de boutique en
+   ligne, aucune source catalogue) : on retire toute boisson sans confirmation
+   communautaire positive. Les confirmations > 0 sont conservees. */
+window.fbCleanUnverifiedBrands = async function() {
+  const snap = await getDocs(collection(db, "stores"));
+  let batch = writeBatch(db), n = 0, cleaned = 0;
+  const norm = s => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  for (const d of snap.docs) {
+    const data = d.data();
+    const b = norm((data.brand || "") + " " + (data.name || ""));
+    if (!/\blidl\b|\baldi\b|\bmatch\b/.test(b)) continue;
+    const confs = data.confirmations || {};
+    const before = (data.drinks || []).length;
+    const kept = (data.drinks || []).filter(id => (Number(confs[id]) || 0) > 0);
+    if (kept.length === before) continue;
+    batch.update(d.ref, { drinks: kept });
+    cleaned++;
+    if (++n >= 400) { await batch.commit(); batch = writeBatch(db); n = 0; }
+  }
+  if (n) await batch.commit();
+  return cleaned;
+};
 window.fbAssignPackToBrand = async function(drinkIds, brand) {
   const ids = drinkIds.map(Number);
   const snap = await getDocs(query(collection(db, "stores"), where("brand", "==", brand)));
@@ -3047,18 +3086,29 @@ function openModal(store,drink){
   document.getElementById("modal-title").textContent="Signaler — "+store.name;
   document.getElementById("modal-info").innerHTML=
     '<div style="width:40px;height:40px;border-radius:12px;background:'+drink.light+';display:flex;align-items:center;justify-content:center;font-size:22px">'+drink.emoji+'</div>'+
-    '<div><div style="font-size:14px;font-weight:600;color:var(--s1)">'+drink.name+'</div><div style="font-size:12px;margin-top:2px;color:var(--s2)">'+store.name+'</div></div>';
+    '<div><div style="font-size:14px;font-weight:600;color:var(--s1)">'+sanitize(drink.name)+'</div><div style="font-size:12px;margin-top:2px;color:var(--s2)">'+sanitize(store.name)+'</div></div>';
   document.getElementById("report-modal").style.display="flex";
 }
 function closeModal(){document.getElementById("report-modal").style.display="none";}
 function report(type){
   if(!reportTarget)return;
   var s=reportTarget.store,d=reportTarget.drink;
+  if(!awardOnce("rep:"+type+":"+(s.fbId||s.id)+":"+d.id,24)){
+    closeModal();toast("D\u00e9j\u00e0 signal\u00e9 aujourd'hui");playSound("err");return;
+  }
   var pts={stock:10,rupture:5,contrefacon:15,nouveau:20};
   var msgs={stock:"✅ +10 pts",rupture:"❌ +5 pts",contrefacon:"⚠️ +15 pts",nouveau:"🆕 +20 pts"};
   var now=new Date(),time=now.getHours()+":"+String(now.getMinutes()).padStart(2,"0");
   if(type==="stock"){if(!s.confirmations[d.id])s.confirmations[d.id]=0;s.confirmations[d.id]++;userStats.confirms++;}
-  else userStats.signals++;
+  else{
+    userStats.signals++;
+    if(type==="rupture"){
+      if(!s.confirmations[d.id])s.confirmations[d.id]=0;
+      s.confirmations[d.id]--; // rupture signalee -> le magasin sort des resultats et des notifs
+      if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||s.id,d.id,-1);
+      resetWatchTrigger(d.id,s.fbId||s.id);
+    }
+  }
   userStats.pts+=pts[type];
   flyPts(pts[type]);
   bumpDaily(type==="scan"?"scans":"signals");
@@ -3071,6 +3121,9 @@ function report(type){
 }
 
 function doConfirm(btn,sid,did,val){
+  if(!awardFree("conf:"+sid+":"+did,24)){
+    toast("D\u00e9j\u00e0 pris en compte aujourd'hui pour ce magasin");playSound("err");return;
+  }
   if(val===1){
     var isDarkConfirm=document.body.classList.contains("dark");
     var bar=btn.parentElement;
@@ -3083,9 +3136,11 @@ function doConfirm(btn,sid,did,val){
     bar.innerHTML='<span style="font-size:12px;font-weight:600;color:var(--s2)">Merci pour ta contribution !</span>';
     var s=STORES.find(function(x){return x.id===sid||x.id===String(sid);});if(!s)return;
     if(!s.confirmations[did])s.confirmations[did]=0;
-    s.confirmations[did]=Math.max(0,s.confirmations[did]-1);
+    s.confirmations[did]--; // negatif autorise : signal communautaire "pas en stock ici"
+    awardOnce("conf:"+sid+":"+did,24);
     userStats.confirms++;userStats.pts+=3;flyPts(3);bumpDaily("confirms");
     trackStoreContribution(sid);
+    resetWatchTrigger(did,sid);
     // Firebase
     if(window.fbConfirmStock) window.fbConfirmStock(sid, did, -1);
     playSound("err");updateProfileStats();toast("👎 Signalé · +3 pts");
@@ -3112,6 +3167,7 @@ function confirmWithPrice(sid,did){
     // Prix partagé avec toute la communauté (pas juste ce navigateur)
     if(window.fbSavePrice)window.fbSavePrice(s.fbId||sid,did,price);
   }
+  if(!awardOnce("conf:"+sid+":"+did,24)){toast("D\u00e9j\u00e0 confirm\u00e9 aujourd'hui");renderStoreList();return;}
   userStats.confirms++;userStats.pts+=3;flyPts(3);bumpDaily("confirms");
   trackStoreContribution(sid);
   // Firebase
@@ -3124,6 +3180,23 @@ function confirmWithPrice(sid,did){
 /* ================================
    PROFILE STATS
 ================================ */
+/* Anti-farm : chaque action ne rapporte des points qu'UNE fois (par jour ou a vie
+   selon le cas). Le meme clic repete a l'infini ne donne plus rien. */
+var awardLog={};
+try{awardLog=JSON.parse(localStorage.getItem("magoAwards")||"{}");}catch(e){}
+function awardFree(key,hours){
+  var ttl=(hours||24)*3600000;
+  return !(awardLog[key]&&(Date.now()-awardLog[key])<ttl);
+}
+function awardOnce(key,hours){
+  if(!awardFree(key,hours))return false;
+  var now=Date.now();
+  Object.keys(awardLog).forEach(function(k){if(now-awardLog[k]>90*86400000)delete awardLog[k];});
+  awardLog[key]=now;
+  try{localStorage.setItem("magoAwards",JSON.stringify(awardLog));}catch(e){}
+  return true;
+}
+var FOREVER=24*3650; // dedup "a vie" (10 ans)
 function trackStoreContribution(storeId){if(storeId!=null)contributedStores[String(storeId)]=true;bumpStreak();}
 /* ================================
    BADGES A PALIERS — bronze / argent / or
@@ -3546,7 +3619,8 @@ function ensurePickerMap(cb){
   function build(){
     var center=[userLat||50.8466,userLng||4.3528];
     window._pickerMap=L.map("store-picker-map",{zoomControl:false,attributionControl:false}).setView(center,13);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(window._pickerMap);
+    var darkP=document.body.classList.contains("dark");
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/"+(darkP?"dark_all":"light_all")+"/{z}/{x}/{y}{r}.png",{maxZoom:20,subdomains:"abcd"}).addTo(window._pickerMap);
     window._pickerMarkers=L.layerGroup().addTo(window._pickerMap);
     window._pickerMap.on("click",function(e){onPickerMapClick(e.latlng);});
     if(userLat){
@@ -3685,7 +3759,10 @@ function updatePickerMapMarkers(list){
   list.slice(0,60).forEach(function(s){
     if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
     var dist=(typeof s.dist==="number")?(s.dist<1000?Math.round(s.dist)+" m":(s.dist/1000).toFixed(1)+" km"):"";
-    var m=L.marker([s.lat,s.lng]).addTo(window._pickerMarkers);
+    var pinColor=brandColor(s.brand);
+    var pinInit=((s.brand||s.name||"?").trim().charAt(0)||"?").toUpperCase();
+    var pinIcon=L.divIcon({html:'<div class="mago-pin" style="--pc:'+pinColor+';width:28px;height:36px"><div class="mago-pin-head" style="width:28px;height:28px;font-size:11.5px">'+pinInit+'</div><div class="mago-pin-tip" style="width:10px;height:10px;bottom:2px"></div></div>',className:"",iconSize:[28,36],iconAnchor:[14,36]});
+    var m=L.marker([s.lat,s.lng],{icon:pinIcon}).addTo(window._pickerMarkers);
     m.bindPopup('<div style="font-family:\'Space Grotesk\',sans-serif;text-align:center;min-width:130px">'+
       '<div style="font-weight:700;font-size:13px;margin-bottom:2px">'+sanitize(s.name)+'</div>'+
       (dist?'<div style="font-size:11px;color:#777;margin-bottom:6px">'+dist+'</div>':"")+
@@ -3770,10 +3847,12 @@ function renderPriceAfterTag(s,did){
     if(!s.priceHistory[did])s.priceHistory[did]=[];
     s.priceHistory[did].push({p:v,t:Date.now()});
     if(window.fbSavePrice)window.fbSavePrice(s.fbId||sid,did,v);
-    userStats.pts+=2;updateProfileStats();
+    if(awardOnce("price:"+sid+":"+did,24)){userStats.pts+=2;toast("\uD83D\uDCB6 "+v.toFixed(2)+"\u20AC enregistr\u00E9 \u00B7 +2 pts");}
+    else{toast("\uD83D\uDCB6 Prix mis \u00e0 jour");}
+    updateProfileStats();
     if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
     renderWhereFound(null);
-    playSound("win");toast("\uD83D\uDCB6 "+v.toFixed(2)+"\u20AC enregistr\u00E9 \u00B7 +2 pts");
+    playSound("win");
   };
 }
 function tagScanToStore(s){
@@ -3802,12 +3881,17 @@ function tagScanToStore(s){
     if(window.fbTagDiscoveryStore)window.fbTagDiscoveryStore(ctx.discoveryId,sid).catch(function(e){console.warn(e);});
     renderDiscoveries();
   }
-  userStats.pts+=3;
+  var tagKey="tag:"+(ctx.drinkId!=null?ctx.drinkId:(ctx.discoveryId!=null?"d"+ctx.discoveryId:"b"+ctx.pendingBarcode))+":"+sid;
+  if(awardOnce(tagKey,FOREVER)){
+    userStats.pts+=3;flyPts(3);
+    toast("\uD83D\uDCCD Rattach\u00E9 \u00E0 "+sanitize(s.name)+" \u00B7 +3 pts");
+  }else{
+    toast("\uD83D\uDCCD D\u00e9j\u00e0 rattach\u00e9 \u00e0 "+sanitize(s.name));
+  }
   trackStoreContribution(sid);
   updateProfileStats();
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
   playSound("win");
-  toast("\uD83D\uDCCD Rattach\u00E9 \u00E0 "+s.name+" \u00B7 +3 pts");
   if(ctx.from==="fiche"){
     renderWhereFound(null);
     if(curSel&&Number(curSel.id)===Number(ctx.drinkId)&&typeof renderStoreList==="function"){
@@ -3879,7 +3963,8 @@ function confirmFamilyFormat(family,barcode,fmt){
   if(window.fbAddFormatSuggestion){
     window.fbAddFormatSuggestion(family.id,family.name,String(barcode),fmt).catch(function(e){console.warn(e);});
   }
-  userStats.pts+=2;updateProfileStats();
+  if(awardOnce("fmt:"+String(barcode),FOREVER)){userStats.pts+=2;}
+  updateProfileStats();
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
   var alt=document.getElementById("scan-not-family");
   if(alt)alt.style.display="none";
@@ -5565,6 +5650,23 @@ function adminImportMission4(){
   }
   next();
 }
+function adminCleanUnverified(){
+  if(!isAdmin)return;
+  if(!confirm("Purger Lidl / Aldi / Match ?\nToute boisson SANS confirmation communautaire positive sera retiree de ces magasins (jamais verifies en catalogue).\nLes confirmations > 0 sont conservees."))return;
+  toast("Purge en cours\u2026");
+  window.fbCleanUnverifiedBrands().then(function(cleaned){
+    (STORES||[]).forEach(function(s){
+      var b=normTxt((s.brand||"")+" "+(s.name||""));
+      if(!/\blidl\b|\baldi\b|\bmatch\b/.test(b))return;
+      var confs=s.confirmations||{};
+      s.drinks=(s.drinks||[]).filter(function(id){return (Number(confs[id])||0)>0;});
+    });
+    try{renderStoreList();}catch(e){}
+    try{checkWatches();renderAlertsCard();}catch(e){}
+    playSound("win");
+    toast("\u2705 "+cleaned+" magasin"+(cleaned>1?"s":"")+" purg\u00e9"+(cleaned>1?"s":""));
+  }).catch(function(e){playSound("err");toast("\u26A0\uFE0F \u00c9chec ("+(e&&e.message||"erreur")+")");});
+}
 function adminFillEnseignes(){
   if(!isAdmin)return;
   var pack=packDrinkIds();
@@ -5606,6 +5708,7 @@ function openAdminSheet(){
     '<div id="ash-photo" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">\uD83D\uDEE0\uFE0F Corriger la photo</div>'+
     '<div id="ash-m4" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Importer \u00e9piceries Bruxelles</div>'+
     '<div id="ash-fill" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Remplissage enseignes (auto)</div>'+
+    '<div id="ash-clean" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Purger Lidl / Aldi / Match</div>'+
     '<div id="ash-brand" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Assigner \u00E0 une enseigne</div>'+
     '<div id="ash-codes" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">\uD83D\uDD22 G\u00E9rer les codes-barres</div>'+
     (canRemove?'<div id="ash-remove" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:#b91c1c">\uD83D\uDDD1\uFE0F Retirer du catalogue</div>':'')+
@@ -5718,14 +5821,18 @@ function centerMapOnUser(){
 }
 function initLeafletMap(lat,lng){
   if(!window.L||!document.getElementById("leaflet-map"))return;
-  var map=L.map("leaflet-map",{zoomControl:true,attributionControl:false}).setView([lat,lng],13);
+  var map=L.map("leaflet-map",{zoomControl:true,attributionControl:true,zoomAnimation:true,markerZoomAnimation:true}).setView([lat,lng],13);
   window._leafletMap=map;
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);
+  var dark=document.body.classList.contains("dark");
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/"+(dark?"dark_all":"light_all")+"/{z}/{x}/{y}{r}.png",{
+    maxZoom:20,subdomains:"abcd",
+    attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  }).addTo(map);
 
   // Pin position utilisateur
   if(userLat){
-    var userIcon=L.divIcon({html:"<div style=\"width:14px;height:14px;border-radius:50%;background:#22c55e;border:3px solid #fff;box-shadow:0 0 6px rgba(0,0,0,.3)\"></div>",className:"",iconSize:[14,14],iconAnchor:[7,7]});
-    L.marker([userLat,userLng],{icon:userIcon}).addTo(map).bindPopup("📍 Ta position");
+    var userIcon=L.divIcon({html:'<div class="mago-me"><div class="mago-me-halo"></div><div class="mago-me-dot"></div></div>',className:"",iconSize:[20,20],iconAnchor:[10,10]});
+    L.marker([userLat,userLng],{icon:userIcon,zIndexOffset:1000}).addTo(map).bindPopup("📍 Ta position");
   }
 
   // Clustering des magasins
@@ -5742,7 +5849,7 @@ function initLeafletMap(lat,lng){
         var pureBrand=brandKeys.length===1&&brandKeys[0]?brandKeys[0]:null;
         var bg=pureBrand?brandColor(pureBrand):(n>100?"#1a1714":n>20?"#3a3330":"#c69a57");
         return L.divIcon({
-          html:"<div style=\"width:"+size+"px;height:"+size+"px;border-radius:50%;background:"+bg+";border:3px solid #fff;display:flex;align-items:center;justify-content:center;font-size:"+(size>40?14:11)+"px;font-weight:800;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.3)\">"+n+"</div>",
+          html:'<div class="mago-cluster" style="--cc:'+bg+';width:'+size+'px;height:'+size+'px;font-size:'+(size>40?14:11.5)+'px">'+n+'</div>',
           className:"",iconSize:[size,size],iconAnchor:[size/2,size/2]
         });
       }
@@ -5774,13 +5881,18 @@ function populateClusterMarkers(cluster){
   cluster.clearLayers();
   if(!curSel)return[];
   var stores=STORES.filter(function(s){return s.drinks&&s.drinks.some(function(d){return Number(d)===curSel.id;});});
+  if(!stores.length&&window._nearbyFallback&&window._nearbyFallback[curSel.id]){
+    stores=(STORES||[]).filter(function(s){return typeof s.lat==="number";})
+      .slice().sort(function(a,b){return(a.dist||9e9)-(b.dist||9e9);}).slice(0,30);
+  }
   stores.forEach(function(s){
     if(!s.lat||!s.lng)return;
     var color=brandColor(s.brand);
-    var op=s.open?1:.45;
+    var initial=((s.brand||s.name||"?").trim().charAt(0)||"?").toUpperCase();
+    var isOpen=storeOpenState(s);
     var storeIcon=L.divIcon({
-      html:"<div style=\"width:12px;height:12px;border-radius:50%;background:"+color+";opacity:"+op+";border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,.3)\"></div>",
-      className:"",iconSize:[12,12],iconAnchor:[6,6]
+      html:'<div class="mago-pin'+(isOpen===false?" closed":"")+'" style="--pc:'+color+'"><div class="mago-pin-head">'+initial+'</div><div class="mago-pin-tip"></div></div>',
+      className:"",iconSize:[34,44],iconAnchor:[17,44]
     });
     var marker=L.marker([s.lat,s.lng],{icon:storeIcon});
     marker._brand=s.brand||"";
@@ -5875,6 +5987,16 @@ function toggleWatch(d){
   try{renderStoreList();}catch(e){}
   try{renderAlertsCard();}catch(e){}
 }
+function resetWatchTrigger(drinkId,storeId){
+  var changed=false;
+  drinkWatches.forEach(function(w){
+    if(Number(w.id)!==Number(drinkId))return;
+    if(w.triggered&&(String(w.storeId)===String(storeId))){
+      w.triggered=false;delete w.storeId;delete w.storeName;delete w.dist;changed=true;
+    }
+  });
+  if(changed){saveWatches();try{renderAlertsCard();}catch(e){}try{checkWatches();}catch(e){}}
+}
 function checkWatches(){
   var fired=false;
   drinkWatches.forEach(function(w){
@@ -5882,6 +6004,7 @@ function checkWatches(){
     var best=null;
     (STORES||[]).forEach(function(s){
       if(!(s.drinks||[]).some(function(did){return Number(did)===Number(w.id);}))return;
+      if(((s.confirmations||{})[w.id]||0)<0)return; // signalee absente ici : jamais en notif
       var dist=null;
       if(typeof userLat==="number"&&userLat&&typeof s.lat==="number"){
         var dLa=(userLat-s.lat)*111000,dLo=(userLng-s.lng)*111000*Math.cos(s.lat*Math.PI/180);
@@ -5897,10 +6020,28 @@ function checkWatches(){
       w.dist=best.dist;
       fired=true;
       playSound("win");
-      toast("\uD83D\uDD14 "+w.name+" signal\u00E9e chez "+best.store.name+(best.dist!=null?" ("+fmtDist(best.dist)+")":"")+" !");
+      toast("\uD83D\uDD14 "+w.name+" signal\u00E9e chez "+sanitize(best.store.name)+(best.dist!=null?" ("+fmtDist(best.dist)+")":"")+" !");
     }
   });
   if(fired){saveWatches();try{renderAlertsCard();}catch(e){}}
+}
+/* Depuis la notif de veille : ouvrir la fiche du magasin (position + rayon complet).
+   Si le magasin n'est plus dans le rayon charge en memoire, on recharge la zone
+   d'abord — sinon le tap ne faisait RIEN (bug signale). */
+function openWatchStore(storeId,drinkId){
+  var s=(STORES||[]).find(function(x){return String(x.id)===String(storeId)||String(x.fbId)===String(storeId);});
+  if(s){openStoreDetail(storeId);return;}
+  toast("Chargement du magasin\u2026");
+  var p=window.fbLoadNearbyStores?window.fbLoadNearbyStores(userLat||50.8466,userLng||4.3528,25,{skipCache:true}):Promise.resolve();
+  Promise.resolve(p).then(function(){
+    var s2=(STORES||[]).find(function(x){return String(x.id)===String(storeId)||String(x.fbId)===String(storeId);});
+    if(s2){openStoreDetail(storeId);}
+    else{
+      // Magasin introuvable (purge/suppression) : la veille repart chercher ailleurs
+      resetWatchTrigger(drinkId,storeId);
+      toast("\u26A0\uFE0F Ce magasin n'existe plus \u2014 veille relanc\u00e9e");
+    }
+  });
 }
 function removeWatch(id){
   drinkWatches=drinkWatches.filter(function(w){return Number(w.id)!==Number(id);});
@@ -5911,17 +6052,56 @@ function renderAlertsCard(){
   if(!drinkWatches.length){host.innerHTML="";return;}
   var rows=drinkWatches.map(function(w){
     var right=w.triggered
-      ?'<span style="font-size:11px;font-weight:800;color:#15803d">\uD83C\uDF89 chez '+w.storeName+(w.dist!=null?" \u00B7 "+fmtDist(w.dist):"")+'</span>'
+      ?'<span style="font-size:11px;font-weight:800;color:#15803d">\uD83C\uDF89 chez '+sanitize(w.storeName||"")+(w.dist!=null?" \u00B7 "+fmtDist(w.dist):"")+'</span>'
       :'<span style="font-size:11px;font-weight:700;color:var(--s3)">\uD83D\uDC40 en veille</span>';
+    var lineAction=w.triggered?"openWatchStore('"+String(w.storeId).replace(/'/g,"\\'")+"',"+w.id+")":"var d=DRINKS.find(function(x){return x.id==="+w.id+"});if(d)pick(d)";
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0" data-wid="'+w.id+'">'+
-      '<span style="font-size:17px">'+(w.emoji||"\uD83E\uDD64")+'</span>'+
-      '<span style="flex:1;min-width:0;font-size:12.5px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" onclick="'+(w.triggered?"openStoreDetail('"+String(w.storeId)+"')":"var d=DRINKS.find(function(x){return x.id==="+w.id+"});if(d)pick(d)")+'">'+w.name+'</span>'+
-      right+
+      '<span style="font-size:17px;cursor:pointer" onclick="'+lineAction+'">'+(w.emoji||"\uD83E\uDD64")+'</span>'+
+      '<span style="flex:1;min-width:0;font-size:12.5px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')this.click()" onclick="'+lineAction+'">'+w.name+'</span>'+
+      '<span style="cursor:pointer" onclick="'+lineAction+'">'+right+'</span>'+
       '<span onclick="removeWatch('+w.id+')" role="button" tabindex="0" aria-label="Retirer la veille" style="font-size:12px;color:var(--s3);cursor:pointer;padding:4px">\u2715</span>'+
     '</div>';
   }).join("");
   host.innerHTML='<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:18px;padding:12px 16px 6px;margin-bottom:14px">'+
     '<div style="font-size:13px;font-weight:800;color:var(--s1);margin-bottom:2px">\uD83D\uDD14 Tes veilles</div>'+rows+'</div>';
+}
+/* Rayon vide pour cette boisson : on montre quand meme les magasins autour,
+   clairement marques "pas encore confirmee ici", avec un bouton "Trouvee ici !"
+   pour que la premiere personne qui la voit en rayon la localise. */
+function toggleNearbyFallback(){
+  if(!curSel)return;
+  window._nearbyFallback=window._nearbyFallback||{};
+  window._nearbyFallback[curSel.id]=!window._nearbyFallback[curSel.id];
+  playSound("pop");
+  renderStoreList();
+  try{if(window._leafletCluster)populateClusterMarkers(window._leafletCluster);}catch(e){}
+}
+function foundHere(storeId){
+  var s=(STORES||[]).find(function(x){return String(x.id)===String(storeId)||String(x.fbId)===String(storeId);});
+  if(!s||!curSel)return;
+  lastScanContext={drinkId:curSel.id,from:"fiche"};
+  tagScanToStore(s);
+}
+function renderNearbyFallback(el){
+  var near=(STORES||[]).filter(function(s){return typeof s.lat==="number";})
+    .slice().sort(function(a,b){return(a.dist||9e9)-(b.dist||9e9);}).slice(0,15);
+  if(!near.length)return;
+  var h='<div style="padding:14px 20px 4px"><div style="font-size:12px;font-weight:700;color:var(--s2);background:var(--bg2);border:1.5px dashed var(--border);border-radius:12px;padding:10px 12px;line-height:1.5">Ces magasins sont autour de toi mais <b>'+sanitize(curSel.name)+'</b> n\'y est pas encore confirm\u00e9e. Tu la vois en rayon ? Appuie sur \u00ab Trouv\u00e9e ici ! \u00bb</div></div>';
+  near.forEach(function(s){
+    var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):"~?km";
+    var sidStr=String(s.id).replace(/'/g,"\\'");
+    h+='<div class="store-card"><div class="store-top">'+
+      '<div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;cursor:pointer" onclick="openStoreDetail(\''+sidStr+'\')">'+
+        '<div class="store-ico" style="background:var(--bg2)">'+storeIconHTML(s)+'</div>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div class="store-name">'+sanitize(s.name)+'</div>'+
+          '<div class="store-meta"><span>'+dist+'</span><span>\u00b7</span><span style="color:var(--s3)">pas encore confirm\u00e9e ici</span></div>'+
+        '</div>'+
+      '</div>'+
+      '<button class="gobtn" onclick="foundHere(\''+sidStr+'\')">Trouv\u00e9e ici !</button>'+
+    '</div></div>';
+  });
+  el.insertAdjacentHTML("beforeend",h);
 }
 function toggleAdvFilters(){
   window._advFiltersOpen=!window._advFiltersOpen;
@@ -5933,6 +6113,7 @@ function renderStoreList(){
   var allStores=STORES.filter(function(s){
     // Support drinks comme tableau d'IDs (nombres ou strings)
     if(!s.drinks||!s.drinks.length)return false;
+    if(((s.confirmations||{})[curSel.id]||0)<0)return false; // signalee absente : retiree des resultats
     return s.drinks.some(function(did){return Number(did)===curSel.id||did===curSel.id;});
   });
   // Rien trouvé dans le rayon courant : élargit la recherche Firestore (25km puis 50km) une seule fois par boisson
@@ -5981,16 +6162,21 @@ function renderStoreList(){
   var activeCount=(curBrandFilter?1:0)+(curBudget?1:0);
   var advToggle='<div style="padding:2px 20px 4px;text-align:right"><span onclick="toggleAdvFilters()" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')toggleAdvFilters()" style="font-size:11.5px;font-weight:600;color:var(--s2);cursor:pointer;text-decoration:underline">Filtres'+(activeCount?' ('+activeCount+')':'')+' '+(advOpen?'\u25B4':'\u25BE')+'</span></div>';
   var advWrap='<div id="store-adv-filters" style="display:'+(advOpen?'block':'none')+'">'+brandBar+budgetBar+'</div>';
+  var nearbyMode=window._nearbyFallback&&window._nearbyFallback[curSel.id];
   el.innerHTML=stores.length?renderSortBar()+advToggle+advWrap:advToggle+advWrap+'<div style="padding:26px 20px 8px;text-align:center"><div style="font-size:15px;font-weight:700;color:var(--s1);margin-bottom:6px">Aucun magasin trouvé</div><div style="font-size:13px;color:var(--s2);line-height:1.5">Cette boisson n\'est pas encore localis\u00E9e par ici.</div>'+
+    '<div onclick="toggleNearbyFallback()" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')toggleNearbyFallback()" style="display:inline-block;margin-top:14px;margin-right:8px;padding:11px 20px;border-radius:999px;background:var(--bg2);border:1.5px solid var(--border);color:var(--s1);font-size:12.5px;font-weight:800;cursor:pointer">\uD83D\uDDFA\uFE0F Voir les magasins autour de moi</div>'+
     '<div onclick="toggleWatch(curSel)" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')toggleWatch(curSel)" aria-label="Me pr\u00E9venir" style="display:inline-block;margin-top:14px;padding:11px 20px;border-radius:999px;background:'+(isWatched(curSel.id)?"var(--bg3);color:var(--s2);border:1.5px solid var(--border)":"var(--s1);color:var(--app-bg);border:none")+';font-size:12.5px;font-weight:800;cursor:pointer">'+(isWatched(curSel.id)?"\uD83D\uDD15 Retirer la veille":"\uD83D\uDD14 Me pr\u00E9venir quand elle arrive pr\u00E8s de moi")+'</div>'+
     '</div>'+locateBtn;
 
-  if(!stores.length)return;
+  if(!stores.length){
+    if(nearbyMode)renderNearbyFallback(el);
+    return;
+  }
   var sid=curSel.id;
   el.insertAdjacentHTML("beforeend",'<div style="padding:8px 20px 4px"><button onclick="drinkLocate()" style="width:100%;padding:8px;border-radius:12px;border:none;background:transparent;color:var(--s3);font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit;text-decoration:underline">Ajouter un autre magasin qui la vend</button></div>');
   stores.forEach(function(s){
     var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):"~?km";
-    var confs=s.confirmations[sid]||0,trust=Math.min(confs*20,100);
+    var confs=Math.max(0,s.confirmations[sid]||0),trust=Math.min(confs*20,100);
     var storePriceVal=getStorePrice(s,sid);
     var storePrice=storePriceVal?storePriceVal.toFixed(2)+"€":null;
     var storeIdStr=String(s.id);
@@ -6000,7 +6186,7 @@ function renderStoreList(){
         '<div class="store-ico" style="background:'+(s.open?curSel.light:"#fee2e2")+'">'+storeIconHTML(s)+'</div>'+
         '<div style="flex:1;min-width:0">'+
           '<div style="display:flex;align-items:center;gap:8px">'+
-            '<div class="store-name">'+s.name+'</div>'+
+            '<div class="store-name">'+sanitize(s.name)+'</div>'+
             (storePrice?'<span style="font-size:12px;font-weight:800;color:var(--s1);background:var(--bg2);padding:2px 8px;border-radius:999px">'+storePrice+'</span>':'<span style="font-size:11px;color:var(--s3);font-weight:500">Prix inconnu</span>')+
           '</div>'+
           '<div class="store-meta"><span>'+dist+'</span><span>·</span>'+
@@ -6010,7 +6196,7 @@ function renderStoreList(){
       (s.open?'<button class="gobtn" onclick="goToStore('+s.lat+','+s.lng+')">Y aller</button>':'<button class="gobtn closed">Fermé</button>')+
     '</div>'+
     '<div class="trust-wrap">'+
-      (s.drinksVerified&&s.drinksVerified.some(function(v){return Number(v)===sid;})?
+      (storeVerifiedFor(s,sid)?
         '<div style="display:inline-flex;align-items:center;gap:5px;margin-bottom:7px;padding:3px 10px;border-radius:999px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:10.5px;font-weight:700;color:#15803d">\u2713 V\u00e9rifi\u00e9 \u00b7 catalogue enseigne</div>':'')+
       '<div style="display:flex;justify-content:space-between;margin-bottom:5px">'+
         '<span style="font-size:10px;font-weight:600;color:var(--s3)">Fiabilité</span>'+
@@ -6089,7 +6275,7 @@ function openStoreSheet(storeId){
     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">'+
       '<div class="store-ico" style="background:'+(s.open?"var(--bg2)":"#fee2e2")+';width:46px;height:46px;font-size:22px;flex-shrink:0">'+storeIconHTML(s)+'</div>'+
       '<div style="flex:1;min-width:0">'+
-        '<div style="font-size:16px;font-weight:800;color:var(--s1)">'+s.name+'</div>'+
+        '<div style="font-size:16px;font-weight:800;color:var(--s1)">'+sanitize(s.name)+'</div>'+
         '<div style="font-size:12px;color:var(--s2);margin-top:2px">'+(s.brand?s.brand+" · ":"")+(dist?dist+" · ":"")+(openLabel(s)?openLabel(s)+(s.hours?" · "+s.hours:""):"Horaires inconnus")+'</div>'+
       '</div>'+
       '<span onclick="closeStoreSheet()" style="font-size:22px;cursor:pointer;flex-shrink:0" class="c3" role="button" tabindex="0" aria-label="Fermer" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();closeStoreSheet();}">✕</span>'+
@@ -6265,7 +6451,8 @@ function openDiscPhotoSheet(discId,discName){
           renderDiscoveries();
           host.style.display="none";
           take.disabled=false;take.textContent="\uD83D\uDCF8 Ajoute une photo du produit";
-          userStats.pts+=3;flyPts(3);bumpDaily("photos");updateProfileStats();
+          if(awardOnce("dphoto:"+String(id),FOREVER)){userStats.pts+=3;flyPts(3);}
+          bumpDaily("photos");updateProfileStats();
           if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
           playSound("win");
           toast("\uD83D\uDCF8 Photo envoy\u00E9e \u00B7 +3 pts");
@@ -6819,7 +7006,8 @@ function submitProposal(){
         console.warn(e);toast("\u26A0\uFE0F Suggestion non envoy\u00E9e (r\u00E8gle photoSuggestions ?)");
       });
     }
-    userStats.pts+=1;updateProfileStats();
+    if(awardOnce("pphoto:"+String(did),FOREVER)){userStats.pts+=1;}
+    updateProfileStats();
     if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
     closeProposeForm();
     playSound("win");
@@ -6837,7 +7025,8 @@ function submitProposal(){
       toast("\u26A0\uFE0F Photo non envoy\u00E9e (v\u00E9rifie la r\u00E8gle discoveryPhotos)");
     });
   }
-  userStats.pts+=2;updateProfileStats();
+  if(awardOnce("propose",1)){userStats.pts+=2;}
+  updateProfileStats();
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
   closeProposeForm();
   renderDiscoveries();
@@ -7090,9 +7279,9 @@ function renderDiscoveries(){
     var missing=ADMIN_VOTE_THRESHOLD-votes;
     var div=document.createElement("div");div.className="disc-card";
     div.innerHTML='<div class="disc-img">'+(d.emoji||"🆕")+'</div>'+
-      '<div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:8px"><div style="font-size:14px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+d.name+'</div>'+
+      '<div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:8px"><div style="font-size:14px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(d.name)+'</div>'+
       (ready?'<span class="disc-ready" style="flex-shrink:0">PR\u00CATE \u2728</span>':"")+'</div>'+
-      '<div style="font-size:12px;margin-top:2px;color:var(--s2)">'+desc+'</div>'+
+      '<div style="font-size:12px;margin-top:2px;color:var(--s2)">'+sanitize(desc)+'</div>'+
       '<div class="vote-progress" role="progressbar" aria-valuemin="0" aria-valuemax="'+ADMIN_VOTE_THRESHOLD+'" aria-valuenow="'+votes+'"><div style="width:'+pct+'%"></div></div>'+
       discFoundInHTML(d)+
       '<div style="font-size:11px;font-weight:600;margin-top:5px;color:'+(ready?"#16a34a":"#c69a57")+'">'+
@@ -7173,24 +7362,31 @@ function renderStarPanel(){
 }
 function setRating(val){
   if(!curSel)return;
+  var prev=userRatings[curSel.id];
+  if(prev===val){toast("★ D\u00e9j\u00e0 not\u00e9 "+val+"/5");playSound("pop");return;}
   userRatings[curSel.id]=val;localStorage.setItem("mago_ratings",JSON.stringify(userRatings));
   var agg=drinkRatingsAgg[curSel.id]||{sum:0,count:0};
-  agg.sum+=val;agg.count+=1;
+  if(prev){agg.sum+=val-prev;} // re-note : on REMPLACE, on n'empile pas
+  else{agg.sum+=val;agg.count+=1;}
   drinkRatingsAgg[curSel.id]=agg;
   curSel.stars=Math.round((agg.sum/agg.count)*10)/10;
-  userStats.pts+=2;updateProfileStats();playSound("pop");
-  toast("★ "+val+"/5 enregistré · +2 pts");
+  if(!prev&&awardOnce("star:"+curSel.id,FOREVER)){userStats.pts+=2;toast("★ "+val+"/5 enregistré · +2 pts");}
+  else{toast("★ Note mise \u00e0 jour : "+val+"/5");}
+  updateProfileStats();playSound("pop");
   renderStarPanel();
   var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent="★ "+curSel.stars;
-  if(window.fbAddRating)window.fbAddRating(curSel.id,val);
+  if(!prev&&window.fbAddRating)window.fbAddRating(curSel.id,val);
 }
 function setRec(val){
   if(!curSel)return;
+  var prev=userRecs[curSel.id];
+  if(prev===val){toast(val==="yes"?"D\u00e9j\u00e0 recommand\u00e9e par toi":"Avis d\u00e9j\u00e0 enregistr\u00e9");playSound("pop");return;}
   userRecs[curSel.id]=val;localStorage.setItem("mago_recs",JSON.stringify(userRecs));
-  userStats.pts+=3;updateProfileStats();playSound("pop");
-  toast(val==="yes"?"Recommandé · +3 pts":"Non recommandé · +3 pts");
+  if(!prev&&awardOnce("rec:"+curSel.id,FOREVER)){userStats.pts+=3;toast(val==="yes"?"Recommandé · +3 pts":"Non recommandé · +3 pts");}
+  else{toast("Avis mis \u00e0 jour");}
+  updateProfileStats();playSound("pop");
   renderStarPanel();
-  if(window.fbAddRec)window.fbAddRec(curSel.id,val);
+  if(!prev&&window.fbAddRec)window.fbAddRec(curSel.id,val);
 }
 
 /* ================================
@@ -7293,7 +7489,14 @@ function openLabel(s){
   if(o===false)return"Ferm\u00E9";
   return"";
 }
-function sortedStores(stores){var arr=stores.slice();if(curSort==="distance")arr.sort(function(a,b){return(a.dist||999)-(b.dist||999);});else if(curSort==="open")arr.sort(function(a,b){return openScore(b)-openScore(a);});else if(curSort==="trust")arr.sort(function(a,b){var id=curSel?curSel.id:0;return(b.confirmations[id]||0)-(a.confirmations[id]||0);});return arr;}
+function storeVerifiedFor(s,did){return !!(s&&s.drinksVerified&&s.drinksVerified.some(function(v){return Number(v)===Number(did);}));}
+function sortedStores(stores){var arr=stores.slice();if(curSort==="distance")arr.sort(function(a,b){return(a.dist||999)-(b.dist||999);});else if(curSort==="open")arr.sort(function(a,b){return openScore(b)-openScore(a);});else if(curSort==="trust")arr.sort(function(a,b){var id=curSel?curSel.id:0;return(b.confirmations[id]||0)-(a.confirmations[id]||0);});
+  // Les magasins SURS (catalogue enseigne verifie ou confirmations positives) toujours avant les "probables"
+  if(curSel){var did=curSel.id;arr.sort(function(a,b){
+    var sa=(storeVerifiedFor(a,did)||((a.confirmations||{})[did]||0)>0)?1:0;
+    var sb=(storeVerifiedFor(b,did)||((b.confirmations||{})[did]||0)>0)?1:0;
+    return sb-sa;});}
+  return arr;}
 
 /* ================================
    PULL TO REFRESH
