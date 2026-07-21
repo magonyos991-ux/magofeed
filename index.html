@@ -1098,7 +1098,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616f</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616g</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1456,24 +1456,34 @@ window.fbSyncUserStats = function(stats) {
   }, 800);
 };
 
+/* Apres liaison Google : on note l'email dans users/{uid}. C'est l'apparition de
+   ce champ qui declenche la notif admin "X a connecte son Gmail" (Cloud Function). */
+async function recordGoogleLink(user) {
+  try {
+    if (user && user.email) {
+      await setDoc(userDocRef(user.uid), { email: user.email, provider: "google" }, { merge: true });
+    }
+  } catch (e) { console.warn("recordGoogleLink:", e); }
+  return user;
+}
 window.fbSignInWithGoogle = async function() {
   var provider = new GoogleAuthProvider();
   if (auth.currentUser && auth.currentUser.isAnonymous) {
     try {
-      return (await linkWithPopup(auth.currentUser, provider)).user;
+      return await recordGoogleLink((await linkWithPopup(auth.currentUser, provider)).user);
     } catch (e) {
       // Le compte Google est deja lie a un profil Magofeed (cree sur un autre
       // appareil) : au lieu d'echouer, on se CONNECTE a ce profil existant.
       // C'est le comportement attendu : ton compte te suit d'un appareil a l'autre.
       if (e && e.code === "auth/credential-already-in-use") {
         var cred = GoogleAuthProvider.credentialFromError(e);
-        if (cred) return (await signInWithCredential(auth, cred)).user;
-        return (await signInWithPopup(auth, provider)).user;
+        if (cred) return await recordGoogleLink((await signInWithCredential(auth, cred)).user);
+        return await recordGoogleLink((await signInWithPopup(auth, provider)).user);
       }
       throw e;
     }
   }
-  return (await signInWithPopup(auth, provider)).user;
+  return await recordGoogleLink((await signInWithPopup(auth, provider)).user);
 };
 
 onAuthStateChanged(auth, async function(user) {
