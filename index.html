@@ -1098,7 +1098,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616g</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616h</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1494,6 +1494,7 @@ onAuthStateChanged(auth, async function(user) {
   window._fbUser = user;
   window.fbCheckAdmin();
   window.fbLoadCatalog();
+  window.fbLoadDrinkMerges();
   window.fbLoadDrinkImages();
   try {
     var snap = await getDoc(userDocRef(user.uid));
@@ -1533,12 +1534,11 @@ function boundingBox(lat, lng, radiusKm) {
   return { latMin: lat - latDelta, latMax: lat + latDelta, lngMin: lng - lngDelta, lngMax: lng + lngDelta };
 }
 /* Fusions de fiches : ancien id -> id conserve. Applique au chargement de chaque
-   magasin : les references Firestore aux anciens ids restent valides sans migration. */
-var DRINK_MERGES = { 11286: 3301, 11287: 3300 };
-function remapDrinkId(x) { return DRINK_MERGES[Number(x)] || Number(x); }
-function normalizeStore(data, id, distKm) {
-  data.fbId = id;
-  data.id = data.id || id;
+   magasin : les references Firestore aux anciens ids restent valides sans migration.
+   Les fusions decidees par l'admin sont dans meta/drinkMerges et chargees au boot. */
+window.DRINK_MERGES = { 11286: 3301, 11287: 3300 };
+function remapDrinkId(x) { return window.DRINK_MERGES[Number(x)] || Number(x); }
+function applyMergesToStore(data) {
   if (data.drinks && data.drinks.length) {
     var seen = {};
     data.drinks = data.drinks.map(remapDrinkId).filter(function(v){ if(seen[v]) return false; seen[v]=1; return true; });
@@ -1548,14 +1548,37 @@ function normalizeStore(data, id, distKm) {
     data.drinksVerified = data.drinksVerified.map(remapDrinkId).filter(function(v){ if(seenV[v]) return false; seenV[v]=1; return true; });
   }
   if (data.confirmations) {
-    Object.keys(DRINK_MERGES).forEach(function(oldId){
+    Object.keys(window.DRINK_MERGES).forEach(function(oldId){
       if (data.confirmations[oldId] != null) {
-        var target = DRINK_MERGES[oldId];
+        var target = window.DRINK_MERGES[oldId];
         data.confirmations[target] = (Number(data.confirmations[target]) || 0) + Number(data.confirmations[oldId]);
         delete data.confirmations[oldId];
       }
     });
   }
+  return data;
+}
+window.fbLoadDrinkMerges = async function() {
+  try {
+    var snap = await getDoc(doc(db, "meta", "drinkMerges"));
+    if (!snap.exists()) return;
+    var m = snap.data() || {};
+    Object.keys(m).forEach(function(k){ window.DRINK_MERGES[Number(k)] = Number(m[k]); });
+    (window.STORES || []).forEach(applyMergesToStore);
+    window.dispatchEvent(new CustomEvent("fbMergesLoaded"));
+  } catch (e) { console.warn("Merges:", e); }
+};
+window.fbSaveDrinkMerge = async function(oldId, newId) {
+  var upd = {};
+  upd[String(oldId)] = Number(newId);
+  await setDoc(doc(db, "meta", "drinkMerges"), upd, { merge: true });
+  window.DRINK_MERGES[Number(oldId)] = Number(newId);
+  (window.STORES || []).forEach(applyMergesToStore);
+};
+function normalizeStore(data, id, distKm) {
+  data.fbId = id;
+  data.id = data.id || id;
+  applyMergesToStore(data);
   // open/hours ne sont PLUS inventes : l'ouverture se calcule en direct
   // (storeOpenState) depuis les vrais horaires OSM ou l'heuristique d'enseigne.
   data.hours = data.hours || null;
@@ -4817,6 +4840,7 @@ function mergeCatalog(rows){
   rows.forEach(function(r){
     if(!r||!r.name)return;
     var rid=Number(r.id)||r.id;
+    if(window.DRINK_MERGES&&window.DRINK_MERGES[Number(rid)])return; // fiche fusionnee : absorbee par sa cible
     var nn=nameKey(r.name);
     var exists=DRINKS.some(function(d){return d.id===rid||nameKey(d.name)===nn;});
     if(exists)return;
@@ -5790,6 +5814,33 @@ function adminImportMission4(){
   }
   next();
 }
+/* Fusion admin : la fiche OUVERTE (curSel) est le doublon a absorber. On cherche
+   la fiche a GARDER, on ecrit oldId->newId dans meta/drinkMerges, et le remap
+   s'applique partout (magasins, confirmations, catalogue) sans migration. */
+function adminMergeDrink(){
+  if(!isAdmin||!curSel)return;
+  var old=curSel;
+  var q=prompt("Fusionner \u00ab "+old.name+" \u00bb (cette fiche dispara\u00eetra).\n\nTape le nom de la fiche \u00c0 GARDER :");
+  if(q===null||!q.trim())return;
+  var qn=normTxt(q.trim());
+  var hits=DRINKS.filter(function(d){return d.id!==old.id&&(fuzzyHit(d.name,qn)||fuzzyHit(d.brand,qn));}).slice(0,6);
+  if(!hits.length){toast("\u26A0\uFE0F Aucune fiche trouv\u00e9e");playSound("err");return;}
+  var listing=hits.map(function(d,i){return (i+1)+". "+d.name+" ("+d.brand+", id "+d.id+")";}).join("\n");
+  var pick2=prompt("Fiche \u00e0 GARDER :\n\n"+listing+"\n\nTape le NUM\u00c9RO :");
+  if(pick2===null)return;
+  var idx=parseInt(pick2.trim(),10)-1;
+  if(isNaN(idx)||idx<0||idx>=hits.length){toast("\u26A0\uFE0F Num\u00e9ro invalide");playSound("err");return;}
+  var target=hits[idx];
+  if(!confirm("Fusionner :\n\u00ab "+old.name+" \u00bb \u2192 \u00ab "+target.name+" \u00bb ?\n\nLa premi\u00e8re dispara\u00eet, ses magasins et confirmations basculent sur la seconde. IRR\u00c9VERSIBLE."))return;
+  toast("Fusion en cours\u2026");
+  window.fbSaveDrinkMerge(old.id,target.id).then(function(){
+    DRINKS=DRINKS.filter(function(d){return Number(d.id)!==Number(old.id);});
+    var sheet=document.getElementById("admin-sheet");if(sheet)sheet.remove();
+    playSound("win");
+    toast("\u2705 Fusionn\u00e9 \u2014 \u00ab "+target.name+" \u00bb garde tout");
+    try{pick(target);}catch(e){}
+  }).catch(function(e){playSound("err");toast("\u26A0\uFE0F \u00c9chec ("+(e&&e.message||"erreur")+")");});
+}
 function adminCleanDuplicateUsers(){
   if(!isAdmin)return;
   if(!confirm("Nettoyer les doublons du classement ?\nPour chaque pseudo en double : on garde le compte le plus r\u00e9cent (ton compte actuel en priorit\u00e9), son score devient le meilleur du groupe, les copies sont supprim\u00e9es."))return;
@@ -5865,6 +5916,7 @@ function openAdminSheet(){
     '<div id="ash-fill" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Remplissage enseignes (auto)</div>'+
     '<div id="ash-clean" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Purger Lidl / Aldi / Match</div>'+
     '<div id="ash-dedup" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Nettoyer doublons classement</div>'+
+    '<div id="ash-merge" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Fusionner cette fiche avec\u2026</div>'+
     '<div id="ash-brand" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Assigner \u00E0 une enseigne</div>'+
     '<div id="ash-codes" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">\uD83D\uDD22 G\u00E9rer les codes-barres</div>'+
     (canRemove?'<div id="ash-remove" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:#b91c1c">\uD83D\uDDD1\uFE0F Retirer du catalogue</div>':'')+
@@ -5878,6 +5930,7 @@ function openAdminSheet(){
   bind("ash-fill",adminFillEnseignes);
   bind("ash-clean",adminCleanUnverified);
   bind("ash-dedup",adminCleanDuplicateUsers);
+  bind("ash-merge",adminMergeDrink);
   bind("ash-brand",adminAssignBrand);
   bind("ash-codes",adminManageBarcodes);
   if(canRemove)bind("ash-remove",adminRemoveDrink);
@@ -7487,6 +7540,13 @@ function overrideAlcohol(code){
   playSound("pop");
   toast("OK \u2014 rescanne le code (ou r\u00e9appuie sur Scanner)");
 }
+window.addEventListener("fbMergesLoaded",function(){
+  try{
+    var before=DRINKS.length;
+    DRINKS=DRINKS.filter(function(d){return !window.DRINK_MERGES[Number(d.id)];});
+    if(DRINKS.length!==before){try{renderList();}catch(e){}}
+  }catch(e){}
+});
 function drinkLocate(){
   if(!curSel)return;
   lastScanContext={drinkId:curSel.id,from:"fiche"};
