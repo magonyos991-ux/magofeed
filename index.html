@@ -1098,7 +1098,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616a</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616b</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1386,7 +1386,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
 <!-- Firebase SDK -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion, arrayRemove, deleteDoc, startAt, endAt, getCountFromServer, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion, arrayRemove, deleteDoc, startAt, endAt, startAfter, documentId, getCountFromServer, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, linkWithPopup, signInWithPopup, signInWithCredential } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getMessaging, getToken, onMessage, isSupported } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
 
@@ -2043,58 +2043,82 @@ window.fbSyncWatch = async function(add, drinkId, drinkName, lat, lng) {
 window.fbSaveStore = async function(id, data) {
   await setDoc(doc(db, "stores", String(id)), data, { merge: true });
 };
+/* Parcours PAGINE de la collection stores : 400 docs a la fois, jamais tout en
+   memoire. L'ancienne version faisait getDocs() de la collection entiere ->
+   crash memoire sur iPhone ("Un probleme recurrent est survenu"). Idempotent :
+   relancer apres un crash reprend/complete sans doublons (arrayUnion). */
 window.fbFillEnseignes = async function(sets) {
-  const snap = await getDocs(collection(db, "stores"));
-  let batch = writeBatch(db), n = 0;
   const counts = {};
   const norm = s => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  for (const d of snap.docs) {
-    const b = norm((d.data().brand || "") + " " + (d.data().name || ""));
-    let ids = null, key = null;
-    if (b.includes("carrefour")) { ids = sets.carrefour; key = "Carrefour"; }
-    else if (b.includes("delhaize")) { ids = sets.delhaize; key = "Delhaize"; }
-    else if (b.includes("colruyt")) { ids = sets.colruyt; key = "Colruyt"; }
-    else if (b.includes("auchan")) { ids = sets.auchan; key = "Auchan"; }
-    else if (b.includes("leclerc")) { ids = sets.leclerc; key = "Leclerc"; }
-    else if (b.includes("intermarch")) { ids = sets.intermarche; key = "Intermarch\u00e9"; }
-    else if (b.includes("monoprix") || b.includes("monop")) { ids = sets.monoprix; key = "Monoprix"; }
-    else if (b.includes("super u") || b.includes("hyper u") || b.includes("u express")) { ids = sets.coursesu; key = "U"; }
-    else if (b.includes("cora") || b.includes("houra")) { ids = sets.cora; key = "Cora"; }
-    else if (b.includes("franprix")) { ids = sets.franprix; key = "Franprix"; }
-    else if (b.includes("albert heijn") || b.includes("ah ") || b === "ah") { ids = sets.albertheijn; key = "Albert Heijn"; }
-    if (!ids || !ids.length) continue;
-    var nums = ids.map(Number);
-    batch.update(d.ref, {
-      drinks: arrayUnion.apply(null, nums),
-      drinksVerified: arrayUnion.apply(null, nums),
-      verifiedSource: "missions 1-5 (07/2026)"
-    });
-    counts[key] = (counts[key] || 0) + 1;
-    if (++n >= 400) { await batch.commit(); batch = writeBatch(db); n = 0; }
+  let lastDoc = null, processed = 0;
+  while (true) {
+    let q1 = lastDoc
+      ? query(collection(db, "stores"), orderBy(documentId()), startAfter(lastDoc), limit(400))
+      : query(collection(db, "stores"), orderBy(documentId()), limit(400));
+    const snap = await getDocs(q1);
+    if (snap.empty) break;
+    let batch = writeBatch(db), n = 0;
+    for (const d of snap.docs) {
+      const b = norm((d.data().brand || "") + " " + (d.data().name || ""));
+      let ids = null, key = null;
+      if (b.includes("carrefour")) { ids = sets.carrefour; key = "Carrefour"; }
+      else if (b.includes("delhaize")) { ids = sets.delhaize; key = "Delhaize"; }
+      else if (b.includes("colruyt")) { ids = sets.colruyt; key = "Colruyt"; }
+      else if (b.includes("auchan")) { ids = sets.auchan; key = "Auchan"; }
+      else if (b.includes("leclerc")) { ids = sets.leclerc; key = "Leclerc"; }
+      else if (b.includes("intermarch")) { ids = sets.intermarche; key = "Intermarch\u00e9"; }
+      else if (b.includes("monoprix") || b.includes("monop")) { ids = sets.monoprix; key = "Monoprix"; }
+      else if (b.includes("super u") || b.includes("hyper u") || b.includes("u express")) { ids = sets.coursesu; key = "U"; }
+      else if (b.includes("cora") || b.includes("houra")) { ids = sets.cora; key = "Cora"; }
+      else if (b.includes("franprix")) { ids = sets.franprix; key = "Franprix"; }
+      else if (b.includes("albert heijn") || b.includes("ah ") || b === "ah") { ids = sets.albertheijn; key = "Albert Heijn"; }
+      if (!ids || !ids.length) continue;
+      var nums = ids.map(Number);
+      batch.update(d.ref, {
+        drinks: arrayUnion.apply(null, nums),
+        drinksVerified: arrayUnion.apply(null, nums),
+        verifiedSource: "missions 1-5 (07/2026)"
+      });
+      counts[key] = (counts[key] || 0) + 1;
+      if (++n >= 150) { await batch.commit(); batch = writeBatch(db); n = 0; }
+    }
+    if (n) await batch.commit();
+    lastDoc = snap.docs[snap.docs.length - 1];
+    processed += snap.size;
+    if (typeof window.onFillProgress === "function") { try { window.onFillProgress(processed); } catch (e) {} }
+    if (snap.size < 400) break;
   }
-  if (n) await batch.commit();
   return counts;
 };
 /* Purge des enseignes JAMAIS verifiees (Lidl/Aldi/Match : pas de boutique en
    ligne, aucune source catalogue) : on retire toute boisson sans confirmation
    communautaire positive. Les confirmations > 0 sont conservees. */
 window.fbCleanUnverifiedBrands = async function() {
-  const snap = await getDocs(collection(db, "stores"));
-  let batch = writeBatch(db), n = 0, cleaned = 0;
+  let cleaned = 0, lastDoc = null;
   const norm = s => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  for (const d of snap.docs) {
-    const data = d.data();
-    const b = norm((data.brand || "") + " " + (data.name || ""));
-    if (!/\blidl\b|\baldi\b|\bmatch\b/.test(b)) continue;
-    const confs = data.confirmations || {};
-    const before = (data.drinks || []).length;
-    const kept = (data.drinks || []).filter(id => (Number(confs[id]) || 0) > 0);
-    if (kept.length === before) continue;
-    batch.update(d.ref, { drinks: kept });
-    cleaned++;
-    if (++n >= 400) { await batch.commit(); batch = writeBatch(db); n = 0; }
+  while (true) {
+    let q1 = lastDoc
+      ? query(collection(db, "stores"), orderBy(documentId()), startAfter(lastDoc), limit(400))
+      : query(collection(db, "stores"), orderBy(documentId()), limit(400));
+    const snap = await getDocs(q1);
+    if (snap.empty) break;
+    let batch = writeBatch(db), n = 0;
+    for (const d of snap.docs) {
+      const data = d.data();
+      const b = norm((data.brand || "") + " " + (data.name || ""));
+      if (!/\blidl\b|\baldi\b|\bmatch\b/.test(b)) continue;
+      const confs = data.confirmations || {};
+      const before = (data.drinks || []).length;
+      const kept = (data.drinks || []).filter(id => (Number(confs[id]) || 0) > 0);
+      if (kept.length === before) continue;
+      batch.update(d.ref, { drinks: kept });
+      cleaned++;
+      if (++n >= 200) { await batch.commit(); batch = writeBatch(db); n = 0; }
+    }
+    if (n) await batch.commit();
+    lastDoc = snap.docs[snap.docs.length - 1];
+    if (snap.size < 400) break;
   }
-  if (n) await batch.commit();
   return cleaned;
 };
 window.fbAssignPackToBrand = async function(drinkIds, brand) {
@@ -5753,8 +5777,10 @@ function adminFillEnseignes(){
   };
   Object.keys(sets).forEach(function(k){sets[k]=sets[k].filter(function(v,i,a){return a.indexOf(v)===i;});});
   if(!confirm("Remplissage int\u00E9gral (BE + FR) :\n\u2022 Carrefour "+sets.carrefour.length+" \u00B7 Delhaize "+sets.delhaize.length+" \u00B7 Colruyt "+sets.colruyt.length+"\n\u2022 Auchan "+sets.auchan.length+" \u00B7 Leclerc "+sets.leclerc.length+" \u00B7 Intermarch\u00E9 "+sets.intermarche.length+"\n\u2022 Monoprix "+sets.monoprix.length+" \u00B7 U "+sets.coursesu.length+" \u00B7 Cora "+sets.cora.length+" \u00B7 Franprix "+sets.franprix.length+" \u00B7 Albert Heijn "+sets.albertheijn.length+"\n\nSur TOUS les magasins de ces enseignes. Lancer ?"))return;
-  toast("Remplissage en cours\u2026 (peut prendre 1 min)");
+  toast("Remplissage en cours\u2026 (peut prendre 1-2 min, laisse l'\u00e9cran allum\u00e9)");
+  window.onFillProgress=function(p){toast("Remplissage\u2026 "+p+" magasins parcourus");};
   window.fbFillEnseignes(sets).then(function(counts){
+    window.onFillProgress=null;
     var msg=Object.keys(counts).map(function(k){return counts[k]+" "+k;}).join(", ");
     playSound("win");
     toast("\u2705 Rempli : "+(msg||"aucun magasin trouv\u00E9"));
