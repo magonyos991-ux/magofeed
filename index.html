@@ -1098,7 +1098,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616e</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616f</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -2120,6 +2120,41 @@ window.fbCleanUnverifiedBrands = async function() {
     if (snap.size < 400) break;
   }
   return cleaned;
+};
+/* Doublons du classement : plusieurs comptes anonymes avec le meme pseudo
+   (une session anonyme = un doc users/). On garde le plus recent par pseudo
+   (priorite au compte actuellement connecte), on lui transfere le meilleur
+   score du groupe, on supprime les autres. Necessite la regle
+   "allow delete: if isAdmin();" sur users/. */
+window.fbCleanDuplicateUsers = async function() {
+  const snap = await getDocs(query(collection(db, "users"), limit(1000)));
+  const me = auth.currentUser ? auth.currentUser.uid : null;
+  const groups = {};
+  snap.forEach(function(d) {
+    const x = d.data();
+    const key = (x.pseudo || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    if (!key) return;
+    (groups[key] = groups[key] || []).push({ ref: d.ref, uid: d.id, points: Number(x.points) || 0,
+      ts: x.updatedAt && x.updatedAt.toMillis ? x.updatedAt.toMillis() : 0 });
+  });
+  let removed = 0, kept = 0;
+  for (const key of Object.keys(groups)) {
+    const g = groups[key];
+    if (g.length < 2) continue;
+    // Le gardien : le compte connecte s'il est dans le groupe, sinon le plus recent
+    let keep = g.find(u => u.uid === me) || g.slice().sort((a, b) => b.ts - a.ts)[0];
+    const maxPts = Math.max.apply(null, g.map(u => u.points));
+    if (maxPts > keep.points) {
+      await updateDoc(keep.ref, { points: maxPts });
+    }
+    for (const u of g) {
+      if (u.uid === keep.uid) continue;
+      await deleteDoc(u.ref);
+      removed++;
+    }
+    kept++;
+  }
+  return { removed: removed, groups: kept };
 };
 window.fbAssignPackToBrand = async function(drinkIds, brand) {
   const ids = drinkIds.map(Number);
@@ -5745,6 +5780,19 @@ function adminImportMission4(){
   }
   next();
 }
+function adminCleanDuplicateUsers(){
+  if(!isAdmin)return;
+  if(!confirm("Nettoyer les doublons du classement ?\nPour chaque pseudo en double : on garde le compte le plus r\u00e9cent (ton compte actuel en priorit\u00e9), son score devient le meilleur du groupe, les copies sont supprim\u00e9es."))return;
+  toast("Nettoyage du classement\u2026");
+  window.fbCleanDuplicateUsers().then(function(r){
+    playSound("win");
+    toast("\u2705 "+r.removed+" copie"+(r.removed>1?"s":"")+" supprim\u00e9e"+(r.removed>1?"s":"")+" ("+r.groups+" pseudo"+(r.groups>1?"s":"")+" d\u00e9doublonn\u00e9"+(r.groups>1?"s":"")+")");
+    if(window.fbLoadLeaderboard)window.fbLoadLeaderboard();
+  }).catch(function(e){
+    playSound("err");
+    toast("\u26A0\uFE0F \u00c9chec ("+(e&&e.message||"erreur")+") \u2014 r\u00e8gle users delete admin manquante ?");
+  });
+}
 function adminCleanUnverified(){
   if(!isAdmin)return;
   if(!confirm("Purger Lidl / Aldi / Match ?\nToute boisson SANS confirmation communautaire positive sera retiree de ces magasins (jamais verifies en catalogue).\nLes confirmations > 0 sont conservees."))return;
@@ -5806,6 +5854,7 @@ function openAdminSheet(){
     '<div id="ash-m4" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Importer \u00e9piceries Bruxelles</div>'+
     '<div id="ash-fill" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Remplissage enseignes (auto)</div>'+
     '<div id="ash-clean" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Purger Lidl / Aldi / Match</div>'+
+    '<div id="ash-dedup" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Nettoyer doublons classement</div>'+
     '<div id="ash-brand" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Assigner \u00E0 une enseigne</div>'+
     '<div id="ash-codes" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">\uD83D\uDD22 G\u00E9rer les codes-barres</div>'+
     (canRemove?'<div id="ash-remove" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:#b91c1c">\uD83D\uDDD1\uFE0F Retirer du catalogue</div>':'')+
@@ -5818,6 +5867,7 @@ function openAdminSheet(){
   bind("ash-m4",adminImportMission4);
   bind("ash-fill",adminFillEnseignes);
   bind("ash-clean",adminCleanUnverified);
+  bind("ash-dedup",adminCleanDuplicateUsers);
   bind("ash-brand",adminAssignBrand);
   bind("ash-codes",adminManageBarcodes);
   if(canRemove)bind("ash-remove",adminRemoveDrink);
