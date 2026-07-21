@@ -91,3 +91,35 @@ self.addEventListener("fetch", function(event) {
     })
   );
 });
+
+/* ── Push notifications (FCM) ──
+   La Cloud Function envoie un payload "notification" webpush : le navigateur
+   l'affiche même sans handler, mais on gère quand même push + clic pour
+   couvrir les payloads "data" et ouvrir directement la fiche de la boisson. */
+self.addEventListener("push", function(event) {
+  var data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) {}
+  var n = data.notification || data.data || {};
+  if (!n.title && !n.body) return; // payload notification natif : déjà affiché par le navigateur
+  event.waitUntil(
+    self.registration.showNotification(n.title || "Magofeed", {
+      body: n.body || "",
+      icon: "icons/icon-192.png",
+      badge: "icons/icon-192.png",
+      data: { url: n.url || (data.data && data.data.url) || "./" }
+    })
+  );
+});
+
+self.addEventListener("notificationclick", function(event) {
+  event.notification.close();
+  var url = (event.notification.data && event.notification.data.url) || "./";
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then(function(list) {
+      for (var i = 0; i < list.length; i++) {
+        if ("focus" in list[i]) { list[i].navigate(url); return list[i].focus(); }
+      }
+      return clients.openWindow(url);
+    })
+  );
+});
