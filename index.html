@@ -1388,6 +1388,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion, arrayRemove, deleteDoc, startAt, endAt, getCountFromServer, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, linkWithPopup, signInWithPopup, signInWithCredential } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getMessaging, getToken, onMessage, isSupported } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
 
 /* ── Firebase Config ── */
 const firebaseConfig = {
@@ -1521,9 +1522,30 @@ function boundingBox(lat, lng, radiusKm) {
   var lngDelta = radiusKm / (111 * Math.max(0.1, Math.cos(lat * Math.PI / 180)));
   return { latMin: lat - latDelta, latMax: lat + latDelta, lngMin: lng - lngDelta, lngMax: lng + lngDelta };
 }
+/* Fusions de fiches : ancien id -> id conserve. Applique au chargement de chaque
+   magasin : les references Firestore aux anciens ids restent valides sans migration. */
+var DRINK_MERGES = { 11286: 3301, 11287: 3300 };
+function remapDrinkId(x) { return DRINK_MERGES[Number(x)] || Number(x); }
 function normalizeStore(data, id, distKm) {
   data.fbId = id;
   data.id = data.id || id;
+  if (data.drinks && data.drinks.length) {
+    var seen = {};
+    data.drinks = data.drinks.map(remapDrinkId).filter(function(v){ if(seen[v]) return false; seen[v]=1; return true; });
+  }
+  if (data.drinksVerified && data.drinksVerified.length) {
+    var seenV = {};
+    data.drinksVerified = data.drinksVerified.map(remapDrinkId).filter(function(v){ if(seenV[v]) return false; seenV[v]=1; return true; });
+  }
+  if (data.confirmations) {
+    Object.keys(DRINK_MERGES).forEach(function(oldId){
+      if (data.confirmations[oldId] != null) {
+        var target = DRINK_MERGES[oldId];
+        data.confirmations[target] = (Number(data.confirmations[target]) || 0) + Number(data.confirmations[oldId]);
+        delete data.confirmations[oldId];
+      }
+    });
+  }
   // open/hours ne sont PLUS inventes : l'ouverture se calcule en direct
   // (storeOpenState) depuis les vrais horaires OSM ou l'heuristique d'enseigne.
   data.hours = data.hours || null;
@@ -1971,6 +1993,53 @@ window.fbApproveFormat = async function(sug) {
    (Cowork + verifs manuelles 17/07) : parcourt TOUS les magasins une fois,
    reconnait l'enseigne par son nom (toutes variantes : Express, Market,
    AD/Proxy Delhaize...) et assigne le bon assortiment. Une seule passe. */
+/* ── PUSH NOTIFICATIONS (FCM) ──
+   La veille locale ne marche qu'app ouverte. Ici : jeton FCM enregistre dans
+   Firestore + chaque veille dupliquee dans la collection "watches" avec la
+   position. La Cloud Function (functions/index.js) envoie le push quand une
+   boisson veillee est ajoutee a un magasin proche — meme app fermee.
+   MAGO_VAPID_KEY : cle "Web Push certificates" de la console Firebase
+   (Parametres du projet > Cloud Messaging). Vide = push desactive, veille
+   locale inchangee. */
+window.MAGO_VAPID_KEY = "";
+window.fbEnablePush = async function(lat, lng) {
+  try {
+    if (!window.MAGO_VAPID_KEY) { console.warn("Push: VAPID key absente"); return { ok: false, reason: "novapid" }; }
+    if (!(await isSupported())) return { ok: false, reason: "unsupported" };
+    var perm = await Notification.requestPermission();
+    if (perm !== "granted") return { ok: false, reason: "denied" };
+    var reg = await navigator.serviceWorker.ready;
+    var messaging = getMessaging(app);
+    var token = await getToken(messaging, { vapidKey: window.MAGO_VAPID_KEY, serviceWorkerRegistration: reg });
+    if (!token) return { ok: false, reason: "notoken" };
+    var user = await ensureAuthed();
+    await setDoc(doc(db, "pushTokens", user.uid), {
+      token: token, lat: lat != null ? lat : null, lng: lng != null ? lng : null,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    onMessage(messaging, function(payload) {
+      var n = payload.notification || {};
+      try { new Notification(n.title || "Magofeed", { body: n.body || "", icon: "icons/icon-192.png" }); } catch (e) {}
+    });
+    window._pushToken = token;
+    return { ok: true };
+  } catch (e) { console.warn("Push setup:", e); return { ok: false, reason: String(e && e.message || e) }; }
+};
+window.fbSyncWatch = async function(add, drinkId, drinkName, lat, lng) {
+  try {
+    var user = await ensureAuthed();
+    var wid = user.uid + "_" + drinkId;
+    if (add) {
+      await setDoc(doc(db, "watches", wid), {
+        uid: user.uid, drinkId: Number(drinkId), drinkName: String(drinkName || "").slice(0, 60),
+        lat: lat != null ? lat : null, lng: lng != null ? lng : null,
+        createdAt: serverTimestamp()
+      });
+    } else {
+      await deleteDoc(doc(db, "watches", wid));
+    }
+  } catch (e) { console.warn("Watch sync:", e); }
+};
 window.fbSaveStore = async function(id, data) {
   await setDoc(doc(db, "stores", String(id)), data, { merge: true });
 };
@@ -2599,8 +2668,6 @@ var DRINKS=[
   {id:11283,name:"Pop Mate Original Bio",brand:"Pop Mate",emoji:"🧉",color:"#27ae60",light:"#e9f7ef",cat:"Exotique",tag:"POP MATE",stars:4.0},
   {id:11284,name:"ChariTea Mate Glace",brand:"ChariTea",emoji:"🍋",color:"#d4ac0d",light:"#fef9e7",cat:"Ice Tea",tag:"CHARITEA",stars:4.1},
   {id:11285,name:"Lemonaid Citron Vert",brand:"Lemonaid",emoji:"🍈",color:"#82e0aa",light:"#e9f7ef",cat:"Soda",tag:"LEMONAID",stars:4.1},
-  {id:11286,name:"Fever-Tree Ginger Beer",brand:"Fever-Tree",emoji:"🫚",color:"#b9770e",light:"#fdf2e9",cat:"Soda",tag:"FEVER-TREE",stars:4.4},
-  {id:11287,name:"Fever-Tree Indian Tonic",brand:"Fever-Tree",emoji:"🍸",color:"#5d6d7e",light:"#eaecee",cat:"Soda",tag:"FEVER-TREE",stars:4.3},
   {id:11288,name:"Canada Dry Ginger Ale",brand:"Canada Dry",emoji:"🥃",color:"#117a65",light:"#e8f6f3",cat:"Soda",tag:"CANADA DRY",stars:4.2},
   {id:11289,name:"Vita Coco Eau de Coco",brand:"Vita Coco",emoji:"🥥",color:"#48c9b0",light:"#e8f8f5",cat:"Exotique",tag:"VITA COCO",stars:4.2},
   {id:11290,name:"Pimento Ginger Punch",brand:"Pimento",emoji:"🌶️",color:"#c0392b",light:"#fdedec",cat:"Soda",tag:"PIMENTO",stars:4.1},
@@ -5982,7 +6049,13 @@ function toggleWatch(d){
     drinkWatches.push({id:d.id,name:d.name,emoji:d.emoji,lat:userLat||null,lng:userLng||null,created:Date.now(),triggered:false});
     playSound("pop");
     toast("\uD83D\uDD14 Tu seras pr\u00E9venu d\u00E8s qu'on la signale pr\u00E8s de toi !");
+    if(window.fbEnablePush&&!window._pushToken){
+      window.fbEnablePush(userLat,userLng).then(function(r){
+        if(r&&r.ok)toast("\uD83D\uDCF2 Notifications activ\u00e9es \u2014 m\u00eame app ferm\u00e9e !");
+      });
+    }
   }
+  if(window.fbSyncWatch)window.fbSyncWatch(i===-1,d.id,d.name,userLat,userLng);
   saveWatches();
   try{renderStoreList();}catch(e){}
   try{renderAlertsCard();}catch(e){}
@@ -7252,6 +7325,67 @@ function exploreGoCity(){
       setTimeout(function(){box.innerHTML="";},2500);
     });
 }
+/* Partage d'une fiche : lien direct #drink=ID (Web Share natif, sinon copie).
+   C'est le canal de croissance : chaque trouvaille devient un lien TikTok/WhatsApp. */
+function shareDrink(d){
+  if(!d)return;
+  var url=location.origin+location.pathname+"#drink="+d.id;
+  var text="J'ai trouv\u00e9 \u00ab "+d.name+" \u00bb sur Magofeed \u2014 regarde o\u00f9 l'acheter pr\u00e8s de chez toi :";
+  if(navigator.share){
+    navigator.share({title:"Magofeed \u00b7 "+d.name,text:text,url:url}).then(function(){
+      if(awardOnce("share:"+d.id,24)){userStats.pts+=2;flyPts(2);updateProfileStats();toast("\uD83D\uDD17 Partag\u00e9 \u00b7 +2 pts");}
+    }).catch(function(){});
+  }else{
+    var copy=navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(url):Promise.reject();
+    Promise.resolve(copy).then(function(){toast("\uD83D\uDD17 Lien copi\u00e9 !");playSound("pop");})
+      .catch(function(){prompt("Copie ce lien :",url);});
+  }
+}
+function handleDeepLink(){
+  var m=(location.hash||"").match(/#drink=(\d+)/);
+  if(!m)return;
+  var d=DRINKS.find(function(x){return Number(x.id)===Number(m[1]);});
+  if(d){try{pick(d);}catch(e){setTimeout(function(){try{pick(d);}catch(e2){}},600);}}
+}
+window.addEventListener("hashchange",handleDeepLink);
+/* Onboarding : 3 ecrans au tout premier lancement, jamais revu ensuite. */
+function showOnboarding(){
+  if(localStorage.getItem("magoOnboard")==="1")return;
+  var slides=[
+    {t:"Trouve l'introuvable",s:"Mogu Mogu, Inca Kola, Uludag, Supermalt\u2026 Magofeed te dit quels magasins autour de toi vendent les boissons du monde entier."},
+    {t:"Scanne et contribue",s:"Scanne un code-barre, confirme un stock, ajoute un prix : chaque contribution aide toute la communaut\u00e9 et te rapporte des points."},
+    {t:"Mets tes envies en veille",s:"Une boisson introuvable ? Active la veille : tu seras pr\u00e9venu d\u00e8s qu'elle est signal\u00e9e pr\u00e8s de chez toi."}
+  ];
+  var idx=0;
+  var wrap=document.createElement("div");
+  wrap.id="mago-onboard";
+  wrap.style.cssText="position:fixed;inset:0;z-index:9500;background:var(--app-bg,#f6f1e9);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 26px;font-family:'Space Grotesk',sans-serif;text-align:center";
+  function render(){
+    var sl=slides[idx];
+    wrap.innerHTML='<div style="max-width:340px;width:100%">'+
+      '<div style="font-size:44px;margin-bottom:22px">'+["\uD83E\uDDED","\uD83D\uDCF1","\uD83D\uDD14"][idx]+'</div>'+
+      '<div style="font-size:23px;font-weight:800;color:var(--s1,#1a1714);margin-bottom:12px">'+sl.t+'</div>'+
+      '<div style="font-size:14.5px;line-height:1.6;color:var(--s2,#6b6259);margin-bottom:30px">'+sl.s+'</div>'+
+      '<div style="display:flex;justify-content:center;gap:7px;margin-bottom:26px">'+slides.map(function(_,i){return '<span style="width:'+(i===idx?22:8)+'px;height:8px;border-radius:999px;background:'+(i===idx?"var(--s1,#1a1714)":"var(--border,#ddd)")+';transition:all .25s"></span>';}).join("")+'</div>'+
+      '<button id="ob-next" style="width:100%;padding:15px;border-radius:16px;border:none;background:var(--s1,#1a1714);color:var(--app-bg,#fff);font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">'+(idx<slides.length-1?"Suivant":"C'est parti !")+'</button>'+
+      (idx<slides.length-1?'<div id="ob-skip" role="button" tabindex="0" style="margin-top:14px;font-size:12.5px;font-weight:600;color:var(--s3,#999);cursor:pointer;text-decoration:underline">Passer</div>':"")+
+    '</div>';
+    document.getElementById("ob-next").onclick=function(){
+      playSound("pop");
+      if(idx<slides.length-1){idx++;render();}
+      else{finish();}
+    };
+    var sk=document.getElementById("ob-skip");
+    if(sk)sk.onclick=finish;
+  }
+  function finish(){
+    try{localStorage.setItem("magoOnboard","1");}catch(e){}
+    wrap.style.transition="opacity .3s";wrap.style.opacity="0";
+    setTimeout(function(){wrap.remove();},320);
+  }
+  render();
+  document.body.appendChild(wrap);
+}
 function drinkLocate(){
   if(!curSel)return;
   lastScanContext={drinkId:curSel.id,from:"fiche"};
@@ -7398,6 +7532,7 @@ function renderSortBar(){
   var html='<div style="display:flex;gap:8px;padding:8px 20px 4px;overflow-x:auto;flex-shrink:0">';
   html+='<div onclick="drinkLocate()" role="button" tabindex="0" aria-label="Ajouter un magasin qui vend cette boisson" onkeydown="if(event.key===\'Enter\')drinkLocate()" style="flex-shrink:0;display:flex;align-items:center;gap:5px;padding:0 15px;height:38px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:12.5px;font-weight:800;cursor:pointer;white-space:nowrap">+ Magasin</div>';
   html+='<div onclick="toggleWatch(curSel)" role="button" tabindex="0" aria-label="Veille sur cette boisson" onkeydown="if(event.key===\'Enter\')toggleWatch(curSel)" style="flex-shrink:0;padding:8px 12px;border-radius:999px;background:'+(isWatched(curSel.id)?"var(--s1)":"var(--bg2)")+';color:'+(isWatched(curSel.id)?"var(--app-bg)":"var(--s1)")+';border:1.5px solid '+(isWatched(curSel.id)?"var(--s1)":"var(--border)")+';font-size:13px;cursor:pointer">'+(isWatched(curSel.id)?'<svg width="16px" height="16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>':'<svg width="16px" height="16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/><line x1="3" y1="3" x2="21" y2="21"/></svg>')+'</div>';
+  html+='<div onclick="shareDrink(curSel)" role="button" tabindex="0" aria-label="Partager cette boisson" onkeydown="if(event.key===\'Enter\')shareDrink(curSel)" style="flex-shrink:0;padding:8px 12px;border-radius:999px;background:var(--bg2);color:var(--s1);border:1.5px solid var(--border);font-size:13px;cursor:pointer"><svg width="16px" height="16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg></div>';
   html+='<div onclick="openExploreMap({drinkId:curSel.id,name:curSel.name})" role="button" tabindex="0" aria-label="Voir sur la carte" onkeydown="if(event.key===\'Enter\'){openExploreMap({drinkId:curSel.id,name:curSel.name});}" style="flex-shrink:0;padding:8px 14px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14"/><path d="M15 6v14"/></svg> Carte</div>';
   ["distance","open","trust"].forEach(function(s){
     var a=curSort===s;
@@ -8047,6 +8182,8 @@ function installApp(){
 function registerServiceWorker(){
   if(!("serviceWorker" in navigator))return;
   navigator.serviceWorker.register("sw.js").catch(function(e){console.warn("SW registration failed:",e);});
+  setTimeout(function(){try{handleDeepLink();}catch(e){}},400);
+  setTimeout(function(){try{showOnboarding();}catch(e){}},250);
 }
 
 /* ================================
