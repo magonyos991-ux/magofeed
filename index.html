@@ -533,6 +533,12 @@ body.dark .toast{background:#f0f0f0;color:#111}
 .mago-pin-head{position:absolute;top:0;left:0;width:34px;height:34px;border-radius:50%;background:var(--pc,#1a1714);border:2.5px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13.5px;font-family:'Space Grotesk',sans-serif;letter-spacing:.3px;z-index:2;transition:transform .15s}
 .mago-pin-tip{position:absolute;left:50%;bottom:3px;width:12px;height:12px;background:var(--pc,#1a1714);border-right:2.5px solid #fff;border-bottom:2.5px solid #fff;transform:translateX(-50%) rotate(45deg);z-index:1}
 .mago-pin.closed{filter:drop-shadow(0 3px 5px rgba(0,0,0,.18)) grayscale(.55);opacity:.72}
+.mago-pin.sure .mago-pin-head{border-color:#16a34a;border-width:3px;box-shadow:0 0 0 3px rgba(22,163,74,.25)}
+.mago-pin.sure{filter:drop-shadow(0 5px 10px rgba(22,163,74,.35))}
+.mago-pin .pin-check{position:absolute;top:-5px;right:-5px;width:16px;height:16px;border-radius:50%;background:#16a34a;border:2px solid #fff;color:#fff;font-size:9px;font-weight:900;display:flex;align-items:center;justify-content:center;z-index:3}
+.mago-pin.maybe{opacity:.5}
+.mago-pin.maybe .mago-pin-head{font-size:11px}
+.mago-pin.absent{opacity:.35;filter:grayscale(1)}
 .leaflet-marker-icon:hover .mago-pin-head{transform:scale(1.1)}
 .mago-cluster{display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--cc,#1a1714);color:#fff;font-weight:800;font-family:'Space Grotesk',sans-serif;border:3px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.25),0 0 0 5px color-mix(in srgb,var(--cc,#1a1714) 22%,transparent);transition:transform .15s}
 .leaflet-marker-icon:hover .mago-cluster{transform:scale(1.06)}
@@ -1098,7 +1104,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616j</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616k</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -5302,6 +5308,7 @@ function renderMap(){
   mapRenderedFor=productId;
   var placeholder=box.querySelector("#map-placeholder");if(placeholder)placeholder.style.display="none";
   box.innerHTML='<div id="leaflet-map" style="width:100%;height:100%"></div>'+
+    '<div style="position:absolute;top:8px;left:8px;z-index:900;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);border-radius:999px">'+mapLegendHTML()+'</div>'+
     '<div class="map-locate-btn" onclick="centerMapOnUser()" title="Centrer sur moi" role="button" tabindex="0" aria-label="Centrer la carte sur ma position" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();centerMapOnUser();}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="var(--s1)" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="var(--s1)" stroke-width="2" stroke-linecap="round"/></svg></div>';
   if(window._leafletMap){window._leafletMap.remove();window._leafletMap=null;}
   if(!window.L){
@@ -6114,17 +6121,32 @@ function populateClusterMarkers(cluster){
     var color=brandColor(s.brand);
     var initial=((s.brand||s.name||"?").trim().charAt(0)||"?").toUpperCase();
     var isOpen=storeOpenState(s);
+    // Statut de LA boisson cherchee dans CE magasin : c'est ca qu'on veut voir
+    // sur la carte, pas juste "un magasin existe ici"
+    var conf=curSel?((s.confirmations||{})[curSel.id]||0):0;
+    var sure=curSel?(storeVerifiedFor(s,curSel.id)||conf>0):false;
+    var status=conf<0?"absent":(sure?"sure":"maybe");
+    var pinCls="mago-pin"+(isOpen===false?" closed":"")+(status==="sure"?" sure":status==="absent"?" absent":" maybe");
+    var big=status==="sure";
     var storeIcon=L.divIcon({
-      html:'<div class="mago-pin'+(isOpen===false?" closed":"")+'" style="--pc:'+color+'"><div class="mago-pin-head">'+initial+'</div><div class="mago-pin-tip"></div></div>',
-      className:"",iconSize:[34,44],iconAnchor:[17,44]
+      html:'<div class="'+pinCls+'" style="--pc:'+color+'">'+
+        '<div class="mago-pin-head">'+initial+(status==="sure"?'<span class="pin-check">\u2713</span>':'')+'</div>'+
+        '<div class="mago-pin-tip"></div></div>',
+      className:"",iconSize:big?[38,49]:[28,36],iconAnchor:big?[19,49]:[14,36]
     });
-    var marker=L.marker([s.lat,s.lng],{icon:storeIcon});
+    var marker=L.marker([s.lat,s.lng],{icon:storeIcon,zIndexOffset:status==="sure"?600:(status==="absent"?0:200)});
     marker._brand=s.brand||"";
     var storeIdForSheet=String(s.id);
     marker.on("click",function(){openStoreSheet(storeIdForSheet);});
     marker.addTo(cluster);
   });
   return stores;
+}
+function mapLegendHTML(){
+  return '<div style="display:flex;gap:12px;align-items:center;padding:7px 12px;font-size:10.5px;font-weight:700;color:var(--s2)">'+
+    '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:50%;background:#16a34a;display:inline-block"></span>L\'a en rayon</span>'+
+    '<span style="display:inline-flex;align-items:center;gap:5px;opacity:.6"><span style="width:9px;height:9px;border-radius:50%;background:var(--s3);display:inline-block"></span>Peut-\u00eatre</span>'+
+  '</div>';
 }
 function loadStoresForMapViewport(map){
   if(!curSel||!window.fbLoadNearbyStores||window._fbViewportLoading)return;
