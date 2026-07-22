@@ -1104,7 +1104,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616l</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616m</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -7190,19 +7190,39 @@ function cropConfirm(){
   setAvatar({type:"photo",v:data});
   var pk=document.getElementById("avatar-picker");if(pk)pk.style.display="none";
 }
+function pseudoColor(p){
+  // Couleur stable derivee du pseudo : le meme pseudo a toujours la meme couleur
+  var palette=["#c0392b","#d35400","#b7950b","#1e8449","#148f77","#1f618d","#6c3483","#a04000","#7d6608","#117864"];
+  var h=0,s=String(p||"?");
+  for(var i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0;
+  return palette[h%palette.length];
+}
+function avatarFallbackHTML(size){
+  var ini=((userPseudo||"?").trim().charAt(0)||"?").toUpperCase();
+  return '<span style="width:'+size+'px;height:'+size+'px;border-radius:50%;background:'+pseudoColor(userPseudo)+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:'+Math.round(size*0.42)+'px;font-weight:800;font-family:\'Space Grotesk\',sans-serif">'+ini+'</span>';
+}
 function applyAvatarEverywhere(){
+  // Le rond du header (celui que tout le monde voit en premier)
+  var head=document.querySelector(".avatar");
+  if(head){
+    var hHtml=avatarHTML(userAvatar,34)||avatarFallbackHTML(34);
+    head.innerHTML=hHtml;
+    head.style.background="none";
+    head.style.overflow="hidden";
+  }
   var html=avatarHTML(userAvatar,76);
   var prof=document.getElementById("profile-avatar");
   if(prof){
     var pen=prof.querySelector("span[aria-hidden]");
-    prof.innerHTML=(html||"\uD83E\uDDD1");
+    prof.innerHTML=(html||avatarFallbackHTML(76));
+    if(!html)prof.style.background="none";
     if(pen)prof.appendChild(pen);
     else prof.innerHTML+='<span aria-hidden="true" style="position:absolute;bottom:-2px;right:-2px;width:24px;height:24px;border-radius:50%;background:var(--s1);color:var(--app-bg);display:flex;align-items:center;justify-content:center;font-size:11px;border:2px solid var(--app-bg)">\u270F\uFE0F</span>';
   }
   var mini=document.getElementById("avatar-initials");
   if(mini){
-    var small=avatarHTML(userAvatar,46);
-    if(small)mini.innerHTML=small;
+    mini.innerHTML=avatarHTML(userAvatar,46)||avatarFallbackHTML(46);
+    mini.style.background="none";
   }
 }
 function openProposeForm(){
