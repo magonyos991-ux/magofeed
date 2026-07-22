@@ -1098,7 +1098,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616i</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616j</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -5438,8 +5438,10 @@ function fetchVerifiedOFFImage(d){
   var key=String(d.id);
   if(d.img||imgFetchInFlight[key])return;
   var cached=imgCache[key];
-  // Cache permanent pour les photos trouvees ; nouvel essai apres 30 jours pour les echecs
-  if(cached&&(cached.url||Date.now()-(cached.ts||0)<30*86400000))return;
+  // Cache permanent pour les photos trouvees ; nouvel essai apres 24h pour les
+  // echecs (avant : 30 jours -> un simple timeout privait un appareil de la
+  // photo pendant un mois, y compris des photos communautaires validees apres)
+  if(cached&&(cached.url||Date.now()-(cached.ts||0)<86400000))return;
   imgFetchInFlight[key]=true;
   // 1) Si la boisson a un code-barre : la fiche EXACTE du produit d'abord.
   //    C'est la qu'on trouve les fiches canoniques aux belles photos
@@ -6341,7 +6343,6 @@ function renderStoreList(){
   var allStores=STORES.filter(function(s){
     // Support drinks comme tableau d'IDs (nombres ou strings)
     if(!s.drinks||!s.drinks.length)return false;
-    if(((s.confirmations||{})[curSel.id]||0)<0)return false; // signalee absente : retiree des resultats
     return s.drinks.some(function(did){return Number(did)===curSel.id||did===curSel.id;});
   });
   // Rien trouvé dans le rayon courant : élargit la recherche Firestore (25km puis 50km) une seule fois par boisson
@@ -6425,7 +6426,9 @@ function renderStoreList(){
     '</div>'+
     '<div class="trust-wrap">'+
       (storeVerifiedFor(s,sid)?
-        '<div style="display:inline-flex;align-items:center;gap:5px;margin-bottom:7px;padding:3px 10px;border-radius:999px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:10.5px;font-weight:700;color:#15803d">\u2713 V\u00e9rifi\u00e9 \u00b7 catalogue enseigne</div>':'')+
+        '<div style="display:inline-flex;align-items:center;gap:5px;margin-bottom:7px;padding:3px 10px;border-radius:999px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:10.5px;font-weight:700;color:#15803d">\u2713 V\u00e9rifi\u00e9 \u00b7 catalogue enseigne</div>':
+       (((s.confirmations||{})[sid]||0)<0?
+        '<div style="display:inline-flex;align-items:center;gap:5px;margin-bottom:7px;padding:3px 10px;border-radius:999px;background:#fff7ed;border:1px solid #fed7aa;font-size:10.5px;font-weight:700;color:#c2410c">Signal\u00e9e absente r\u00e9cemment \u2014 tu la vois ? confirme !</div>':''))+
       '<div style="display:flex;justify-content:space-between;margin-bottom:5px">'+
         '<span style="font-size:10px;font-weight:600;color:var(--s3)">Fiabilité</span>'+
         '<span style="font-size:10px;font-weight:600;color:var(--s2)">'+confs+' confirmation'+(confs>1?"s":"")+'</span>'+
@@ -7798,11 +7801,14 @@ function openLabel(s){
 }
 function storeVerifiedFor(s,did){return !!(s&&s.drinksVerified&&s.drinksVerified.some(function(v){return Number(v)===Number(did);}));}
 function sortedStores(stores){var arr=stores.slice();if(curSort==="distance")arr.sort(function(a,b){return(a.dist||999)-(b.dist||999);});else if(curSort==="open")arr.sort(function(a,b){return openScore(b)-openScore(a);});else if(curSort==="trust")arr.sort(function(a,b){var id=curSel?curSel.id:0;return(b.confirmations[id]||0)-(a.confirmations[id]||0);});
-  // Les magasins SURS (catalogue enseigne verifie ou confirmations positives) toujours avant les "probables"
+  // Ordre : SURS (catalogue verifie / confirmations positives) > probables > signalees absentes
   if(curSel){var did=curSel.id;arr.sort(function(a,b){
-    var sa=(storeVerifiedFor(a,did)||((a.confirmations||{})[did]||0)>0)?1:0;
-    var sb=(storeVerifiedFor(b,did)||((b.confirmations||{})[did]||0)>0)?1:0;
-    return sb-sa;});}
+    function rank(s){
+      var c=(s.confirmations||{})[did]||0;
+      if(c<0)return -1; // signalee absente : en dernier, mais VISIBLE (un seul "non" ne doit pas effacer une vraie dispo)
+      return (storeVerifiedFor(s,did)||c>0)?1:0;
+    }
+    return rank(b)-rank(a);});}
   return arr;}
 
 /* ================================
