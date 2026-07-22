@@ -1104,7 +1104,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616k</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616l</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -4791,6 +4791,7 @@ function storeSkeletonHTML(n){
   return html;
 }
 function pick(d){
+  window._storeListExpanded=false;
   // Recherche (une seule fois, mise en cache) de la vraie photo du produit sur OpenFoodFacts
   fetchVerifiedOFFImage(d);
   // Rafraichir le visuel de fiche (badge loupe si une photo est deja en cache)
@@ -6383,6 +6384,10 @@ function renderStoreList(){
   if(curBrandFilter&&brandsAvailable.indexOf(curBrandFilter)===-1)curBrandFilter=null;
   var stores=sortedStores(allStores);
   if(curBrandFilter)stores=stores.filter(function(s){return s.brand===curBrandFilter;});
+  // Plafond d'affichage : 300 cartes DOM pour un Coca faisaient ramer les
+  // telephones — les 20 premieres suffisent (les sures sont deja en tete)
+  var totalStores=stores.length;
+  if(!window._storeListExpanded&&stores.length>20)stores=stores.slice(0,20);
   var open=stores.filter(function(s){return s.open;}).length;
   var maxPrice=curBudget||null;
   if(maxPrice){stores=stores.filter(function(s){var p=getStorePrice(s,curSel.id);return !p||p<=maxPrice;});}
@@ -6422,6 +6427,14 @@ function renderStoreList(){
   if(!stores.length){
     if(nearbyMode)renderNearbyFallback(el);
     return;
+  }
+  if(!window._storeListExpanded&&totalStores>20){
+    setTimeout(function(){
+      var host=document.getElementById("res-stores");
+      if(host&&!document.getElementById("store-more-btn")){
+        host.insertAdjacentHTML("beforeend",'<div id="store-more-btn" onclick="window._storeListExpanded=true;renderStoreList();" role="button" tabindex="0" style="margin:6px 16px 14px;padding:12px;border-radius:14px;background:var(--bg2);border:1.5px solid var(--border);text-align:center;font-size:12.5px;font-weight:800;color:var(--s1);cursor:pointer">Voir les '+(totalStores-20)+' autres magasins</div>');
+      }
+    },0);
   }
   var sid=curSel.id;
   el.insertAdjacentHTML("beforeend",'<div style="padding:8px 20px 4px"><button onclick="drinkLocate()" style="width:100%;padding:8px;border-radius:12px;border:none;background:transparent;color:var(--s3);font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit;text-decoration:underline">Ajouter un autre magasin qui la vend</button></div>');
@@ -7440,7 +7453,9 @@ function exploreLoadStores(){
     var shown=0;
     list.slice(0,400).forEach(function(s){
       if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
-      var mk=L.marker([s.lat,s.lng],{icon:L.divIcon({className:"",html:'<div style="width:30px;height:30px;border-radius:50%;background:var(--app-bg);border:2px solid var(--s1);display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 6px rgba(0,0,0,.25)">'+(s.emoji||"\uD83C\uDFEA")+'</div>',iconSize:[30,30],iconAnchor:[15,15]})});
+      var pc=brandColor(s.brand);
+      var ini=((s.brand||s.name||"?").trim().charAt(0)||"?").toUpperCase();
+      var mk=L.marker([s.lat,s.lng],{icon:L.divIcon({className:"",html:'<div class="mago-pin'+(storeOpenState(s)===false?" closed":"")+'" style="--pc:'+pc+';width:30px;height:39px"><div class="mago-pin-head" style="width:30px;height:30px;font-size:12px">'+ini+'</div><div class="mago-pin-tip" style="width:11px;height:11px;bottom:2px"></div></div>',iconSize:[30,39],iconAnchor:[15,39]})});
       mk.on("click",function(e){
         if(e&&e.originalEvent&&window.L&&L.DomEvent){try{L.DomEvent.stopPropagation(e.originalEvent);}catch(_e){}}
         // recentrage doux sur le pin (la bandelette couvre le bas)
@@ -7633,7 +7648,28 @@ function voteDisc(id){
 /* ================================
    MAPS EXTERNAL
 ================================ */
-function openGmaps(){if(!curSel)return;var s=STORES.filter(function(x){return x.drinks.includes(curSel.id)&&x.open;})[0];if(s)window.open("https://www.google.com/maps/dir/?api=1&destination="+s.lat+","+s.lng,"_blank");}
+function openGmaps(){
+  if(!curSel)return;
+  var did=curSel.id;
+  var cands=STORES.filter(function(x){
+    return (x.drinks||[]).some(function(d){return Number(d)===Number(did);})
+      &&storeOpenState(x)!==false
+      &&((x.confirmations||{})[did]||0)>=0; // jamais vers un magasin signale absent
+  });
+  if(!cands.length){toast("Aucun magasin ouvert avec cette boisson par ici");playSound("err");return;}
+  // Le but de l'app : t'envoyer la ou elle EST. Priorite aux magasins SURS
+  // (catalogue verifie / confirmations / scans), puis au plus proche.
+  cands.sort(function(a,b){
+    var sa=(storeVerifiedFor(a,did)||((a.confirmations||{})[did]||0)>0)?1:0;
+    var sb=(storeVerifiedFor(b,did)||((b.confirmations||{})[did]||0)>0)?1:0;
+    if(sa!==sb)return sb-sa;
+    return (a.dist||9e9)-(b.dist||9e9);
+  });
+  var s=cands[0];
+  var sure=storeVerifiedFor(s,did)||((s.confirmations||{})[did]||0)>0;
+  toast((sure?"\u2713 ":"")+sanitize(s.name)+(s.dist?" \u00b7 "+fmtDist(s.dist):""));
+  window.open("https://www.google.com/maps/dir/?api=1&destination="+s.lat+","+s.lng,"_blank");
+}
 function openWaze(){if(!curSel)return;var s=STORES.filter(function(x){return x.drinks.includes(curSel.id)&&x.open;})[0];if(s)window.open("https://waze.com/ul?ll="+s.lat+","+s.lng+"&navigate=yes","_blank");}
 function goToStore(lat,lng){window.open("https://www.google.com/maps/dir/?api=1&destination="+lat+","+lng,"_blank");}
 
