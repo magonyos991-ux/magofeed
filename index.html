@@ -1098,7 +1098,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616h</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616i</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -2167,6 +2167,9 @@ window.fbCleanDuplicateUsers = async function() {
     const x = d.data();
     const key = (x.pseudo || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
     if (!key) return;
+    // Pseudos generiques ou herites de l'ancien defaut : plusieurs PERSONNES
+    // DIFFERENTES peuvent les porter -> interdits de fusion
+    if (key === "magonyos" || key === "explorateur" || key === "anonyme") return;
     (groups[key] = groups[key] || []).push({ ref: d.ref, uid: d.id, points: Number(x.points) || 0,
       ts: x.updatedAt && x.updatedAt.toMillis ? x.updatedAt.toMillis() : 0 });
   });
@@ -5825,12 +5828,20 @@ function adminMergeDrink(){
   var qn=normTxt(q.trim());
   var hits=DRINKS.filter(function(d){return d.id!==old.id&&(fuzzyHit(d.name,qn)||fuzzyHit(d.brand,qn));}).slice(0,6);
   if(!hits.length){toast("\u26A0\uFE0F Aucune fiche trouv\u00e9e");playSound("err");return;}
-  var listing=hits.map(function(d,i){return (i+1)+". "+d.name+" ("+d.brand+", id "+d.id+")";}).join("\n");
-  var pick2=prompt("Fiche \u00e0 GARDER :\n\n"+listing+"\n\nTape le NUM\u00c9RO :");
-  if(pick2===null)return;
-  var idx=parseInt(pick2.trim(),10)-1;
-  if(isNaN(idx)||idx<0||idx>=hits.length){toast("\u26A0\uFE0F Num\u00e9ro invalide");playSound("err");return;}
-  var target=hits[idx];
+  var target=null;
+  if(hits.length===1){
+    target=hits[0]; // un seul resultat : pas besoin de demander un numero
+  }else{
+    var listing=hits.map(function(d,i){return (i+1)+". "+d.name+" \u00b7 "+d.brand;}).join("\n");
+    var pick2=prompt("Fiche \u00e0 GARDER \u2014 tape le NUM\u00c9RO de la liste (1 \u00e0 "+hits.length+") :\n\n"+listing);
+    if(pick2===null)return;
+    var n=parseInt(String(pick2).replace(/[^0-9]/g,""),10);
+    if(!isNaN(n)){
+      if(n>=1&&n<=hits.length)target=hits[n-1];
+      else target=hits.find(function(d){return Number(d.id)===n;})||null; // il a tape un id : on accepte aussi
+    }
+    if(!target){toast("\u26A0\uFE0F Tape un num\u00e9ro entre 1 et "+hits.length);playSound("err");return;}
+  }
   if(!confirm("Fusionner :\n\u00ab "+old.name+" \u00bb \u2192 \u00ab "+target.name+" \u00bb ?\n\nLa premi\u00e8re dispara\u00eet, ses magasins et confirmations basculent sur la seconde. IRR\u00c9VERSIBLE."))return;
   toast("Fusion en cours\u2026");
   window.fbSaveDrinkMerge(old.id,target.id).then(function(){
@@ -8545,8 +8556,10 @@ try{
     userStats.confirms=Math.max(userStats.confirms,d.confirms||0);
     // Le pseudo du compte Firestore fait foi : on l'adopte localement pour que
     // le pseudo genere sur ce nouvel appareil n'ecrase pas celui du compte
-    if(d.pseudo&&d.pseudo!==userPseudo){
-      userPseudo=String(d.pseudo).slice(0,24);
+    var incomingPseudo=d.pseudo?String(d.pseudo).slice(0,24):null;
+    if(incomingPseudo==="Magonyos"&&localStorage.getItem("magoFounder")!=="1")incomingPseudo=null; // heritage de l'ancien defaut : on n'adopte pas
+    if(incomingPseudo&&incomingPseudo!==userPseudo){
+      userPseudo=incomingPseudo;
       try{localStorage.setItem("magopseudo",userPseudo);}catch(err){}
       applyPseudoDisplays();
     }
@@ -8614,6 +8627,21 @@ try{
     var row=document.getElementById("admin-row");
     if(row)row.style.display=isAdmin?"flex":"none";
     if(!isAdmin&&document.getElementById("s-admin").classList.contains("on"))navTo("settings");
+    // Migration des pseudos herites : les appareils d'avant le correctif ont
+    // encore "Magonyos" (ancien defaut) en memoire -> chaque visiteur passait
+    // pour le fondateur dans les notifs et le classement. Le fondateur (admin)
+    // recoit un marqueur et garde son pseudo ; les autres sont regeneres.
+    try{
+      if(isAdmin){localStorage.setItem("magoFounder","1");}
+      else if(userPseudo==="Magonyos"&&localStorage.getItem("magoFounder")!=="1"){
+        userPseudo=generatePseudo();
+        localStorage.setItem("magopseudo",userPseudo);
+        applyPseudoDisplays();
+        userStats.pseudoMigrated=true;
+        if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+        toast("Ton pseudo : "+userPseudo+" (modifiable dans Profil)");
+      }
+    }catch(e2){}
   });
   // Mode hors-ligne : photographier les donnees recues dans IndexedDB
   window.addEventListener("fbStoresLoaded", function(e) {
