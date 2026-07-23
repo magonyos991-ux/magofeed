@@ -1066,6 +1066,13 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
           </div>
         </div>
       </div>
+      <div style="padding:0 20px 8px" class="t-label">Notifications</div>
+      <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
+        <div onclick="settingsEnablePush()" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer" role="button" tabindex="0" onkeydown="if(event.key==='Enter'){settingsEnablePush();}">
+          <div><div style="font-size:14px;font-weight:600;color:var(--s1)">Notifications push</div><div id="notif-state" style="font-size:12px;margin-top:2px;color:var(--s2)">Vérification…</div></div>
+          <span style="font-size:18px">🔔</span>
+        </div>
+      </div>
       <div style="padding:0 20px 8px" class="t-label">Confidentialité</div>
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div onclick="clearHistory()" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
@@ -1109,7 +1116,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616o</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616q</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1924,17 +1931,22 @@ window.fbImportStores = async function(list, onProgress) {
     var chunk = list.slice(i, i + 400);
     var batch = writeBatch(db);
     chunk.forEach(function(s) {
-      batch.set(doc(db, "stores", String(s.id)), {
+      var data = {
         name: String(s.name).slice(0, 60),
         emoji: s.emoji || "\uD83C\uDFEA",
         lat: Number(s.lat),
         lng: Number(s.lng),
         hours: s.hours ? String(s.hours).slice(0, 120) : null,
-        drinks: [],
-        confirmations: {},
         osmImport: true,
         createdAt: serverTimestamp()
-      });
+      };
+      if (s.type) data.type = String(s.type).slice(0, 40);
+      if (s.brand) data.brand = String(s.brand).slice(0, 40);
+      // Boissons probables (heuristique de categorie) : arrayUnion pour ne JAMAIS
+      // ecraser ce qu'un magasin existant a deja (avant : set sans merge + drinks:[]
+      // -> un re-import pouvait effacer les rayons et confirmations. repare.)
+      if (s.drinks && s.drinks.length) data.drinks = arrayUnion.apply(null, s.drinks.map(Number));
+      batch.set(doc(db, "stores", String(s.id)), data, { merge: true });
     });
     await batch.commit();
     done += chunk.length;
@@ -3738,8 +3750,11 @@ function openStorePicker(){
   var ov=document.getElementById("store-picker");if(!ov)return;
   ov.style.display="block";
   var q=document.getElementById("store-picker-q");
-  if(q){q.value="";setTimeout(function(){q.focus();},120);}
+  if(q){q.value="";}
   renderStorePicker();
+  // La carte s'ouvre DIRECT, centree sur toi : tape le pin du magasin ou tu es,
+  // "C'est ici", fini — pas besoin de connaitre son nom.
+  if(!pickerMapOn)toggleStorePickerMap();
 }
 /* Carte du selecteur : tous les magasins correspondant a la recherche
    ("colruyt" -> tous les Colruyt autour), tap sur un marqueur -> "C'est ici".
@@ -5773,110 +5788,6 @@ var M4_CATS={
   latino:["jarritos","inca kola","postobon","bavaria","polar","antarctica"],
   americain:["prime","arizona","dr pepper","jarritos","canada dry","mountain dew"]
 };
-/* Mission 7 : boutiques americaines de Paris (pour les utilisateurs parisiens).
-   Boissons PROBABLES par categorie, jamais verifiees -> pins "?" sur la carte. */
-var M7_STORES=[
-  ["Lolly's","Westfield Forum des Halles, 101 Porte Berger, 75001 Paris","americain"],
-  ["Sweet Escape Rivoli","186 Rue de Rivoli, 75001 Paris","americain"],
-  ["In Good We Trust","67 Rue Quincampoix, 75003 Paris","americain"],
-  ["Sweet Escape Marais","19 Rue des \u00c9couffes, 75004 Paris","americain"],
-  ["Cometeshop","13 Rue de l'Asile Popincourt, 75011 Paris","americain"],
-  ["L'\u00c9picerie Anglaise","5 Cit\u00e9 du Wauxhall, 75010 Paris","americain"],
-  ["Candy World","27 Rue de Meaux, 75019 Paris","americain"]
-];
-function adminImportMission7(){
-  if(!isAdmin)return;
-  if(!confirm("Importer "+M7_STORES.length+" boutiques am\u00e9ricaines de PARIS ?\nBoissons probables (dont Mountain Dew) assign\u00e9es SANS confirmation.\nDur\u00e9e : ~15 s (g\u00e9ocodage)."))return;
-  var i=0,ok=0,fail=[];
-  function slug(s){return "m7-"+normTxt(s).replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");}
-  function next(){
-    if(i>=M7_STORES.length){
-      playSound(ok?"win":"err");
-      toast("\u2705 "+ok+"/"+M7_STORES.length+" boutiques Paris import\u00e9es"+(fail.length?" \u00b7 \u00e9checs : "+fail.join(", "):""));
-      return;
-    }
-    var st=M7_STORES[i++];
-    toast("Import "+i+"/"+M7_STORES.length+" : "+st[0]);
-    fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(st[1]))
-      .then(function(r){return r.json();})
-      .then(function(res){
-        if(!res||!res[0])throw new Error("introuvable");
-        var drinks=brandIds(M4_CATS[st[2]]||[]);
-        var docData={name:st[0],brand:"",lat:Number(res[0].lat),lng:Number(res[0].lon),
-          type:"candy shop US",address:st[1],drinks:drinks,confirmations:{},reports:[],
-          source:"mission7",createdAt:Date.now()};
-        return window.fbSaveStore?window.fbSaveStore(slug(st[0]),docData):Promise.reject(new Error("hors-ligne"));
-      })
-      .then(function(){ok++;})
-      .catch(function(e){fail.push(st[0]);console.warn("M7",st[0],e);})
-      .finally(function(){setTimeout(next,1100);});
-  }
-  next();
-}
-var M4_STORES=[
-  ["Kam Yuen Supermarket","Rue de la Vierge Noire 2, 1000 Bruxelles","asiatique"],
-  ["Wang Li Supermarch\u00e9","Rue des Halles 7, 1000 Bruxelles","asiatique"],
-  ["Tagawa Vleurgat","Chauss\u00e9e de Vleurgat 119, 1050 Ixelles","asiatique"],
-  ["Tagawa Schuman","Rue Juste Lipse 17, 1040 Etterbeek","asiatique"],
-  ["Tagawa Stockel","Rue de l'\u00c9glise 96, 1150 Woluwe-Saint-Pierre","asiatique"],
-  ["Foodstuffs","Rue du Saule 41, 1083 Jette","asiatique"],
-  ["Wang Li Anderlecht","Rue de l'Agrafe 53, 1070 Anderlecht","asiatique"],
-  ["Shilla Supermarket","Chauss\u00e9e de Wavre 1676, 1160 Auderghem","asiatique"],
-  ["Asia Market Hoang Trinh","Chauss\u00e9e de Boondael 278, 1050 Ixelles","asiatique"],
-  ["Jin Long Trading","Rue Saint-Pierre 59, 1000 Bruxelles","asiatique"],
-  ["Gateway to Asia","Chauss\u00e9e d'Ixelles 104, 1050 Ixelles","asiatique"],
-  ["Xuan Minh","Avenue Georges Henri 316, 1200 Woluwe-Saint-Lambert","asiatique"],
-  ["Candan Supermarket","Rue de J\u00e9rusalem 36, 1030 Schaerbeek","turc"],
-  ["Great Market","Chauss\u00e9e de Louvain 650, 1030 Schaerbeek","turc"],
-  ["Top Supermarket","Avenue Clemenceau 120, 1070 Anderlecht","maghrebin"],
-  ["Freshmed","Rue de l'Escadron 35, 1040 Etterbeek","turc"],
-  ["Tunam Market","Rue Richard Vandevelde 138, 1030 Schaerbeek","turc"],
-  ["Le Bon Prix","Rue de la Carpe 7, 1080 Molenbeek-Saint-Jean","maghrebin"],
-  ["Casatanger","Rue de l'Intendant 92, 1080 Molenbeek-Saint-Jean","maghrebin"],
-  ["Kaya Market","Rue Henri de Saegher 27, 1080 Molenbeek-Saint-Jean","maghrebin"],
-  ["Zando Ya Matonge","Chauss\u00e9e de Wavre 89, 1050 Ixelles","africain"],
-  ["Etoile de Kindia","Chauss\u00e9e de Wavre 105, 1050 Ixelles","africain"],
-  ["Masudi","Rue du Bateau 39, 1080 Molenbeek-Saint-Jean","africain"],
-  ["Bara Express","Place Bara 3, 1070 Anderlecht","africain"],
-  ["Tienda Latina Brussels","Place du Samedi 8, 1000 Bruxelles","latino"],
-  ["Mundo Latino","Avenue Chazal 29, 1030 Schaerbeek","latino"],
-  ["Las Flores MX","Rue Georges Moreau 123, 1070 Anderlecht","latino"],
-  ["Viva Latino Market","Chauss\u00e9e d'Alsemberg 46, 1060 Saint-Gilles","latino"],
-  ["El Pueblo Latino","Avenue Jean Volders 52, 1060 Saint-Gilles","latino"],
-  ["SUCX The King of Candy","Rue de la Colline 15, 1000 Bruxelles","americain"],
-  ["Candy Time","Rue de la Colline 14, 1000 Bruxelles","americain"],
-  ["Candy Shop","Rue des Fripiers 7, 1000 Bruxelles","americain"],
-  ["C'est Bonbon","Boulevard Lambermont 1, 1000 Bruxelles","americain"]
-];
-function adminImportMission4(){
-  if(!isAdmin)return;
-  if(!confirm("Importer "+M4_STORES.length+" \u00e9piceries sp\u00e9cialis\u00e9es de Bruxelles ?\nBoissons probables assign\u00e9es SANS confirmation (la communaut\u00e9 validera).\nDur\u00e9e : ~40 s (g\u00e9ocodage)."))return;
-  var i=0,ok=0,fail=[];
-  function slug(s){return "m4-"+normTxt(s).replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");}
-  function next(){
-    if(i>=M4_STORES.length){
-      playSound(ok?"win":"err");
-      toast("\u2705 "+ok+"/"+M4_STORES.length+" \u00e9piceries import\u00e9es"+(fail.length?" \u00b7 \u00e9checs : "+fail.join(", "):""));
-      return;
-    }
-    var st=M4_STORES[i++];
-    toast("Import "+i+"/"+M4_STORES.length+" : "+st[0]);
-    fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(st[1]))
-      .then(function(r){return r.json();})
-      .then(function(res){
-        if(!res||!res[0])throw new Error("introuvable");
-        var drinks=brandIds(M4_CATS[st[2]]||[]);
-        var docData={name:st[0],brand:"",lat:Number(res[0].lat),lng:Number(res[0].lon),
-          type:"\u00e9picerie "+st[2],address:st[1],drinks:drinks,confirmations:{},reports:[],
-          source:"mission4",createdAt:Date.now()};
-        return window.fbSaveStore?window.fbSaveStore(slug(st[0]),docData):Promise.reject(new Error("hors-ligne"));
-      })
-      .then(function(){ok++;})
-      .catch(function(e){fail.push(st[0]);console.warn("M4",st[0],e);})
-      .finally(function(){setTimeout(next,1100);});
-  }
-  next();
-}
 /* Fusion admin : la fiche OUVERTE (curSel) est le doublon a absorber. On cherche
    la fiche a GARDER, on ecrit oldId->newId dans meta/drinkMerges, et le remap
    s'applique partout (magasins, confirmations, catalogue) sans migration. */
@@ -5986,8 +5897,7 @@ function openAdminSheet(){
     '<div style="width:38px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 12px"></div>'+
     '<div style="font-size:13px;font-weight:700;color:var(--s2);margin-bottom:10px;text-align:center">Admin \u00B7 '+sanitize(d.name)+'</div>'+
     '<div id="ash-photo" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">\uD83D\uDEE0\uFE0F Corriger la photo</div>'+
-    '<div id="ash-m4" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Importer \u00e9piceries Bruxelles</div>'+
-    '<div id="ash-m7" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Importer boutiques US Paris</div>'+
+    '<div id="ash-zone" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Importer magasins de la zone (monde entier)</div>'+
     '<div id="ash-fill" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Remplissage enseignes (auto)</div>'+
     '<div id="ash-clean" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Purger Lidl / Aldi / Match</div>'+
     '<div id="ash-dedup" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Nettoyer doublons classement</div>'+
@@ -6001,8 +5911,7 @@ function openAdminSheet(){
   wrap.onclick=function(e){if(e.target===wrap)close();};
   function bind(id,fn){var el=document.getElementById(id);if(!el)return;el.onclick=function(){close();fn();};el.onkeydown=function(ev){if(ev.key==="Enter"){close();fn();}};}
   bind("ash-photo",adminFixPhoto);
-  bind("ash-m4",adminImportMission4);
-  bind("ash-m7",adminImportMission7);
+  bind("ash-zone",function(){var sheet=document.getElementById("admin-sheet");if(sheet)sheet.remove();openOsmImport();});
   bind("ash-fill",adminFillEnseignes);
   bind("ash-clean",adminCleanUnverified);
   bind("ash-dedup",adminCleanDuplicateUsers);
@@ -6611,6 +6520,7 @@ function openStoreSheet(storeId){
     '</div>'+
     '<div style="font-size:12.5px;color:var(--s2);margin-bottom:16px">'+drinkCount+' boisson'+(drinkCount>1?"s":"")+' référencée'+(drinkCount>1?"s":"")+' dans ce magasin</div>'+
     '<div style="display:flex;gap:10px">'+
+      '<button onclick="showStoreOnMap('+s.lat+','+s.lng+')" style="flex:1;padding:12px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">\uD83D\uDDFA\uFE0F Sur la carte</button>'+
       '<button onclick="goToStore('+s.lat+','+s.lng+')" style="flex:1;padding:12px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:700;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">Y aller</button>'+
       '<button onclick="closeStoreSheet();openStoreDetail(\''+storeIdStr+'\')" style="flex:1;padding:12px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">Voir le détail</button>'+
     '</div>';
@@ -7055,7 +6965,9 @@ function osmAnalyze(){
         var lng=e.lon!=null?e.lon:(e.center&&e.center.lon);
         var name=e.tags&&(e.tags.name||e.tags["name:fr"]||e.tags.brand);
         if(lat==null||lng==null||!name)return null;
-        return {id:"o"+e.id,osm:e.id,name:name,emoji:osmShopEmoji(e.tags.shop),lat:lat,lng:lng,hours:(e.tags.opening_hours||null)};
+        var gcat=guessStoreCat(name+" "+(e.tags.brand||""));
+        return {id:"o"+e.id,osm:e.id,name:name,emoji:osmShopEmoji(e.tags.shop),lat:lat,lng:lng,hours:(e.tags.opening_hours||null),
+          brand:(e.tags.brand||null),type:gcat?("\u00e9picerie "+gcat):null,drinks:gcat?brandIds(M4_CATS[gcat]||[]):[]};
       }).filter(Boolean).filter(function(s){
         var k=s.id;if(seen[k])return false;seen[k]=1;return true;
       });
@@ -7089,6 +7001,19 @@ function osmAnalyze(){
       playSound("err");
     });
 }
+/* Devine la categorie d'un magasin depuis son nom/enseigne, dans n'importe
+   quelle ville du monde -> boissons probables (pins "?"). Volontairement
+   conservateur : pas d'indice = pas de probable (la communaute remplira). */
+function guessStoreCat(name){
+  var n=normTxt(name||"");
+  if(/candy|american|sweet|usa|us shop|bonbon/.test(n))return "americain";
+  if(/asia|asiat|chin|jap|nippon|korea|coree|viet|thai|oriental market|k-?mart/.test(n))return "asiatique";
+  if(/turk|turc|istanbul|anatol|ankara|bosphor/.test(n))return "turc";
+  if(/afric|afro|matonge|exotic|exotique/.test(n))return "africain";
+  if(/latino|latin|mex|colombi|bresil|brasil/.test(n))return "latino";
+  if(/maroc|alger|tunis|orient(al)?\b|halal market|souk/.test(n))return "maghrebin";
+  return "";
+}
 function osmRunImport(){
   if(!osmCandidates||!osmCandidates.length)return;
   var status=document.getElementById("osm-status");
@@ -7102,7 +7027,7 @@ function osmRunImport(){
     // fusion locale immediate
     list.forEach(function(c){
       if(!(STORES||[]).some(function(s){return String(s.id)===c.id;})){
-        var entry={id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,drinks:[],confirmations:{}};
+        var entry={id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,brand:c.brand||"",type:c.type||"",drinks:(c.drinks||[]).slice(),confirmations:{}};
         if(typeof userLat==="number"&&userLat){
           var dLa=(userLat-c.lat)*111000,dLo=(userLng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
           entry.dist=Math.round(Math.sqrt(dLa*dLa+dLo*dLo));
@@ -7440,8 +7365,13 @@ function exploreHideCard(){
   var status=document.getElementById("explore-status");
   if(status)status.style.display="block";
 }
+function showStoreOnMap(lat,lng){
+  // Voir le magasin dans NOTRE carte (pas un renvoi vers Google Maps)
+  openExploreMap({center:{lat:lat,lng:lng}});
+}
 function openExploreMap(opts){
   exploreFilter=(opts&&opts.drinkId!=null)?{drinkId:opts.drinkId,name:opts.name||""}:null;
+  window._exploreFocus=(opts&&opts.center)?{lat:Number(opts.center.lat),lng:Number(opts.center.lng)}:null;
   var host=document.getElementById("explore-map-host");
   if(!host){
     host=document.createElement("div");
@@ -7468,7 +7398,8 @@ function openExploreMap(opts){
   function build(){
     if(!exploreMap){
       exploreMap=L.map("explore-map",{zoomControl:false});
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(exploreMap);
+      var darkE=document.body.classList.contains("dark");
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/"+(darkE?"dark_all":"light_all")+"/{z}/{x}/{y}{r}.png",{maxZoom:20,subdomains:"abcd"}).addTo(exploreMap);
       exploreLayer=L.layerGroup().addTo(exploreMap);
       exploreMap.on("moveend",function(){
         clearTimeout(_exploreTimer);
@@ -7479,7 +7410,8 @@ function openExploreMap(opts){
         L.circleMarker([userLat,userLng],{radius:7,color:"#fff",weight:2,fillColor:"#2e86c1",fillOpacity:1}).addTo(exploreMap);
       }
     }
-    exploreMap.setView([typeof userLat==="number"&&userLat?userLat:50.8466,typeof userLng==="number"&&userLng?userLng:4.3528],14);
+    if(window._exploreFocus){exploreMap.setView([window._exploreFocus.lat,window._exploreFocus.lng],17);}
+    else exploreMap.setView([typeof userLat==="number"&&userLat?userLat:50.8466,typeof userLng==="number"&&userLng?userLng:4.3528],14);
     setTimeout(function(){try{exploreMap.invalidateSize();}catch(e){}exploreLoadStores();},120);
   }
   if(window.L){build();return;}
@@ -7627,6 +7559,35 @@ function handleDeepLink(){
 }
 window.addEventListener("hashchange",handleDeepLink);
 /* Onboarding : 3 ecrans au tout premier lancement, jamais revu ensuite. */
+/* Reglages > Notifications : etat lisible + activation en un tap.
+   Sur iPhone, les push exigent l'app installee sur l'ecran d'accueil. */
+function refreshNotifState(){
+  var el=document.getElementById("notif-state");
+  if(!el)return;
+  if(!("Notification" in window)){el.textContent="Non supportées sur ce navigateur";return;}
+  var p=Notification.permission;
+  if(p==="granted"&&window._pushToken)el.textContent="\u2705 Activées — tu seras prévenu même app fermée";
+  else if(p==="granted")el.textContent="Autorisées — appuie pour finaliser";
+  else if(p==="denied")el.textContent="\u274C Refusées — réactive-les dans les réglages du téléphone";
+  else el.textContent="Appuie pour activer (veilles, alertes)";
+}
+function settingsEnablePush(){
+  if(!("Notification" in window)){toast("Non support\u00e9es ici");playSound("err");return;}
+  if(Notification.permission==="denied"){
+    toast("Bloqu\u00e9es par le t\u00e9l\u00e9phone : R\u00e9glages > Notifications > Magofeed");
+    playSound("err");return;
+  }
+  toast("Activation\u2026");
+  var p=window.fbEnablePush?window.fbEnablePush(userLat,userLng):Promise.resolve({ok:false});
+  Promise.resolve(p).then(function(r){
+    refreshNotifState();
+    if(r&&r.ok){playSound("win");toast("\uD83D\uDCF2 Notifications activ\u00e9es !");}
+    else if(r&&r.reason==="denied"){toast("Permission refus\u00e9e");playSound("err");}
+    else if(r&&r.reason==="unsupported"){toast("Sur iPhone : ajoute d'abord l'app \u00e0 l'\u00e9cran d'accueil");playSound("err");}
+    else{toast("\u26A0\uFE0F R\u00e9essaie dans un instant");playSound("err");}
+  });
+}
+setInterval(function(){var el=document.getElementById("notif-state");if(el&&el.textContent==="V\u00e9rification\u2026")refreshNotifState();},1500);
 function showOnboarding(){
   if(localStorage.getItem("magoOnboard")==="1")return;
   var slides=[
