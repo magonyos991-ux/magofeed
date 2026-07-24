@@ -1116,7 +1116,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616t</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616u</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -3973,6 +3973,7 @@ function openAddStoreForm(){
     '<div id="add-store-types" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>'+
     '<div id="add-store-pos" style="font-size:12px;font-weight:600;color:var(--s2);background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:10px"></div>'+
     '<div style="display:flex;gap:8px">'+
+      '<button id="add-store-cancel" style="padding:12px 16px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Annuler</button>'+
       '<button id="add-store-save" style="flex:1;padding:12px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Cr\u00E9er le magasin</button>'+
       '<button id="add-store-cancel" style="padding:12px 16px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s2);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Annuler</button>'+
     '</div></div>';
@@ -3994,6 +3995,13 @@ function openAddStoreForm(){
   renderAddStorePos();
   document.getElementById("add-store-cancel").onclick=function(){addStorePlacing=false;renderStorePicker();};
   document.getElementById("add-store-save").onclick=saveNewStore;
+  var cancelBtn=document.getElementById("add-store-cancel");
+  if(cancelBtn)cancelBtn.onclick=function(){
+    addStorePos=null;addStorePlacing=false;
+    if(window._addStoreDraft&&window._pickerMarkers){try{window._pickerMarkers.removeLayer(window._addStoreDraft);}catch(e){}window._addStoreDraft=null;}
+    var q=document.getElementById("store-picker-q");if(q)q.value="";
+    renderStorePicker();playSound("pop");
+  };
 }
 function renderAddStorePos(){
   var el=document.getElementById("add-store-pos");if(!el)return;
@@ -4014,11 +4022,16 @@ function renderAddStorePos(){
   };
 }
 function onPickerMapClick(latlng){
-  if(!addStorePlacing)return;
+  if(!addStorePlacing&&!addStorePos)return;
+  // Repositionnable a volonte : chaque tap DEPLACE le pin provisoire (avant :
+  // chaque tap en ajoutait un de plus, impossible de corriger une erreur ->
+  // doublons de magasins). Le pin definitif n'existe qu'apres "Creer".
   addStorePos={lat:latlng.lat,lng:latlng.lng,src:"map"};
   addStorePlacing=false;
   if(window._pickerMarkers&&window.L){
-    L.circleMarker([latlng.lat,latlng.lng],{radius:9,color:"#fff",weight:2,fillColor:"#c69a57",fillOpacity:1}).addTo(window._pickerMarkers);
+    if(window._addStoreDraft){try{window._pickerMarkers.removeLayer(window._addStoreDraft);}catch(e){}}
+    window._addStoreDraft=L.circleMarker([latlng.lat,latlng.lng],{radius:9,color:"#fff",weight:2,fillColor:"#c69a57",fillOpacity:1}).addTo(window._pickerMarkers);
+    window._addStoreDraft.bindPopup("Ici ? Re-tape ailleurs pour d\u00e9placer").openPopup();
   }
   renderAddStorePos();
   playSound("pop");
@@ -4049,6 +4062,8 @@ function saveNewStore(){
   var createBtn=document.getElementById("add-store-save");
   if(createBtn){createBtn.disabled=true;createBtn.textContent="Enregistrement\u2026";}
   var finishOk=function(){
+    if(window._addStoreDraft&&window._pickerMarkers){try{window._pickerMarkers.removeLayer(window._addStoreDraft);}catch(e){}window._addStoreDraft=null;}
+    addStorePos=null;
     STORES.push(s);
     playSound("win");
     toast("\uD83C\uDFEA \u00AB "+name+" \u00BB enregistr\u00E9 pour tout le monde !");
