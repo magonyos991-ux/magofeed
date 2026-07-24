@@ -525,6 +525,7 @@ body.dark .toast{background:#f0f0f0;color:#111}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 /* La carte entre en scene : montee + fondu avec un leger ressort,
    au lieu d'apparaitre brutalement */
+#map-box.map-fullscreen{position:fixed!important;inset:0!important;z-index:8500!important;width:100vw!important;height:100vh!important;border-radius:0!important;margin:0!important}
 #explore-map-host{opacity:0;transform:translateY(6%) scale(.97);transition:opacity .26s ease,transform .36s cubic-bezier(.22,1.15,.36,1)}
 #explore-map-host.in{opacity:1;transform:none}
 /* ── Marqueurs de carte : pins pro (fond clair CARTO, ombres, pop-in) ── */
@@ -554,7 +555,10 @@ body.dark .toast{background:#f0f0f0;color:#111}
 .leaflet-container{background:#eae6df;font-family:'Space Grotesk',sans-serif}
 body.dark .leaflet-container{background:#23211f}
 .leaflet-control-attribution{font-size:9px!important;opacity:.65;background:rgba(255,255,255,.7)!important}
-.leaflet-control-zoom a{border:none!important;color:#1a1714!important;font-weight:700}
+.leaflet-control-zoom{opacity:.5;transition:opacity .2s;border:none!important;box-shadow:0 2px 8px rgba(0,0,0,.18)!important;border-radius:12px!important;overflow:hidden}
+.leaflet-control-zoom:hover,.leaflet-control-zoom:active{opacity:1}
+.leaflet-control-zoom a{border:none!important;color:#1a1714!important;font-weight:700;background:rgba(255,255,255,.85)!important}
+body.dark .leaflet-control-zoom a{background:rgba(42,42,42,.85)!important;color:#eee!important}
 #explore-store-card{transform:translateY(12px);opacity:0;transition:transform .3s cubic-bezier(.22,1.2,.36,1),opacity .2s}
 #explore-store-card.in{transform:none;opacity:1}
 
@@ -1116,7 +1120,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616w</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617a</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1610,18 +1614,61 @@ function normalizeStore(data, id, distKm) {
 }
 
 // Requête bounding-box Firestore + filtre Haversine précis côté client
-async function queryNearbyStores(lat, lng, radiusKm) {
-  var box = boundingBox(lat, lng, radiusKm);
+/* La base a grossi (imports de zones) : une tranche de latitude peut depasser
+   la limite Firestore -> avec orderBy(lat)+limit, seuls les magasins les plus
+   au SUD revenaient (bug "que le sud de Bruxelles", Fransman/Laeken invisibles).
+   Fix : si une bande sature la limite, on la coupe en deux et on recommence —
+   couverture complete garantie, quel que soit le nombre de magasins. */
+/* Le cache echouait EN SILENCE : la base a grossi, le JSON depassait le quota
+   localStorage (~5 Mo), l'ecriture plantait dans un catch muet -> jamais de
+   cache -> rechargement reseau complet a CHAQUE ouverture (le "tout doit se
+   recharger" ressenti par le fondateur). Fix : version compacte (champs utiles
+   seulement) + repli progressif sur les magasins les plus proches si ca ne
+   rentre toujours pas. L'app s'ouvre desormais instantanement sur le cache. */
+function compactStore(s) {
+  return {
+    id: s.id, fbId: s.fbId, name: s.name, brand: s.brand || "", emoji: s.emoji,
+    lat: s.lat, lng: s.lng, type: s.type || "", hours: s.hours || null,
+    dist: s.dist, drinks: s.drinks || [], drinksVerified: s.drinksVerified || [],
+    confirmations: s.confirmations || {}, community: s.community || false
+  };
+}
+function saveStoresCache(lat, lng, radiusKm, now, stores) {
+  var slim = stores.map(compactStore).sort(function(a, b) { return (a.dist || 9e9) - (b.dist || 9e9); });
+  var caps = [slim.length, 1500, 800, 400, 200];
+  for (var i = 0; i < caps.length; i++) {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ lat: lat, lng: lng, radiusKm: radiusKm, ts: now, stores: slim.slice(0, caps[i]) }));
+      return;
+    } catch (e) { /* trop gros : on retente avec moins, les plus proches d'abord */ }
+  }
+}
+async function queryLatBand(latMin, latMax, depth) {
   var q = query(
     collection(db, "stores"),
-    where("lat", ">=", box.latMin),
-    where("lat", "<=", box.latMax),
+    where("lat", ">=", latMin),
+    where("lat", "<=", latMax),
     orderBy("lat"),
-    limit(3000)
+    limit(2000)
   );
   var snap = await getDocs(q);
-  var out = [];
-  snap.forEach(function(docSnap) {
+  if (snap.size >= 2000 && depth < 6) {
+    var mid = (latMin + latMax) / 2;
+    var a = await queryLatBand(latMin, mid, depth + 1);
+    var b = await queryLatBand(mid, latMax, depth + 1);
+    return a.concat(b);
+  }
+  var docs = [];
+  snap.forEach(function(d) { docs.push(d); });
+  return docs;
+}
+async function queryNearbyStores(lat, lng, radiusKm) {
+  var box = boundingBox(lat, lng, radiusKm);
+  var docs = await queryLatBand(box.latMin, box.latMax, 0);
+  var out = [], seen = {};
+  docs.forEach(function(docSnap) {
+    if (seen[docSnap.id]) return; // frontiere de bande : un doc peut arriver 2x
+    seen[docSnap.id] = 1;
     var data = docSnap.data();
     if (data.lng == null || data.lng < box.lngMin || data.lng > box.lngMax) return;
     var d = haversineKm(lat, lng, data.lat, data.lng);
@@ -1677,8 +1724,7 @@ window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
     var stores = await queryNearbyStores(lat, lng, radiusKm);
     window._fbLastQuery = { lat: lat, lng: lng, radiusKm: radiusKm };
     applyStores(stores, banner, false);
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ lat: lat, lng: lng, radiusKm: radiusKm, ts: now, stores: stores })); }
-    catch (e) { /* quota localStorage dépassé, tant pis pour le cache */ }
+    saveStoresCache(lat, lng, radiusKm, now, stores);
     return stores;
   } catch (e) {
     console.warn("Firebase geo query error:", e);
@@ -2872,6 +2918,11 @@ var DRINKS=[
   {id:11349,name:"Cara\u00efbos Nectar Mangue",brand:"Cara\u00efbos",emoji:"\ud83e\udd6d",color:"#e67e22",light:"#fef3e2",cat:"Jus",tag:"CARAIBOS",stars:4.2,formats:[{type:"bouteille",cl:75}]},
   {id:11350,name:"Mountain Dew Sans Sucre",brand:"Mountain Dew",emoji:"\ud83d\udc9a",color:"#39b54a",light:"#eafaf1",cat:"Soda",tag:"MTN DEW",stars:4.2,formats:[{type:"bouteille",cl:50}]},
   {id:11351,name:"Red Bull Sakura Edition",brand:"Red Bull",emoji:"\ud83c\udf38",color:"#f1948a",light:"#fdedec",cat:"Energy",tag:"RED BULL",stars:4.5,formats:[{type:"canette",cl:25}],imp:1},
+  {id:11465,name:"Hell Ice Coffee Latte",brand:"Hell",emoji:"\u2615",color:"#a9746e",light:"#f6ede9",cat:"Autre",tag:"HELL COFFEE",stars:4.3,formats:[{type:"canette",cl:25}]},
+  {id:11466,name:"Hell Ice Coffee Double Espresso",brand:"Hell",emoji:"\u2615",color:"#6e4a3a",light:"#f3e9e4",cat:"Autre",tag:"HELL COFFEE",stars:4.3,formats:[{type:"canette",cl:25}]},
+  {id:11467,name:"Starbucks Oat Cappuccino",brand:"Starbucks",emoji:"\u2615",color:"#0e6655",light:"#e8f6f1",cat:"Autre",tag:"STARBUCKS",stars:4.4,formats:[{type:"bouteille",cl:22}]},
+  {id:11468,name:"Starbucks Caramel Macchiato",brand:"Starbucks",emoji:"\u2615",color:"#b9770e",light:"#fdf2e3",cat:"Autre",tag:"STARBUCKS",stars:4.4,formats:[{type:"bouteille",cl:22}]},
+  {id:11469,name:"Gina Ice Caff\u00e8 Latte Macchiato",brand:"Gina",emoji:"\u2615",color:"#935116",light:"#fbeee1",cat:"Autre",tag:"GINA",stars:4.0,formats:[{type:"bouteille",cl:23}]},
   {id:11418,name:"Red Bull Purple Edition A\u00e7a\u00ef",brand:"Red Bull",emoji:"\ud83c\udf47",color:"#6c3483",light:"#f5eef8",cat:"Energy",tag:"RED BULL",stars:4.4,formats:[{type:"canette",cl:25}],imp:1},
   {id:11419,name:"Red Bull Lilac Edition Asp\u00e9rule Pamplemousse",brand:"Red Bull",emoji:"\ud83d\udc9c",color:"#af7ac5",light:"#f5eef8",cat:"Energy",tag:"RED BULL",stars:4.3,formats:[{type:"canette",cl:25}],imp:1},
   {id:11420,name:"Fanta Strawberry Kiwi",brand:"Fanta",emoji:"\ud83c\udf53",color:"#e74c3c",light:"#fdecea",cat:"Soda",tag:"FANTA",stars:4.3,formats:[{type:"canette",cl:33}],imp:1},
@@ -3893,6 +3944,9 @@ function openStorePicker(){
   // La carte s'ouvre DIRECT, centree sur toi : tape le pin du magasin ou tu es,
   // "C'est ici", fini — pas besoin de connaitre son nom.
   if(!pickerMapOn)toggleStorePickerMap();
+  // Leaflet initialise pendant l'animation du panneau -> carte a moitie rendue
+  // (tuiles manquantes). On recalcule la taille une fois le panneau pose.
+  [400,900].forEach(function(t){setTimeout(function(){try{if(window._pickerMap)window._pickerMap.invalidateSize();}catch(e){}},t);});
 }
 /* Carte du selecteur : tous les magasins correspondant a la recherche
    ("colruyt" -> tous les Colruyt autour), tap sur un marqueur -> "C'est ici".
@@ -5488,6 +5542,7 @@ function renderMap(){
   var placeholder=box.querySelector("#map-placeholder");if(placeholder)placeholder.style.display="none";
   box.innerHTML='<div id="leaflet-map" style="width:100%;height:100%"></div>'+
     '<div style="position:absolute;top:8px;left:8px;z-index:900;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);border-radius:999px">'+mapLegendHTML()+'</div>'+
+    '<div id="map-full-btn" onclick="toggleDrinkMapFull()" role="button" tabindex="0" aria-label="Carte en plein \u00e9cran" style="position:absolute;top:8px;right:8px;z-index:900;width:36px;height:36px;border-radius:12px;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--s1);cursor:pointer">\u26f6</div>'+
     '<div class="map-locate-btn" onclick="centerMapOnUser()" title="Centrer sur moi" role="button" tabindex="0" aria-label="Centrer la carte sur ma position" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();centerMapOnUser();}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="var(--s1)" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="var(--s1)" stroke-width="2" stroke-linecap="round"/></svg></div>';
   if(window._leafletMap){window._leafletMap.remove();window._leafletMap=null;}
   if(!window.L){
@@ -6305,7 +6360,8 @@ function centerMapOnUser(){
 }
 function initLeafletMap(lat,lng){
   if(!window.L||!document.getElementById("leaflet-map"))return;
-  var map=L.map("leaflet-map",{zoomControl:true,attributionControl:true,zoomAnimation:true,markerZoomAnimation:true}).setView([lat,lng],13);
+  var map=L.map("leaflet-map",{zoomControl:false,attributionControl:true,zoomAnimation:true,markerZoomAnimation:true}).setView([lat,lng],13);
+  L.control.zoom({position:"bottomleft"}).addTo(map);
   window._leafletMap=map;
   var dark=document.body.classList.contains("dark");
   L.tileLayer("https://{s}.basemaps.cartocdn.com/"+(dark?"dark_all":"light_all")+"/{z}/{x}/{y}{r}.png",{
@@ -6399,6 +6455,17 @@ function populateClusterMarkers(cluster){
     marker.addTo(cluster);
   });
   return stores;
+}
+/* Plein ecran carte : la boite passe en fixe pleine fenetre, Leaflet recalcule
+   sa taille, le bouton devient une croix. */
+function toggleDrinkMapFull(){
+  var box=document.getElementById("map-box");if(!box)return;
+  var full=box.classList.toggle("map-fullscreen");
+  var btn=document.getElementById("map-full-btn");
+  if(btn)btn.textContent=full?"\u2715":"\u26f6";
+  playSound("pop");
+  setTimeout(function(){try{if(window._leafletMap)window._leafletMap.invalidateSize();}catch(e){}},80);
+  setTimeout(function(){try{if(window._leafletMap)window._leafletMap.invalidateSize();}catch(e){}},380);
 }
 function mapLegendHTML(){
   return '<div style="display:flex;gap:10px;align-items:center;padding:7px 12px;font-size:10px;font-weight:700;color:var(--s2)">'+
@@ -7663,6 +7730,7 @@ function showStoreOnMap(lat,lng){
 function openExploreMap(opts){
   exploreFilter=(opts&&opts.drinkId!=null)?{drinkId:opts.drinkId,name:opts.name||""}:null;
   window._exploreFocus=(opts&&opts.center)?{lat:Number(opts.center.lat),lng:Number(opts.center.lng)}:null;
+  [420,950].forEach(function(t){setTimeout(function(){try{if(exploreMap)exploreMap.invalidateSize();}catch(e){}},t);});
   var host=document.getElementById("explore-map-host");
   if(!host){
     host=document.createElement("div");
