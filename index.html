@@ -1116,7 +1116,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616u</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616w</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1282,6 +1282,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div class="res-back" onclick="closeStoreDetail()">
           <div style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff">←</div>
           <span style="font-size:15px;font-weight:700;color:#fff;flex:1">Magasin</span>
+          <div id="sd-batch" onclick="event.stopPropagation();adminBatchAssignHere()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px;cursor:pointer" role="button" tabindex="0" aria-label="Rayon par photos : assigner une liste (admin)" onkeydown="if(event.key==='Enter'){event.stopPropagation();adminBatchAssignHere();}">📸</div>
           <div id="sd-remove" onclick="event.stopPropagation();adminRemoveStore()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px;cursor:pointer" role="button" tabindex="0" aria-label="Supprimer ce magasin (admin)" onkeydown="if(event.key==='Enter'){event.stopPropagation();adminRemoveStore();}">🗑️</div>
         </div>
         <div class="res-product">
@@ -2220,6 +2221,16 @@ window.fbCleanDuplicateUsers = async function() {
 /* Rayon verifie par photos : assigne une liste d'ids a UN magasin, en drinks
    ET drinksVerified (pins verts) — outil generique, marche pour n'importe quel
    magasin du monde dont on a photographie les frigos. */
+/* Ajout communautaire multiple : "j'ai vu ces boissons dans ce magasin".
+   drinks + 1 confirmation chacune (meme valeur qu'un "Trouvee ici !"). */
+window.fbCommunityAddDrinks = async function(storeId, ids) {
+  const nums = ids.map(Number).filter(n => !isNaN(n));
+  if (!nums.length) return 0;
+  const upd = { drinks: arrayUnion.apply(null, nums) };
+  nums.forEach(function(id) { upd["confirmations." + id] = increment(1); });
+  await updateDoc(doc(db, "stores", String(storeId)), upd);
+  return nums.length;
+};
 window.fbAssignListToStore = async function(storeId, ids) {
   const nums = ids.map(Number).filter(n => !isNaN(n));
   if (!nums.length) return 0;
@@ -5825,6 +5836,101 @@ document.addEventListener("touchend",function(ev){
    appliquee, publiee dans la carte partagee, et marquee "manual" pour que
    le pipeline automatique ne l'ecrase jamais. Toujours limite au domaine
    images.openfoodfacts.org : pas d'URL arbitraire, meme pour un admin. */
+/* Rayon par photos DEPUIS la fiche du magasin : plus logique que l'ancien
+   emplacement (menu admin des fiches boisson) — on est SUR le magasin, on
+   colle la liste, point. */
+/* Panneau "Ajouter des boissons" : recherche + selection multiple + valider.
+   Accessible a tous — c'est la version rapide du "Trouvee ici !". */
+var _addDrinksSel={};
+function openAddDrinksSheet(){
+  if(!curStoreDetail)return;
+  _addDrinksSel={};
+  var s=curStoreDetail;
+  var wrap=document.createElement("div");
+  wrap.id="adddrinks-sheet";
+  wrap.style.cssText="position:fixed;inset:0;z-index:8600;background:rgba(0,0,0,.45);display:flex;align-items:flex-end";
+  wrap.innerHTML='<div style="background:var(--app-bg);border-radius:22px 22px 0 0;width:100%;max-height:82vh;display:flex;flex-direction:column;padding:18px 16px calc(16px + env(safe-area-inset-bottom))">'+
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'+
+      '<div style="flex:1;font-size:15px;font-weight:800;color:var(--s1)">Qu\'as-tu vu chez '+sanitize(s.name)+' ?</div>'+
+      '<div onclick="document.getElementById(\'adddrinks-sheet\').remove()" role="button" tabindex="0" style="width:32px;height:32px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:13px;color:var(--s2)">\u2715</div></div>'+
+    '<input id="adddrinks-q" type="text" placeholder="Cherche une boisson\u2026" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none;margin-bottom:10px">'+
+    '<div id="adddrinks-list" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>'+
+    '<button id="adddrinks-go" style="margin-top:12px;padding:14px;border-radius:16px;border:none;background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer;font-family:inherit" disabled>S\u00e9lectionne des boissons</button>'+
+  '</div>';
+  document.body.appendChild(wrap);
+  wrap.addEventListener("click",function(e){if(e.target===wrap)wrap.remove();});
+  var q=document.getElementById("adddrinks-q");
+  q.oninput=renderAddDrinksList;
+  document.getElementById("adddrinks-go").onclick=submitAddDrinks;
+  renderAddDrinksList();
+  setTimeout(function(){q.focus();},150);
+}
+function renderAddDrinksList(){
+  var s=curStoreDetail;if(!s)return;
+  var el=document.getElementById("adddrinks-list");if(!el)return;
+  var qn=normTxt((document.getElementById("adddrinks-q")||{}).value||"");
+  var have={};(s.drinks||[]).forEach(function(d){have[Number(d)]=1;});
+  var list=DRINKS.filter(function(d){return !have[Number(d.id)]&&(!qn||fuzzyHit(d.name,qn)||fuzzyHit(d.brand,qn));}).slice(0,40);
+  el.innerHTML=list.map(function(d){
+    var on=!!_addDrinksSel[d.id];
+    return '<div onclick="toggleAddDrink('+d.id+')" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 6px;border-bottom:1px solid var(--border);cursor:pointer">'+
+      '<div style="width:34px;height:34px;border-radius:10px;background:'+d.light+';display:flex;align-items:center;justify-content:center;font-size:17px">'+d.emoji+'</div>'+
+      '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(d.name)+'</div><div style="font-size:11px;color:var(--s3)">'+sanitize(d.brand)+'</div></div>'+
+      '<div style="width:24px;height:24px;border-radius:8px;border:2px solid '+(on?"#16a34a":"var(--border)")+';background:'+(on?"#16a34a":"transparent")+';display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:900">'+(on?"\u2713":"")+'</div>'+
+    '</div>';
+  }).join("")||'<div style="padding:24px;text-align:center;font-size:13px;color:var(--s2)">Rien trouv\u00e9 \u2014 scanne-la pour l\'ajouter au catalogue !</div>';
+  var go=document.getElementById("adddrinks-go");
+  var n=Object.keys(_addDrinksSel).length;
+  if(go){go.disabled=!n;go.textContent=n?("Ajouter "+n+" boisson"+(n>1?"s":"")+" \u00e0 ce magasin"):"S\u00e9lectionne des boissons";}
+}
+function toggleAddDrink(id){
+  if(_addDrinksSel[id])delete _addDrinksSel[id];else _addDrinksSel[id]=1;
+  playSound("pop");renderAddDrinksList();
+}
+function submitAddDrinks(){
+  var s=curStoreDetail;if(!s)return;
+  var ids=Object.keys(_addDrinksSel).map(Number);
+  if(!ids.length)return;
+  var sheet=document.getElementById("adddrinks-sheet");if(sheet)sheet.remove();
+  toast("Ajout\u2026");
+  window.fbCommunityAddDrinks(s.fbId||s.id,ids).then(function(n){
+    s.drinks=s.drinks||[];s.confirmations=s.confirmations||{};
+    var pts=0;
+    ids.forEach(function(id){
+      if(s.drinks.indexOf(id)===-1)s.drinks.push(id);
+      s.confirmations[id]=(s.confirmations[id]||0)+1;
+      if(awardOnce("tag:"+id+":"+(s.fbId||s.id),FOREVER))pts+=2;
+    });
+    var live=(STORES||[]).find(function(x){return String(x.id)===String(s.id);});
+    if(live&&live!==s){live.drinks=s.drinks.slice();live.confirmations=s.confirmations;}
+    if(pts){userStats.pts+=pts;flyPts(pts);updateProfileStats();if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);}
+    playSound("win");
+    toast("\u2705 "+n+" boisson"+(n>1?"s":"")+" ajout\u00e9e"+(n>1?"s":"")+(pts?" \u00b7 +"+pts+" pts":""));
+    try{renderStoreDetail();}catch(e){}
+  }).catch(function(e){playSound("err");toast("\u26A0\uFE0F \u00c9chec ("+(e&&e.message||"erreur")+")");});
+}
+function adminBatchAssignHere(){
+  if(!isAdmin||!curStoreDetail)return;
+  var s=curStoreDetail;
+  var raw=prompt("Rayon de \u00ab "+s.name+" \u00bb \u2014 colle la liste d'ids (s\u00e9par\u00e9s par des virgules) :");
+  if(raw===null)return;
+  var ids=raw.split(/[\s,;]+/).map(Number).filter(function(x){return !isNaN(x)&&x>0;});
+  if(!ids.length){toast("\u26A0\uFE0F Aucun id valide");playSound("err");return;}
+  if(!confirm(ids.length+" boissons \u2192 \u00ab "+s.name+" \u00bb, en V\u00c9RIFI\u00c9 (pins verts). Confirmer ?"))return;
+  toast("Assignation\u2026");
+  window.fbAssignListToStore(s.fbId||s.id,ids).then(function(n){
+    s.drinks=s.drinks||[];s.drinksVerified=s.drinksVerified||[];
+    ids.forEach(function(id){
+      if(s.drinks.indexOf(id)===-1)s.drinks.push(id);
+      if(s.drinksVerified.indexOf(id)===-1)s.drinksVerified.push(id);
+    });
+    var live=(STORES||[]).find(function(x){return String(x.id)===String(s.id)||String(x.fbId)===String(s.fbId||s.id);});
+    if(live&&live!==s){live.drinks=s.drinks.slice();live.drinksVerified=s.drinksVerified.slice();}
+    playSound("win");
+    toast("\u2705 "+n+" boissons v\u00e9rifi\u00e9es chez "+sanitize(s.name));
+    try{openStoreDetail(s.id);}catch(e){}
+  }).catch(function(e){playSound("err");toast("\u26A0\uFE0F \u00c9chec ("+(e&&e.message||"erreur")+")");});
+}
 function adminRemoveStore(){
   if(!isAdmin||!curStoreDetail)return;
   var s=curStoreDetail;
@@ -6702,7 +6808,8 @@ function openStoreSheet(storeId){
     '</div>'+
     '<div style="font-size:12.5px;color:var(--s2);margin-bottom:16px">'+drinkCount+' boisson'+(drinkCount>1?"s":"")+' référencée'+(drinkCount>1?"s":"")+' dans ce magasin</div>'+
     '<div style="display:flex;gap:10px">'+
-      '<button onclick="showStoreOnMap('+s.lat+','+s.lng+')" style="flex:1;padding:12px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">\uD83D\uDDFA\uFE0F Sur la carte</button>'+
+      '<button onclick="openAddDrinksSheet()" style="flex:1;padding:12px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">\u2795 Boissons</button>'+
+      '<button onclick="showStoreOnMap('+s.lat+','+s.lng+')" style="flex:1;padding:12px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">\uD83D\uDDFA\uFE0F Carte</button>'+
       '<button onclick="goToStore('+s.lat+','+s.lng+')" style="flex:1;padding:12px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:700;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">Y aller</button>'+
       '<button onclick="closeStoreSheet();openStoreDetail(\''+storeIdStr+'\')" style="flex:1;padding:12px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">Voir le détail</button>'+
     '</div>';
@@ -6721,6 +6828,8 @@ function openStoreDetail(storeId){
   storeDetailReturn=current?current.id.replace("s-",""):"search";
   curStoreDetail=s;
   curStoreDetailQuery="";curStoreDetailCat="Tous";
+  var btS=document.getElementById("sd-batch");
+  if(btS)btS.style.display=isAdmin?"flex":"none";
   var rmS=document.getElementById("sd-remove");
   if(rmS)rmS.style.display=isAdmin?"flex":"none";
   var sdSearch=document.getElementById("sd-search");if(sdSearch)sdSearch.value="";
@@ -7603,6 +7712,7 @@ function openExploreMap(opts){
   document.head.appendChild(script);
 }
 function closeExploreMap(){
+  clearRoute();
   var host=document.getElementById("explore-map-host");
   if(!host)return;
   host.classList.remove("in");
@@ -7894,10 +8004,66 @@ function openGmaps(){
   var s=cands[0];
   var sure=storeVerifiedFor(s,did)||((s.confirmations||{})[did]||0)>0;
   toast((sure?"\u2713 ":"")+sanitize(s.name)+(s.dist?" \u00b7 "+fmtDist(s.dist):""));
-  window.open("https://www.google.com/maps/dir/?api=1&destination="+s.lat+","+s.lng,"_blank");
+  showRouteToStore(s.lat,s.lng);
 }
 function openWaze(){if(!curSel)return;var s=STORES.filter(function(x){return x.drinks.includes(curSel.id)&&x.open;})[0];if(s)window.open("https://waze.com/ul?ll="+s.lat+","+s.lng+"&navigate=yes","_blank");}
-function goToStore(lat,lng){window.open("https://www.google.com/maps/dir/?api=1&destination="+lat+","+lng,"_blank");}
+/* "Y aller" trace maintenant le CHEMIN dans notre carte (ligne type suivi de
+   livreur, distance + duree a pied) via le routage OpenStreetMap public —
+   gratuit, sans cle. Google Maps reste en secours dans le bandeau pour la
+   navigation vocale. */
+function goToStore(lat,lng){showRouteToStore(lat,lng);}
+window._routeLayer=null;window._routeBanner=null;
+function clearRoute(){
+  try{if(window._routeLayer&&exploreMap){exploreMap.removeLayer(window._routeLayer);}}catch(e){}
+  window._routeLayer=null;
+  var b=document.getElementById("route-banner");if(b)b.remove();
+}
+function showRouteToStore(lat,lng){
+  if(typeof userLat!=="number"||!userLat){
+    toast("Active ta position d'abord");playSound("err");
+    window.open("https://www.google.com/maps/dir/?api=1&destination="+lat+","+lng,"_blank");
+    return;
+  }
+  openExploreMap({center:{lat:(lat+userLat)/2,lng:(lng+userLng)/2}});
+  toast("Calcul du chemin\u2026");
+  var url="https://routing.openstreetmap.de/routed-foot/route/v1/foot/"+userLng+","+userLat+";"+lng+","+lat+"?overview=full&geometries=geojson";
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    if(!d.routes||!d.routes[0])throw new Error("pas de route");
+    var rt=d.routes[0];
+    var wait=function(){
+      if(!exploreMap){setTimeout(wait,150);return;}
+      clearRoute();
+      var coords=rt.geometry.coordinates.map(function(c){return [c[1],c[0]];});
+      // Ligne double (bordure + trait) : le rendu "app de livraison"
+      var group=L.layerGroup();
+      L.polyline(coords,{color:"#ffffff",weight:9,opacity:.95}).addTo(group);
+      L.polyline(coords,{color:"#1a1714",weight:5,opacity:.95}).addTo(group);
+      group.addTo(exploreMap);
+      window._routeLayer=group;
+      exploreMap.fitBounds(L.latLngBounds(coords).pad(0.18));
+      var km=rt.distance/1000;
+      var mins=Math.max(1,Math.round(rt.duration/60));
+      var host=document.getElementById("explore-map-host");
+      if(host){
+        var b=document.createElement("div");
+        b.id="route-banner";
+        b.style.cssText="position:absolute;left:12px;right:12px;bottom:14px;z-index:1000;background:var(--app-bg);border:1.5px solid var(--border);border-radius:18px;padding:13px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 24px rgba(0,0,0,.18);font-family:'Space Grotesk',sans-serif";
+        b.innerHTML='<div style="flex:1;min-width:0">'+
+          '<div style="font-size:16px;font-weight:800;color:var(--s1)">\uD83D\uDEB6 '+(km<1?Math.round(km*1000)+" m":km.toFixed(1)+" km")+' \u00b7 ~'+mins+' min</div>'+
+          '<div style="font-size:11.5px;color:var(--s2);margin-top:1px">\u00e0 pied \u00b7 chemin le plus court</div></div>'+
+          '<div onclick="window.open(\'https://www.google.com/maps/dir/?api=1&travelmode=walking&destination='+lat+','+lng+'\',\'_blank\')" role="button" tabindex="0" style="padding:9px 13px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:11.5px;font-weight:800;color:var(--s1);cursor:pointer;white-space:nowrap">GPS \u2197</div>'+
+          '<div onclick="clearRoute()" role="button" tabindex="0" aria-label="Fermer l\'itin\u00e9raire" style="width:32px;height:32px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--s2);cursor:pointer">\u2715</div>';
+        host.appendChild(b);
+      }
+      playSound("pop");
+    };
+    wait();
+  }).catch(function(e){
+    console.warn("route:",e);
+    toast("Trac\u00e9 indisponible \u2014 ouverture GPS");
+    window.open("https://www.google.com/maps/dir/?api=1&travelmode=walking&destination="+lat+","+lng,"_blank");
+  });
+}
 
 /* ================================
    SCAN COUNTS & RATINGS
