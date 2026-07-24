@@ -1069,7 +1069,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 8px" class="t-label">Notifications</div>
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div onclick="settingsEnablePush()" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer" role="button" tabindex="0" onkeydown="if(event.key==='Enter'){settingsEnablePush();}">
-          <div><div style="font-size:14px;font-weight:600;color:var(--s1)">Notifications push</div><div id="notif-state" style="font-size:12px;margin-top:2px;color:var(--s2)">Vérification…</div></div>
+          <div><div style="font-size:14px;font-weight:600;color:var(--s1)">Notifications</div><div style="font-size:12px;margin-top:2px;color:var(--s2)">Sois prévenu quand une boisson que tu suis (🔔 veille) est trouvée près de toi — même app fermée</div><div id="notif-state" style="font-size:12px;margin-top:4px;font-weight:700;color:var(--s1)">Vérification…</div></div>
           <span style="font-size:18px">🔔</span>
         </div>
       </div>
@@ -1116,7 +1116,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616q</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0616t</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -2217,6 +2217,19 @@ window.fbCleanDuplicateUsers = async function() {
   }
   return { removed: removed, groups: kept };
 };
+/* Rayon verifie par photos : assigne une liste d'ids a UN magasin, en drinks
+   ET drinksVerified (pins verts) — outil generique, marche pour n'importe quel
+   magasin du monde dont on a photographie les frigos. */
+window.fbAssignListToStore = async function(storeId, ids) {
+  const nums = ids.map(Number).filter(n => !isNaN(n));
+  if (!nums.length) return 0;
+  await updateDoc(doc(db, "stores", String(storeId)), {
+    drinks: arrayUnion.apply(null, nums),
+    drinksVerified: arrayUnion.apply(null, nums),
+    verifiedSource: "photos rayon (07/2026)"
+  });
+  return nums.length;
+};
 window.fbAssignPackToBrand = async function(drinkIds, brand) {
   const ids = drinkIds.map(Number);
   const snap = await getDocs(query(collection(db, "stores"), where("brand", "==", brand)));
@@ -2847,6 +2860,120 @@ var DRINKS=[
   {id:11348,name:"Ayran",brand:"Gazi",emoji:"\ud83e\udd5b",color:"#f8f9f9",light:"#fdfefe",cat:"Autre",tag:"AYRAN",stars:4.3,formats:[{type:"bouteille",cl:25}]},
   {id:11349,name:"Cara\u00efbos Nectar Mangue",brand:"Cara\u00efbos",emoji:"\ud83e\udd6d",color:"#e67e22",light:"#fef3e2",cat:"Jus",tag:"CARAIBOS",stars:4.2,formats:[{type:"bouteille",cl:75}]},
   {id:11350,name:"Mountain Dew Sans Sucre",brand:"Mountain Dew",emoji:"\ud83d\udc9a",color:"#39b54a",light:"#eafaf1",cat:"Soda",tag:"MTN DEW",stars:4.2,formats:[{type:"bouteille",cl:50}]},
+  {id:11351,name:"Red Bull Sakura Edition",brand:"Red Bull",emoji:"\ud83c\udf38",color:"#f1948a",light:"#fdedec",cat:"Energy",tag:"RED BULL",stars:4.5,formats:[{type:"canette",cl:25}],imp:1},
+  {id:11418,name:"Red Bull Purple Edition A\u00e7a\u00ef",brand:"Red Bull",emoji:"\ud83c\udf47",color:"#6c3483",light:"#f5eef8",cat:"Energy",tag:"RED BULL",stars:4.4,formats:[{type:"canette",cl:25}],imp:1},
+  {id:11419,name:"Red Bull Lilac Edition Asp\u00e9rule Pamplemousse",brand:"Red Bull",emoji:"\ud83d\udc9c",color:"#af7ac5",light:"#f5eef8",cat:"Energy",tag:"RED BULL",stars:4.3,formats:[{type:"canette",cl:25}],imp:1},
+  {id:11420,name:"Fanta Strawberry Kiwi",brand:"Fanta",emoji:"\ud83c\udf53",color:"#e74c3c",light:"#fdecea",cat:"Soda",tag:"FANTA",stars:4.3,formats:[{type:"canette",cl:33}],imp:1},
+  {id:11421,name:"Fanta Dragon Fruit",brand:"Fanta",emoji:"\ud83d\udc09",color:"#ec7063",light:"#fdedec",cat:"Soda",tag:"FANTA",stars:4.4,formats:[{type:"canette",cl:33}],imp:1},
+  {id:11422,name:"Fanta Peach",brand:"Fanta",emoji:"\ud83c\udf51",color:"#f8b88b",light:"#fef3e2",cat:"Soda",tag:"FANTA",stars:4.3,formats:[{type:"canette",cl:33}],imp:1},
+  {id:11423,name:"Lipton Ice Tea Framboise",brand:"Lipton",emoji:"\ud83c\udf53",color:"#c0392b",light:"#fdecea",cat:"Ice Tea",tag:"LIPTON",stars:4.2,formats:[{type:"canette",cl:33},{type:"bouteille",cl:50}]},
+  {id:11424,name:"Lipton Ice Tea Past\u00e8que Menthe",brand:"Lipton",emoji:"\ud83c\udf49",color:"#e74c3c",light:"#fdecea",cat:"Ice Tea",tag:"LIPTON",stars:4.2,formats:[{type:"canette",cl:33},{type:"bouteille",cl:50}]},
+  {id:11425,name:"Pales Mojito Myrtille Fraise",brand:"Pales",emoji:"\ud83c\udf78",color:"#48c9b0",light:"#e8f8f5",cat:"Soda",tag:"PALES",stars:4.2,formats:[{type:"canette",cl:33}]},
+  {id:11426,name:"Pales Mojito P\u00eache Blanche",brand:"Pales",emoji:"\ud83c\udf51",color:"#f5cba7",light:"#fdf2e9",cat:"Soda",tag:"PALES",stars:4.2,formats:[{type:"canette",cl:33}]},
+  {id:11427,name:"San Pellegrino Ciao! Lime",brand:"San Pellegrino",emoji:"\ud83c\udf4b",color:"#82e0aa",light:"#eafaf1",cat:"Soda",tag:"SAN PELLEGRINO",stars:4.2,formats:[{type:"canette",cl:33}]},
+  {id:11428,name:"San Pellegrino Ciao! Pesca",brand:"San Pellegrino",emoji:"\ud83c\udf51",color:"#f8b88b",light:"#fef3e2",cat:"Soda",tag:"SAN PELLEGRINO",stars:4.2,formats:[{type:"canette",cl:33}]},
+  {id:11429,name:"Schweppes Mojito",brand:"Schweppes",emoji:"\ud83c\udf78",color:"#a3e4d7",light:"#e8f8f5",cat:"Soda",tag:"SCHWEPPES",stars:4.3,formats:[{type:"canette",cl:33}],imp:1},
+  {id:11430,name:"Cecemel",brand:"Cecemel",emoji:"\ud83c\udf6b",color:"#6e2c00",light:"#fdf2e9",cat:"Autre",tag:"CECEMEL",stars:4.5,formats:[{type:"canette",cl:25}]},
+  {id:11431,name:"Vitamin Well Awake",brand:"Vitamin Well",emoji:"\u26a1",color:"#d98880",light:"#fdedec",cat:"Sport",tag:"VITAMIN WELL",stars:4.1,formats:[{type:"bouteille",cl:50}]},
+  {id:11432,name:"Vitamin Well Refresh",brand:"Vitamin Well",emoji:"\ud83c\udf4b",color:"#a9dfbf",light:"#eafaf1",cat:"Sport",tag:"VITAMIN WELL",stars:4.1,formats:[{type:"bouteille",cl:50}]},
+  {id:11433,name:"Hawai Tropical",brand:"Hawai",emoji:"\ud83c\udf34",color:"#d68910",light:"#fdf2e9",cat:"Exotique",tag:"HAWAI",stars:4.3,formats:[{type:"bouteille",cl:50}]},
+  {id:11434,name:"Hawai Ananas",brand:"Hawai",emoji:"\ud83c\udf4d",color:"#f1c40f",light:"#fef9e7",cat:"Exotique",tag:"HAWAI",stars:4.3,formats:[{type:"bouteille",cl:50}]},
+  {id:11435,name:"Maaza Guava",brand:"Maaza",emoji:"\ud83e\udded",color:"#ec7063",light:"#fdedec",cat:"Exotique",tag:"MAAZA",stars:4.3,formats:[{type:"bouteille",cl:50},{type:"brique",cl:100}]},
+  {id:11436,name:"Maaza Fruit Punch",brand:"Maaza",emoji:"\ud83c\udf79",color:"#c0392b",light:"#fdecea",cat:"Exotique",tag:"MAAZA",stars:4.2,formats:[{type:"bouteille",cl:50}]},
+  {id:11437,name:"Maaza Tropical",brand:"Maaza",emoji:"\ud83c\udf34",color:"#5dade2",light:"#ebf5fb",cat:"Exotique",tag:"MAAZA",stars:4.2,formats:[{type:"bouteille",cl:50},{type:"brique",cl:100}]},
+  {id:11438,name:"Maaza Lychee",brand:"Maaza",emoji:"\ud83c\udf38",color:"#f5b7b1",light:"#fdedec",cat:"Exotique",tag:"MAAZA",stars:4.3,formats:[{type:"bouteille",cl:50}]},
+  {id:11439,name:"Maaza Passion Fruit",brand:"Maaza",emoji:"\ud83e\udd6d",color:"#6c3483",light:"#f5eef8",cat:"Exotique",tag:"MAAZA",stars:4.3,formats:[{type:"brique",cl:100}]},
+  {id:11440,name:"Capri-Sun Safari Fruits",brand:"Capri-Sun",emoji:"\ud83e\udd93",color:"#d4ac0d",light:"#fef9e7",cat:"Jus",tag:"CAPRI-SUN",stars:4.2,formats:[{type:"brique",cl:20}]},
+  {id:11441,name:"Capri-Sun Jungle Drink",brand:"Capri-Sun",emoji:"\ud83c\udf3f",color:"#1e8449",light:"#e9f7ef",cat:"Jus",tag:"CAPRI-SUN",stars:4.2,formats:[{type:"brique",cl:20}]},
+  {id:11442,name:"Tropical Aloe Vera Original",brand:"Tropical",emoji:"\ud83c\udf43",color:"#27ae60",light:"#e9f7ef",cat:"Autre",tag:"ALOE",stars:4.1,formats:[{type:"bouteille",cl:50}]},
+  {id:11443,name:"Monster Juiced Viking Berry",brand:"Monster",emoji:"\ud83e\uded0",color:"#8e44ad",light:"#f5eef8",cat:"Energy",tag:"MONSTER",stars:4.4,formats:[{type:"canette",cl:50}],imp:1},
+  {id:11444,name:"Monster Ultra Red",brand:"Monster",emoji:"\u2764\ufe0f",color:"#c0392b",light:"#fdecea",cat:"Energy",tag:"MONSTER",stars:4.3,formats:[{type:"canette",cl:50}],imp:1},
+  {id:11445,name:"Edessa Mulberry",brand:"Edessa",emoji:"\ud83c\udf47",color:"#4a235a",light:"#f5eef8",cat:"Jus",tag:"EDESSA",stars:4.3,formats:[{type:"bouteille",cl:25}]},
+  {id:11446,name:"Edessa Pomegranate",brand:"Edessa",emoji:"\ud83e\uded3",color:"#c0392b",light:"#fdecea",cat:"Jus",tag:"EDESSA",stars:4.3,formats:[{type:"bouteille",cl:25}]},
+  {id:11447,name:"Arizona Strawberry Lemonade",brand:"Arizona",emoji:"\ud83c\udf53",color:"#ec7063",light:"#fdedec",cat:"Ice Tea",tag:"ARIZONA",stars:4.3,formats:[{type:"bouteille",cl:50}],imp:1},
+  {id:11448,name:"Calypso Original Lemonade",brand:"Calypso",emoji:"\ud83c\udf4b",color:"#f4d03f",light:"#fef9e7",cat:"Exotique",tag:"CALYPSO",stars:4.4,formats:[{type:"bouteille",cl:47}]},
+  {id:11449,name:"Calypso Ocean Blue Lemonade",brand:"Calypso",emoji:"\ud83c\udf0a",color:"#2471a3",light:"#ebf5fb",cat:"Exotique",tag:"CALYPSO",stars:4.4,formats:[{type:"bouteille",cl:47}]},
+  {id:11450,name:"Calypso Berry Bloom",brand:"Calypso",emoji:"\ud83e\uded0",color:"#6c3483",light:"#f5eef8",cat:"Exotique",tag:"CALYPSO",stars:4.3,formats:[{type:"canette",cl:33}]},
+  {id:11451,name:"AA Drink High Energy",brand:"AA Drink",emoji:"\u26a1",color:"#e67e22",light:"#fef3e2",cat:"Sport",tag:"AA DRINK",stars:4.1,formats:[{type:"bouteille",cl:50}]},
+  {id:11452,name:"Rodeo Energy",brand:"Rodeo",emoji:"\ud83e\udd20",color:"#c0392b",light:"#fdecea",cat:"Energy",tag:"RODEO",stars:3.9,formats:[{type:"canette",cl:25}]},
+  {id:11453,name:"Hell Nova",brand:"Hell",emoji:"\ud83d\udcab",color:"#8e44ad",light:"#f5eef8",cat:"Energy",tag:"HELL",stars:4.2,formats:[{type:"canette",cl:25}],imp:1},
+  {id:11454,name:"Hell Lime Spritz",brand:"Hell",emoji:"\ud83c\udf4b",color:"#82e0aa",light:"#eafaf1",cat:"Energy",tag:"HELL",stars:4.2,formats:[{type:"canette",cl:25}],imp:1},
+  {id:11455,name:"Hell Cactus Twist",brand:"Hell",emoji:"\ud83c\udf35",color:"#1e8449",light:"#e9f7ef",cat:"Energy",tag:"HELL",stars:4.2,formats:[{type:"canette",cl:25}],imp:1},
+  {id:11456,name:"Pacha Fraise",brand:"Pacha",emoji:"\ud83c\udf53",color:"#ec7063",light:"#fdedec",cat:"Exotique",tag:"PACHA",stars:4.2,formats:[{type:"canette",cl:25}]},
+  {id:11457,name:"Pacha Mangue",brand:"Pacha",emoji:"\ud83e\udd6d",color:"#e67e22",light:"#fef3e2",cat:"Exotique",tag:"PACHA",stars:4.2,formats:[{type:"canette",cl:25}]},
+  {id:11458,name:"Pacha Coco",brand:"Pacha",emoji:"\ud83e\udd65",color:"#f8f9f9",light:"#fdfefe",cat:"Exotique",tag:"PACHA",stars:4.2,formats:[{type:"canette",cl:25}]},
+  {id:11459,name:"Nalu Fruity Frost",brand:"Nalu",emoji:"\u2744\ufe0f",color:"#85c1e9",light:"#ebf5fb",cat:"Energy",tag:"NALU",stars:4.2,formats:[{type:"canette",cl:25}],imp:1},
+  {id:11460,name:"Nalu Exotic",brand:"Nalu",emoji:"\ud83c\udf34",color:"#f1c40f",light:"#fef9e7",cat:"Energy",tag:"NALU",stars:4.2,formats:[{type:"canette",cl:25}],imp:1},
+  {id:11461,name:"Looza Pomme",brand:"Looza",emoji:"\ud83c\udf4f",color:"#a9dfbf",light:"#eafaf1",cat:"Jus",tag:"LOOZA",stars:4.2,formats:[{type:"bouteille",cl:20}]},
+  {id:11462,name:"Looza Strawberry Delight",brand:"Looza",emoji:"\ud83c\udf53",color:"#ec7063",light:"#fdedec",cat:"Jus",tag:"LOOZA",stars:4.2,formats:[{type:"bouteille",cl:20}]},
+  {id:11463,name:"Looza P\u00eache",brand:"Looza",emoji:"\ud83c\udf51",color:"#f8b88b",light:"#fef3e2",cat:"Jus",tag:"LOOZA",stars:4.3,formats:[{type:"bouteille",cl:20}]},
+  {id:11464,name:"Dr Pepper Strawberries & Cream",brand:"Dr Pepper",emoji:"\ud83c\udf53",color:"#a04000",light:"#fdf2e9",cat:"Soda",tag:"DR PEPPER",stars:4.4,formats:[{type:"canette",cl:35}],imp:1},
+  {id:11352,name:"Red Bull Pink Edition Fruits des Bois",brand:"Red Bull",emoji:"\ud83c\udf53",color:"#e91e63",light:"#fce4ec",cat:"Energy",tag:"RED BULL",stars:4.4,formats:[{type:"canette",cl:25}]},
+  {id:11353,name:"Red Bull Apricot Edition Abricot-Fraise",brand:"Red Bull",emoji:"\ud83c\udf51",color:"#e67e22",light:"#fef3e2",cat:"Energy",tag:"RED BULL",stars:4.4,formats:[{type:"canette",cl:25}]},
+  {id:11354,name:"Red Bull Apple Edition",brand:"Red Bull",emoji:"\ud83c\udf4f",color:"#27ae60",light:"#e9f7ef",cat:"Energy",tag:"RED BULL",stars:4.3,formats:[{type:"canette",cl:25}]},
+  {id:11355,name:"Red Bull Sea Blue Edition Juneberry",brand:"Red Bull",emoji:"\ud83c\udf0a",color:"#2471a3",light:"#ebf5fb",cat:"Energy",tag:"RED BULL",stars:4.4,formats:[{type:"canette",cl:25}]},
+  {id:11356,name:"Red Bull Summer Edition P\u00eache Blanche",brand:"Red Bull",emoji:"\ud83c\udf51",color:"#f5b7b1",light:"#fdedec",cat:"Energy",tag:"RED BULL",stars:4.5,formats:[{type:"canette",cl:25}]},
+  {id:11357,name:"Red Bull Summer Edition Sudachi",brand:"Red Bull",emoji:"\ud83c\udf4b",color:"#82e0aa",light:"#eafaf1",cat:"Energy",tag:"RED BULL",stars:4.3,formats:[{type:"canette",cl:25}]},
+  {id:11358,name:"Red Bull Winter Edition Fuji Apple Ginger",brand:"Red Bull",emoji:"\ud83c\udf4e",color:"#c0392b",light:"#fdecea",cat:"Energy",tag:"RED BULL",stars:4.4,formats:[{type:"canette",cl:25}]},
+  {id:11359,name:"Red Bull Winter Edition Iced Vanilla Berry",brand:"Red Bull",emoji:"\u2744\ufe0f",color:"#85c1e9",light:"#ebf5fb",cat:"Energy",tag:"RED BULL",stars:4.4,formats:[{type:"canette",cl:25}]},
+  {id:11360,name:"Monster Ultra Peachy Keen",brand:"Monster",emoji:"\ud83c\udf51",color:"#f8b88b",light:"#fef3e2",cat:"Energy",tag:"MONSTER",stars:4.5,formats:[{type:"canette",cl:50}]},
+  {id:11361,name:"Monster Ultra Watermelon",brand:"Monster",emoji:"\ud83c\udf49",color:"#e74c3c",light:"#fdecea",cat:"Energy",tag:"MONSTER",stars:4.4,formats:[{type:"canette",cl:50}]},
+  {id:11362,name:"Monster Ultra Fantasy Ruby Red",brand:"Monster",emoji:"\ud83d\udc8e",color:"#c0392b",light:"#fdecea",cat:"Energy",tag:"MONSTER",stars:4.4,formats:[{type:"canette",cl:50}]},
+  {id:11363,name:"Monster Juice Bad Apple",brand:"Monster",emoji:"\ud83c\udf4e",color:"#7b241c",light:"#f9ebea",cat:"Energy",tag:"MONSTER",stars:4.3,formats:[{type:"canette",cl:50}]},
+  {id:11364,name:"Monster Juice Rio Punch",brand:"Monster",emoji:"\ud83c\udf79",color:"#d35400",light:"#fdf2e9",cat:"Energy",tag:"MONSTER",stars:4.4,formats:[{type:"canette",cl:50}]},
+  {id:11365,name:"Monster MIXXD Punch",brand:"Monster",emoji:"\ud83c\udf47",color:"#6c3483",light:"#f5eef8",cat:"Energy",tag:"MONSTER",stars:4.3,formats:[{type:"canette",cl:50}]},
+  {id:11366,name:"Monster Ultra Violet",brand:"Monster",emoji:"\ud83d\udc9c",color:"#8e44ad",light:"#f5eef8",cat:"Energy",tag:"MONSTER",stars:4.5,formats:[{type:"canette",cl:50}],imp:1},
+  {id:11367,name:"Monster Ultra Strawberry Dreams",brand:"Monster",emoji:"\ud83c\udf53",color:"#ec7063",light:"#fdedec",cat:"Energy",tag:"MONSTER",stars:4.5,formats:[{type:"canette",cl:50}],imp:1},
+  {id:11368,name:"Fanta Cassis",brand:"Fanta",emoji:"\ud83c\udf47",color:"#5b2c6f",light:"#f5eef8",cat:"Soda",tag:"FANTA",stars:4.2,formats:[{type:"canette",cl:33}]},
+  {id:11369,name:"Fanta Zero Shokata",brand:"Fanta",emoji:"\ud83c\udf4b",color:"#a9cce3",light:"#ebf5fb",cat:"Soda",tag:"FANTA",stars:4.3,formats:[{type:"canette",cl:33}]},
+  {id:11370,name:"Fanta Apple Cherry",brand:"Fanta",emoji:"\ud83c\udf52",color:"#c0392b",light:"#fdecea",cat:"Soda",tag:"FANTA",stars:4.2,formats:[{type:"canette",cl:33}]},
+  {id:11371,name:"Fanta Forest Berries",brand:"Fanta",emoji:"\ud83e\uded0",color:"#6c3483",light:"#f5eef8",cat:"Soda",tag:"FANTA",stars:4.2,formats:[{type:"canette",cl:33}]},
+  {id:11372,name:"Fanta Berry",brand:"Fanta",emoji:"\ud83e\uded0",color:"#2e4053",light:"#eaecee",cat:"Soda",tag:"FANTA",stars:4.3,formats:[{type:"canette",cl:33}]},
+  {id:11373,name:"Fanta Zero Pineapple Grapefruit",brand:"Fanta",emoji:"\ud83c\udf4d",color:"#f4d03f",light:"#fef9e7",cat:"Soda",tag:"FANTA",stars:4.2,formats:[{type:"bouteille",cl:150}]},
+  {id:11374,name:"Fanta Pineapple USA",brand:"Fanta",emoji:"\ud83c\udf4d",color:"#f1c40f",light:"#fef9e7",cat:"Soda",tag:"FANTA",stars:4.4,formats:[{type:"canette",cl:33}],imp:1},
+  {id:11375,name:"Fanta Melon",brand:"Fanta",emoji:"\ud83c\udf48",color:"#82e0aa",light:"#eafaf1",cat:"Soda",tag:"FANTA",stars:4.4,formats:[{type:"canette",cl:33}],imp:1},
+  {id:11376,name:"Fanta Lychee",brand:"Fanta",emoji:"\ud83c\udf38",color:"#f5b7b1",light:"#fdedec",cat:"Soda",tag:"FANTA",stars:4.4,formats:[{type:"canette",cl:33}],imp:1},
+  {id:11377,name:"Arizona Blueberry White Tea",brand:"Arizona",emoji:"\ud83e\uded0",color:"#5dade2",light:"#ebf5fb",cat:"Ice Tea",tag:"ARIZONA",stars:4.4,formats:[{type:"bouteille",cl:50}]},
+  {id:11378,name:"Arizona Pomegranate Green Tea",brand:"Arizona",emoji:"\ud83e\uded3",color:"#c0392b",light:"#fdecea",cat:"Ice Tea",tag:"ARIZONA",stars:4.3,formats:[{type:"bouteille",cl:50}]},
+  {id:11379,name:"Prime Sournova",brand:"Prime",emoji:"\u2b50",color:"#48c9b0",light:"#e8f8f5",cat:"Sport",tag:"PRIME",stars:4.3,formats:[{type:"bouteille",cl:50}],imp:1},
+  {id:11380,name:"Prime Energy Orange Mango",brand:"Prime",emoji:"\ud83e\udd6d",color:"#e67e22",light:"#fef3e2",cat:"Energy",tag:"PRIME",stars:4.3,formats:[{type:"canette",cl:33}],imp:1},
+  {id:11381,name:"Dr Pepper Cream Soda",brand:"Dr Pepper",emoji:"\ud83c\ud366",color:"#a04000",light:"#fdf2e9",cat:"Soda",tag:"DR PEPPER",stars:4.4,formats:[{type:"canette",cl:35}]},
+  {id:11382,name:"Pepsi Zero Lime",brand:"Pepsi",emoji:"\ud83c\udf4b",color:"#1e8449",light:"#e9f7ef",cat:"Soda",tag:"PEPSI",stars:4.2,formats:[{type:"canette",cl:33}]},
+  {id:11383,name:"7UP Cocktail Exotique",brand:"7UP",emoji:"\ud83c\udf79",color:"#16a085",light:"#e8f8f5",cat:"Soda",tag:"7UP",stars:4.2,formats:[{type:"canette",cl:33}],imp:1},
+  {id:11384,name:"Capri-Sun +Electrolytes Blackberry Raspberry",brand:"Capri-Sun",emoji:"\ud83e\uded0",color:"#6c3483",light:"#f5eef8",cat:"Sport",tag:"CAPRI-SUN",stars:4.2,formats:[{type:"bouteille",cl:33}]},
+  {id:11385,name:"Capri-Sun +Electrolytes Mango Peach",brand:"Capri-Sun",emoji:"\ud83e\udd6d",color:"#e67e22",light:"#fef3e2",cat:"Sport",tag:"CAPRI-SUN",stars:4.2,formats:[{type:"bouteille",cl:33}]},
+  {id:11386,name:"Capri-Sun Fairy Drink",brand:"Capri-Sun",emoji:"\ud83e\uddda",color:"#af7ac5",light:"#f5eef8",cat:"Jus",tag:"CAPRI-SUN",stars:4.1,formats:[{type:"brique",cl:20}]},
+  {id:11387,name:"Schweppes Selection Tonic Hibiscus",brand:"Schweppes",emoji:"\ud83c\udf3a",color:"#c0392b",light:"#fdecea",cat:"Soda",tag:"SCHWEPPES",stars:4.3,formats:[{type:"canette",cl:25}]},
+  {id:11388,name:"Schweppes Selection Touch of Lime",brand:"Schweppes",emoji:"\ud83c\udf4b",color:"#27ae60",light:"#e9f7ef",cat:"Soda",tag:"SCHWEPPES",stars:4.3,formats:[{type:"canette",cl:25}]},
+  {id:11389,name:"Schweppes Selection Pomelo",brand:"Schweppes",emoji:"\ud83c\udf4a",color:"#ec7063",light:"#fdedec",cat:"Soda",tag:"SCHWEPPES",stars:4.3,formats:[{type:"canette",cl:25}]},
+  {id:11390,name:"Schweppes Selection Tonic P\u00eache Blanche Sureau",brand:"Schweppes",emoji:"\ud83c\udf51",color:"#f5cba7",light:"#fdf2e9",cat:"Soda",tag:"SCHWEPPES",stars:4.3,formats:[{type:"canette",cl:25}]},
+  {id:11391,name:"Schweppes Selection Ginger Beer Chilli",brand:"Schweppes",emoji:"\ud83c\udf36\ufe0f",color:"#ca6f1e",light:"#fdf2e9",cat:"Soda",tag:"SCHWEPPES",stars:4.3,formats:[{type:"canette",cl:25}]},
+  {id:11392,name:"Schweppes Orange Passion",brand:"Schweppes",emoji:"\ud83c\udf4a",color:"#e67e22",light:"#fef3e2",cat:"Soda",tag:"SCHWEPPES",stars:4.2,formats:[{type:"bouteille",cl:150}]},
+  {id:11393,name:"Ramune Yuzu",brand:"Hata Kosen",emoji:"\ud83c\udf4b",color:"#f4d03f",light:"#fef9e7",cat:"Exotique",tag:"RAMUNE",stars:4.4,formats:[{type:"bouteille",cl:20}],imp:1},
+  {id:11394,name:"Ramune Melon",brand:"Hata Kosen",emoji:"\ud83c\udf48",color:"#82e0aa",light:"#eafaf1",cat:"Exotique",tag:"RAMUNE",stars:4.5,formats:[{type:"bouteille",cl:20}],imp:1},
+  {id:11395,name:"Ramune Litchi",brand:"Hata Kosen",emoji:"\ud83c\udf38",color:"#f5b7b1",light:"#fdedec",cat:"Exotique",tag:"RAMUNE",stars:4.5,formats:[{type:"bouteille",cl:20}],imp:1},
+  {id:11396,name:"Ramune Myrtille",brand:"Hata Kosen",emoji:"\ud83e\uded0",color:"#2471a3",light:"#ebf5fb",cat:"Exotique",tag:"RAMUNE",stars:4.3,formats:[{type:"bouteille",cl:20}],imp:1},
+  {id:11397,name:"Calpis Soda",brand:"Asahi",emoji:"\ud83e\udd5b",color:"#f8f9f9",light:"#fdfefe",cat:"Exotique",tag:"CALPIS",stars:4.4,formats:[{type:"canette",cl:35}],imp:1},
+  {id:11398,name:"Uluda\u011f Frutti Melon",brand:"Uluda\u011f",emoji:"\ud83c\udf48",color:"#82e0aa",light:"#eafaf1",cat:"Exotique",tag:"ULUDAG",stars:4.3,formats:[{type:"canette",cl:25}],imp:1},
+  {id:11399,name:"Uluda\u011f Frutti Poire",brand:"Uluda\u011f",emoji:"\ud83c\udf50",color:"#a9dfbf",light:"#eafaf1",cat:"Exotique",tag:"ULUDAG",stars:4.3,formats:[{type:"canette",cl:25}],imp:1},
+  {id:11400,name:"Uluda\u011f Frutti Passion",brand:"Uluda\u011f",emoji:"\ud83e\udd6d",color:"#d68910",light:"#fdf2e9",cat:"Exotique",tag:"ULUDAG",stars:4.3,formats:[{type:"canette",cl:25}],imp:1},
+  {id:11401,name:"Uluda\u011f Limonata",brand:"Uluda\u011f",emoji:"\ud83c\udf4b",color:"#f7dc6f",light:"#fef9e7",cat:"Exotique",tag:"ULUDAG",stars:4.5,formats:[{type:"bouteille",cl:25}],imp:1},
+  {id:11402,name:"Ginger Beer by Supermalt",brand:"Supermalt",emoji:"\ud83e\uddc4",color:"#ca6f1e",light:"#fdf2e9",cat:"Exotique",tag:"SUPERMALT",stars:4.2,formats:[{type:"canette",cl:33}],imp:1},
+  {id:11403,name:"Supermalt Mango & Passion",brand:"Supermalt",emoji:"\ud83e\udd6d",color:"#e67e22",light:"#fef3e2",cat:"Exotique",tag:"SUPERMALT",stars:4.2,formats:[{type:"canette",cl:33}],imp:1},
+  {id:11404,name:"Vitamalt Ginger",brand:"Vitamalt",emoji:"\ud83e\uddc4",color:"#b7950b",light:"#fef9e7",cat:"Exotique",tag:"VITAMALT",stars:4.2,formats:[{type:"bouteille",cl:33}],imp:1},
+  {id:11405,name:"Rubicon Pomegranate",brand:"Rubicon",emoji:"\ud83e\uded3",color:"#c0392b",light:"#fdecea",cat:"Exotique",tag:"RUBICON",stars:4.3,formats:[{type:"bouteille",cl:100}],imp:1},
+  {id:11406,name:"Rubicon Pineapple",brand:"Rubicon",emoji:"\ud83c\udf4d",color:"#f1c40f",light:"#fef9e7",cat:"Exotique",tag:"RUBICON",stars:4.3,formats:[{type:"bouteille",cl:100}],imp:1},
+  {id:11407,name:"Rubicon Watermelon",brand:"Rubicon",emoji:"\ud83c\udf49",color:"#e74c3c",light:"#fdecea",cat:"Exotique",tag:"RUBICON",stars:4.3,formats:[{type:"bouteille",cl:100}],imp:1},
+  {id:11408,name:"Hell Strong Apple",brand:"Hell",emoji:"\ud83c\udf4f",color:"#27ae60",light:"#e9f7ef",cat:"Energy",tag:"HELL",stars:4.2,formats:[{type:"canette",cl:25}],imp:1},
+  {id:11409,name:"Hell Black Cherry",brand:"Hell",emoji:"\ud83c\udf52",color:"#4a235a",light:"#f5eef8",cat:"Energy",tag:"HELL",stars:4.3,formats:[{type:"canette",cl:25}],imp:1},
+  {id:11410,name:"Yakult Plus",brand:"Yakult",emoji:"\ud83e\udd5b",color:"#d4ac0d",light:"#fef9e7",cat:"Autre",tag:"YAKULT",stars:4.3,formats:[{type:"bouteille",cl:7}]},
+  {id:11411,name:"Yakult Plus P\u00eache",brand:"Yakult",emoji:"\ud83c\udf51",color:"#f5b7b1",light:"#fdedec",cat:"Autre",tag:"YAKULT",stars:4.3,formats:[{type:"bouteille",cl:7}]},
+  {id:11412,name:"Yakult Light",brand:"Yakult",emoji:"\ud83e\udd5b",color:"#aed6f1",light:"#ebf5fb",cat:"Autre",tag:"YAKULT",stars:4.1,formats:[{type:"bouteille",cl:7}]},
+  {id:11413,name:"Tropico Pomme Fruits Rouges",brand:"Tropico",emoji:"\ud83c\udf4e",color:"#c0392b",light:"#fdecea",cat:"Jus",tag:"TROPICO",stars:4.2,formats:[{type:"bouteille",cl:150}]},
+  {id:11414,name:"Oasis Pomme Poire",brand:"Oasis",emoji:"\ud83c\udf50",color:"#a9dfbf",light:"#eafaf1",cat:"Jus",tag:"OASIS",stars:4.2,formats:[{type:"bouteille",cl:200}]},
+  {id:11415,name:"Oasis Fraise Framboise",brand:"Oasis",emoji:"\ud83c\udf53",color:"#ec7063",light:"#fdedec",cat:"Jus",tag:"OASIS",stars:4.3,formats:[{type:"bouteille",cl:200}]},
+  {id:11416,name:"Oasis P\u00eache Abricot",brand:"Oasis",emoji:"\ud83c\udf51",color:"#f8b88b",light:"#fef3e2",cat:"Jus",tag:"OASIS",stars:4.2,formats:[{type:"bouteille",cl:200}]},
+  {id:11417,name:"Vimto Fizzy Original",brand:"Vimto",emoji:"\ud83c\udf47",color:"#6c3483",light:"#f5eef8",cat:"Soda",tag:"VIMTO",stars:4.3,formats:[{type:"canette",cl:33}],imp:1},
   {id:11110,name:"Selecto",brand:"Hamoud Boualem",emoji:"🟤",color:"#2c3e50",light:"#eaecee",cat:"Exotique",tag:"HAMOUD BOUALEM",stars:4.5},
   {id:11111,name:"Ifri Pomme",brand:"Ifri",emoji:"🍏",color:"#27ae60",light:"#e9f7ef",cat:"Exotique",tag:"IFRI",stars:4.1},
   {id:11113,name:"Arizona Mucho Mango",brand:"Arizona",emoji:"🥭",color:"#a9dfbf",light:"#eafaf1",cat:"Ice Tea",tag:"ARIZONA",stars:4.5},
@@ -5718,7 +5845,10 @@ var PACK_BRANDS=["coca-cola","fanta","sprite","pepsi","7up","monster","red bull"
   "lipton","schweppes","oasis","capri-sun","evian","perrier","volvic","vittel",
   "spa","orangina","fuze tea","mogu mogu"];
 function packDrinkIds(){
-  return DRINKS.filter(function(d){return PACK_BRANDS.indexOf(normTxt(d.brand))!==-1;})
+  // d.imp = variante import (candy shops / epiceries) : JAMAIS versee au socle
+  // verifie des grandes surfaces, meme si sa marque y est (Ultra Violet n'herite
+  // pas du badge Carrefour de Monster)
+  return DRINKS.filter(function(d){return !d.imp&&PACK_BRANDS.indexOf(normTxt(d.brand))!==-1;})
     .map(function(d){return d.id;});
 }
 function adminAssignBrand(){
@@ -5791,6 +5921,39 @@ var M4_CATS={
 /* Fusion admin : la fiche OUVERTE (curSel) est le doublon a absorber. On cherche
    la fiche a GARDER, on ecrit oldId->newId dans meta/drinkMerges, et le remap
    s'applique partout (magasins, confirmations, catalogue) sans migration. */
+function adminBatchAssign(){
+  if(!isAdmin)return;
+  var q=prompt("Rayon par photos \u2014 tape le NOM du magasin :");
+  if(q===null||!q.trim())return;
+  var qn=normTxt(q.trim());
+  var hits=(STORES||[]).filter(function(s){return normTxt(s.name||"").indexOf(qn)!==-1;}).slice(0,6);
+  if(!hits.length){toast("\u26A0\uFE0F Magasin introuvable (charge sa zone d'abord)");playSound("err");return;}
+  var target=hits[0];
+  if(hits.length>1){
+    var listing=hits.map(function(s,i){return (i+1)+". "+s.name;}).join("\n");
+    var p2=prompt("Quel magasin ? (1 \u00e0 "+hits.length+")\n\n"+listing);
+    if(p2===null)return;
+    var n=parseInt(String(p2).replace(/[^0-9]/g,""),10);
+    if(isNaN(n)||n<1||n>hits.length){toast("\u26A0\uFE0F Num\u00e9ro invalide");playSound("err");return;}
+    target=hits[n-1];
+  }
+  var raw=prompt("Colle la liste d'ids (s\u00e9par\u00e9s par des virgules) :");
+  if(raw===null)return;
+  var ids=raw.split(/[\s,;]+/).map(Number).filter(function(x){return !isNaN(x)&&x>0;});
+  if(!ids.length){toast("\u26A0\uFE0F Aucun id valide");playSound("err");return;}
+  if(!confirm(ids.length+" boissons \u2192 \u00ab "+target.name+" \u00bb, en V\u00c9RIFI\u00c9 (pins verts). Confirmer ?"))return;
+  toast("Assignation\u2026");
+  window.fbAssignListToStore(target.fbId||target.id,ids).then(function(n){
+    target.drinks=target.drinks||[];target.drinksVerified=target.drinksVerified||[];
+    ids.forEach(function(id){
+      if(target.drinks.indexOf(id)===-1)target.drinks.push(id);
+      if(target.drinksVerified.indexOf(id)===-1)target.drinksVerified.push(id);
+    });
+    try{renderStoreList();}catch(e){}
+    playSound("win");
+    toast("\u2705 "+n+" boissons v\u00e9rifi\u00e9es chez "+sanitize(target.name));
+  }).catch(function(e){playSound("err");toast("\u26A0\uFE0F \u00c9chec ("+(e&&e.message||"erreur")+")");});
+}
 function adminMergeDrink(){
   if(!isAdmin||!curSel)return;
   var old=curSel;
@@ -5856,22 +6019,24 @@ function adminCleanUnverified(){
 function adminFillEnseignes(){
   if(!isAdmin)return;
   var pack=packDrinkIds();
+  // Version "verifiable" de brandIds : sans les variantes import (d.imp)
+  function vIds(keys){return brandIds(keys).filter(function(id){var d=DRINKS.find(function(x){return x.id===id;});return d&&!d.imp;});}
   var sets={
-    carrefour:pack.concat(brandIds(["arizona","tropico","chupa chups","hata kosen","ramune","dr pepper","poms","rosport"])),
+    carrefour:pack.concat(vIds(["arizona","tropico","chupa chups","hata kosen","ramune","dr pepper","poms","rosport"])),
     delhaize:pack.filter(function(id){var d=DRINKS.find(function(x){return x.id===id;});return d&&normTxt(d.brand)!=="mogu mogu";})
-      .concat(brandIds(["vimto","arizona","tropico","dr pepper"])),
-    colruyt:pack.concat(brandIds(["arizona","tropico","chupa chups","dr pepper","poms","rosport","hell"])),
-    auchan:pack.concat(brandIds(["jarritos","hamoud boualem","selecto","ifri","arizona","prime","tropico","chupa chups","dr pepper","burn","antarctica","vita coco","mountain dew sans"])),
-    leclerc:pack.concat(brandIds(["arizona","prime","hata kosen","ramune","royal","dr pepper","caraibos"])),
-    intermarche:pack.concat(brandIds(["vimto","selecto","arizona","prime","tropico","chupa chups","ramune","hata kosen","dr pepper"])),
-    monoprix:pack.concat(brandIds(["ifri","arizona","prime","tropico","dr pepper","matecito","yakult","pop mate","charitea","lemonaid","fever-tree","pimento","nexba","karma","gimber","vita coco","ciao","ucha kombucha","voelkel","jubiles","uma ginger","accent ginger","pop's","san pellegrino"])),
-    coursesu:pack.concat(brandIds(["jarritos","supermalt","hamoud boualem","fever-tree","canada dry","vita coco","lorina","nexba","selecto","hata kosen","ramune","arizona","tropico","chupa chups","dr pepper","gimber","pop's","caraibos"])),
-    cora:pack.concat(brandIds(["socrate","jomo","charitea","caraibos","hamoud boualem","tropico","dr pepper","yakult","ciao","canada dry","lorina"])),
-    franprix:pack.concat(brandIds(["matecito","grace","eloa","selecto","royal","tropico","vita coco","ucha kombucha","lorina"])),
-    albertheijn:pack.concat(brandIds(["prime","dr pepper","poms","rosport","fritz-kola","fever-tree","yakult","vita coco","nalu"])),
+      .concat(vIds(["vimto","arizona","tropico","dr pepper"])),
+    colruyt:pack.concat(vIds(["arizona","tropico","chupa chups","dr pepper","poms","rosport","hell"])),
+    auchan:pack.concat(vIds(["jarritos","hamoud boualem","selecto","ifri","arizona","prime","tropico","chupa chups","dr pepper","burn","antarctica","vita coco","mountain dew sans"])),
+    leclerc:pack.concat(vIds(["arizona","prime","hata kosen","ramune","royal","dr pepper","caraibos"])),
+    intermarche:pack.concat(vIds(["vimto","selecto","arizona","prime","tropico","chupa chups","ramune","hata kosen","dr pepper"])),
+    monoprix:pack.concat(vIds(["ifri","arizona","prime","tropico","dr pepper","matecito","yakult","pop mate","charitea","lemonaid","fever-tree","pimento","nexba","karma","gimber","vita coco","ciao","ucha kombucha","voelkel","jubiles","uma ginger","accent ginger","pop's","san pellegrino"])),
+    coursesu:pack.concat(vIds(["jarritos","supermalt","hamoud boualem","fever-tree","canada dry","vita coco","lorina","nexba","selecto","hata kosen","ramune","arizona","tropico","chupa chups","dr pepper","gimber","pop's","caraibos"])),
+    cora:pack.concat(vIds(["socrate","jomo","charitea","caraibos","hamoud boualem","tropico","dr pepper","yakult","ciao","canada dry","lorina"])),
+    franprix:pack.concat(vIds(["matecito","grace","eloa","selecto","royal","tropico","vita coco","ucha kombucha","lorina"])),
+    albertheijn:pack.concat(vIds(["prime","dr pepper","poms","rosport","fritz-kola","fever-tree","yakult","vita coco","nalu"])),
     // Mission 6 : OKay (okay.be) et Jumbo (jumbo.com — proxy NL, assortiment belge proche)
-    okay:pack.concat(brandIds(["ayran","gazi","dr pepper","nalu","gimber"])),
-    jumbo:pack.concat(brandIds(["jarritos","vimto","okf","arizona","chupa chups","dr pepper","hell","yakult","fever-tree","canada dry"]))
+    okay:pack.concat(vIds(["ayran","gazi","dr pepper","nalu","gimber"])),
+    jumbo:pack.concat(vIds(["jarritos","vimto","okf","arizona","chupa chups","dr pepper","hell","yakult","fever-tree","canada dry"]))
   };
   Object.keys(sets).forEach(function(k){sets[k]=sets[k].filter(function(v,i,a){return a.indexOf(v)===i;});});
   if(!confirm("Remplissage int\u00E9gral (BE + FR) :\n\u2022 Carrefour "+sets.carrefour.length+" \u00B7 Delhaize "+sets.delhaize.length+" \u00B7 Colruyt "+sets.colruyt.length+"\n\u2022 Auchan "+sets.auchan.length+" \u00B7 Leclerc "+sets.leclerc.length+" \u00B7 Intermarch\u00E9 "+sets.intermarche.length+"\n\u2022 Monoprix "+sets.monoprix.length+" \u00B7 U "+sets.coursesu.length+" \u00B7 Cora "+sets.cora.length+" \u00B7 Franprix "+sets.franprix.length+" \u00B7 Albert Heijn "+sets.albertheijn.length+"\n\nSur TOUS les magasins de ces enseignes. Lancer ?"))return;
@@ -5902,6 +6067,7 @@ function openAdminSheet(){
     '<div id="ash-clean" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Purger Lidl / Aldi / Match</div>'+
     '<div id="ash-dedup" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Nettoyer doublons classement</div>'+
     '<div id="ash-merge" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Fusionner cette fiche avec\u2026</div>'+
+    '<div id="ash-batch" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Rayon par photos (lot \u2192 magasin)</div>'+
     '<div id="ash-brand" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Assigner \u00E0 une enseigne</div>'+
     '<div id="ash-codes" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">\uD83D\uDD22 G\u00E9rer les codes-barres</div>'+
     (canRemove?'<div id="ash-remove" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:#b91c1c">\uD83D\uDDD1\uFE0F Retirer du catalogue</div>':'')+
@@ -5916,6 +6082,7 @@ function openAdminSheet(){
   bind("ash-clean",adminCleanUnverified);
   bind("ash-dedup",adminCleanDuplicateUsers);
   bind("ash-merge",adminMergeDrink);
+  bind("ash-batch",adminBatchAssign);
   bind("ash-brand",adminAssignBrand);
   bind("ash-codes",adminManageBarcodes);
   if(canRemove)bind("ash-remove",adminRemoveDrink);
