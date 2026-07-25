@@ -1120,7 +1120,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617a</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617b</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1540,6 +1540,11 @@ onAuthStateChanged(auth, async function(user) {
    côté client avec la formule de Haversine. */
 const DEFAULT_CENTER = { lat: 50.8503, lng: 4.3517 }; // Bruxelles, utilisé tant que le GPS n'a pas répondu
 const CACHE_KEY = "magoNearbyCache";
+// Version des DONNEES du cache : quand un fix change la facon de charger les
+// magasins (ex: bug "que le sud"), les caches enregistres AVANT le fix sont
+// perimes — sans ce marqueur, le telephone continuait de servir la vieille
+// tranche pendant des heures apres la mise a jour.
+const CACHE_DATA_V = "0617b";
 // Sobriete Firestore : cache "frais" 6h (zero lecture reseau), rafraichi en
 // silence entre 6h et 24h, requete complete au-dela. Les magasins bougent
 // rarement ; les confirmations/prix, eux, arrivent par les mises a jour locales.
@@ -1638,7 +1643,7 @@ function saveStoresCache(lat, lng, radiusKm, now, stores) {
   var caps = [slim.length, 1500, 800, 400, 200];
   for (var i = 0; i < caps.length; i++) {
     try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({ lat: lat, lng: lng, radiusKm: radiusKm, ts: now, stores: slim.slice(0, caps[i]) }));
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ v: CACHE_DATA_V, lat: lat, lng: lng, radiusKm: radiusKm, ts: now, stores: slim.slice(0, caps[i]) }));
       return;
     } catch (e) { /* trop gros : on retente avec moins, les plus proches d'abord */ }
   }
@@ -1702,6 +1707,7 @@ window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
   if (!opts.skipCache) {
     try {
       var cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+      if (cached && cached.v !== CACHE_DATA_V) { cached = null; try { localStorage.removeItem(CACHE_KEY); } catch (e2) {} }
       if (cached && (now - cached.ts) < CACHE_HARD_TTL_MS && cached.radiusKm >= radiusKm) {
         var driftKm = haversineKm(lat, lng, cached.lat, cached.lng);
         if (driftKm < radiusKm * 0.5) {
@@ -1725,12 +1731,19 @@ window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
     window._fbLastQuery = { lat: lat, lng: lng, radiusKm: radiusKm };
     applyStores(stores, banner, false);
     saveStoresCache(lat, lng, radiusKm, now, stores);
+    // Zone quasi vide (ex: Liege jamais exploree) : on previent l'app, qui va
+    // chercher les magasins d'OpenStreetMap toute seule — l'app s'amorce dans
+    // n'importe quelle ville du monde sans intervention de personne.
+    if (stores.length < 6) {
+      window.dispatchEvent(new CustomEvent("fbZoneSparse", { detail: { lat: lat, lng: lng, count: stores.length } }));
+    }
     return stores;
   } catch (e) {
     console.warn("Firebase geo query error:", e);
     if (banner) { banner.textContent = "⚠️ Mode local (Firebase indisponible)"; banner.style.background = "#b91c1c"; }
     try {
       var cachedFallback = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+      if (cachedFallback && cachedFallback.v !== CACHE_DATA_V) cachedFallback = null;
       if (cachedFallback && cachedFallback.stores && cachedFallback.stores.length) {
         applyStores(cachedFallback.stores, banner, true);
         return cachedFallback.stores;
@@ -7371,6 +7384,75 @@ function guessStoreCat(name){
   if(/latino|latin|mex|colombi|bresil|brasil/.test(n))return "latino";
   if(/maroc|alger|tunis|orient(al)?\b|halal market|souk/.test(n))return "maghrebin";
   return "";
+}
+/* AUTO-IMPORT MONDIAL — la reponse a "fais tout partout" : quand quelqu'un
+   ouvre l'app dans une zone que Magofeed ne connait pas encore (Liege, Tokyo,
+   Casablanca...), l'app interroge OpenStreetMap TOUTE SEULE et importe les
+   magasins du coin. Personne n'appuie sur rien. Garde-fous : 1 fois par
+   zone de ~5 km par semaine et par appareil, jamais deux imports en parallele,
+   echecs silencieux (Overpass est parfois lent). */
+window.addEventListener("fbZoneSparse",function(e){
+  try{autoImportZone(e.detail.lat,e.detail.lng);}catch(err){console.warn("autoImport:",err);}
+});
+var _autoImportBusy=false;
+function autoImportZone(cLat,cLng){
+  if(_autoImportBusy||typeof cLat!=="number"||!cLat)return;
+  var cell=Math.round(cLat*20)+"_"+Math.round(cLng*20);
+  var zones={};
+  try{zones=JSON.parse(localStorage.getItem("magoAutoZones")||"{}");}catch(e){}
+  if(zones[cell]&&Date.now()-zones[cell]<7*86400000)return; // deja tente cette semaine
+  _autoImportBusy=true;
+  zones[cell]=Date.now();
+  try{localStorage.setItem("magoAutoZones",JSON.stringify(zones));}catch(e){}
+  var km=2.5;
+  var dLat=km/111,dLng=km/(111*Math.cos(cLat*Math.PI/180));
+  var bbox=(cLat-dLat)+","+(cLng-dLng)+","+(cLat+dLat)+","+(cLng+dLng);
+  var q='[out:json][timeout:40];(node["shop"~"^('+OSM_SHOP_TYPES+')$"]('+bbox+');way["shop"~"^('+OSM_SHOP_TYPES+')$"]('+bbox+'););out center 200;';
+  fetchWithTimeout("https://overpass-api.de/api/interpreter?data="+encodeURIComponent(q),40000)
+    .then(function(r){return r.json();})
+    .then(function(data){
+      var els=(data&&data.elements)||[];
+      var seen={};
+      var found=els.map(function(el){
+        var lat=el.lat!=null?el.lat:(el.center&&el.center.lat);
+        var lng=el.lon!=null?el.lon:(el.center&&el.center.lon);
+        var name=el.tags&&(el.tags.name||el.tags["name:fr"]||el.tags.brand);
+        if(lat==null||lng==null||!name)return null;
+        var gcat=guessStoreCat(name+" "+(el.tags.brand||""));
+        return {id:"o"+el.id,osm:el.id,name:name,emoji:osmShopEmoji(el.tags.shop),lat:lat,lng:lng,hours:(el.tags.opening_hours||null),
+          brand:(el.tags.brand||null),type:gcat?("\u00e9picerie "+gcat):null,drinks:gcat?brandIds(M4_CATS[gcat]||[]):[]};
+      }).filter(Boolean).filter(function(s){var k=s.id;if(seen[k])return false;seen[k]=1;return true;});
+      if(!found.length){_autoImportBusy=false;return;}
+      var zone=window.fbQueryZone?window.fbQueryZone(cLat,cLng,km+0.5):Promise.resolve(STORES||[]);
+      return zone.then(function(existing){
+        var news=found.filter(function(c){
+          return !existing.some(function(s){
+            if(String(s.id)===c.id||String(s.id)===String(c.osm))return true;
+            if(typeof s.lat!=="number")return false;
+            var dLa=(s.lat-c.lat)*111000,dLo=(s.lng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
+            return Math.sqrt(dLa*dLa+dLo*dLo)<60&&(normTxt(s.name)===normTxt(c.name)||fuzzyIncludes(c.name,s.name)||fuzzyIncludes(s.name,c.name));
+          });
+        }).slice(0,150);
+        if(!news.length){_autoImportBusy=false;return;}
+        return window.fbImportStores(news,null).then(function(done){
+          news.forEach(function(c){
+            if(!(STORES||[]).some(function(s){return String(s.id)===c.id;})){
+              var entry={id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,brand:c.brand||"",type:c.type||"",drinks:(c.drinks||[]).slice(),confirmations:{}};
+              if(typeof userLat==="number"&&userLat){
+                var dLa=(userLat-c.lat)*111000,dLo=(userLng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
+                entry.dist=Math.round(Math.sqrt(dLa*dLa+dLo*dLo));
+              }
+              STORES.push(entry);
+            }
+          });
+          _autoImportBusy=false;
+          toast("\uD83C\uDF0D +"+done+" magasins d\u00e9couverts dans cette zone");
+          playSound("pop");
+          try{if(curSel)renderStoreList();}catch(e2){}
+        });
+      });
+    })
+    .catch(function(e){console.warn("autoImport OSM:",e);_autoImportBusy=false;});
 }
 function osmRunImport(){
   if(!osmCandidates||!osmCandidates.length)return;
