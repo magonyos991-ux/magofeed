@@ -1120,7 +1120,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617b</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617d</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1648,6 +1648,21 @@ function saveStoresCache(lat, lng, radiusKm, now, stores) {
     } catch (e) { /* trop gros : on retente avec moins, les plus proches d'abord */ }
   }
 }
+/* Les modifications locales (scan confirme sur place, ajout de boissons,
+   rayon admin...) etaient ecrites dans Firestore ET dans STORES en memoire,
+   mais JAMAIS dans le cache localStorage. Au rechargement suivant, le cache
+   d'avant la modif etait servi tel quel (TTL 6h) -> la modif semblait perdue
+   ("j'ai coche le Carrefour Express, au reload il a disparu"). fbTouchCache
+   reecrit le cache depuis l'etat courant, en gardant le ts d'origine (le TTL
+   n'est pas prolonge artificiellement). */
+window.fbTouchCache = function() {
+  try {
+    var cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+    var q = window._fbLastQuery || cached;
+    if (!q || typeof q.lat !== "number") return;
+    saveStoresCache(q.lat, q.lng, q.radiusKm || 10, (cached && cached.ts) || Date.now(), window.STORES || []);
+  } catch (e) { console.warn("touchCache:", e); }
+};
 async function queryLatBand(latMin, latMax, depth) {
   var q = query(
     collection(db, "stores"),
@@ -1683,8 +1698,24 @@ async function queryNearbyStores(lat, lng, radiusKm) {
   return out;
 }
 
+/* Anti-crash memoire : Safari tue la page quand la RAM explose ("l'app se
+   relance toute seule"). Deux mesures : (1) on ne garde en memoire que les
+   ~1400 magasins les plus proches — largement assez pour l'usage, le reste se
+   recharge a la demande ; (2) on retire des objets les champs jamais utilises
+   par l'interface. */
+function slimStores(stores) {
+  stores.forEach(function(s) {
+    delete s.reports; delete s.createdAt; delete s.updatedAt;
+    delete s.osmImport; delete s.source;
+  });
+  if (stores.length > 1400) {
+    stores.sort(function(a, b) { return (a.dist == null ? 9e9 : a.dist) - (b.dist == null ? 9e9 : b.dist); });
+    stores.length = 1400;
+  }
+  return stores;
+}
 function applyStores(stores, banner, fromCache) {
-  window.STORES = stores;
+  window.STORES = slimStores(stores);
   try{if(typeof checkWatches==="function")checkWatches();}catch(e){}
   window._fbStoresLoaded = stores;
   window._fbReady = true;
@@ -3498,6 +3529,7 @@ function report(type){
       if(!s.confirmations[d.id])s.confirmations[d.id]=0;
       s.confirmations[d.id]--; // rupture signalee -> le magasin sort des resultats et des notifs
       if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||s.id,d.id,-1);
+      if(window.fbTouchCache)window.fbTouchCache();
       resetWatchTrigger(d.id,s.fbId||s.id);
     }
   }
@@ -3535,6 +3567,7 @@ function doConfirm(btn,sid,did,val){
     resetWatchTrigger(did,sid);
     // Firebase
     if(window.fbConfirmStock) window.fbConfirmStock(sid, did, -1);
+    if(window.fbTouchCache)window.fbTouchCache();
     playSound("err");updateProfileStats();toast("👎 Signalé · +3 pts");
   }
 }
@@ -3564,6 +3597,7 @@ function confirmWithPrice(sid,did){
   trackStoreContribution(sid);
   // Firebase
   if(window.fbConfirmStock) window.fbConfirmStock(sid, did, 1);
+  if(window.fbTouchCache)window.fbTouchCache();
   playSound("pop");updateProfileStats();
   toast(price?"✅ "+price.toFixed(2)+"€ enregistré · +3 pts":"✅ Stock confirmé · +3 pts");
   renderStoreList();
@@ -3783,7 +3817,7 @@ function startScan(){
       btn.style.display="none";
       document.getElementById("scan-result").style.display="none";
       if(quaggaRunning)return;
-      Quagga.init({inputStream:{type:"LiveStream",target:video,constraints:{facingMode:"environment"}},decoder:{readers:["ean_reader","ean_8_reader","code_128_reader","upc_reader"]}},
+      Quagga.init({inputStream:{type:"LiveStream",target:video,constraints:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}}},locator:{patchSize:"medium",halfSample:true},decoder:{readers:["ean_reader","ean_8_reader","code_128_reader","upc_reader"]}},
         function(err){
           if(err){hint.textContent="❌ "+err;return;}
           _scanVotes={code:null,count:0};
@@ -4143,6 +4177,7 @@ function saveNewStore(){
     if(window._addStoreDraft&&window._pickerMarkers){try{window._pickerMarkers.removeLayer(window._addStoreDraft);}catch(e){}window._addStoreDraft=null;}
     addStorePos=null;
     STORES.push(s);
+    if(window.fbTouchCache)window.fbTouchCache();
     playSound("win");
     toast("\uD83C\uDFEA \u00AB "+name+" \u00BB enregistr\u00E9 pour tout le monde !");
     if(createBtn){createBtn.disabled=false;createBtn.textContent="Cr\u00E9er le magasin";}
@@ -4282,6 +4317,7 @@ function tagScanToStore(s){
     if(!s.confirmations)s.confirmations={};
     s.confirmations[did]=(s.confirmations[did]||0)+1;
     if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||sid,did).catch(function(e){console.warn(e);});
+    if(window.fbTouchCache)window.fbTouchCache();
   }else if(ctx.pendingBarcode!=null){
     // Produit pas encore ajoute en decouverte : on retient le magasin,
     // addDiscovery le consommera au moment de l'ajout
@@ -5971,6 +6007,7 @@ function submitAddDrinks(){
     });
     var live=(STORES||[]).find(function(x){return String(x.id)===String(s.id);});
     if(live&&live!==s){live.drinks=s.drinks.slice();live.confirmations=s.confirmations;}
+    if(window.fbTouchCache)window.fbTouchCache();
     if(pts){userStats.pts+=pts;flyPts(pts);updateProfileStats();if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);}
     playSound("win");
     toast("\u2705 "+n+" boisson"+(n>1?"s":"")+" ajout\u00e9e"+(n>1?"s":"")+(pts?" \u00b7 +"+pts+" pts":""));
@@ -5994,6 +6031,7 @@ function adminBatchAssignHere(){
     });
     var live=(STORES||[]).find(function(x){return String(x.id)===String(s.id)||String(x.fbId)===String(s.fbId||s.id);});
     if(live&&live!==s){live.drinks=s.drinks.slice();live.drinksVerified=s.drinksVerified.slice();}
+    if(window.fbTouchCache)window.fbTouchCache();
     playSound("win");
     toast("\u2705 "+n+" boissons v\u00e9rifi\u00e9es chez "+sanitize(s.name));
     try{openStoreDetail(s.id);}catch(e){}
@@ -6005,6 +6043,7 @@ function adminRemoveStore(){
   if(!confirm("Supprimer \u00AB "+s.name+" \u00BB de la carte pour tout le monde ?\n(doublon, magasin ferm\u00E9\u2026)"))return;
   var idx=STORES.findIndex(function(x){return String(x.id)===String(s.id);});
   if(idx!==-1)STORES.splice(idx,1);
+  if(window.fbTouchCache)window.fbTouchCache();
   if(window.fbDeleteStore)window.fbDeleteStore(s.fbId||s.id).catch(function(e){console.warn(e);toast("\u26A0\uFE0F Suppression distante \u00E9chou\u00E9e");});
   playSound("pop");
   toast("\uD83D\uDDD1\uFE0F \u00AB "+s.name+" \u00BB supprim\u00E9 de la carte");
@@ -6063,6 +6102,7 @@ function adminAssignBrand(){
     window.fbAssignPackToBrand(packIds,brand).then(function(total){
       (STORES||[]).forEach(function(s){
         if(s.brand===brand){s.drinks=s.drinks||[];packIds.forEach(function(id){if(s.drinks.indexOf(id)===-1)s.drinks.push(id);});}
+        if(window.fbTouchCache)window.fbTouchCache();
       });
       try{renderStoreList();}catch(e){}
       playSound("win");
@@ -6138,6 +6178,7 @@ function adminBatchAssign(){
       if(target.drinks.indexOf(id)===-1)target.drinks.push(id);
       if(target.drinksVerified.indexOf(id)===-1)target.drinksVerified.push(id);
     });
+    if(window.fbTouchCache)window.fbTouchCache();
     try{renderStoreList();}catch(e){}
     playSound("win");
     toast("\u2705 "+n+" boissons v\u00e9rifi\u00e9es chez "+sanitize(target.name));
@@ -7446,6 +7487,7 @@ function autoImportZone(cLat,cLng){
             }
           });
           _autoImportBusy=false;
+          if(window.fbTouchCache)window.fbTouchCache();
           toast("\uD83C\uDF0D +"+done+" magasins d\u00e9couverts dans cette zone");
           playSound("pop");
           try{if(curSel)renderStoreList();}catch(e2){}
@@ -7905,6 +7947,14 @@ function exploreLoadStores(){
         if(!(STORES||[]).some(function(x){return String(x.id)===String(s.id);}))STORES.push(s);
       }
     });
+    // En balade sur la carte, chaque zone visitee s'ajoutait a STORES sans
+    // limite -> memoire en roue libre -> crash. On coupe aux plus proches.
+    if((STORES||[]).length>1800){
+      STORES.sort(function(a,b){return (a.dist==null?9e9:a.dist)-(b.dist==null?9e9:b.dist);});
+      STORES.length=1400;
+      _exploreSeen={};
+      STORES.forEach(function(s){_exploreSeen[String(s.id)]=1;});
+    }
     try{checkWatches();}catch(e){}
     exploreLayer.clearLayers();
     var shown=0;
