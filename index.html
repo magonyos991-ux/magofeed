@@ -1120,7 +1120,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617d</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617e</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -7491,6 +7491,7 @@ function autoImportZone(cLat,cLng){
           toast("\uD83C\uDF0D +"+done+" magasins d\u00e9couverts dans cette zone");
           playSound("pop");
           try{if(curSel)renderStoreList();}catch(e2){}
+          try{if(exploreMap)exploreMap.fire("moveend");}catch(e3){} // la carte explore se remplit sous les yeux
         });
       });
     })
@@ -7928,6 +7929,12 @@ function exploreLoadStores(){
   var q=window.fbQueryZone?window.fbQueryZone(cLat,cLng,Math.min(radiusKm,25)):Promise.resolve(STORES||[]);
   q.then(function(list){
     list=list||[];
+    // Zone du monde encore vierge (Dakar, Tokyo...) : au lieu d'afficher le
+    // vide, on declenche la decouverte OpenStreetMap automatique — avant, ce
+    // reflexe n'existait qu'a la position de l'utilisateur, pas en balade.
+    if(list.length<6&&radiusKm<=10&&typeof autoImportZone==="function"){
+      try{autoImportZone(cLat,cLng);}catch(eAI){}
+    }
     var hiddenClosed=0;
     if(exploreFilter){
       list=list.filter(function(s){
