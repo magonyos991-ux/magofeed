@@ -1120,7 +1120,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617e</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617g</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1286,6 +1286,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div class="res-back" onclick="closeStoreDetail()">
           <div style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff">←</div>
           <span style="font-size:15px;font-weight:700;color:#fff;flex:1">Magasin</span>
+          <div id="sd-share" onclick="event.stopPropagation();shareStore()" style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer" role="button" tabindex="0" aria-label="Partager ce magasin" onkeydown="if(event.key==='Enter'){event.stopPropagation();shareStore();}">↗</div>
           <div id="sd-batch" onclick="event.stopPropagation();adminBatchAssignHere()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px;cursor:pointer" role="button" tabindex="0" aria-label="Rayon par photos : assigner une liste (admin)" onkeydown="if(event.key==='Enter'){event.stopPropagation();adminBatchAssignHere();}">📸</div>
           <div id="sd-remove" onclick="event.stopPropagation();adminRemoveStore()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px;cursor:pointer" role="button" tabindex="0" aria-label="Supprimer ce magasin (admin)" onkeydown="if(event.key==='Enter'){event.stopPropagation();adminRemoveStore();}">🗑️</div>
         </div>
@@ -1293,6 +1294,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
           <div class="res-emoji" id="sd-emoji"></div>
           <div style="flex:1">
             <div id="sd-name" style="font-size:17px;font-weight:800;color:#fff"></div>
+          <div id="sd-partner" style="display:none;margin-top:3px"><span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.18);font-size:10.5px;font-weight:800;color:#fff">⭐ Partenaire vérifié · rayon photographié sur place</span></div>
             <div id="sd-sub" style="font-size:12px;color:rgba(255,255,255,.8);font-weight:500;margin-top:2px"></div>
             <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap" id="sd-badges"></div>
           </div>
@@ -2037,6 +2039,10 @@ window.fbImportStores = async function(list, onProgress) {
       // ecraser ce qu'un magasin existant a deja (avant : set sans merge + drinks:[]
       // -> un re-import pouvait effacer les rayons et confirmations. repare.)
       if (s.drinks && s.drinks.length) data.drinks = arrayUnion.apply(null, s.drinks.map(Number));
+      if (s.drinksVerified && s.drinksVerified.length) {
+        data.drinksVerified = arrayUnion.apply(null, s.drinksVerified.map(Number));
+        if (s.verifiedSource) data.verifiedSource = s.verifiedSource;
+      }
       batch.set(doc(db, "stores", String(s.id)), data, { merge: true });
     });
     await batch.commit();
@@ -2313,6 +2319,13 @@ window.fbCleanDuplicateUsers = async function() {
    magasin du monde dont on a photographie les frigos. */
 /* Ajout communautaire multiple : "j'ai vu ces boissons dans ce magasin".
    drinks + 1 confirmation chacune (meme valeur qu'un "Trouvee ici !"). */
+window.fbGetStore = async function(storeId) {
+  try {
+    var snap = await getDoc(doc(db, "stores", String(storeId)));
+    if (!snap.exists()) return null;
+    return normalizeStore(snap.data(), snap.id, null);
+  } catch (e) { console.warn("fbGetStore:", e); return null; }
+};
 window.fbCommunityAddDrinks = async function(storeId, ids) {
   const nums = ids.map(Number).filter(n => !isNaN(n));
   if (!nums.length) return 0;
@@ -6014,6 +6027,15 @@ function submitAddDrinks(){
     try{renderStoreDetail();}catch(e){}
   }).catch(function(e){playSound("err");toast("\u26A0\uFE0F \u00c9chec ("+(e&&e.message||"erreur")+")");});
 }
+function shareStore(){
+  if(!curStoreDetail)return;
+  var s=curStoreDetail;
+  var url=location.origin+location.pathname+"#store="+encodeURIComponent(s.fbId||s.id);
+  var n=(s.drinks||[]).length;
+  var txt="\uD83D\uDCCD "+s.name+" est sur Magofeed"+(n?" avec "+n+" boissons r\u00e9f\u00e9renc\u00e9es":"")+" !";
+  if(navigator.share){navigator.share({title:"Magofeed \u00b7 "+s.name,text:txt,url:url}).catch(function(){});}
+  else{try{navigator.clipboard.writeText(txt+" "+url);toast("Lien copi\u00e9 !");playSound("pop");}catch(e){prompt("Copie le lien :",url);}}
+}
 function adminBatchAssignHere(){
   if(!isAdmin||!curStoreDetail)return;
   var s=curStoreDetail;
@@ -6246,8 +6268,12 @@ function adminCleanUnverified(){
     toast("\u2705 "+cleaned+" magasin"+(cleaned>1?"s":"")+" purg\u00e9"+(cleaned>1?"s":""));
   }).catch(function(e){playSound("err");toast("\u26A0\uFE0F \u00c9chec ("+(e&&e.message||"erreur")+")");});
 }
-function adminFillEnseignes(){
-  if(!isAdmin)return;
+/* Les rayons d'enseignes deviennent AUTOMATIQUES : chaque magasin importe
+   (auto-import mondial compris) recoit son catalogue verifie a la creation.
+   Avant : bouton manuel -> tout magasin arrive apres le dernier clic restait
+   vide ("le Coca en orange partout" constate chez le pere d'Ilias). */
+function buildChainSets(){
+  if(window._chainSets)return window._chainSets;
   var pack=packDrinkIds();
   // Version "verifiable" de brandIds : sans les variantes import (d.imp)
   function vIds(keys){return brandIds(keys).filter(function(id){var d=DRINKS.find(function(x){return x.id===id;});return d&&!d.imp;});}
@@ -6268,6 +6294,31 @@ function adminFillEnseignes(){
     okay:pack.concat(vIds(["ayran","gazi","dr pepper","nalu","gimber"])),
     jumbo:pack.concat(vIds(["jarritos","vimto","okf","arizona","chupa chups","dr pepper","hell","yakult","fever-tree","canada dry"]))
   };
+  window._chainSets=sets;
+  return sets;
+}
+/* Detecte l'enseigne d'un magasin par son nom/marque -> son set verifie */
+function chainIdsFor(name,brand){
+  var sets=buildChainSets();
+  var b=normTxt((brand||"")+" "+(name||""));
+  if(b.indexOf("carrefour")!==-1)return{ids:sets.carrefour,key:"Carrefour"};
+  if(b.indexOf("delhaize")!==-1)return{ids:sets.delhaize,key:"Delhaize"};
+  if(b.indexOf("colruyt")!==-1)return{ids:sets.colruyt,key:"Colruyt"};
+  if(b.indexOf("auchan")!==-1)return{ids:sets.auchan,key:"Auchan"};
+  if(b.indexOf("leclerc")!==-1)return{ids:sets.leclerc,key:"Leclerc"};
+  if(b.indexOf("intermarch")!==-1)return{ids:sets.intermarche,key:"Intermarch\u00e9"};
+  if(b.indexOf("monoprix")!==-1||b.indexOf("monop")!==-1)return{ids:sets.monoprix,key:"Monoprix"};
+  if(b.indexOf("super u")!==-1||b.indexOf("hyper u")!==-1||b.indexOf("u express")!==-1)return{ids:sets.coursesu,key:"U"};
+  if(b.indexOf("cora")!==-1||b.indexOf("houra")!==-1)return{ids:sets.cora,key:"Cora"};
+  if(b.indexOf("franprix")!==-1)return{ids:sets.franprix,key:"Franprix"};
+  if(b.indexOf("albert heijn")!==-1||b.indexOf("ah ")!==-1||b==="ah")return{ids:sets.albertheijn,key:"Albert Heijn"};
+  if(b.indexOf("okay")!==-1)return{ids:sets.okay,key:"OKay"};
+  if(b.indexOf("jumbo")!==-1)return{ids:sets.jumbo,key:"Jumbo"};
+  return null;
+}
+function adminFillEnseignes(){
+  if(!isAdmin)return;
+  var sets=buildChainSets();
   Object.keys(sets).forEach(function(k){sets[k]=sets[k].filter(function(v,i,a){return a.indexOf(v)===i;});});
   if(!confirm("Remplissage int\u00E9gral (BE + FR) :\n\u2022 Carrefour "+sets.carrefour.length+" \u00B7 Delhaize "+sets.delhaize.length+" \u00B7 Colruyt "+sets.colruyt.length+"\n\u2022 Auchan "+sets.auchan.length+" \u00B7 Leclerc "+sets.leclerc.length+" \u00B7 Intermarch\u00E9 "+sets.intermarche.length+"\n\u2022 Monoprix "+sets.monoprix.length+" \u00B7 U "+sets.coursesu.length+" \u00B7 Cora "+sets.cora.length+" \u00B7 Franprix "+sets.franprix.length+" \u00B7 Albert Heijn "+sets.albertheijn.length+"\n\nSur TOUS les magasins de ces enseignes. Lancer ?"))return;
   toast("Remplissage en cours\u2026 (peut prendre 1-2 min, laisse l'\u00e9cran allum\u00e9)");
@@ -7002,10 +7053,15 @@ function resolveStoreAddress(s){
       }
     }).catch(function(){});
 }
+function storeIsPartner(s){
+  return !!(s&&s.verifiedSource&&String(s.verifiedSource).indexOf("photos")!==-1);
+}
 function renderStoreDetail(){
   var s=curStoreDetail;if(!s)return;
   document.getElementById("sd-emoji").innerHTML=storeIconHTML(s);
   document.getElementById("sd-name").textContent=s.name;
+  var pb=document.getElementById("sd-partner");
+  if(pb)pb.style.display=storeIsPartner(s)?"block":"none";
   var addr=s.address||"";
   document.getElementById("sd-sub").textContent=(s.brand?s.brand+" · ":"")+(s.type||"")+(addr?" · "+addr:"");
   if(!addr)resolveStoreAddress(s);
@@ -7378,8 +7434,13 @@ function osmAnalyze(){
         var name=e.tags&&(e.tags.name||e.tags["name:fr"]||e.tags.brand);
         if(lat==null||lng==null||!name)return null;
         var gcat=guessStoreCat(name+" "+(e.tags.brand||""));
+        var chain=chainIdsFor(name,e.tags.brand);
+        var cd={drinks:[],dv:null,vs:null};
+        if(chain){cd.drinks=chain.ids.slice();cd.dv=chain.ids.slice();cd.vs="catalogue enseigne (auto)";}
+        else if(gcat){cd.drinks=brandIds(M4_CATS[gcat]||[]);}
+        else{cd.drinks=packDrinkIds();}
         return {id:"o"+e.id,osm:e.id,name:name,emoji:osmShopEmoji(e.tags.shop),lat:lat,lng:lng,hours:(e.tags.opening_hours||null),
-          brand:(e.tags.brand||null),type:gcat?("\u00e9picerie "+gcat):null,drinks:gcat?brandIds(M4_CATS[gcat]||[]):[]};
+          brand:(e.tags.brand||null),type:gcat?("\u00e9picerie "+gcat):null,drinks:cd.drinks,drinksVerified:cd.dv,verifiedSource:cd.vs};
       }).filter(Boolean).filter(function(s){
         var k=s.id;if(seen[k])return false;seen[k]=1;return true;
       });
@@ -7460,8 +7521,16 @@ function autoImportZone(cLat,cLng){
         var name=el.tags&&(el.tags.name||el.tags["name:fr"]||el.tags.brand);
         if(lat==null||lng==null||!name)return null;
         var gcat=guessStoreCat(name+" "+(el.tags.brand||""));
+        // Enseigne connue -> rayon VERIFIE d'office ; categorie detectee ->
+        // probables ; sinon superette/night shop -> le socle mainstream en
+        // probable (un night shop sans Coca, ca n'existe pas)
+        var chain=chainIdsFor(name,el.tags.brand);
+        var cd={drinks:[],dv:null,vs:null};
+        if(chain){cd.drinks=chain.ids.slice();cd.dv=chain.ids.slice();cd.vs="catalogue enseigne (auto)";}
+        else if(gcat){cd.drinks=brandIds(M4_CATS[gcat]||[]);}
+        else{cd.drinks=packDrinkIds();}
         return {id:"o"+el.id,osm:el.id,name:name,emoji:osmShopEmoji(el.tags.shop),lat:lat,lng:lng,hours:(el.tags.opening_hours||null),
-          brand:(el.tags.brand||null),type:gcat?("\u00e9picerie "+gcat):null,drinks:gcat?brandIds(M4_CATS[gcat]||[]):[]};
+          brand:(el.tags.brand||null),type:gcat?("\u00e9picerie "+gcat):null,drinks:cd.drinks,drinksVerified:cd.dv,verifiedSource:cd.vs};
       }).filter(Boolean).filter(function(s){var k=s.id;if(seen[k])return false;seen[k]=1;return true;});
       if(!found.length){_autoImportBusy=false;return;}
       var zone=window.fbQueryZone?window.fbQueryZone(cLat,cLng,km+0.5):Promise.resolve(STORES||[]);
@@ -7478,7 +7547,7 @@ function autoImportZone(cLat,cLng){
         return window.fbImportStores(news,null).then(function(done){
           news.forEach(function(c){
             if(!(STORES||[]).some(function(s){return String(s.id)===c.id;})){
-              var entry={id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,brand:c.brand||"",type:c.type||"",drinks:(c.drinks||[]).slice(),confirmations:{}};
+              var entry={id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,brand:c.brand||"",type:c.type||"",drinks:(c.drinks||[]).slice(),drinksVerified:(c.drinksVerified||[]).slice(),verifiedSource:c.verifiedSource||null,confirmations:{}};
               if(typeof userLat==="number"&&userLat){
                 var dLa=(userLat-c.lat)*111000,dLo=(userLng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
                 entry.dist=Math.round(Math.sqrt(dLa*dLa+dLo*dLo));
@@ -7510,7 +7579,7 @@ function osmRunImport(){
     // fusion locale immediate
     list.forEach(function(c){
       if(!(STORES||[]).some(function(s){return String(s.id)===c.id;})){
-        var entry={id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,brand:c.brand||"",type:c.type||"",drinks:(c.drinks||[]).slice(),confirmations:{}};
+        var entry={id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,brand:c.brand||"",type:c.type||"",drinks:(c.drinks||[]).slice(),drinksVerified:(c.drinksVerified||[]).slice(),verifiedSource:c.verifiedSource||null,confirmations:{}};
         if(typeof userLat==="number"&&userLat){
           var dLa=(userLat-c.lat)*111000,dLo=(userLng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
           entry.dist=Math.round(Math.sqrt(dLa*dLa+dLo*dLo));
@@ -8052,9 +8121,30 @@ function shareDrink(d){
 }
 function handleDeepLink(){
   var m=(location.hash||"").match(/#drink=(\d+)/);
-  if(!m)return;
-  var d=DRINKS.find(function(x){return Number(x.id)===Number(m[1]);});
-  if(d){try{pick(d);}catch(e){setTimeout(function(){try{pick(d);}catch(e2){}},600);}}
+  if(m){
+    var d=DRINKS.find(function(x){return Number(x.id)===Number(m[1]);});
+    if(d){try{pick(d);}catch(e){setTimeout(function(){try{pick(d);}catch(e2){}},600);}}
+    return;
+  }
+  // Lien de MAGASIN (#store=ID) : le kit partenaire — un QR sur le frigo d'un
+  // commercant ouvre directement SA fiche avec tout son rayon.
+  var ms=(location.hash||"").match(/#store=([A-Za-z0-9_-]+)/);
+  if(ms){
+    var sid=decodeURIComponent(ms[1]);
+    var tryOpen=function(attempt){
+      var s=(STORES||[]).find(function(x){return String(x.id)===sid||String(x.fbId)===sid;});
+      if(s){try{openStoreDetail(s.id);}catch(e){}return;}
+      if(window.fbGetStore){
+        window.fbGetStore(sid).then(function(st){
+          if(st){
+            if(!(STORES||[]).some(function(x){return String(x.id)===String(st.id);}))STORES.push(st);
+            try{openStoreDetail(st.id);}catch(e){}
+          }else if(attempt<3){setTimeout(function(){tryOpen(attempt+1);},900);}
+        }).catch(function(){if(attempt<3)setTimeout(function(){tryOpen(attempt+1);},900);});
+      }else if(attempt<5){setTimeout(function(){tryOpen(attempt+1);},700);}
+    };
+    tryOpen(0);
+  }
 }
 window.addEventListener("hashchange",handleDeepLink);
 /* Onboarding : 3 ecrans au tout premier lancement, jamais revu ensuite. */
