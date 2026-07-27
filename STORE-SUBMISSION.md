@@ -72,9 +72,10 @@ Coordonnées (e-mail si login Google), Contenu utilisateur. Aucune n'est utilis�
 
 ## 4. Reste à préparer (hors code)
 
-- [ ] **Icône** 512×512 (Play) et 1024×1024 (App Store) — tu as déjà `icons/`
-- [ ] **Captures d'écran** (min. 2 par plateforme, format téléphone)
-- [ ] **Description** courte + longue de la fiche
+- [x] **Icône** 512×512 (Play, `icons/icon-512.png`) et 1024×1024 (App Store, `icons/icon-1024.png`)
+- [x] **Feature graphic** Google Play 1024×500 (`icons/feature-graphic.png`)
+- [x] **Description** courte + longue (voir `STORE-LISTING.md`)
+- [ ] **Captures d'écran** (voir section 5 ci-dessous)
 - [ ] **Catégorie** : Shopping ou Style de vie · **Classification d'âge** : Tout public
 - [ ] **Compte développeur** : Google Play (25 $ une fois) · Apple Developer (99 $/an)
 - [ ] **Signature de l'app** : keystore Android (`keytool`) · certificat de distribution iOS
@@ -83,7 +84,36 @@ Coordonnées (e-mail si login Google), Contenu utilisateur. Aucune n'est utilis�
 
 ---
 
-## 5. Commandes Capacitor de référence
+## 5. Captures d'écran — mode d'emploi
+
+### Dimensions exigées
+| Store | Format | Nombre |
+|---|---|---|
+| Google Play (téléphone) | min. 320 px côté court, ratio 16:9 ou 9:16 (ex. **1080×1920**) | 2 à 8 |
+| App Store (iPhone 6.7") | **1290×2796** | 3 à 10 |
+| App Store (iPhone 6.5") | **1242×2688** | facultatif si 6.7" fourni |
+
+### Les 4 écrans à capturer (dans cet ordre)
+1. **Accueil** — « Bonjour 👋 Que boit-on ? » + barre de recherche
+2. **Résultat de recherche** — une boisson + les magasins triés par distance
+3. **Carte** — magasins autour de toi avec les pins
+4. **Scan** — l'écran caméra de scan code-barres
+
+### Comment les prendre (le plus simple)
+1. Ouvre l'app **en vrai sur ton téléphone** (le login/la géoloc marchent, contrairement au PC).
+2. Mets-toi dans chaque écran ci-dessus et fais une capture native :
+   - **Android** : Volume bas + Power
+   - **iPhone** : Volume haut + Power
+3. Les captures du téléphone sont déjà aux bonnes dimensions natives → utilisables directement.
+
+> Astuce cadrage : évite d'avoir une barre de statut avec ton % de batterie à 12 % ou des notifs perso visibles. Mets le téléphone en mode « ne pas déranger » avant.
+
+### Alternative sans téléphone (émulateur)
+Après `npx cap open android`, lance l'app dans l'émulateur Android Studio (Pixel 6) et capture via l'icône appareil photo de la barre latérale de l'émulateur.
+
+---
+
+## 6. Commandes Capacitor de référence
 
 ```bash
 npm install
