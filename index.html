@@ -326,6 +326,10 @@ body.dark .gps-bar{background:#052e16;border-bottom:1px solid #14532d;color:#86e
 }
 body.dark .map-locate-btn{background:#2a2a2a}
 .map-locate-btn:active{transform:scale(.92)}
+/* Toggle "en stock seulement" sur la carte : etat actif = vert plein */
+#map-instock-btn.on{background:#16a34a!important;color:#fff!important;border-color:#16a34a!important}
+#map-instock-btn.on span{background:#fff!important}
+#map-instock-btn:active{transform:scale(.95)}
 
 /* ── Store cards ── */
 .store-card{
@@ -1136,7 +1140,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617l</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617m</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -5643,6 +5647,7 @@ function renderMap(){
   var placeholder=box.querySelector("#map-placeholder");if(placeholder)placeholder.style.display="none";
   box.innerHTML='<div id="leaflet-map" style="width:100%;height:100%"></div>'+
     '<div style="position:absolute;top:8px;left:8px;z-index:900;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);border-radius:999px">'+mapLegendHTML()+'</div>'+
+    '<div id="map-instock-btn" onclick="toggleInStockOnly()" role="button" tabindex="0" aria-pressed="'+(window._mapInStockOnly?"true":"false")+'" aria-label="N\'afficher que les magasins qui l\'ont en stock" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleInStockOnly();}" class="'+(window._mapInStockOnly?"on":"")+'" style="position:absolute;top:50px;left:8px;z-index:901;padding:7px 12px;border-radius:999px;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);font-size:11px;font-weight:800;color:var(--s1);cursor:pointer;display:flex;align-items:center;gap:6px"><span style="width:9px;height:9px;border-radius:50%;background:#16a34a;display:inline-block;flex-shrink:0"></span>En stock seulement</div>'+
     '<div id="map-full-btn" onclick="toggleDrinkMapFull()" role="button" tabindex="0" aria-label="Carte en plein \u00e9cran" style="position:absolute;top:8px;right:8px;z-index:900;width:36px;height:36px;border-radius:12px;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--s1);cursor:pointer">\u26f6</div>'+
     '<div class="map-locate-btn" onclick="centerMapOnUser()" title="Centrer sur moi" role="button" tabindex="0" aria-label="Centrer la carte sur ma position" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();centerMapOnUser();}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="var(--s1)" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="var(--s1)" stroke-width="2" stroke-linecap="round"/></svg></div>';
   if(window._leafletMap){window._leafletMap.remove();window._leafletMap=null;}
@@ -6589,6 +6594,9 @@ function populateClusterMarkers(cluster){
     var conf=curSel?((s.confirmations||{})[curSel.id]||0):0;
     var sure=curSel?(hasDrink&&(storeVerifiedFor(s,curSel.id)||conf>0)):false;
     var status=(!hasDrink||conf<0)?"no":(sure?"sure":"maybe");
+    // Filtre "en stock seulement" : on ne garde QUE les magasins qui l'ont vraiment
+    // (vert coche), pour savoir ou ALLER a coup sur plutot qu'ou essayer.
+    if(window._mapInStockOnly&&status!=="sure")return;
     var pinCls="mago-pin"+(isOpen===false?" closed":"")+(status==="sure"?" sure":status==="no"?" no":" maybe");
     var big=status==="sure";
     var badge=status==="sure"?'<span class="pin-check">\u2713</span>':(status==="no"?'<span class="pin-no">\u2715</span>':'<span class="pin-maybe">?</span>');
@@ -6623,6 +6631,21 @@ function toggleDrinkMapFull(){
   playSound("pop");
   setTimeout(function(){try{if(window._leafletMap)window._leafletMap.invalidateSize();}catch(e){}},80);
   setTimeout(function(){try{if(window._leafletMap)window._leafletMap.invalidateSize();}catch(e){}},380);
+}
+// Bascule "en stock seulement" : ne montre que les magasins qui ont vraiment la
+// boisson (marqueur vert coche). Re-peuple les marqueurs de la carte des resultats.
+function toggleInStockOnly(){
+  window._mapInStockOnly=!window._mapInStockOnly;
+  var btn=document.getElementById("map-instock-btn");
+  if(btn){
+    btn.classList.toggle("on",window._mapInStockOnly);
+    btn.setAttribute("aria-pressed",window._mapInStockOnly?"true":"false");
+  }
+  if(window._leafletCluster)populateClusterMarkers(window._leafletCluster);
+  playSound("pop");
+  if(window._mapInStockOnly&&window._leafletCluster&&window._leafletCluster.getLayers&&!window._leafletCluster.getLayers().length){
+    toast("Aucun magasin confirme pour l'instant — sois le premier a confirmer !");
+  }
 }
 function mapLegendHTML(){
   return '<div style="display:flex;gap:10px;align-items:center;padding:7px 12px;font-size:10px;font-weight:700;color:var(--s2)">'+
