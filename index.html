@@ -1107,6 +1107,13 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
           <div style="font-size:14px;font-weight:600;color:var(--s1)" data-i18n="termsL">Conditions d'utilisation</div>
           <span style="color:var(--s3)">›</span>
         </div>
+        <div onclick="deleteAccount()" role="button" tabindex="0" aria-label="Supprimer mon compte" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();deleteAccount();}" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
+          <div>
+            <div style="font-size:14px;font-weight:600;color:#d33">Supprimer mon compte</div>
+            <div style="font-size:12px;margin-top:2px;color:var(--s2)">Efface définitivement ton profil et tes données</div>
+          </div>
+          <span style="font-size:18px">🗑️</span>
+        </div>
       </div>
       <div style="padding:0 20px 8px" class="t-label" data-i18n="appSec">Application</div>
       <div id="install-app-section" style="padding:0 20px 20px;display:none">
@@ -1125,7 +1132,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617i</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617j</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -1417,7 +1424,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion, arrayRemove, deleteDoc, startAt, endAt, startAfter, documentId, getCountFromServer, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, linkWithPopup, signInWithPopup, signInWithCredential } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, linkWithPopup, signInWithPopup, signInWithCredential, deleteUser, reauthenticateWithPopup } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getMessaging, getToken, onMessage, isSupported } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
 
 /* ── Firebase Config ── */
@@ -1514,6 +1521,29 @@ window.fbSignInWithGoogle = async function() {
     }
   }
   return await recordGoogleLink((await signInWithPopup(auth, provider)).user);
+};
+
+// Suppression definitive du compte (exigee par l'App Store / Google Play des
+// lors qu'un utilisateur peut se connecter). Efface le profil Firestore
+// (pseudo, points, streak) puis le compte d'authentification lui-meme.
+// Les contributions communautaires anonymes (magasins, decouvertes) restent :
+// ce ne sont pas des donnees personnelles rattachees a l'identite.
+window.fbDeleteAccount = async function() {
+  var user = auth.currentUser;
+  if (!user) throw new Error("no-user");
+  try { await deleteDoc(doc(db, "users", user.uid)); } catch (e) { console.warn("delete user doc:", e); }
+  try {
+    await deleteUser(user);
+  } catch (e) {
+    // Firebase exige parfois une reconnexion recente avant suppression.
+    if (e && e.code === "auth/requires-recent-login" && !user.isAnonymous) {
+      await reauthenticateWithPopup(user, new GoogleAuthProvider());
+      await deleteUser(auth.currentUser);
+    } else {
+      throw e;
+    }
+  }
+  return true;
 };
 
 onAuthStateChanged(auth, async function(user) {
@@ -9024,6 +9054,26 @@ function rejectDiscovery(d){
 }
 function showPrivacy(){show("privacy");}
 function showTerms(){show("terms");}
+function deleteAccount(){
+  if(!confirm("Supprimer définitivement ton compte Magofeed ?\n\nTon pseudo, tes points, ton streak et ton classement seront effacés. Cette action est irréversible.")) return;
+  if(!window.fbDeleteAccount){toast("Indisponible pour le moment");return;}
+  toast("Suppression du compte…");
+  window.fbDeleteAccount().then(function(){
+    try{localStorage.clear();}catch(e){}
+    toast("Compte supprimé");
+    setTimeout(function(){location.reload();},1000);
+  }).catch(function(e){
+    var code=(e&&e.code)||"";
+    if(code==="auth/requires-recent-login"){
+      toast("Reconnecte-toi avec Google puis réessaie");
+    }else if(code==="auth/popup-closed-by-user"||code==="auth/cancelled-popup-request"){
+      toast("Suppression annulée");
+    }else{
+      toast("Erreur lors de la suppression");
+    }
+    console.warn("deleteAccount:",e);
+  });
+}
 function reportBug(){window.open("mailto:magofeed@outlook.com?subject=Bug%20report%20Magofeed","_blank");}
 function resetTuto(){localStorage.removeItem("magotuto");show("home");setTimeout(tutoStart,400);toast("Tutoriel relancé !");}
 function resetOnboarding(){localStorage.removeItem("magoob");localStorage.removeItem("magotuto");location.reload();}
