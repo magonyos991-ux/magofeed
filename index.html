@@ -8344,7 +8344,37 @@ function renderExploreChips(){
   var html="";
   if(exploreFilter)html+=chip("instock","En stock",c.instock,true);
   html+=chip("open","Ouvert",c.open,false)+chip("near","< 1 km",c.near,false);
+  // Filtre enseigne : ouvre un selecteur des enseignes presentes autour.
+  var brand=window._exploreBrand;
+  var bst=brand?"background:var(--s1);color:var(--app-bg);border:1px solid var(--s1)":"background:var(--bg2);color:var(--s2);border:1px solid var(--border)";
+  html+='<div onclick="openExploreBrandPicker()" role="button" tabindex="0" aria-label="Filtrer par enseigne" onkeydown="if(event.key===\'Enter\'){openExploreBrandPicker();}" style="flex-shrink:0;display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:999px;font-size:12px;font-weight:700;cursor:pointer;'+bst+'">'+(brand?sanitize(brand):"Enseigne")+' ▾</div>';
   el.innerHTML=html;
+}
+function openExploreBrandPicker(){
+  var brands=window._exploreBrands||[];
+  var old=document.getElementById("explore-brand-picker");if(old)old.remove();
+  var ov=document.createElement("div");
+  ov.id="explore-brand-picker";
+  ov.style.cssText="position:fixed;inset:0;z-index:4400;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center";
+  ov.onclick=function(e){if(e.target===ov)ov.remove();};
+  function row(label,val,sel){
+    return '<div onclick="setExploreBrand('+(val===null?"null":"'"+String(val).replace(/'/g,"\\'")+"'")+')" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){setExploreBrand('+(val===null?"null":"'"+String(val).replace(/'/g,"\\'")+"'")+');}" style="padding:15px 6px;font-size:15px;font-weight:600;color:var(--s1);cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">'+sanitize(label)+'<span style="color:var(--s1)">'+(sel?"✓":"")+'</span></div>';
+  }
+  var items=row("Toutes les enseignes",null,!window._exploreBrand);
+  items+=brands.map(function(b){return row(b,b,window._exploreBrand===b);}).join("");
+  if(!brands.length)items+='<div style="padding:18px 6px;font-size:13px;color:var(--s2)">Aucune enseigne identifiée ici.</div>';
+  ov.innerHTML='<div style="width:100%;max-width:440px;background:var(--app-bg);border-radius:20px 20px 0 0;padding:16px 18px calc(18px + env(safe-area-inset-bottom,0px));max-height:72vh;overflow-y:auto;box-shadow:0 -8px 30px rgba(0,0,0,.3)">'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div style="font-size:16px;font-weight:800;color:var(--s1)">Enseigne</div><div onclick="var p=document.getElementById(\'explore-brand-picker\');if(p)p.remove();" role="button" tabindex="0" aria-label="Fermer" style="font-size:22px;color:var(--s3);cursor:pointer;padding:2px 6px">✕</div></div>'+
+    items+'</div>';
+  document.body.appendChild(ov);
+  playSound("pop");
+}
+function setExploreBrand(b){
+  window._exploreBrand=b;
+  var p=document.getElementById("explore-brand-picker");if(p)p.remove();
+  renderExploreChips();
+  if(exploreMap)exploreLoadStores();
+  playSound("pop");
 }
 function exploreApplyChips(list){
   var c=window._exploreChips,arr=list;
@@ -8353,6 +8383,7 @@ function exploreApplyChips(list){
   // "En stock" : ne garder que les magasins qui ONT la boisson (on masque le
   // contexte gris alentour). Utile maintenant que la carte montre aussi les autres.
   if(c.instock&&exploreFilter)arr=arr.filter(function(s){return s._hasDrink||(s.drinks||[]).some(function(id){return Number(id)===Number(exploreFilter.drinkId);});});
+  if(window._exploreBrand)arr=arr.filter(function(s){return s.brand===window._exploreBrand;});
   return arr;
 }
 function exploreSetHeader(shown,sure){
@@ -8392,6 +8423,7 @@ function showStoreOnMap(lat,lng){
 function openExploreMap(opts){
   exploreFilter=(opts&&opts.drinkId!=null)?{drinkId:opts.drinkId,name:opts.name||""}:null;
   window._exploreChips={instock:false,open:false,near:false};
+  window._exploreBrand=null;
   window._exploreFocus=(opts&&opts.center)?{lat:Number(opts.center.lat),lng:Number(opts.center.lng)}:null;
   setTimeout(function(){try{renderExploreChips();exploreSetHeader(0,exploreFilter?0:undefined);}catch(e){}},60);
   [420,950].forEach(function(t){setTimeout(function(){try{if(exploreMap)exploreMap.invalidateSize();}catch(e){}},t);});
@@ -8525,6 +8557,8 @@ function exploreLoadStores(){
     // En-tete (nom boisson + compteurs) et filtres chips (En stock / Ouvert / < 1 km)
     var _drinkTotal=list.length;
     var _sureCount=exploreFilter?list.filter(function(s){var did=exploreFilter.drinkId;return storeVerifiedFor(s,did)||((s.confirmations||{})[did]||0)>0;}).length:undefined;
+    // Enseignes presentes (vendeurs si une boisson est ciblee, sinon toutes) pour le selecteur.
+    window._exploreBrands=Array.from(new Set(list.filter(function(s){return !exploreFilter||s._hasDrink;}).map(function(s){return s.brand;}).filter(Boolean))).sort();
     try{list=exploreApplyChips(list);}catch(eChip){}
     exploreLayer.clearLayers();
     var shown=0;
