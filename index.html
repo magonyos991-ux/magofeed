@@ -8919,6 +8919,24 @@ function showRouteToStore(lat,lng){
     openExploreMap({center:{lat:(lat+userLat)/2,lng:(lng+userLng)/2}});
   }
   toast("Calcul du chemin\u2026");
+  // Feedback INSTANTANE : un trait pointille a vol d'oiseau s'affiche tout de suite
+  // (percu comme fluide, "bim"), remplace par le vrai chemin pieton des que l'API repond.
+  (function(){
+    var _t=0;
+    var draw=function(){
+      if(!exploreMap){if(_t++<25){setTimeout(draw,120);}return;}
+      try{exploreMap.invalidateSize();}catch(e){}
+      var sz=null;try{sz=exploreMap.getSize();}catch(e){}
+      if((!sz||sz.x===0||sz.y===0)&&_t++<25){setTimeout(draw,120);return;}
+      try{clearRoute();}catch(e){}
+      var straight=[[userLat,userLng],[lat,lng]];
+      var g=L.layerGroup();
+      L.polyline(straight,{color:"#ffffff",weight:8,opacity:.85,dashArray:"1,12",lineCap:"round"}).addTo(g);
+      g.addTo(exploreMap);window._routeLayer=g;
+      try{exploreMap.fitBounds(L.latLngBounds(straight).pad(0.3),{animate:true,duration:.4});}catch(e){}
+    };
+    draw();
+  })();
   var url="https://routing.openstreetmap.de/routed-foot/route/v1/foot/"+userLng+","+userLat+";"+lng+","+lat+"?overview=full&geometries=geojson";
   fetch(url).then(function(r){return r.json();}).then(function(d){
     if(!d.routes||!d.routes[0])throw new Error("pas de route");
