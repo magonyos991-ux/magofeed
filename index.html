@@ -5217,13 +5217,10 @@ function pick(d){
   curSel=d;setAccent(d);incrementScan(d.id);
   recents=[d].concat(recents.filter(function(r){return r.id!==d.id;})).slice(0,4);
   renderRecents();renderResults();show("results");
-  // Ouvrir une boisson = atterrir direct sur la CARTE PROPRE + feuille des magasins
-  // (le "comme tu m'avais montre"). La page produit reste dessous : le X de la carte
-  // la revele (formats, note, confirmations). On n'ouvre pas si aucun magasin connu.
-  try{
-    var hasStores=(STORES||[]).some(function(s){return s.drinks&&s.drinks.some(function(id){return Number(id)===Number(d.id);});});
-    if(hasStores)setTimeout(function(){if(curSel&&curSel.id===d.id)openDrinkMapView();},60);
-  }catch(eOpen){}
+  // Ouvrir une boisson = atterrir TOUJOURS sur la carte (meme sans magasin connu :
+  // on montre les magasins alentours en gris + la veille + "je sais ou la trouver").
+  // Fini l'ancien ecran liste "Aucun magasin trouve" incoherent d'une boisson a l'autre.
+  try{ setTimeout(function(){if(curSel&&curSel.id===d.id)openDrinkMapView();},60); }catch(eOpen){}
   playSound("pop");
 }
 /* ================================
@@ -8513,7 +8510,22 @@ function renderExploreSheet(list){
       '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(s.name)+'</div><div style="font-size:11px;color:var(--s2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sub+'</div></div>'+
       (dist?'<div style="font-size:12.5px;font-weight:800;color:var(--s1);flex-shrink:0">'+dist+'</div>':'')+
     '</div>';
-  }).join("")||'<div style="padding:30px;text-align:center;font-size:13px;color:var(--s2)">Aucun magasin dans cette zone</div>';
+  }).join("");
+  // Aucun vendeur pour cette boisson : au lieu d'un cul-de-sac, on propose la
+  // veille (etre prevenu) et l'ajout manuel ("je sais ou la trouver").
+  if(!arr.length){
+    if(exploreFilter&&curSel){
+      var _w=(typeof isWatched==="function")?isWatched(curSel.id):false;
+      el.innerHTML='<div style="padding:18px 8px 8px;text-align:center">'+
+        '<div style="font-size:14px;font-weight:800;color:var(--s1);margin-bottom:6px">Personne ne l\'a encore confirmée ici</div>'+
+        '<div style="font-size:12.5px;color:var(--s2);line-height:1.5;margin-bottom:14px">Regarde les magasins alentours (en gris sur la carte), ou sois prévenu dès qu\'elle arrive près de toi.</div>'+
+        '<div onclick="toggleWatch(curSel)" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){toggleWatch(curSel);}" style="padding:13px;border-radius:14px;background:'+(_w?"var(--bg2);color:var(--s1);border:1.5px solid var(--border)":"var(--s1);color:var(--app-bg);border:none")+';font-size:13.5px;font-weight:800;cursor:pointer;margin-bottom:9px">'+(_w?"🔕 Retirer la veille":"🔔 Me prévenir quand elle arrive")+'</div>'+
+        '<div onclick="exploreAddStore()" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){exploreAddStore();}" style="padding:13px;border-radius:14px;background:var(--bg2);border:1.5px solid var(--border);color:var(--s1);font-size:13.5px;font-weight:800;cursor:pointer">➕ Je sais où la trouver</div>'+
+      '</div>';
+    } else {
+      el.innerHTML='<div style="padding:30px;text-align:center;font-size:13px;color:var(--s2)">Aucun magasin dans cette zone</div>';
+    }
+  }
 }
 function showStoreOnMap(lat,lng){
   // Voir le magasin dans NOTRE carte (pas un renvoi vers Google Maps)
