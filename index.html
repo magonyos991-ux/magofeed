@@ -8350,7 +8350,9 @@ function exploreApplyChips(list){
   var c=window._exploreChips,arr=list;
   if(c.open)arr=arr.filter(function(s){return storeOpenState(s)===true;});
   if(c.near)arr=arr.filter(function(s){return typeof s.dist==="number"&&s.dist<=1000;});
-  if(c.instock&&exploreFilter)arr=arr.filter(function(s){var did=exploreFilter.drinkId;return storeVerifiedFor(s,did)||((s.confirmations||{})[did]||0)>0;});
+  // "En stock" : ne garder que les magasins qui ONT la boisson (on masque le
+  // contexte gris alentour). Utile maintenant que la carte montre aussi les autres.
+  if(c.instock&&exploreFilter)arr=arr.filter(function(s){return s._hasDrink||(s.drinks||[]).some(function(id){return Number(id)===Number(exploreFilter.drinkId);});});
   return arr;
 }
 function exploreSetHeader(shown,sure){
@@ -8487,16 +8489,21 @@ function exploreLoadStores(){
     if(list.length<6&&radiusKm<=10&&typeof autoImportZone==="function"){
       try{autoImportZone(cLat,cLng);}catch(eAI){}
     }
-    var hiddenClosed=0;
+    var hiddenClosed=0,withDrink=0;
     if(exploreFilter){
-      list=list.filter(function(s){
-        return (s.drinks||[]).some(function(id){return Number(id)===Number(exploreFilter.drinkId);});
+      var _did=exploreFilter.drinkId;
+      // On GARDE tous les magasins autour (contexte), on marque juste ceux qui
+      // ont vraiment la boisson : eux sont mis en avant, les autres restent
+      // visibles en gris efface (l'utilisateur voit aussi ou essayer a cote).
+      list.forEach(function(s){
+        s._hasDrink=(s.drinks||[]).some(function(id){return Number(id)===Number(_did);});
+        if(s._hasDrink)withDrink++;
       });
-      // Chercher une boisson = vouloir l'acheter MAINTENANT : les magasins
-      // FERMES sont masques (les horaires inconnus restent visibles).
-      list=list.filter(function(s){
-        if(storeOpenState(s)===false){hiddenClosed++;return false;}
-        return true;
+      // Vendeurs (et ouverts) d'abord, contexte ensuite.
+      list.sort(function(a,b){
+        var da=(a._hasDrink?2:0)+(storeOpenState(a)===false?0:1);
+        var db=(b._hasDrink?2:0)+(storeOpenState(b)===false?0:1);
+        return db-da;
       });
     }
     // fusion douce dans STORES (necessaire pour ouvrir la fiche magasin)
@@ -8525,7 +8532,16 @@ function exploreLoadStores(){
       if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
       var pc=brandColor(s.brand);
       var ini=((s.brand||s.name||"?").trim().charAt(0)||"?").toUpperCase();
-      var mk=L.marker([s.lat,s.lng],{icon:L.divIcon({className:"",html:'<div class="mago-pin'+(storeOpenState(s)===false?" closed":"")+'" style="--pc:'+pc+';width:30px;height:39px"><div class="mago-pin-head" style="width:30px;height:30px;font-size:12px">'+ini+'</div><div class="mago-pin-tip" style="width:11px;height:11px;bottom:2px"></div></div>',iconSize:[30,39],iconAnchor:[15,39]})});
+      var did=exploreFilter?exploreFilter.drinkId:null;
+      var hasDrink=exploreFilter?!!s._hasDrink:true;
+      var conf=did?((s.confirmations||{})[did]||0):0;
+      var sure=did?(hasDrink&&(storeVerifiedFor(s,did)||conf>0)):false;
+      var closed=storeOpenState(s)===false;
+      // vend & confirme = vert coche ; vend = point de marque ; ne vend pas = gris (contexte alentour)
+      var cls="mago-pin"+(closed?" closed":"")+(sure?" sure":"");
+      var badge=sure?'<span class="pin-check">✓</span>':"";
+      var ctx=(exploreFilter&&!hasDrink)?"opacity:.4;filter:grayscale(1)":"";
+      var mk=L.marker([s.lat,s.lng],{icon:L.divIcon({className:"",html:'<div class="'+cls+'" style="--pc:'+pc+';width:30px;height:39px;'+ctx+'"><div class="mago-pin-head" style="width:30px;height:30px;font-size:12px">'+ini+badge+'</div><div class="mago-pin-tip" style="width:11px;height:11px;bottom:2px"></div></div>',iconSize:[30,39],iconAnchor:[15,39]}),zIndexOffset:sure?600:(hasDrink?300:0)});
       mk.on("click",function(e){
         if(e&&e.originalEvent&&window.L&&L.DomEvent){try{L.DomEvent.stopPropagation(e.originalEvent);}catch(_e){}}
         try{if(exploreMap.panTo)exploreMap.panTo([s.lat,s.lng]);}catch(_e){}
@@ -8536,19 +8552,17 @@ function exploreLoadStores(){
       exploreLayer.addLayer(mk);
       shown++;
     });
-    try{renderExploreChips();exploreSetHeader(exploreFilter?_drinkTotal:shown,_sureCount);}catch(eHdr){}
-    try{renderExploreSheet(list);}catch(eSheet){console.warn("exploreSheet:",eSheet);}
+    try{renderExploreChips();exploreSetHeader(exploreFilter?withDrink:shown,_sureCount);}catch(eHdr){}
+    try{renderExploreSheet(exploreFilter?list.filter(function(s){return s._hasDrink;}):list);}catch(eSheet){console.warn("exploreSheet:",eSheet);}
     if(status){
       if(exploreFilter){
-        if(shown){
-          status.textContent="\uD83C\uDFEA "+shown+" magasin"+(shown>1?"s":"")+" vend"+(shown>1?"ent":"")+" "+exploreFilter.name+(hiddenClosed?" \u00B7 "+hiddenClosed+" ferm\u00E9"+(hiddenClosed>1?"s":"")+" masqu\u00E9"+(hiddenClosed>1?"s":""):"");
-        }else if(hiddenClosed){
-          status.textContent="Les "+hiddenClosed+" vendeur"+(hiddenClosed>1?"s":"")+" de "+exploreFilter.name+" "+(hiddenClosed>1?"sont ferm\u00E9s":"est ferm\u00E9")+" \u00E0 cette heure \uD83D\uDE34";
+        if(withDrink){
+          status.textContent=withDrink+" magasin"+(withDrink>1?"s":"")+" vend"+(withDrink>1?"ent":"")+" "+exploreFilter.name+" \u00B7 autres alentours en gris";
         }else{
-          status.textContent="Personne ne vend "+exploreFilter.name+" par ici (encore)";
+          status.textContent="Personne ne vend "+exploreFilter.name+" par ici \u2014 magasins alentours en gris";
         }
       }else{
-        status.textContent=shown?("\uD83C\uDFEA "+shown+" magasin"+(shown>1?"s":"")+" ici"):"Aucun magasin dans cette zone \u2014 sois le premier \u00E0 en ajouter !";
+        status.textContent=shown?(shown+" magasin"+(shown>1?"s":"")+" ici"):"Aucun magasin dans cette zone \u2014 sois le premier \u00E0 en ajouter !";
       }
     }
   }).catch(function(e){
