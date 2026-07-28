@@ -1149,7 +1149,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617r</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617s</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -8594,7 +8594,12 @@ function showRouteToStore(lat,lng){
     window.open("https://www.google.com/maps/dir/?api=1&destination="+lat+","+lng,"_blank");
     return;
   }
-  openExploreMap({center:{lat:(lat+userLat)/2,lng:(lng+userLng)/2}});
+  // On ouvre la carte SEULEMENT si elle n'est pas deja affichee, sinon le
+  // recentrage/zoom ecraserait le cadrage de l'itineraire.
+  var _hostR=document.getElementById("explore-map-host");
+  if(!exploreMap||!_hostR||_hostR.style.display==="none"){
+    openExploreMap({center:{lat:(lat+userLat)/2,lng:(lng+userLng)/2}});
+  }
   toast("Calcul du chemin\u2026");
   var url="https://routing.openstreetmap.de/routed-foot/route/v1/foot/"+userLng+","+userLat+";"+lng+","+lat+"?overview=full&geometries=geojson";
   fetch(url).then(function(r){return r.json();}).then(function(d){
@@ -8610,7 +8615,10 @@ function showRouteToStore(lat,lng){
       L.polyline(coords,{color:"#1a1714",weight:5,opacity:.95}).addTo(group);
       group.addTo(exploreMap);
       window._routeLayer=group;
-      exploreMap.fitBounds(L.latLngBounds(coords).pad(0.18));
+      // Cadrer TOUT le chemin A->B (comme Waze/Google Maps), en reservant de la
+      // place pour la barre du haut (~150px) et la banniere/feuille du bas (~200px)
+      // pour ne pas cacher le depart ou l'arrivee derriere les overlays.
+      exploreMap.fitBounds(L.latLngBounds(coords),{paddingTopLeft:[34,150],paddingBottomRight:[34,205],animate:true,duration:.55,maxZoom:17});
       var km=rt.distance/1000;
       var mins=Math.max(1,Math.round(rt.duration/60));
       var host=document.getElementById("explore-map-host");
