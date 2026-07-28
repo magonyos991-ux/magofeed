@@ -599,6 +599,12 @@ body.dark .toast{background:#f0f0f0;color:#111}
 .mago-pin .pin-no{position:absolute;top:-5px;right:-5px;width:15px;height:15px;border-radius:50%;background:#fff;border:2px solid #dc2626;color:#dc2626;font-size:8.5px;font-weight:900;display:flex;align-items:center;justify-content:center;z-index:3}
 .mago-pin.absent{opacity:.35;filter:grayscale(1)}
 .leaflet-marker-icon:hover .mago-pin-head{transform:scale(1.1)}
+/* Etiquette du magasin destination (nom + croix) au-dessus du pin */
+.leaflet-tooltip.mago-dest-tip{background:var(--app-bg);color:var(--s1);border:1.5px solid var(--border);border-radius:12px;box-shadow:0 5px 18px rgba(0,0,0,.3);font-family:'Space Grotesk',sans-serif;padding:6px 8px 6px 11px;display:flex;align-items:center;gap:8px;white-space:nowrap;max-width:230px}
+.leaflet-tooltip.mago-dest-tip::before{border-top-color:var(--border)}
+.mago-dest-name{font-size:13px;font-weight:800;overflow:hidden;text-overflow:ellipsis;max-width:170px}
+.mago-dest-x{width:22px;height:22px;border-radius:50%;background:var(--bg2);color:var(--s1);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;cursor:pointer;flex-shrink:0;border:1px solid var(--border)}
+.mago-dest-x:active{transform:scale(.9)}
 .mago-cluster{display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--cc,#1a1714);color:#fff;font-weight:800;font-family:'Space Grotesk',sans-serif;border:3px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.25),0 0 0 5px color-mix(in srgb,var(--cc,#1a1714) 22%,transparent);transition:transform .15s}
 .leaflet-marker-icon:hover .mago-cluster{transform:scale(1.06)}
 .mago-me{position:relative;width:20px;height:20px}
@@ -8967,7 +8973,8 @@ function goToStore(lat,lng){
 window._routeLayer=null;window._routeBanner=null;
 function clearRoute(){
   try{if(window._routeLayer&&exploreMap){exploreMap.removeLayer(window._routeLayer);}}catch(e){}
-  window._routeLayer=null;window._navDest=null;
+  try{if(window._navDestMarker&&exploreMap){exploreMap.removeLayer(window._navDestMarker);}}catch(e){}
+  window._routeLayer=null;window._navDest=null;window._navDestMarker=null;
   var b=document.getElementById("route-banner");if(b)b.remove();
   if(typeof setExploreFab==="function")setExploreFab(true);
   // On avait masque les autres magasins pour l'itineraire : on les re-affiche.
@@ -9033,7 +9040,14 @@ function showRouteToStore(lat,lng,store){
       L.circleMarker([userLat,userLng],{radius:7,color:"#fff",weight:3,fillColor:"#2e86c1",fillOpacity:1}).addTo(group);
       var _destC=brandColor(window._navDest&&window._navDest.brand);
       var _destIni=(((window._navDest&&(window._navDest.brand||window._navDest.name))||"?").trim().charAt(0)||"?").toUpperCase();
-      L.marker([lat,lng],{icon:L.divIcon({className:"",html:'<div class="mago-pin sure" style="--pc:'+_destC+';width:34px;height:44px"><div class="mago-pin-head" style="width:34px;height:34px;font-size:13px">'+_destIni+'</div><div class="mago-pin-tip"></div></div>',iconSize:[34,44],iconAnchor:[17,44]}),zIndexOffset:2000}).addTo(group);
+      var _destName=(window._navDest&&window._navDest.name)?window._navDest.name:"Ce magasin";
+      var _destMk=L.marker([lat,lng],{icon:L.divIcon({className:"",html:'<div class="mago-pin sure" style="--pc:'+_destC+';width:34px;height:44px"><div class="mago-pin-head" style="width:34px;height:34px;font-size:13px">'+_destIni+'</div><div class="mago-pin-tip"></div></div>',iconSize:[34,44],iconAnchor:[17,44]}),zIndexOffset:2000});
+      // Etiquette au-dessus du pin : nom du magasin + petite croix pour annuler.
+      _destMk.bindTooltip('<span class="mago-dest-name">'+sanitize(_destName)+'</span><span class="mago-dest-x" role="button" tabindex="0" aria-label="Annuler l\'itinéraire" onclick="event.stopPropagation();clearRoute();playSound(\'pop\')">✕</span>',{permanent:true,direction:"top",offset:[0,-46],interactive:true,className:"mago-dest-tip"});
+      try{if(window._navDestMarker&&exploreMap)exploreMap.removeLayer(window._navDestMarker);}catch(e){}
+      _destMk.addTo(exploreMap);
+      window._navDestMarker=_destMk;
+      setTimeout(function(){try{_destMk.openTooltip();}catch(e){}},60);
       // On masque les autres magasins pendant l'itineraire pour bien voir le chemin.
       try{exploreLayer.clearLayers();}catch(e){}
       group.addTo(exploreMap);
