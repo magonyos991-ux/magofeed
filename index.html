@@ -8411,6 +8411,41 @@ function setExploreBrand(b){
   if(exploreMap)exploreLoadStores(true);
   playSound("pop");
 }
+/* Fleches de bord : quand une boisson est ciblee, les magasins qui l'ont mais qui
+   sont HORS de l'ecran sont indiques par une fleche sur le bord de la carte,
+   pointant vers eux. Tap sur la fleche -> la carte glisse jusqu'au magasin. */
+function renderInStockArrows(){
+  var mapEl=document.getElementById("explore-map");
+  if(!exploreMap||!mapEl)return;
+  var wrap=document.getElementById("explore-edge-arrows");
+  if(!wrap){wrap=document.createElement("div");wrap.id="explore-edge-arrows";wrap.style.cssText="position:absolute;inset:0;pointer-events:none;z-index:1140";mapEl.appendChild(wrap);}
+  wrap.innerHTML="";
+  if(!exploreFilter||window._routeLayer)return; // seulement en mode boisson, hors itineraire
+  var did=exploreFilter.drinkId;
+  var vendors=(window._exploreRawList||[]).filter(function(s){return typeof s.lat==="number"&&(s.drinks||[]).some(function(id){return Number(id)===Number(did);});});
+  if(!vendors.length)return;
+  var size;try{size=exploreMap.getSize();}catch(e){return;}
+  var W=size.x,H=size.y;if(!W||!H)return;var cx=W/2,cy=H/2,pad=30,placed=0;
+  vendors.forEach(function(s){
+    if(placed>=6)return;
+    var p;try{p=exploreMap.latLngToContainerPoint([s.lat,s.lng]);}catch(e){return;}
+    if(p.x>=0&&p.x<=W&&p.y>=0&&p.y<=H)return; // deja visible
+    var dx=p.x-cx,dy=p.y-cy,ang=Math.atan2(dy,dx);
+    var hw=cx-pad,hh=cy-pad;
+    var tx=Math.cos(ang),ty=Math.sin(ang);
+    var scale=Math.min(Math.abs(tx)<1e-6?1e9:hw/Math.abs(tx),Math.abs(ty)<1e-6?1e9:hh/Math.abs(ty));
+    var ex=cx+tx*scale,ey=cy+ty*scale;
+    var sure=storeVerifiedFor(s,did)||((s.confirmations||{})[did]||0)>0;
+    var col=sure?"#16a34a":brandColor(s.brand);
+    var a=document.createElement("div");
+    a.setAttribute("role","button");a.setAttribute("aria-label","Aller vers "+s.name);
+    a.style.cssText="position:absolute;left:"+ex+"px;top:"+ey+"px;transform:translate(-50%,-50%);pointer-events:auto;cursor:pointer";
+    a.innerHTML='<div style="width:34px;height:34px;border-radius:50%;background:'+col+';border:2.5px solid #fff;box-shadow:0 2px 9px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center"><svg width="16" height="16" viewBox="0 0 24 24" style="transform:rotate('+ang+'rad)"><path d="M4 12h13M12 6l7 6-7 6" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>';
+    a.onclick=function(){try{exploreMap.setView([s.lat,s.lng],Math.max(exploreMap.getZoom(),15));}catch(e){}playSound("pop");};
+    wrap.appendChild(a);
+    placed++;
+  });
+}
 function exploreApplyChips(list){
   var c=window._exploreChips,arr=list;
   if(c.open)arr=arr.filter(function(s){return storeOpenState(s)===true;});
@@ -8507,6 +8542,7 @@ function openExploreMap(opts){
       L.tileLayer("https://{s}.basemaps.cartocdn.com/"+(darkE?"dark_all":"light_all")+"/{z}/{x}/{y}{r}.png",{maxZoom:20,subdomains:"abcd"}).addTo(exploreMap);
       exploreLayer=L.layerGroup().addTo(exploreMap);
       exploreMap.on("moveend zoomend",function(){
+        try{renderInStockArrows();}catch(e){}
         clearTimeout(_exploreTimer);
         _exploreTimer=setTimeout(function(){exploreLoadStores();},350);
       });
@@ -8631,6 +8667,7 @@ function exploreLoadStores(useCache){
     });
     try{renderExploreChips();exploreSetHeader(exploreFilter?withDrink:shown,_sureCount);}catch(eHdr){}
     try{renderExploreSheet(exploreFilter?list.filter(function(s){return s._hasDrink;}):list);}catch(eSheet){console.warn("exploreSheet:",eSheet);}
+    try{renderInStockArrows();}catch(eArr){}
     if(status){
       if(exploreFilter){
         if(withDrink){
