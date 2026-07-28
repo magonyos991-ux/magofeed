@@ -1,0 +1,284 @@
+<title>Magofeed — TikTok EDM</title>
+<style>
+  :root{
+    --ink:#0c0a08;--ground:#1a1714;--ground2:#241f1a;--line:#3a332c;
+    --signal:#e67e22;--gold:#f0b840;--gold-soft:#e8c17a;--paper:#f5f2ec;--mute:#8a817a;--good:#27ae60;--bad:#e74c3c;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--ink);color:var(--paper);font-family:var(--sans);display:grid;place-items:center;min-height:100dvh;overflow:hidden;padding:14px}
+  .stage-wrap{position:relative;height:min(94dvh,calc((100vw - 28px)*16/9));aspect-ratio:9/16;max-width:100%}
+  .stage{position:absolute;inset:0;border-radius:24px;overflow:hidden;container-type:size;
+    background:radial-gradient(130% 80% at 50% 34%,#2a2018 0%,var(--ground) 44%,#0a0806 100%)}
+  /* beat pulse layer */
+  .pulse{position:absolute;inset:0;z-index:0;pointer-events:none;
+    background:radial-gradient(60% 40% at 50% 44%,rgba(230,126,34,.22),transparent 70%);opacity:.0}
+  .stage.kick .pulse{opacity:1;transition:opacity .04s}
+  .stage .pulse{transition:opacity .22s ease}
+  .stage::after{content:"";position:absolute;inset:0;z-index:40;pointer-events:none;
+    background:radial-gradient(120% 90% at 50% 42%,transparent 54%,rgba(0,0,0,.5) 100%)}
+
+  .beatbox{position:absolute;inset:0;z-index:2;display:grid;place-items:center;transform:scale(1)}
+  .stage.kick .beatbox{transform:scale(1.035)}
+  .beatbox{transition:transform .12s cubic-bezier(.2,.8,.2,1)}
+
+  .scene{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;padding:9% 8%;opacity:0;visibility:hidden}
+  .scene.on{opacity:1;visibility:visible}
+  h1{font-weight:800;letter-spacing:-.03em;line-height:.98;text-wrap:balance;font-size:clamp(34px,13cqw,74px);text-transform:uppercase}
+  .sig{color:var(--signal)}.hl{color:var(--gold)}
+  .kick-txt{color:var(--gold-soft);font-weight:800;letter-spacing:.02em;font-size:clamp(16px,5cqw,26px);margin-top:3cqh;text-transform:uppercase}
+
+  .flashword{opacity:0;transform:scale(.8)}
+  .flashword.hit{animation:hit .42s cubic-bezier(.15,.9,.2,1.1) forwards}
+  @keyframes hit{0%{opacity:0;transform:scale(.7) rotate(-2deg)}30%{opacity:1;transform:scale(1.06)}100%{opacity:1;transform:scale(1)}}
+
+  .slam{animation:none}
+  .scene.on .slam{animation:slam .5s cubic-bezier(.1,1.3,.3,1) both}
+  @keyframes slam{0%{transform:scale(2.4);opacity:0;filter:blur(6px)}55%{opacity:1}70%{transform:scale(.94)}100%{transform:scale(1);filter:blur(0)}}
+
+  /* radar mark */
+  .mark{position:relative;width:clamp(150px,52cqw,260px);aspect-ratio:1;border-radius:26%;display:grid;place-items:center;
+    background:linear-gradient(160deg,#241d16,#141110);box-shadow:0 24px 70px -14px rgba(230,126,34,.45),0 0 0 1px rgba(240,184,64,.15)}
+  .mark .M{font-weight:800;font-size:clamp(100px,38cqw,180px);letter-spacing:-.04em;margin-top:.13em}
+  .mark .eye{position:absolute;top:12%;left:50%;transform:translateX(-50%);width:20%;aspect-ratio:1;border-radius:50%;
+    background:radial-gradient(circle,var(--gold) 0 26%,#7a5a1e 27% 40%,transparent 41%)}
+  .stage.kick .mark .eye::before{content:"";position:absolute;inset:0;border-radius:50%;border:3px solid rgba(240,184,64,.6);animation:ping .5s ease-out}
+  @keyframes ping{from{transform:scale(1);opacity:.8}to{transform:scale(3.2);opacity:0}}
+  .wordmark{font-weight:800;letter-spacing:-.02em;font-size:clamp(44px,15cqw,80px);line-height:1}
+  .tag{color:var(--gold-soft);font-weight:700;font-size:clamp(16px,5cqw,26px);margin-top:2cqh}
+
+  /* map */
+  .map{position:relative;width:min(80cqw,340px);aspect-ratio:1;border-radius:22px;overflow:hidden;
+    background:linear-gradient(0deg,#14110e,#1b1712);border:1px solid var(--line);margin-top:2cqh}
+  .map::before{content:"";position:absolute;inset:0;opacity:.5;
+    background:repeating-linear-gradient(38deg,transparent 0 26px,rgba(255,255,255,.03) 26px 28px),
+               repeating-linear-gradient(-52deg,transparent 0 34px,rgba(255,255,255,.025) 34px 36px)}
+  .me{position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);width:18px;height:18px;border-radius:50%;
+    background:var(--signal);box-shadow:0 0 0 5px rgba(230,126,34,.25);z-index:3}
+  .pin{position:absolute;transform:translate(-50%,-100%) scale(0);z-index:4}
+  .pin.pop{animation:pop .34s cubic-bezier(.2,1.5,.3,1) forwards}
+  @keyframes pop{to{transform:translate(-50%,-100%) scale(1)}}
+  .pin .head{width:30px;height:30px;border-radius:50% 50% 50% 2px;transform:rotate(45deg);background:var(--gold);display:grid;place-items:center;box-shadow:0 6px 16px rgba(0,0,0,.5)}
+  .pin .head b{transform:rotate(-45deg);font-size:14px}
+  .chip{margin-top:3cqh;display:inline-flex;gap:8px;align-items:center;background:rgba(39,174,96,.18);
+    border:1px solid rgba(39,174,96,.55);color:#8ce0ac;font-weight:800;padding:8px 15px;border-radius:999px;font-size:clamp(13px,4cqw,17px)}
+
+  .brandtab{position:absolute;top:14px;left:16px;z-index:20;display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px;opacity:.9}
+  .brandtab .b-dot{width:9px;height:9px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 3px rgba(240,184,64,.18)}
+  .beatbar{position:absolute;left:0;right:0;bottom:0;z-index:20;height:4px;background:rgba(255,255,255,.1)}
+  .beatbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--signal),var(--gold))}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important}.stage.kick .beatbox{transform:none}}
+</style>
+
+<div class="stage-wrap"><div class="stage" id="stage">
+  <div class="pulse"></div>
+  <div class="brandtab"><span class="b-dot"></span>Magofeed</div>
+  <div class="beatbox">
+
+    <section class="scene" data-id="hook">
+      <div class="kick-txt flashword" data-fw>🥤 en rupture ?</div>
+      <h1 style="margin-top:2cqh"><span class="flashword" data-fw>Ta boisson</span><br><span class="flashword sig" data-fw>introuvable</span></h1>
+    </section>
+
+    <section class="scene" data-id="logo">
+      <div class="mark slam"><span class="eye"></span><span class="M">M</span></div>
+      <div class="wordmark slam" style="margin-top:4cqh">Magofeed</div>
+      <div class="tag">Trouve-la près de toi</div>
+    </section>
+
+    <section class="scene" data-id="map">
+      <h1 style="font-size:clamp(26px,9cqw,50px)"><span class="hl">3 magasins</span><br>l'ont en stock</h1>
+      <div class="map">
+        <div class="me"></div>
+        <div class="pin" data-pin style="left:30%;top:32%"><div class="head"><b>🥤</b></div></div>
+        <div class="pin" data-pin style="left:70%;top:44%"><div class="head"><b>🥤</b></div></div>
+        <div class="pin" data-pin style="left:50%;top:74%"><div class="head"><b>🥤</b></div></div>
+      </div>
+      <div class="chip">📍 confirmé en temps réel</div>
+    </section>
+
+    <section class="scene" data-id="feat">
+      <h1 style="font-size:clamp(30px,11cqw,62px)">
+        <span class="flashword" data-fw>Repère.</span><br>
+        <span class="flashword" data-fw>Confirme.</span><br>
+        <span class="flashword hl" data-fw>Partage.</span>
+      </h1>
+    </section>
+
+    <section class="scene" data-id="cta">
+      <div class="mark slam" style="width:clamp(100px,32cqw,150px)"><span class="eye"></span><span class="M">M</span></div>
+      <h1 class="slam" style="margin-top:3cqh">Trouve ta<br><span class="hl">boisson</span></h1>
+      <div class="kick-txt">🔜 bientôt · gratuit</div>
+    </section>
+
+  </div>
+  <div class="beatbar"><i id="bb"></i></div>
+</div></div>
+
+<script>
+(function(){
+  var BPM=128, BEAT=60/BPM, BAR=BEAT*4;
+  // scene boundaries in beats: [start,end)
+  var SCENES=[
+    {id:"hook", a:0,  b:8},
+    {id:"logo", a:8,  b:16},
+    {id:"map",  a:16, b:24},
+    {id:"feat", a:24, b:32},
+    {id:"cta",  a:32, b:40}
+  ];
+  var TOTAL=40*BEAT; // 40 beats
+  var stage=document.getElementById('stage');
+  var scenes={}; SCENES.forEach(function(s){ scenes[s.id]=stage.querySelector('.scene[data-id="'+s.id+'"]'); });
+  var bb=document.getElementById('bb');
+
+  var startPerf=0, curScene=-1, lastBeat=-1, raf=null;
+
+  function resetScene(el){
+    el.querySelectorAll('[data-fw]').forEach(function(w){ w.classList.remove('hit'); });
+    el.querySelectorAll('[data-pin]').forEach(function(p){ p.classList.remove('pop'); });
+  }
+  function enter(i){
+    curScene=i;
+    SCENES.forEach(function(s,k){ scenes[s.id].classList.toggle('on',k===i); });
+    resetScene(scenes[SCENES[i].id]);
+  }
+
+  function beatHit(beatIdx){
+    stage.classList.add('kick');
+    setTimeout(function(){ stage.classList.remove('kick'); }, 110);
+    var s=SCENES[curScene]; if(!s) return;
+    var local=beatIdx - s.a; // beat within scene
+    var el=scenes[s.id];
+    // reveal flashwords one per beat
+    var fws=el.querySelectorAll('[data-fw]');
+    if(fws[local]) fws[local].classList.add('hit');
+    // drop pins on beats (map scene)
+    var pins=el.querySelectorAll('[data-pin]');
+    if(pins.length && local>=1 && pins[local-1]) pins[local-1].classList.add('pop');
+  }
+
+  function loop(now){
+    var t=(now-startPerf)/1000;
+    if(t>=TOTAL){ startPerf=now; t=0; curScene=-1; lastBeat=-1; }
+    // scene
+    var beat=t/BEAT;
+    var si=0; for(var i=0;i<SCENES.length;i++){ if(beat>=SCENES[i].a) si=i; }
+    if(si!==curScene) enter(si);
+    // beat pulse
+    var bi=Math.floor(beat);
+    if(bi!==lastBeat){ lastBeat=bi; beatHit(bi); }
+    bb.style.width=((t/TOTAL)*100)+'%';
+    raf=requestAnimationFrame(loop);
+  }
+  function startVisual(){ startPerf=performance.now(); curScene=-1; lastBeat=-1; cancelAnimationFrame(raf); raf=requestAnimationFrame(loop); }
+  window.MagoEDM={restart:startVisual, total:TOTAL, bpm:BPM};
+  startVisual();
+
+  /* ================= EDM AUDIO ================= */
+  var AC=window.AudioContext||window.webkitAudioContext;
+  var actx,master,comp,started=false,muted=false;
+  function noiseBuf(dur){ var n=Math.floor(actx.sampleRate*dur),b=actx.createBuffer(1,n,actx.sampleRate),d=b.getChannelData(0);
+    for(var i=0;i<n;i++)d[i]=Math.random()*2-1; return b; }
+  function kick(t){
+    var o=actx.createOscillator(),g=actx.createGain();
+    o.frequency.setValueAtTime(150,t); o.frequency.exponentialRampToValueAtTime(48,t+0.12);
+    g.gain.setValueAtTime(0.9,t); g.gain.exponentialRampToValueAtTime(0.0001,t+0.28);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t+0.3);
+  }
+  function hat(t,open){
+    var s=actx.createBufferSource(); s.buffer=noiseBuf(open?0.12:0.03);
+    var hp=actx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=8000;
+    var g=actx.createGain(); g.gain.setValueAtTime(open?0.14:0.10,t); g.gain.exponentialRampToValueAtTime(0.0001,t+(open?0.12:0.035));
+    s.connect(hp); hp.connect(g); g.connect(master); s.start(t); s.stop(t+0.13);
+  }
+  function sub(t,dur,freq,duck){
+    var o=actx.createOscillator(); o.type='sine'; o.frequency.value=freq;
+    var g=actx.createGain();
+    g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(0.24,t+0.02);
+    if(duck){ for(var k=0;k*0.5<dur;k++){ var kt=t+k*0.5; g.gain.setValueAtTime(0.06,kt); g.gain.exponentialRampToValueAtTime(0.24,kt+0.28);} }
+    g.gain.setValueAtTime(g.gain.value,t+dur-0.05); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t+dur);
+  }
+  function lead(t,freq,dur,pan){
+    var lp=actx.createBiquadFilter(); lp.type='lowpass';
+    lp.frequency.setValueAtTime(900,t); lp.frequency.linearRampToValueAtTime(2600,t+0.05); lp.frequency.linearRampToValueAtTime(1200,t+dur);
+    var g=actx.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.08,t+0.01); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    var p=actx.createStereoPanner?actx.createStereoPanner():null; if(p)p.pan.value=pan||0;
+    [-8,-3,0,4,9].forEach(function(det){ var o=actx.createOscillator(); o.type='sawtooth'; o.frequency.value=freq; o.detune.value=det; o.connect(lp); o.start(t); o.stop(t+dur+0.02); });
+    lp.connect(g); g.connect(p||master); if(p)p.connect(master);
+  }
+  function riser(t,dur){
+    var s=actx.createBufferSource(); s.buffer=noiseBuf(dur); s.loop=true;
+    var bp=actx.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=1.2;
+    bp.frequency.setValueAtTime(400,t); bp.frequency.exponentialRampToValueAtTime(7000,t+dur);
+    var g=actx.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(0.12,t+dur*0.9); g.gain.linearRampToValueAtTime(0.0001,t+dur);
+    s.connect(bp); bp.connect(g); g.connect(master); s.start(t); s.stop(t+dur);
+  }
+  function impact(t){
+    var s=actx.createBufferSource(); s.buffer=noiseBuf(0.6);
+    var lp=actx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=1800;
+    var g=actx.createGain(); g.gain.setValueAtTime(0.5,t); g.gain.exponentialRampToValueAtTime(0.0001,t+0.6);
+    s.connect(lp); lp.connect(g); g.connect(master); s.start(t); s.stop(t+0.6);
+    kick(t);
+  }
+
+  // A-minor-ish energetic riff (Hz): A3 C4 E4 A4 ...
+  var RIFF=[220.00,261.63,329.63,440.00,392.00,329.63,293.66,261.63];
+  var BASSNOTE=[55.00,55.00,73.42,73.42,82.41,82.41,55.00,55.00]; // A1 D2 E2 A1 per 2 bars
+
+  function schedule(startAt){
+    var t0=startAt, beat=BEAT;
+    // build (beats 0-8): pluck riff + riser last 4 beats
+    for(var i=0;i<8;i++){ lead(t0+i*beat, RIFF[i%RIFF.length]/2, beat*0.9, (i%2?0.3:-0.3)); }
+    for(var h=0;h<16;h++){ hat(t0+h*(beat/2), false); }
+    riser(t0+4*beat, 4*beat);
+    // DROP at beat 8
+    impact(t0+8*beat);
+    // groove beats 8-40 (4/4 kick, hats, sub, lead)
+    for(var b=8;b<40;b++){
+      kick(t0+b*beat);
+      hat(t0+b*beat+beat/2, (b%4===3));
+      hat(t0+b*beat+beat/4, false);
+    }
+    // sub bass per 2 bars (8 beats)
+    for(var s=8;s<40;s+=8){ var bn=BASSNOTE[(s/8)%BASSNOTE.length]; sub(t0+s*beat, 8*beat, bn, true); }
+    // lead riff during map+feat (beats 16-32)
+    for(var m=16;m<32;m++){ if(m%2===0) lead(t0+m*beat, RIFF[m%RIFF.length], beat*1.1, (m%4<2?-0.25:0.25)); }
+    // CTA (32-40): bright stabs on downbeats
+    for(var c=32;c<40;c+=2){ lead(t0+c*beat, RIFF[c%RIFF.length], beat*1.6, 0); }
+  }
+
+  function runAudio(){
+    schedule(actx.currentTime+0.06);
+    setTimeout(function(){ if(window.MagoEDM){ window.MagoEDM.restart(); } if(!muted) runAudio(); else pendingLoop=true; }, TOTAL*1000);
+  }
+  var pendingLoop=false;
+
+  function startAudio(){
+    if(started) return; started=true;
+    actx=new AC(); if(actx.resume) actx.resume();
+    master=actx.createGain(); master.gain.value=0.0001;
+    comp=actx.createDynamicsCompressor(); comp.threshold.value=-10; comp.ratio.value=6;
+    master.connect(comp); comp.connect(actx.destination);
+    master.gain.exponentialRampToValueAtTime(0.85, actx.currentTime+0.3);
+    if(window.MagoEDM) window.MagoEDM.restart();
+    runAudio();
+    mbtn.style.display='grid'; updateBtn();
+  }
+  function updateBtn(){ mbtn.textContent=muted?'🔇':'🔊'; }
+  function setMute(m){ muted=m; if(master) master.gain.linearRampToValueAtTime(m?0.0001:0.85, actx.currentTime+0.15); updateBtn(); if(!m&&pendingLoop){pendingLoop=false;runAudio();} }
+
+  var ov=document.createElement('button'); ov.type='button'; ov.setAttribute('aria-label','Activer le son');
+  ov.style.cssText='position:absolute;inset:0;z-index:30;border:0;cursor:pointer;background:rgba(8,6,4,.5);backdrop-filter:blur(3px);color:#f5f2ec;font:800 17px system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-transform:uppercase;letter-spacing:.04em';
+  ov.innerHTML='<span style="width:82px;height:82px;border-radius:50%;background:rgba(230,126,34,.18);border:1px solid rgba(240,184,64,.6);display:grid;place-items:center;box-shadow:0 0 0 10px rgba(230,126,34,.08)"><svg width="34" height="34" viewBox="0 0 24 24" fill="#f0b840"><path d="M8 5v14l11-7z"/></svg></span><span>Activer le son 🔊</span>';
+  ov.addEventListener('click',function(){ ov.remove(); if(AC) startAudio(); });
+  if(AC) stage.appendChild(ov);
+
+  var mbtn=document.createElement('button'); mbtn.type='button'; mbtn.setAttribute('aria-label','Couper le son');
+  mbtn.style.cssText='position:absolute;top:14px;right:16px;z-index:32;width:36px;height:36px;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:rgba(20,17,14,.72);color:#f5f2ec;cursor:pointer;display:none;place-items:center;font-size:15px';
+  mbtn.addEventListener('click',function(){ setMute(!muted); });
+  stage.appendChild(mbtn);
+})();
+</script>

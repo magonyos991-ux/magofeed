@@ -22,6 +22,7 @@ const targets = [
   { file: 'video-pub.html',       out: 'magofeed-9x16',        w: 1080, h: 1920, dur: 22800 },
   { file: 'video-pub-16x9.html',  out: 'magofeed-16x9',        w: 1920, h: 1080, dur: 22800 },
   { file: 'bumper.html',          out: 'magofeed-bumper-9x16', w: 1080, h: 1920, dur: 7000  },
+  { file: 'video-tiktok-edm.html', out: 'magofeed-tiktok-edm',  w: 1080, h: 1920, dur: 18750 },
 ];
 
 // force le "stage" à remplir toute la frame (pas de letterbox), et masque les contrôles
