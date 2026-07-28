@@ -8322,7 +8322,7 @@ function exploreSheetPick(id){
   if(sheet&&sheet.classList.contains("open"))exploreToggleSheet();
   try{if(exploreMap&&exploreMap.setView)exploreMap.setView([s.lat,s.lng],Math.max(exploreMap.getZoom?exploreMap.getZoom():15,16));}catch(e){}
   // Clic sur un magasin = tracer l'itineraire (le "traçage partout").
-  showRouteToStore(s.lat,s.lng);
+  showRouteToStore(s.lat,s.lng,s);
   playSound("pop");
 }
 window._exploreChips={instock:false,open:false,near:false};
@@ -8345,7 +8345,7 @@ function exploreAddStore(){
 function exploreToggleChip(name){
   window._exploreChips[name]=!window._exploreChips[name];
   renderExploreChips();
-  if(exploreMap)exploreLoadStores();
+  if(exploreMap)exploreLoadStores(true);
   playSound("pop");
 }
 function renderExploreChips(){
@@ -8408,7 +8408,7 @@ function setExploreBrand(b){
   window._exploreBrand=b;
   var p=document.getElementById("explore-brand-picker");if(p)p.remove();
   renderExploreChips();
-  if(exploreMap)exploreLoadStores();
+  if(exploreMap)exploreLoadStores(true);
   playSound("pop");
 }
 function exploreApplyChips(list){
@@ -8506,11 +8506,11 @@ function openExploreMap(opts){
       var darkE=document.body.classList.contains("dark");
       L.tileLayer("https://{s}.basemaps.cartocdn.com/"+(darkE?"dark_all":"light_all")+"/{z}/{x}/{y}{r}.png",{maxZoom:20,subdomains:"abcd"}).addTo(exploreMap);
       exploreLayer=L.layerGroup().addTo(exploreMap);
-      exploreMap.on("moveend",function(){
+      exploreMap.on("moveend zoomend",function(){
         clearTimeout(_exploreTimer);
-        _exploreTimer=setTimeout(exploreLoadStores,600);
+        _exploreTimer=setTimeout(function(){exploreLoadStores();},350);
       });
-      exploreMap.on("click",exploreHideCard);
+      exploreMap.on("click",function(){ if(window._routeLayer){clearRoute();playSound("pop");} else {exploreHideCard();} });
       if(typeof userLat==="number"&&userLat){
         L.circleMarker([userLat,userLng],{radius:7,color:"#fff",weight:2,fillColor:"#2e86c1",fillOpacity:1}).addTo(exploreMap);
       }
@@ -8535,7 +8535,7 @@ function closeExploreMap(){
   // page produit encombree (que l'utilisateur ne doit plus voir).
   if(window._exploreFromDrink){window._exploreFromDrink=false;try{show("home");}catch(e){}}
 }
-function exploreLoadStores(){
+function exploreLoadStores(useCache){
   if(!exploreMap)return;
   var status=document.getElementById("explore-status");
   var b=exploreMap.getBounds();
@@ -8545,18 +8545,20 @@ function exploreLoadStores(){
   var dLa=(ne.lat-sw.lat)*111/2;
   var dLo=(ne.lng-sw.lng)*111*Math.cos(cLat*Math.PI/180)/2;
   var radiusKm=Math.sqrt(dLa*dLa+dLo*dLo);
-  if(radiusKm>30){
+  if(!useCache&&radiusKm>30){
     if(status)status.textContent="\uD83D\uDD0D Zoome pour voir les magasins";
     return;
   }
-  if(status)status.textContent="Chargement\u2026";
-  var q=window.fbQueryZone?window.fbQueryZone(cLat,cLng,Math.min(radiusKm,25)):Promise.resolve(STORES||[]);
+  var q;
+  if(useCache&&window._exploreRawList){q=Promise.resolve(window._exploreRawList);}
+  else{if(status)status.textContent="Chargement\u2026";q=window.fbQueryZone?window.fbQueryZone(cLat,cLng,Math.min(radiusKm,25)):Promise.resolve(STORES||[]);}
   q.then(function(list){
     list=list||[];
+    if(!useCache)window._exploreRawList=list;
     // Zone du monde encore vierge (Dakar, Tokyo...) : au lieu d'afficher le
     // vide, on declenche la decouverte OpenStreetMap automatique — avant, ce
     // reflexe n'existait qu'a la position de l'utilisateur, pas en balade.
-    if(list.length<6&&radiusKm<=10&&typeof autoImportZone==="function"){
+    if(!useCache&&list.length<8&&radiusKm<=25&&typeof autoImportZone==="function"){
       try{autoImportZone(cLat,cLng);}catch(eAI){}
     }
     var hiddenClosed=0,withDrink=0;
@@ -8592,6 +8594,9 @@ function exploreLoadStores(){
       STORES.forEach(function(s){_exploreSeen[String(s.id)]=1;});
     }
     try{checkWatches();}catch(e){}
+    // Itineraire actif : on garde les autres magasins masques pour bien voir le
+    // chemin (un moveend/zoomend du fitBounds relancait sinon l'affichage des pins).
+    if(window._routeLayer){try{exploreLayer.clearLayers();}catch(e){}return;}
     // En-tete (nom boisson + compteurs) et filtres chips (En stock / Ouvert / < 1 km)
     var _drinkTotal=list.length;
     var _sureCount=exploreFilter?list.filter(function(s){var did=exploreFilter.drinkId;return storeVerifiedFor(s,did)||((s.confirmations||{})[did]||0)>0;}).length:undefined;
@@ -8618,7 +8623,7 @@ function exploreLoadStores(){
         if(e&&e.originalEvent&&window.L&&L.DomEvent){try{L.DomEvent.stopPropagation(e.originalEvent);}catch(_e){}}
         try{if(exploreMap.panTo)exploreMap.panTo([s.lat,s.lng]);}catch(_e){}
         // Clic sur un pin = tracer l'itineraire directement (le "traçage partout").
-        showRouteToStore(s.lat,s.lng);
+        showRouteToStore(s.lat,s.lng,s);
         playSound("pop");
       });
       exploreLayer.addLayer(mk);
@@ -8876,7 +8881,7 @@ function openGmaps(){
   var s=cands[0];
   var sure=storeVerifiedFor(s,did)||((s.confirmations||{})[did]||0)>0;
   toast((sure?"\u2713 ":"")+sanitize(s.name)+(s.dist?" \u00b7 "+fmtDist(s.dist):""));
-  showRouteToStore(s.lat,s.lng);
+  showRouteToStore(s.lat,s.lng,s);
 }
 function openWaze(){if(!curSel)return;var s=STORES.filter(function(x){return x.drinks.includes(curSel.id)&&x.open;})[0];if(s)window.open("https://waze.com/ul?ll="+s.lat+","+s.lng+"&navigate=yes","_blank");}
 /* "Y aller" trace maintenant le CHEMIN dans notre carte (ligne type suivi de
@@ -8902,11 +8907,17 @@ function goToStore(lat,lng){
 window._routeLayer=null;window._routeBanner=null;
 function clearRoute(){
   try{if(window._routeLayer&&exploreMap){exploreMap.removeLayer(window._routeLayer);}}catch(e){}
-  window._routeLayer=null;
+  window._routeLayer=null;window._navDest=null;
   var b=document.getElementById("route-banner");if(b)b.remove();
   if(typeof setExploreFab==="function")setExploreFab(true);
+  // On avait masque les autres magasins pour l'itineraire : on les re-affiche.
+  try{
+    var h=document.getElementById("explore-map-host");
+    if(exploreMap&&window._exploreRawList&&h&&getComputedStyle(h).display!=="none")exploreLoadStores(true);
+  }catch(e){}
 }
-function showRouteToStore(lat,lng){
+function showRouteToStore(lat,lng,store){
+  window._navDest=store||(STORES||[]).find(function(x){return x.lat===lat&&x.lng===lng;})||null;
   if(typeof userLat!=="number"||!userLat){
     toast("Active ta position d'abord");playSound("err");
     window.open("https://www.google.com/maps/dir/?api=1&destination="+lat+","+lng,"_blank");
@@ -8928,7 +8939,9 @@ function showRouteToStore(lat,lng){
       try{exploreMap.invalidateSize();}catch(e){}
       var sz=null;try{sz=exploreMap.getSize();}catch(e){}
       if((!sz||sz.x===0||sz.y===0)&&_t++<25){setTimeout(draw,120);return;}
-      try{clearRoute();}catch(e){}
+      // Retrait inline de l'ancien trace (SANS clearRoute, qui reinitialiserait
+      // _navDest et re-afficherait les pins).
+      try{if(window._routeLayer)exploreMap.removeLayer(window._routeLayer);}catch(e){}
       var straight=[[userLat,userLng],[lat,lng]];
       var g=L.layerGroup();
       L.polyline(straight,{color:"#ffffff",weight:8,opacity:.85,dashArray:"1,12",lineCap:"round"}).addTo(g);
@@ -8950,12 +8963,19 @@ function showRouteToStore(lat,lng){
       try{exploreMap.invalidateSize();}catch(e){}
       var sz=null;try{sz=exploreMap.getSize();}catch(e){}
       if((!sz||sz.x===0||sz.y===0)&&_tries<20){_tries++;setTimeout(wait,150);return;}
-      clearRoute();
+      try{if(window._routeLayer)exploreMap.removeLayer(window._routeLayer);}catch(e){}
+      var rb0=document.getElementById("route-banner");if(rb0)rb0.remove();
       var coords=rt.geometry.coordinates.map(function(c){return [c[1],c[0]];});
-      // Ligne double (bordure + trait) : le rendu "app de livraison"
+      // Trace propre facon Waze : ligne double aux bouts arrondis + depart/arrivee.
       var group=L.layerGroup();
-      L.polyline(coords,{color:"#ffffff",weight:9,opacity:.95}).addTo(group);
-      L.polyline(coords,{color:"#1a1714",weight:5,opacity:.95}).addTo(group);
+      L.polyline(coords,{color:"#ffffff",weight:10,opacity:.95,lineCap:"round",lineJoin:"round"}).addTo(group);
+      L.polyline(coords,{color:"#1a1714",weight:5,opacity:1,lineCap:"round",lineJoin:"round"}).addTo(group);
+      L.circleMarker([userLat,userLng],{radius:7,color:"#fff",weight:3,fillColor:"#2e86c1",fillOpacity:1}).addTo(group);
+      var _destC=brandColor(window._navDest&&window._navDest.brand);
+      var _destIni=(((window._navDest&&(window._navDest.brand||window._navDest.name))||"?").trim().charAt(0)||"?").toUpperCase();
+      L.marker([lat,lng],{icon:L.divIcon({className:"",html:'<div class="mago-pin sure" style="--pc:'+_destC+';width:34px;height:44px"><div class="mago-pin-head" style="width:34px;height:34px;font-size:13px">'+_destIni+'</div><div class="mago-pin-tip"></div></div>',iconSize:[34,44],iconAnchor:[17,44]}),zIndexOffset:2000}).addTo(group);
+      // On masque les autres magasins pendant l'itineraire pour bien voir le chemin.
+      try{exploreLayer.clearLayers();}catch(e){}
       group.addTo(exploreMap);
       window._routeLayer=group;
       // Cadrer TOUT le chemin A->B (comme Waze/Google Maps), en reservant de la
@@ -8970,8 +8990,8 @@ function showRouteToStore(lat,lng){
         b.id="route-banner";
         b.style.cssText="position:absolute;left:12px;right:12px;bottom:14px;z-index:1000;background:var(--app-bg);border:1.5px solid var(--border);border-radius:18px;padding:13px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 24px rgba(0,0,0,.18);font-family:'Space Grotesk',sans-serif";
         b.innerHTML='<div style="flex:1;min-width:0">'+
-          '<div style="font-size:16px;font-weight:800;color:var(--s1)">\uD83D\uDEB6 '+(km<1?Math.round(km*1000)+" m":km.toFixed(1)+" km")+' \u00b7 ~'+mins+' min</div>'+
-          '<div style="font-size:11.5px;color:var(--s2);margin-top:1px">\u00e0 pied \u00b7 chemin le plus court</div></div>'+
+          '<div style="font-size:13px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(window._navDest?sanitize(window._navDest.name):"Itin\u00E9raire")+'</div>'+
+          '<div style="font-size:12.5px;color:var(--s2);margin-top:2px">\uD83D\uDEB6 '+(km<1?Math.round(km*1000)+" m":km.toFixed(1)+" km")+' \u00b7 ~'+mins+' min \u00e0 pied</div></div>'+
           '<div onclick="window.open(\'https://www.google.com/maps/dir/?api=1&travelmode=walking&destination='+lat+','+lng+'\',\'_blank\')" role="button" tabindex="0" style="padding:9px 13px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:11.5px;font-weight:800;color:var(--s1);cursor:pointer;white-space:nowrap">GPS \u2197</div>'+
           '<div onclick="clearRoute()" role="button" tabindex="0" aria-label="Fermer l\'itin\u00e9raire" style="width:32px;height:32px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--s2);cursor:pointer">\u2715</div>';
         host.appendChild(b);
@@ -9939,10 +9959,9 @@ try{
   renderFavs();
   renderBadges();
   applyAvatarEverywhere();
-  // Le GPS n'est demande au lancement QUE pour les habitues : au premier
-  // lancement, c'est le bouton de l'ecran Localisation de l'intro qui le
-  // declenche — l'utilisateur comprend pourquoi avant qu'iOS ne demande.
-  if(localStorage.getItem("magoob")==="1")initGPS();
+  // GPS demande DES le lancement (le pere de l'utilisateur voyait la demande
+  // arriver trop tard, au 1er clic) : sans position, rien n'est trie/centre.
+  initGPS();
   initPullToRefresh();
   initSplash();
   // Exposer au module Firebase
