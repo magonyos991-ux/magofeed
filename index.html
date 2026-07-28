@@ -8499,6 +8499,10 @@ function renderExploreSheet(list){
   var arr=(list||[]).filter(function(s){return typeof s.lat==="number";}).slice();
   arr.sort(function(a,b){return (a.dist==null?9e9:a.dist)-(b.dist==null?9e9:b.dist);});
   if(title)title.textContent=arr.length?(arr.length+" magasin"+(arr.length>1?"s":"")+(exploreFilter?" · "+exploreFilter.name:" autour de toi")):"Aucun magasin ici";
+  // Prix communautaire : le moins cher connu ressort en vert avec un badge.
+  var _did=exploreFilter?exploreFilter.drinkId:null;
+  var _prices=_did?arr.map(function(s){return getStorePrice(s,_did);}).filter(function(p){return typeof p==="number"&&p>0;}):[];
+  var _minP=_prices.length?Math.min.apply(null,_prices):null;
   el.innerHTML=arr.slice(0,80).map(function(s){
     var dist=s.dist?(s.dist<1000?Math.round(s.dist)+" m":(s.dist/1000).toFixed(1)+" km"):"";
     var open=storeOpenState(s);
@@ -8506,10 +8510,17 @@ function renderExploreSheet(list){
     var nb=(s.drinks||[]).length;
     var sub=[s.brand||"",openTxt,nb?nb+" boissons":""].filter(Boolean).join(" · ");
     var idEsc=String(s.id).replace(/'/g,"\\'");
+    var pr=_did?getStorePrice(s,_did):null;
+    var isCheap=(pr!=null&&pr===_minP&&_prices.length>1);
+    var prTxt=(pr!=null)?(pr.toFixed(2).replace(/\.?0+$/,"")+"€"):"";
+    var cheapBadge=isCheap?'<span style="flex-shrink:0;font-size:9px;font-weight:800;color:#16a34a;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:999px;padding:1px 6px">MOINS CHER</span>':'';
     return '<div class="exsheet-row" onclick="exploreSheetPick(\''+idEsc+'\')" role="button" tabindex="0">'+
       '<div style="width:38px;height:38px;border-radius:11px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;overflow:hidden">'+storeIconHTML(s)+'</div>'+
-      '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(s.name)+'</div><div style="font-size:11px;color:var(--s2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sub+'</div></div>'+
-      (dist?'<div style="font-size:12.5px;font-weight:800;color:var(--s1);flex-shrink:0">'+dist+'</div>':'')+
+      '<div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px"><div style="font-size:13.5px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(s.name)+'</div>'+cheapBadge+'</div><div style="font-size:11px;color:var(--s2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sub+'</div></div>'+
+      '<div style="flex-shrink:0;text-align:right;min-width:44px">'+
+        (prTxt?'<div style="font-size:13.5px;font-weight:800;color:'+(isCheap?"#16a34a":"var(--s1)")+'">'+prTxt+'</div>':'<div style="font-size:10.5px;font-weight:600;color:var(--s3)">prix ?</div>')+
+        (dist?'<div style="font-size:11px;font-weight:700;color:var(--s2);margin-top:1px">'+dist+'</div>':'')+
+      '</div>'+
     '</div>';
   }).join("");
   // Aucun vendeur pour cette boisson : au lieu d'un cul-de-sac, on propose la
