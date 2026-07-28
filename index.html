@@ -8983,27 +8983,38 @@ function goToStore(lat,lng){
   }
   showRouteToStore(lat,lng);
 }
-window._routeLayer=null;window._routeBanner=null;window._routeAnim=null;
-/* Anime le trace : le chemin se DESSINE de toi jusqu'au magasin en ~1,4 s
-   (easeInOut). setInterval (pas rAF) pour rester fiable meme si l'onglet ne
-   composite pas. Ligne double (bordure blanche + trait noir), bouts arrondis. */
+window._routeLayer=null;window._routeBanner=null;window._routeAnim=null;window._routeAnimTO=null;
+/* Anime le trace de facon FLUIDE : on dessine la polyline UNE fois, puis on anime
+   stroke-dashoffset (une seule propriete par frame, en requestAnimationFrame) ->
+   le chemin se "dessine" de toi jusqu'au magasin en ~1,3 s sans saccade. Avant on
+   reconstruisait toute la polyline a chaque tick (Leaflet reconstruit le path SVG
+   = jank). Securite : timeout qui force la ligne pleine si rAF est ralenti. */
 function animateRouteDraw(coords,group){
-  if(window._routeAnim){clearInterval(window._routeAnim);window._routeAnim=null;}
+  if(window._routeAnim){cancelAnimationFrame(window._routeAnim);window._routeAnim=null;}
+  if(window._routeAnimTO){clearTimeout(window._routeAnimTO);window._routeAnimTO=null;}
   if(!coords||coords.length<2)return;
-  var white=L.polyline([],{color:"#ffffff",weight:10,opacity:.95,lineCap:"round",lineJoin:"round"}).addTo(group);
-  var dark=L.polyline([],{color:"#1a1714",weight:5,opacity:1,lineCap:"round",lineJoin:"round"}).addTo(group);
-  var total=coords.length,dur=1400,t0=Date.now();
-  window._routeAnim=setInterval(function(){
-    var k=Math.min(1,(Date.now()-t0)/dur);
+  var white=L.polyline(coords,{color:"#ffffff",weight:10,opacity:.95,lineCap:"round",lineJoin:"round"}).addTo(group);
+  var dark=L.polyline(coords,{color:"#1a1714",weight:5,opacity:1,lineCap:"round",lineJoin:"round"}).addTo(group);
+  var pw=white._path,pd=dark._path,len=0;
+  try{len=pd&&pd.getTotalLength?pd.getTotalLength():0;}catch(e){len=0;}
+  if(!pw||!pd||!len)return; // pas de SVG dispo : la ligne pleine est deja affichee
+  [pw,pd].forEach(function(p){p.style.transition="none";p.style.strokeDasharray=len;p.style.strokeDashoffset=len;});
+  var dur=1300,t0=null;
+  function frame(ts){
+    if(t0===null)t0=ts;
+    var k=Math.min(1,(ts-t0)/dur);
     var e=k<0.5?2*k*k:1-Math.pow(-2*k+2,2)/2; // easeInOutQuad
-    var n=Math.max(2,Math.round(e*total));
-    var part=coords.slice(0,n);
-    try{white.setLatLngs(part);dark.setLatLngs(part);}catch(err){}
-    if(k>=1){clearInterval(window._routeAnim);window._routeAnim=null;try{white.setLatLngs(coords);dark.setLatLngs(coords);}catch(err){}}
-  },33);
+    var off=len*(1-e);
+    pw.style.strokeDashoffset=off;pd.style.strokeDashoffset=off;
+    if(k<1){window._routeAnim=requestAnimationFrame(frame);}
+    else{window._routeAnim=null;pw.style.strokeDashoffset=0;pd.style.strokeDashoffset=0;}
+  }
+  window._routeAnim=requestAnimationFrame(frame);
+  window._routeAnimTO=setTimeout(function(){try{pw.style.strokeDashoffset=0;pd.style.strokeDashoffset=0;}catch(e){}window._routeAnimTO=null;},dur+500);
 }
 function clearRoute(){
-  if(window._routeAnim){clearInterval(window._routeAnim);window._routeAnim=null;}
+  if(window._routeAnim){cancelAnimationFrame(window._routeAnim);window._routeAnim=null;}
+  if(window._routeAnimTO){clearTimeout(window._routeAnimTO);window._routeAnimTO=null;}
   try{if(window._routeLayer&&exploreMap){exploreMap.removeLayer(window._routeLayer);}}catch(e){}
   try{if(window._navDestMarker&&exploreMap){exploreMap.removeLayer(window._navDestMarker);}}catch(e){}
   window._routeLayer=null;window._navDest=null;window._navDestMarker=null;
