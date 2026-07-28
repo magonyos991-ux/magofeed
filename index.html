@@ -910,6 +910,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div class="brands-rail" id="brands-rail"></div>
       <div id="missions-card" style="margin-bottom:14px"></div>
       <div id="alerts-card"></div>
+      <div id="deals-wrap"></div>
       <div id="top-rail-wrap" style="display:none">
         <div class="sec-hd"><div class="t-section"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3 2.5.5 5 2.5 5 5.5a4.5 4.5 0 1 1-9 0c0-1.15.43-2.2 1-3 .28.6.5 1.5 1.5 3z"/><path d="M12 2c1 3 4 4.5 4 8.5"/><path d="M12 2C8 5 6 8 6 11.5"/></svg> <span id="t-toprail">Tes plus recherchées</span></div></div>
         <div id="top-rail" style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 12px;margin:0 -2px;scrollbar-width:none;-webkit-overflow-scrolling:touch"></div>
@@ -3529,6 +3530,7 @@ function initGPS(){
     STORES.forEach(function(s){s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));});
     STORES.sort(function(a,b){return(a.dist||0)-(b.dist||0);});
     if(curSel)renderStoreList();
+    try{renderDeals();}catch(e){}
     var dot=document.getElementById("gps-dot");if(dot)dot.style.background="#22c55e";
     // Recharge Firestore avec un rayon de 10km centré sur la vraie position (remplace le lot "Bruxelles par défaut")
     if(window.fbLoadNearbyStores)window.fbLoadNearbyStores(userLat,userLng,10);
@@ -5492,6 +5494,52 @@ function renderRecents(){
       '<span class="c3" style="font-size:18px">›</span>';
     div.onclick=function(){pick(d);};el.appendChild(div);
   });
+}
+/* Accueil "Bons plans" : donne une raison d'ouvrir l'app chaque semaine.
+   - S'il y a des prix communautaires connus -> les meilleurs prix pres de toi.
+   - Sinon (demarrage a froid) -> "Boisson du moment" (rotation quotidienne). */
+function renderDeals(){
+  var el=document.getElementById("deals-wrap");if(!el)return;
+  var best={};
+  (STORES||[]).forEach(function(s){
+    var ids={};
+    if(s.prices)Object.keys(s.prices).forEach(function(k){ids[k]=s.prices[k];});
+    var lp=storePrices[s.id]||{};Object.keys(lp).forEach(function(k){ids[k]=lp[k];});
+    Object.keys(ids).forEach(function(k){
+      var price=parseFloat(ids[k]);if(!(price>0))return;
+      var d=DRINKS.find(function(x){return String(x.id)===String(k);});if(!d)return;
+      var dist=(typeof s.dist==="number")?s.dist:9e9;
+      var cur=best[d.id];
+      if(!cur||price<cur.price||(price===cur.price&&dist<cur.dist))best[d.id]={drink:d,store:s,price:price,dist:dist};
+    });
+  });
+  var list=Object.keys(best).map(function(k){return best[k];}).sort(function(a,b){return a.price-b.price;}).slice(0,6);
+  if(list.length){
+    var h='<div class="sec-hd"><div class="t-section">Bons plans près de toi</div></div>'+
+      '<div style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 12px;margin:0 -2px;scrollbar-width:none;-webkit-overflow-scrolling:touch">';
+    list.forEach(function(x){
+      var dist=(typeof x.store.dist==="number")?(x.store.dist<1000?Math.round(x.store.dist)+" m":(x.store.dist/1000).toFixed(1)+" km"):"";
+      h+='<div onclick="pick(DRINKS.find(function(d){return d.id==='+x.drink.id+';}))" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){pick(DRINKS.find(function(d){return d.id==='+x.drink.id+';}));}" style="flex:none;width:152px;background:var(--card-bg,#fff);border:1px solid var(--border);border-radius:16px;padding:11px;cursor:pointer">'+
+        '<div style="display:flex;align-items:center;gap:8px"><div style="width:34px;height:34px;border-radius:9px;background:'+(x.drink.light||"var(--bg2)")+';display:flex;align-items:center;justify-content:center;font-size:17px;overflow:hidden;flex-shrink:0">'+drinkIconHTML(x.drink)+'</div>'+
+        '<div style="font-size:16px;font-weight:800;color:#16a34a">'+x.price.toFixed(2).replace(/\.?0+$/,"")+'€</div></div>'+
+        '<div style="font-size:12px;font-weight:700;color:var(--s1);margin-top:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(x.drink.name)+'</div>'+
+        '<div style="font-size:11px;color:var(--s2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(x.store.name)+(dist?" · "+dist:"")+'</div>'+
+      '</div>';
+    });
+    h+='</div>';
+    el.innerHTML=h;
+    return;
+  }
+  // Cold-start : boisson du moment (rotation par jour, parmi les mieux notees)
+  var pool=DRINKS.filter(function(d){return (d.stars||0)>=4.3;});if(!pool.length)pool=DRINKS;
+  if(!pool.length){el.innerHTML="";return;}
+  var d=pool[Math.floor(Date.now()/86400000)%pool.length];
+  el.innerHTML='<div class="sec-hd"><div class="t-section">Boisson du moment</div></div>'+
+    '<div onclick="pick(DRINKS.find(function(x){return x.id==='+d.id+';}))" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){pick(DRINKS.find(function(x){return x.id==='+d.id+';}));}" style="display:flex;align-items:center;gap:13px;background:var(--card-bg,#fff);border:1px solid var(--border);border-radius:16px;padding:13px;cursor:pointer;margin-bottom:14px">'+
+    '<div style="width:52px;height:52px;border-radius:13px;background:'+(d.light||"var(--bg2)")+';display:flex;align-items:center;justify-content:center;font-size:26px;overflow:hidden;flex-shrink:0">'+drinkIconHTML(d)+'</div>'+
+    '<div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:800;color:var(--s1)">'+sanitize(d.name)+'</div><div style="font-size:12px;color:var(--s2);margin-top:2px">'+sanitize(d.brand)+' · ★ '+d.stars+' — trouve-la près de toi</div></div>'+
+    '<span style="font-size:18px;color:var(--s3)">›</span>'+
+  '</div>';
 }
 function onSearchInput(){clearTimeout(searchDebounce);searchDebounce=setTimeout(renderList,150);}
 function setSearchMode(mode){
@@ -10102,6 +10150,7 @@ try{
     if(t){ev.stopPropagation();discLocate(t.getAttribute("data-disc"));}
   });
   renderTrends();renderRecents();renderList();
+  try{renderDeals();}catch(e){}
   renderLangGrid();renderDiscoveries();
   renderFavs();
   renderBadges();
@@ -10117,6 +10166,7 @@ try{
   window.addEventListener("fbStoresLoaded", function(e) {
     STORES = e.detail;
     if(curSel) renderStoreList();
+    try{renderDeals();}catch(err){}
   });
   // Compte + points persistants Firebase
   window.addEventListener("fbUserStatsLoaded", function(e) {
