@@ -7050,20 +7050,43 @@ function foundHere(storeId){
   lastScanContext={drinkId:curSel.id,from:"fiche"};
   tagScanToStore(s);
 }
+/* SUGGESTIONS INTELLIGENTES : quelle boutique a le plus de chances d'avoir cette
+   boisson ? Heuristique (pas une garantie de stock) : produit de niche/import ->
+   epiceries asiatiques / import / night shops ; produit mainstream -> grandes
+   surfaces. Bonus si le magasin est actif (beaucoup de boissons) et proche. */
+var NICHE_DRINK_KW=/sakura|ramune|mogu|yakult|milkis|vimto|rubicon|maaza|rani|calypso|jarritos|pocari|aloe|supermalt|vitamalt|barbican|fayrouz|hamoud|uludag|ayran|lassi|coco|litchi|lychee|guava|goyave|tamarin|hibiscus|bissap|thai|japon|korea|cor\u00e9en|coreen/i;
+var SHOP_IMPORT_KW=/asie|asian|asiat|orient|import|exotiq|exotic|afric|afriq|turc|turk|halal|bazar|epicerie|\u00e9picerie|mini.?mark|night|libanais|indien|indian|chinois|chinese|world|inter|market/i;
+var SHOP_BIG_KW=/carrefour|delhaize|lidl|aldi|colruyt|okay|spar|intermarch|cora|match|auchan|hyper|proxy|super/i;
+function drinkIsNiche(d){
+  if(!d)return false;
+  if(d.cat==="Exotique")return true;
+  return NICHE_DRINK_KW.test((d.name||"")+" "+(d.brand||""));
+}
+function storeLikelihood(s,d){
+  var txt=((s.name||"")+" "+(s.brand||"")+" "+(s.type||"")).toLowerCase();
+  var isImport=SHOP_IMPORT_KW.test(txt),isBig=SHOP_BIG_KW.test(txt),score=0;
+  if(drinkIsNiche(d)){ score+=isImport?50:0; score+=isBig?8:6; }
+  else { score+=isBig?30:0; score+=isImport?14:4; }
+  score+=Math.min((s.drinks||[]).length,20);
+  if(typeof s.dist==="number")score+=Math.max(0,20-s.dist/500);
+  return score;
+}
 function renderNearbyFallback(el){
   var near=(STORES||[]).filter(function(s){return typeof s.lat==="number";})
-    .slice().sort(function(a,b){return(a.dist||9e9)-(b.dist||9e9);}).slice(0,15);
+    .slice().sort(function(a,b){return storeLikelihood(b,curSel)-storeLikelihood(a,curSel);}).slice(0,15);
   if(!near.length)return;
-  var h='<div style="padding:14px 20px 4px"><div style="font-size:12px;font-weight:700;color:var(--s2);background:var(--bg2);border:1.5px dashed var(--border);border-radius:12px;padding:10px 12px;line-height:1.5">Ces magasins sont autour de toi mais <b>'+sanitize(curSel.name)+'</b> n\'y est pas encore confirm\u00e9e. Tu la vois en rayon ? Appuie sur \u00ab Trouv\u00e9e ici ! \u00bb</div></div>';
-  near.forEach(function(s){
+  var niche=drinkIsNiche(curSel);
+  var h='<div style="padding:14px 20px 4px"><div style="font-size:12px;font-weight:700;color:var(--s2);background:var(--bg2);border:1.5px dashed var(--border);border-radius:12px;padding:10px 12px;line-height:1.5">Personne n\'a encore confirm\u00e9 <b>'+sanitize(curSel.name)+'</b> par ici. Voici les magasins <b>les plus susceptibles</b> de l\'avoir'+(niche?' (produit d\'import \u2014 vise les \u00e9piceries asiatiques / du monde et les night shops)':'')+'. Tu la vois en rayon ? Appuie sur \u00ab Trouv\u00e9e ici ! \u00bb</div></div>';
+  near.forEach(function(s,i){
     var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):"~?km";
     var sidStr=String(s.id).replace(/'/g,"\\'");
+    var probable=i<Math.min(3,near.length)&&storeLikelihood(s,curSel)>=(niche?40:25);
     h+='<div class="store-card"><div class="store-top">'+
       '<div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;cursor:pointer" onclick="openStoreDetail(\''+sidStr+'\')">'+
         '<div class="store-ico" style="background:var(--bg2)">'+storeIconHTML(s)+'</div>'+
         '<div style="flex:1;min-width:0">'+
-          '<div class="store-name">'+sanitize(s.name)+'</div>'+
-          '<div class="store-meta"><span>'+dist+'</span><span>\u00b7</span><span style="color:var(--s3)">pas encore confirm\u00e9e ici</span></div>'+
+          '<div style="display:flex;align-items:center;gap:7px"><div class="store-name">'+sanitize(s.name)+'</div>'+(probable?'<span style="flex-shrink:0;font-size:10px;font-weight:800;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:999px;padding:2px 8px">\u2605 Probable</span>':'')+'</div>'+
+          '<div class="store-meta"><span>'+dist+'</span><span>\u00b7</span><span style="color:var(--s3)">'+(probable?"bonne piste":"pas encore confirm\u00e9e ici")+'</span></div>'+
         '</div>'+
       '</div>'+
       '<button class="gobtn" onclick="foundHere(\''+sidStr+'\')">Trouv\u00e9e ici !</button>'+
