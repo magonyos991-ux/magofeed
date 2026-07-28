@@ -343,6 +343,13 @@ body.dark .map-locate-btn{background:#2a2a2a}
 #explore-sheet-grip{width:48px;height:6px;border-radius:99px;background:var(--s3);opacity:.55;margin:0 auto 11px;transition:background .15s,opacity .15s}
 #explore-sheet-head:active #explore-sheet-grip{opacity:1;background:var(--s2)}
 #explore-sheet-list{overflow-y:auto;flex:1;padding:0 14px 14px;-webkit-overflow-scrolling:touch}
+/* Boutons de zoom +/- de la carte explore : plus gros, thematises, au-dessus du sheet. */
+#explore-map .leaflet-bottom.leaflet-left{bottom:calc(104px + env(safe-area-inset-bottom,0px));left:10px}
+#explore-map .leaflet-control-zoom{border:none!important;box-shadow:0 3px 12px rgba(0,0,0,.28);border-radius:12px}
+#explore-map .leaflet-control-zoom a{width:40px;height:40px;line-height:40px;font-size:22px;font-weight:700;background:var(--app-bg);color:var(--s1);border:1px solid var(--border)}
+#explore-map .leaflet-control-zoom a:first-child{border-radius:12px 12px 0 0}
+#explore-map .leaflet-control-zoom a:last-child{border-radius:0 0 12px 12px;border-top:none}
+#explore-map .leaflet-control-zoom a:hover{background:var(--bg2)}
 .exsheet-row{display:flex;align-items:center;gap:11px;padding:11px 2px;border-top:1px solid var(--border);cursor:pointer}
 .exsheet-row:active{opacity:.6}
 
@@ -5484,7 +5491,15 @@ function renderRecents(){
 }
 function onSearchInput(){clearTimeout(searchDebounce);searchDebounce=setTimeout(renderList,150);}
 function setSearchMode(mode){
-  if(mode==="stores")curBrandFilter=null;
+  if(mode==="stores"){
+    // Recherche magasin = la CARTE directement (comme pour les boissons), avec le
+    // filtre enseigne. Fini la liste "Carrefour Express..." a scroller a l'infini.
+    curBrandFilter=null;
+    document.querySelectorAll(".search-mode-btn").forEach(function(b){b.classList.toggle("on",b.dataset.mode==="drinks");});
+    openExploreMap({});
+    playSound("pop");
+    return;
+  }
   searchMode=mode;
   document.querySelectorAll(".search-mode-btn").forEach(function(b){b.classList.toggle("on",b.dataset.mode===mode);});
   var catsEl=document.getElementById("cats-search");if(catsEl)catsEl.style.display=mode==="drinks"?"flex":"none";
@@ -8350,23 +8365,43 @@ function renderExploreChips(){
   html+='<div onclick="openExploreBrandPicker()" role="button" tabindex="0" aria-label="Filtrer par enseigne" onkeydown="if(event.key===\'Enter\'){openExploreBrandPicker();}" style="flex-shrink:0;display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:999px;font-size:12px;font-weight:700;cursor:pointer;'+bst+'">'+(brand?sanitize(brand):"Enseigne")+' ▾</div>';
   el.innerHTML=html;
 }
+// Toutes les enseignes connues (magasins charges + enseignes de reference),
+// pas seulement celles visibles a l'ecran : on doit pouvoir choisir n'importe
+// laquelle et la taper au clavier.
+function allKnownBrands(){
+  var set={};
+  (window.STORES||[]).forEach(function(s){if(s&&s.brand)set[s.brand]=1;});
+  try{Object.keys(BRAND_COLORS||{}).forEach(function(b){set[b]=1;});}catch(e){}
+  return Object.keys(set).sort(function(a,b){return a.localeCompare(b,"fr");});
+}
+function brandPickerRow(label,val,sel){
+  var arg=(val===null?"null":"'"+String(val).replace(/'/g,"\\'")+"'");
+  return '<div onclick="setExploreBrand('+arg+')" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){setExploreBrand('+arg+');}" style="padding:14px 4px;font-size:15px;font-weight:600;color:var(--s1);cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">'+sanitize(label)+'<span style="color:var(--s1);font-weight:800">'+(sel?"✓":"")+'</span></div>';
+}
+function renderBrandPickerList(q){
+  var el=document.getElementById("brand-picker-list");if(!el)return;
+  q=(q||"").trim().toLowerCase();
+  var brands=allKnownBrands();
+  if(q)brands=brands.filter(function(b){return b.toLowerCase().indexOf(q)!==-1;});
+  var html=q?"":brandPickerRow("Toutes les enseignes",null,!window._exploreBrand);
+  html+=brands.slice(0,250).map(function(b){return brandPickerRow(b,b,window._exploreBrand===b);}).join("");
+  if(!brands.length)html+='<div style="padding:18px 4px;font-size:13px;color:var(--s2)">Aucune enseigne « '+sanitize(q)+' »</div>';
+  el.innerHTML=html;
+}
 function openExploreBrandPicker(){
-  var brands=window._exploreBrands||[];
   var old=document.getElementById("explore-brand-picker");if(old)old.remove();
   var ov=document.createElement("div");
   ov.id="explore-brand-picker";
   ov.style.cssText="position:fixed;inset:0;z-index:4400;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center";
   ov.onclick=function(e){if(e.target===ov)ov.remove();};
-  function row(label,val,sel){
-    return '<div onclick="setExploreBrand('+(val===null?"null":"'"+String(val).replace(/'/g,"\\'")+"'")+')" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){setExploreBrand('+(val===null?"null":"'"+String(val).replace(/'/g,"\\'")+"'")+');}" style="padding:15px 6px;font-size:15px;font-weight:600;color:var(--s1);cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">'+sanitize(label)+'<span style="color:var(--s1)">'+(sel?"✓":"")+'</span></div>';
-  }
-  var items=row("Toutes les enseignes",null,!window._exploreBrand);
-  items+=brands.map(function(b){return row(b,b,window._exploreBrand===b);}).join("");
-  if(!brands.length)items+='<div style="padding:18px 6px;font-size:13px;color:var(--s2)">Aucune enseigne identifiée ici.</div>';
-  ov.innerHTML='<div style="width:100%;max-width:440px;background:var(--app-bg);border-radius:20px 20px 0 0;padding:16px 18px calc(18px + env(safe-area-inset-bottom,0px));max-height:72vh;overflow-y:auto;box-shadow:0 -8px 30px rgba(0,0,0,.3)">'+
-    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div style="font-size:16px;font-weight:800;color:var(--s1)">Enseigne</div><div onclick="var p=document.getElementById(\'explore-brand-picker\');if(p)p.remove();" role="button" tabindex="0" aria-label="Fermer" style="font-size:22px;color:var(--s3);cursor:pointer;padding:2px 6px">✕</div></div>'+
-    items+'</div>';
+  ov.innerHTML='<div style="width:100%;max-width:440px;background:var(--app-bg);border-radius:20px 20px 0 0;padding:16px 18px calc(18px + env(safe-area-inset-bottom,0px));max-height:80vh;display:flex;flex-direction:column;box-shadow:0 -8px 30px rgba(0,0,0,.3)">'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-size:16px;font-weight:800;color:var(--s1)">Choisir une enseigne</div><div onclick="var p=document.getElementById(\'explore-brand-picker\');if(p)p.remove();" role="button" tabindex="0" aria-label="Fermer" style="font-size:22px;color:var(--s3);cursor:pointer;padding:2px 6px">✕</div></div>'+
+    '<input id="brand-picker-q" placeholder="Tape une enseigne — Carrefour, Lidl…" oninput="renderBrandPickerList(this.value)" style="width:100%;padding:12px 14px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-family:inherit;margin-bottom:8px;outline:none">'+
+    '<div id="brand-picker-list" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>'+
+  '</div>';
   document.body.appendChild(ov);
+  renderBrandPickerList("");
+  setTimeout(function(){var i=document.getElementById("brand-picker-q");if(i){try{i.focus();}catch(e){}}},120);
   playSound("pop");
 }
 function setExploreBrand(b){
@@ -8464,7 +8499,10 @@ function openExploreMap(opts){
   playSound("pop");
   function build(){
     if(!exploreMap){
-      exploreMap=L.map("explore-map",{zoomControl:false});
+      // doubleClickZoom + touchZoom (pincer) actifs par defaut ; on ajoute aussi
+      // des boutons +/- visibles (clairs pour tout le monde).
+      exploreMap=L.map("explore-map",{zoomControl:false,doubleClickZoom:true,touchZoom:true,tap:true});
+      L.control.zoom({position:"bottomleft"}).addTo(exploreMap);
       var darkE=document.body.classList.contains("dark");
       L.tileLayer("https://{s}.basemaps.cartocdn.com/"+(darkE?"dark_all":"light_all")+"/{z}/{x}/{y}{r}.png",{maxZoom:20,subdomains:"abcd"}).addTo(exploreMap);
       exploreLayer=L.layerGroup().addTo(exploreMap);
