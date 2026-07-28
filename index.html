@@ -326,17 +326,23 @@ body.dark .gps-bar{background:#052e16;border-bottom:1px solid #14532d;color:#86e
 }
 body.dark .map-locate-btn{background:#2a2a2a}
 .map-locate-btn:active{transform:scale(.92)}
+@keyframes navpulse{0%{box-shadow:0 0 0 0 rgba(22,163,74,.55)}70%{box-shadow:0 0 0 8px rgba(22,163,74,0)}100%{box-shadow:0 0 0 0 rgba(22,163,74,0)}}
 /* Toggle "en stock seulement" sur la carte : etat actif = vert plein */
 #map-instock-btn.on{background:#16a34a!important;color:#fff!important;border-color:#16a34a!important}
 #map-instock-btn.on span{background:#fff!important}
 #map-instock-btn:active{transform:scale(.95)}
 /* Feuille "liste des magasins" sur la carte Explorer : repliee par defaut
    (poignee + resume), depliee au tap sur la poignee. Pas de drag = robuste. */
-#explore-sheet{position:absolute;left:0;right:0;bottom:0;z-index:1050;background:var(--app-bg);border-top:1px solid var(--border);border-radius:20px 20px 0 0;box-shadow:0 -8px 26px rgba(0,0,0,.28);height:74px;overflow:hidden;transition:height .28s cubic-bezier(.4,0,.2,1);padding-bottom:env(safe-area-inset-bottom,0px)}
-#explore-sheet.open{height:60%}
-#explore-sheet-head{padding:8px 16px 6px;cursor:pointer}
-#explore-sheet-grip{width:40px;height:5px;border-radius:99px;background:var(--s3);opacity:.5;margin:0 auto 8px}
-#explore-sheet-list{overflow-y:auto;height:calc(100% - 46px);padding:0 14px 14px}
+/* Bottom-sheet a paliers : hauteur fixe, on le fait coulisser au doigt via
+   translateY (le transform est fluide et fiable, contrairement a l'animation de
+   height qui restait bloquee ici). 3 paliers : apercu / moitie / plein. */
+#explore-sheet{position:absolute;left:0;right:0;bottom:0;z-index:1050;background:var(--app-bg);border-top:1px solid var(--border);border-radius:20px 20px 0 0;box-shadow:0 -8px 26px rgba(0,0,0,.28);height:86%;display:flex;flex-direction:column;transform:translateY(calc(100% - 88px));transition:transform .34s cubic-bezier(.32,.72,0,1);padding-bottom:env(safe-area-inset-bottom,0px);will-change:transform}
+#explore-sheet-head{padding:12px 16px 8px;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;flex-shrink:0}
+#explore-sheet-head:active{cursor:grabbing}
+#explore-sheet.dragging{transition:none!important}
+#explore-sheet-grip{width:48px;height:6px;border-radius:99px;background:var(--s3);opacity:.55;margin:0 auto 11px;transition:background .15s,opacity .15s}
+#explore-sheet-head:active #explore-sheet-grip{opacity:1;background:var(--s2)}
+#explore-sheet-list{overflow-y:auto;flex:1;padding:0 14px 14px;-webkit-overflow-scrolling:touch}
 .exsheet-row{display:flex;align-items:center;gap:11px;padding:11px 2px;border-top:1px solid var(--border);cursor:pointer}
 .exsheet-row:active{opacity:.6}
 
@@ -6643,7 +6649,7 @@ function toggleDrinkMapFull(){
   // le pan/zoom pour que la page puisse defiler vers la liste des magasins.
   var m=window._leafletMap;
   if(m){
-    if(full){m.dragging.enable();m.scrollWheelZoom.enable();}
+    if(full){m.dragging.enable();m.scrollWheelZoom.enable();if(m.touchZoom)m.touchZoom.enable();if(m.doubleClickZoom)m.doubleClickZoom.enable();}
     else{m.dragging.disable();m.scrollWheelZoom.disable();}
   }
   playSound("pop");
@@ -6670,7 +6676,14 @@ function toggleInStockOnly(){
    Au clic sur un magasin : "bim", un chemin se dessine de ta position jusqu'a lui,
    avec auto-zoom (dezoom si loin) et une banniere distance/temps a pied. */
 window._drinkRouteLayer=null;
+/* Etat de la navigation temps reel (un seul itineraire actif a la fois). */
+window._navWatchId=null;window._navStore=null;window._navUserMarker=null;window._navRouteCoords=null;window._navLastReroute=0;
 function clearDrinkRoute(){
+  // Coupe aussi le suivi GPS temps reel : fermer l'itineraire = arreter la navigation.
+  if(window._navWatchId!=null){try{navigator.geolocation.clearWatch(window._navWatchId);}catch(e){}window._navWatchId=null;}
+  window._navStore=null;window._navRouteCoords=null;
+  if(window._navUserMarker&&window._leafletMap){try{window._leafletMap.removeLayer(window._navUserMarker);}catch(e){}}
+  window._navUserMarker=null;
   try{if(window._drinkRouteLayer&&window._leafletMap)window._leafletMap.removeLayer(window._drinkRouteLayer);}catch(e){}
   window._drinkRouteLayer=null;
   var b=document.getElementById("drink-route-banner");if(b)b.remove();
@@ -6701,27 +6714,99 @@ function routeFromMarker(storeId){
     L.polyline(coords,{color:"#ffffff",weight:9,opacity:.95}).addTo(g);
     L.polyline(coords,{color:"#1a1714",weight:5,opacity:.95}).addTo(g);
     g.addTo(map);window._drinkRouteLayer=g;
+    window._navStore=s;window._navRouteCoords=coords;
+    try{map.invalidateSize();}catch(e){}
     try{map.fitBounds(L.latLngBounds(coords).pad(0.2));}catch(e){}
     showDrinkRouteBanner(box,s,rt.distance,rt.duration);
+    startNavTracking(s);
     try{playSound("pop");}catch(e){}
   }).catch(function(e){console.warn("routeFromMarker:",e);});
 }
+function fmtNavDist(distance){return distance==null?"Calcul du chemin…":(distance<1000?Math.round(distance)+" m":(distance/1000).toFixed(distance<10000?1:0)+" km");}
 function showDrinkRouteBanner(box,s,distance,duration){
   if(!box)return;
   var old=document.getElementById("drink-route-banner");if(old)old.remove();
-  var distStr=distance==null?"Calcul du chemin…":(distance<1000?Math.round(distance)+" m":(distance/1000).toFixed(1)+" km");
+  var distStr=fmtNavDist(distance);
   var minStr=duration==null?"":" · ~"+Math.max(1,Math.round(duration/60))+" min";
-  var sid=String(s.id).replace(/'/g,"\\'");
+  var gmapsUrl="https://www.google.com/maps/dir/?api=1&travelmode=walking&destination="+s.lat+","+s.lng;
   var b=document.createElement("div");
   b.id="drink-route-banner";
-  b.style.cssText="position:absolute;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));z-index:1100;background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:11px 13px;display:flex;align-items:center;gap:9px;box-shadow:0 8px 24px rgba(0,0,0,.28);font-family:'Space Grotesk',sans-serif";
-  b.innerHTML='<div style="flex:1;min-width:0">'+
-    '<div style="font-size:14px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🚶 '+distStr+minStr+'</div>'+
-    '<div style="font-size:11px;color:var(--s2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(s.name)+' · à pied</div></div>'+
-    '<div onclick="openStoreSheet(\''+sid+'\')" role="button" tabindex="0" aria-label="Details du magasin" style="padding:8px 11px;border-radius:11px;background:var(--bg2);border:1.5px solid var(--border);font-size:11px;font-weight:800;color:var(--s1);cursor:pointer;white-space:nowrap;flex-shrink:0">Détails</div>'+
-    '<div onclick="window.open(\'https://www.google.com/maps/dir/?api=1&travelmode=walking&destination='+s.lat+','+s.lng+'\',\'_blank\')" role="button" tabindex="0" aria-label="Ouvrir dans le GPS" style="padding:8px 11px;border-radius:11px;background:var(--s1);color:var(--app-bg);font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0">GPS ↗</div>'+
-    '<div onclick="clearDrinkRoute()" role="button" tabindex="0" aria-label="Fermer l\'itineraire" style="width:30px;height:30px;border-radius:9px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--s2);cursor:pointer;flex-shrink:0">✕</div>';
+  b.style.cssText="position:absolute;left:10px;right:10px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:1100;background:var(--app-bg);border:1.5px solid var(--border);border-radius:18px;padding:12px 13px;box-shadow:0 10px 30px rgba(0,0,0,.32);font-family:'Space Grotesk',sans-serif";
+  b.innerHTML=
+    '<div style="display:flex;align-items:center;gap:11px">'+
+      '<div style="width:38px;height:38px;border-radius:12px;background:var(--s1);color:var(--app-bg);display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0">🚶</div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div id="nav-dist" style="font-size:16px;font-weight:800;color:var(--s1);line-height:1.1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+distStr+minStr+'</div>'+
+        '<div id="nav-sub" style="font-size:11.5px;color:var(--s2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(s.name)+' · à pied · en direct</div>'+
+      '</div>'+
+      '<div id="nav-live-dot" style="width:9px;height:9px;border-radius:50%;background:#16a34a;flex-shrink:0;box-shadow:0 0 0 0 rgba(22,163,74,.5);animation:navpulse 1.6s ease-out infinite"></div>'+
+    '</div>'+
+    '<div style="display:flex;gap:8px;margin-top:11px">'+
+      '<div onclick="clearDrinkRoute();playSound(\'pop\')" role="button" tabindex="0" aria-label="Annuler l\'itineraire" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();clearDrinkRoute();}" style="flex:1;text-align:center;padding:11px;border-radius:13px;background:var(--bg2);border:1.5px solid var(--border);font-size:13px;font-weight:800;color:var(--s1);cursor:pointer">✕ Annuler</div>'+
+      '<div onclick="window.open(\''+gmapsUrl+'\',\'_blank\')" role="button" tabindex="0" aria-label="Ouvrir dans Google Maps" style="flex:1;text-align:center;padding:11px;border-radius:13px;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;cursor:pointer">Google Maps ↗</div>'+
+    '</div>';
   box.appendChild(b);
+}
+/* ITINERAIRE TEMPS REEL : on suit la position GPS, on met a jour la distance/ETA
+   restante en direct, on deplace le point "moi" et on recentre. Si l'utilisateur
+   s'ecarte nettement du trace, on recalcule l'itineraire (au plus une fois / 12s). */
+function startNavTracking(s){
+  if(!s||!navigator.geolocation)return;
+  if(window._navWatchId!=null){try{navigator.geolocation.clearWatch(window._navWatchId);}catch(e){}}
+  try{
+    window._navWatchId=navigator.geolocation.watchPosition(function(pos){
+      navUpdatePosition(pos.coords.latitude,pos.coords.longitude);
+    },function(){},{enableHighAccuracy:true,maximumAge:4000,timeout:12000});
+  }catch(e){}
+}
+function navUpdatePosition(lat,lng){
+  var s=window._navStore,map=window._leafletMap;
+  if(!s||!map)return;
+  userLat=lat;userLng=lng;
+  // Marqueur "moi" qui se deplace en direct.
+  try{
+    if(!window._navUserMarker){
+      var ic=L.divIcon({html:'<div class="mago-me"><div class="mago-me-halo"></div><div class="mago-me-dot"></div></div>',className:"",iconSize:[20,20],iconAnchor:[10,10]});
+      window._navUserMarker=L.marker([lat,lng],{icon:ic,zIndexOffset:2000}).addTo(map);
+    } else {
+      window._navUserMarker.setLatLng([lat,lng]);
+    }
+  }catch(e){}
+  // Distance restante a vol d'oiseau (rapide, suffisant pour l'affichage live).
+  var remain=haversine(lat,lng,s.lat,s.lng);
+  var mins=Math.max(1,Math.round(remain/1.35/60)); // ~1.35 m/s a pied
+  var dEl=document.getElementById("nav-dist");
+  if(dEl)dEl.textContent=fmtNavDist(remain)+" · ~"+mins+" min";
+  if(remain<40){
+    var sub=document.getElementById("nav-sub");if(sub)sub.textContent="Tu es arrivé ! · "+sanitize(s.name);
+    var dot=document.getElementById("nav-live-dot");if(dot)dot.style.background="#1a1714";
+  }
+  // Recentrage doux sur la position.
+  try{map.panTo([lat,lng],{animate:true,duration:.6});}catch(e){}
+  // Re-route si on s'ecarte beaucoup du trace (> 55 m du point le plus proche).
+  var now=Date.now();
+  if(window._navRouteCoords&&now-window._navLastReroute>12000){
+    var minD=1e9;
+    for(var i=0;i<window._navRouteCoords.length;i++){
+      var c=window._navRouteCoords[i];var dd=haversine(lat,lng,c[0],c[1]);if(dd<minD)minD=dd;
+    }
+    if(minD>55){
+      window._navLastReroute=now;
+      var sub2=document.getElementById("nav-sub");if(sub2)sub2.textContent="Recalcul de l'itinéraire…";
+      var url="https://routing.openstreetmap.de/routed-foot/route/v1/foot/"+lng+","+lat+";"+s.lng+","+s.lat+"?overview=full&geometries=geojson";
+      fetch(url).then(function(r){return r.json();}).then(function(d){
+        if(!window._navStore||window._navStore.id!==s.id||!d.routes||!d.routes[0])return;
+        var coords=d.routes[0].geometry.coordinates.map(function(c){return [c[1],c[0]];});
+        window._navRouteCoords=coords;
+        try{if(window._drinkRouteLayer)map.removeLayer(window._drinkRouteLayer);}catch(e){}
+        var g=L.layerGroup();
+        L.polyline(coords,{color:"#ffffff",weight:9,opacity:.95}).addTo(g);
+        L.polyline(coords,{color:"#1a1714",weight:5,opacity:.95}).addTo(g);
+        g.addTo(map);window._drinkRouteLayer=g;
+        var sub3=document.getElementById("nav-sub");if(sub3)sub3.textContent=sanitize(s.name)+" · à pied · en direct";
+      }).catch(function(){});
+    }
+  }
 }
 function mapLegendHTML(){
   return '<div style="display:flex;gap:10px;align-items:center;padding:7px 12px;font-size:10px;font-weight:700;color:var(--s2)">'+
@@ -7042,13 +7127,25 @@ function renderStoreList(){
     var storePriceVal=getStorePrice(s,sid);
     var storePrice=storePriceVal?storePriceVal.toFixed(2)+"€":null;
     var storeIdStr=String(s.id);
+    // Statut stock de CETTE boisson dans CE magasin, rendu tres visible :
+    // barre d'accent coloree a gauche + pastille pres du nom.
+    var confN=s.confirmations[sid]||0;
+    var isSure=storeVerifiedFor(s,sid)||confN>0;
+    var isNo=confN<0;
+    var stCol=isSure?"#16a34a":(isNo?"#dc2626":"#f59e0b");
+    var stBg=isSure?"#f0fdf4":(isNo?"#fef2f2":"#fffbeb");
+    var stTxt=isSure?"#15803d":(isNo?"#b91c1c":"#b45309");
+    var stLbl=isSure?"En stock":(isNo?"Absente":"À vérifier");
+    var stIco=isSure?"✓":(isNo?"✕":"?");
     var div=document.createElement("div");div.className="store-card";
+    div.style.borderLeft="4px solid "+stCol;
     div.innerHTML='<div class="store-top">'+
       '<div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;cursor:pointer" onclick="openStoreDetail(\''+storeIdStr.replace(/'/g,"\\'")+'\')">'+
         '<div class="store-ico" style="background:'+(s.open?curSel.light:"#fee2e2")+'">'+storeIconHTML(s)+'</div>'+
         '<div style="flex:1;min-width:0">'+
-          '<div style="display:flex;align-items:center;gap:8px">'+
+          '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">'+
             '<div class="store-name">'+sanitize(s.name)+'</div>'+
+            '<span style="flex-shrink:0;display:inline-flex;align-items:center;gap:3px;padding:2px 9px;border-radius:999px;background:'+stBg+';color:'+stTxt+';font-size:10px;font-weight:800;letter-spacing:.2px;white-space:nowrap">'+stIco+' '+stLbl+'</span>'+
             (storePrice?'<span style="font-size:12px;font-weight:800;color:var(--s1);background:var(--bg2);padding:2px 8px;border-radius:999px">'+storePrice+'</span>':'<span style="font-size:11px;color:var(--s3);font-weight:500">Prix inconnu</span>')+
           '</div>'+
           '<div class="store-meta"><span>'+dist+'</span><span>·</span>'+
@@ -7059,11 +7156,9 @@ function renderStoreList(){
     '</div>'+
     '<div class="trust-wrap">'+
       (storeVerifiedFor(s,sid)?
-        '<div style="display:inline-flex;align-items:center;gap:5px;margin-bottom:7px;padding:3px 10px;border-radius:999px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:10.5px;font-weight:700;color:#15803d">\u2713 V\u00e9rifi\u00e9 \u00b7 catalogue enseigne</div>':
-       (((s.confirmations||{})[sid]||0)<0?
-        '<div style="display:inline-flex;align-items:center;gap:5px;margin-bottom:7px;padding:3px 10px;border-radius:999px;background:#fef2f2;border:1px solid #fecaca;font-size:10.5px;font-weight:700;color:#b91c1c">\u2715 Signal\u00e9e absente \u2014 tu la vois ? confirme !</div>':
-       (((s.confirmations||{})[sid]||0)===0?
-        '<div style="display:inline-flex;align-items:center;gap:5px;margin-bottom:7px;padding:3px 10px;border-radius:999px;background:#fffbeb;border:1px solid #fde68a;font-size:10.5px;font-weight:700;color:#b45309">? Possible \u00b7 pas encore v\u00e9rifi\u00e9 ici</div>':'')))+
+        '<div style="display:inline-flex;align-items:center;gap:5px;margin-bottom:7px;padding:3px 10px;border-radius:999px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:10.5px;font-weight:700;color:#15803d">\u2713 Confirm\u00e9 au catalogue de l\'enseigne</div>':
+       (confN<0?
+        '<div style="display:inline-flex;align-items:center;gap:5px;margin-bottom:7px;padding:3px 10px;border-radius:999px;background:#fef2f2;border:1px solid #fecaca;font-size:10.5px;font-weight:700;color:#b91c1c">Tu la vois ici ? confirme pour aider !</div>':''))+
       '<div style="display:flex;justify-content:space-between;margin-bottom:5px">'+
         '<span style="font-size:10px;font-weight:600;color:var(--s3)">Fiabilité</span>'+
         '<span style="font-size:10px;font-weight:600;color:var(--s2)">'+confs+' confirmation'+(confs>1?"s":"")+'</span>'+
@@ -8047,9 +8142,17 @@ function fmtDist(m){
   if(m==null)return null;
   return m<1000?Math.round(m)+" m":(m/1000).toFixed(m<10000?1:0)+" km";
 }
+// Masque le bouton "+ Magasin" quand une fiche/feuille/itineraire occupe le bas
+// de la carte explore (il chevauchait la fiche magasin), le reaffiche sinon.
+function setExploreFab(show){
+  var f=document.getElementById("explore-add-fab");if(!f)return;
+  if(show){f.style.opacity="1";f.style.transform="none";f.style.pointerEvents="auto";}
+  else{f.style.opacity="0";f.style.transform="translateY(8px)";f.style.pointerEvents="none";}
+}
 function exploreShowCard(s){
   var card=document.getElementById("explore-store-card");
   if(!card)return;
+  setExploreFab(false);
   var dist=null;
   if(typeof userLat==="number"&&userLat&&typeof s.lat==="number"){
     var dLa=(userLat-s.lat)*111000,dLo=(userLng-s.lng)*111000*Math.cos(s.lat*Math.PI/180);
@@ -8084,17 +8187,84 @@ function exploreHideCard(){
   if(card){card.classList.remove("in");card.style.display="none";}
   var status=document.getElementById("explore-status");
   if(status)status.style.display="block";
+  // Pas de fiche ni d'itineraire ouvert -> on peut reafficher "+ Magasin".
+  if(!document.getElementById("route-banner"))setExploreFab(true);
 }
 // Feuille "liste des magasins" de la carte Explorer : repli/deploiement au tap.
-function exploreToggleSheet(){
-  var s=document.getElementById("explore-sheet");if(!s)return;
-  var open=s.classList.toggle("open");
+/* Bottom-sheet a paliers facon Google/Apple Maps : 3 hauteurs (apercu / moitie /
+   plein). On le tire au doigt (il suit la main), et au relachement il se cale sur
+   le palier le plus proche. Simple et lisible pour tout le monde. */
+var SHEET_PEEK=88;
+function sheetVisibleFor(state,sheetH,hostH){
+  if(state==="max")return sheetH;
+  if(state==="mid")return Math.round(hostH*0.46);
+  return SHEET_PEEK;
+}
+function sheetCurOffset(sheet){
+  var m=/translateY\(\s*([-0-9.]+)px/.exec(sheet.style.transform||"");
+  if(m)return parseFloat(m[1]);
+  return Math.max(0,(sheet.offsetHeight||0)-SHEET_PEEK);
+}
+function setExploreSheet(state,silent){
+  var sheet=document.getElementById("explore-sheet");if(!sheet)return;
+  var host=document.getElementById("explore-map-host");
+  var hostH=(host&&host.offsetHeight)?host.offsetHeight:(window.innerHeight||740);
+  var sheetH=sheet.offsetHeight||Math.round(hostH*0.86);
+  var visible=sheetVisibleFor(state,sheetH,hostH);
+  var offset=Math.max(0,sheetH-visible);
+  // On pose le transform : la transition CSS l'anime en douceur (sur appareil reel).
+  sheet.style.transform="translateY("+offset+"px)";
+  var opened=state!=="min";
+  sheet.classList.toggle("open",opened);
+  sheet._sheetState=state;
   var chev=document.getElementById("explore-sheet-chev");
-  if(chev)chev.textContent=open?"Réduire ▼":"Voir la liste ▲";
-  // La pastille "N magasins ici" chevauche la liste quand la feuille est ouverte.
+  if(chev)chev.textContent=state==="max"?"Réduire ▼":(state==="mid"?"Tout voir ▲":"Voir la liste ▲");
   var status=document.getElementById("explore-status");
-  if(status)status.style.display=open?"none":"block";
-  playSound("pop");
+  if(status)status.style.display=opened?"none":"block";
+  if(typeof setExploreFab==="function")setExploreFab(!opened);
+  if(!silent){try{playSound("pop");}catch(e){}}
+}
+function exploreToggleSheet(){
+  var sheet=document.getElementById("explore-sheet");if(!sheet)return;
+  setExploreSheet(sheet.classList.contains("open")?"min":"mid");
+}
+function initExploreSheetDrag(){
+  var sheet=document.getElementById("explore-sheet");
+  var head=document.getElementById("explore-sheet-head");
+  if(!sheet||!head||head._dragInit)return;
+  head._dragInit=true;
+  var startY=0,startOffset=0,dragging=false,moved=false;
+  function curOffset(){var m=/translateY\(\s*([-0-9.]+)px/.exec(sheet.style.transform||"");return m?parseFloat(m[1]):Math.max(0,sheet.offsetHeight-SHEET_PEEK);}
+  head.addEventListener("pointerdown",function(e){
+    if(window._sheetAnim){cancelAnimationFrame(window._sheetAnim);window._sheetAnim=null;}
+    dragging=true;moved=false;startY=e.clientY;startOffset=curOffset();
+    sheet.classList.add("dragging");
+    try{head.setPointerCapture(e.pointerId);}catch(_){}
+  });
+  head.addEventListener("pointermove",function(e){
+    if(!dragging)return;
+    var dy=e.clientY-startY; // vers le bas = offset augmente (on referme)
+    if(Math.abs(dy)>5)moved=true;
+    var maxOff=Math.max(0,sheet.offsetHeight-SHEET_PEEK);
+    var off=Math.max(0,Math.min(maxOff,startOffset+dy));
+    sheet.style.transform="translateY("+off+"px)";
+  });
+  function end(e){
+    if(!dragging)return;dragging=false;
+    sheet.classList.remove("dragging");
+    try{head.releasePointerCapture(e.pointerId);}catch(_){}
+    if(!moved){setExploreSheet(sheet.classList.contains("open")?"min":"mid");return;}
+    var host=document.getElementById("explore-map-host");
+    var hostH=(host&&host.offsetHeight)?host.offsetHeight:(window.innerHeight||740);
+    var sheetH=sheet.offsetHeight;
+    var off=curOffset();
+    var cands=[["min",sheetH-sheetVisibleFor("min",sheetH,hostH)],["mid",sheetH-sheetVisibleFor("mid",sheetH,hostH)],["max",0]];
+    var best="min",bd=1e9;
+    cands.forEach(function(c){var d=Math.abs(c[1]-off);if(d<bd){bd=d;best=c[0];}});
+    setExploreSheet(best,true);
+  }
+  head.addEventListener("pointerup",end);
+  head.addEventListener("pointercancel",end);
 }
 function exploreSheetPick(id){
   var s=(STORES||[]).find(function(x){return String(x.id)===String(id);});
@@ -8209,13 +8379,15 @@ function openExploreMap(opts){
       '</div>'+
       '<div id="explore-city-results" style="position:absolute;top:calc(122px + env(safe-area-inset-top));left:14px;right:14px;z-index:1300"></div>'+
       '<div id="explore-map" style="flex:1"></div>'+
-      '<div onclick="exploreAddStore()" role="button" tabindex="0" aria-label="Ajouter un magasin" onkeydown="if(event.key===\'Enter\'){exploreAddStore()}" style="position:absolute;right:14px;bottom:calc(96px + env(safe-area-inset-bottom));z-index:1150;display:flex;align-items:center;gap:7px;padding:11px 15px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;box-shadow:0 6px 18px rgba(0,0,0,.28);cursor:pointer">+ Magasin</div>'+
+      '<div id="explore-add-fab" onclick="exploreAddStore()" role="button" tabindex="0" aria-label="Ajouter un magasin" onkeydown="if(event.key===\'Enter\'){exploreAddStore()}" style="position:absolute;right:14px;bottom:calc(150px + env(safe-area-inset-bottom));z-index:1150;display:flex;align-items:center;gap:7px;padding:11px 15px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;box-shadow:0 6px 18px rgba(0,0,0,.28);cursor:pointer;transition:opacity .2s,transform .2s">+ Magasin</div>'+
       '<div id="explore-store-card" role="button" tabindex="0" style="display:none;position:absolute;bottom:calc(88px + env(safe-area-inset-bottom));left:14px;right:14px;background:var(--app-bg);border:1.5px solid var(--border);border-radius:18px;padding:12px 14px;align-items:center;gap:12px;box-shadow:0 8px 24px rgba(0,0,0,.22);cursor:pointer;z-index:1200"></div>'+
       '<div id="explore-status" style="position:absolute;bottom:calc(92px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--app-bg);border:1.5px solid var(--border);border-radius:999px;padding:8px 16px;font-size:12px;font-weight:700;color:var(--s1);box-shadow:0 4px 14px rgba(0,0,0,.18);white-space:nowrap;z-index:1100">Chargement\u2026</div>'+
-      '<div id="explore-sheet"><div id="explore-sheet-head" onclick="exploreToggleSheet()" role="button" tabindex="0" aria-label="Ouvrir ou fermer la liste des magasins" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();exploreToggleSheet();}"><div id="explore-sheet-grip"></div><div style="display:flex;align-items:center;justify-content:space-between"><div id="explore-sheet-title" style="font-size:13.5px;font-weight:800;color:var(--s1)">Magasins autour de toi</div><div id="explore-sheet-chev" style="font-size:12px;font-weight:700;color:var(--s2);white-space:nowrap">Voir la liste \u25b2</div></div></div><div id="explore-sheet-list"></div></div>';
+      '<div id="explore-sheet"><div id="explore-sheet-head" role="button" tabindex="0" aria-label="Glisser pour ouvrir ou fermer la liste des magasins" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();exploreToggleSheet();}"><div id="explore-sheet-grip"></div><div style="display:flex;align-items:center;justify-content:space-between"><div id="explore-sheet-title" style="font-size:13.5px;font-weight:800;color:var(--s1)">Magasins autour de toi</div><div id="explore-sheet-chev" style="font-size:12px;font-weight:700;color:var(--s2);white-space:nowrap">Voir la liste \u25b2</div></div></div><div id="explore-sheet-list"></div></div>';
     document.body.appendChild(host);
     host.querySelector("#explore-city-go").onclick=exploreGoCity;
     host.querySelector("#explore-city-q").addEventListener("keydown",function(ev){if(ev.key==="Enter")exploreGoCity();});
+    initExploreSheetDrag();
+    setExploreSheet("min",true);
   }
   host.style.display="flex";
   requestAnimationFrame(function(){requestAnimationFrame(function(){host.classList.add("in");});});
@@ -8591,12 +8763,28 @@ function openWaze(){if(!curSel)return;var s=STORES.filter(function(x){return x.d
    livreur, distance + duree a pied) via le routage OpenStreetMap public —
    gratuit, sans cle. Google Maps reste en secours dans le bandeau pour la
    navigation vocale. */
-function goToStore(lat,lng){showRouteToStore(lat,lng);}
+function goToStore(lat,lng){
+  // "Y aller" trace desormais sur la carte des RESULTATS (deja dimensionnee, donc
+  // fiable) en plein ecran, avec suivi temps reel — au lieu de sauter sur la carte
+  // explore encore non dimensionnee (qui plantait le fitBounds). Repli GPS sinon.
+  var s=(STORES||[]).find(function(x){return x.lat===lat&&x.lng===lng;});
+  var map=window._leafletMap;
+  var box=document.getElementById("map-box");
+  var onResults=document.getElementById("s-results")&&document.getElementById("s-results").classList.contains("on");
+  if(s&&map&&box&&onResults&&typeof userLat==="number"&&userLat){
+    var wasFull=box.classList.contains("map-fullscreen");
+    if(!wasFull)toggleDrinkMapFull();
+    setTimeout(function(){routeFromMarker(String(s.id));},wasFull?60:400);
+    return;
+  }
+  showRouteToStore(lat,lng);
+}
 window._routeLayer=null;window._routeBanner=null;
 function clearRoute(){
   try{if(window._routeLayer&&exploreMap){exploreMap.removeLayer(window._routeLayer);}}catch(e){}
   window._routeLayer=null;
   var b=document.getElementById("route-banner");if(b)b.remove();
+  if(typeof setExploreFab==="function")setExploreFab(true);
 }
 function showRouteToStore(lat,lng){
   if(typeof userLat!=="number"||!userLat){
@@ -8615,8 +8803,15 @@ function showRouteToStore(lat,lng){
   fetch(url).then(function(r){return r.json();}).then(function(d){
     if(!d.routes||!d.routes[0])throw new Error("pas de route");
     var rt=d.routes[0];
+    var _tries=0;
     var wait=function(){
+      // Attendre non seulement que la carte existe mais qu'elle ait une TAILLE :
+      // dessiner/fitBounds sur une carte non dimensionnee lancait
+      // "Cannot read properties of undefined (reading 'x')" -> repli GPS force.
       if(!exploreMap){setTimeout(wait,150);return;}
+      try{exploreMap.invalidateSize();}catch(e){}
+      var sz=null;try{sz=exploreMap.getSize();}catch(e){}
+      if((!sz||sz.x===0||sz.y===0)&&_tries<20){_tries++;setTimeout(wait,150);return;}
       clearRoute();
       var coords=rt.geometry.coordinates.map(function(c){return [c[1],c[0]];});
       // Ligne double (bordure + trait) : le rendu "app de livraison"
@@ -8628,7 +8823,7 @@ function showRouteToStore(lat,lng){
       // Cadrer TOUT le chemin A->B (comme Waze/Google Maps), en reservant de la
       // place pour la barre du haut (~150px) et la banniere/feuille du bas (~200px)
       // pour ne pas cacher le depart ou l'arrivee derriere les overlays.
-      exploreMap.fitBounds(L.latLngBounds(coords),{paddingTopLeft:[34,150],paddingBottomRight:[34,205],animate:true,duration:.55,maxZoom:17});
+      try{exploreMap.fitBounds(L.latLngBounds(coords),{paddingTopLeft:[34,150],paddingBottomRight:[34,205],animate:true,duration:.55,maxZoom:17});}catch(e){}
       var km=rt.distance/1000;
       var mins=Math.max(1,Math.round(rt.duration/60));
       var host=document.getElementById("explore-map-host");
@@ -8643,6 +8838,7 @@ function showRouteToStore(lat,lng){
           '<div onclick="clearRoute()" role="button" tabindex="0" aria-label="Fermer l\'itin\u00e9raire" style="width:32px;height:32px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--s2);cursor:pointer">\u2715</div>';
         host.appendChild(b);
       }
+      if(typeof setExploreFab==="function")setExploreFab(false);
       playSound("pop");
     };
     wait();
