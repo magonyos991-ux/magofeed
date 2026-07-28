@@ -1,11 +1,12 @@
 /* Magofeed — bande-son générée (Web Audio API), sans fichier externe.
-   Nappe chaude + arpège + pings radar synchronisés aux scènes + carillon final.
+   Version "chaude" : nappe douce + mélodie boîte-à-musique (sinus) + basse ronde
+   + pings radar discrets au changement de scène + carillon final.
    Progression : F#m – D – A – E – D – A (vi–IV–I–V–IV–I en La majeur).
-   S'auto-injecte : overlay "Activer le son" (autoplay bloqué) + bouton mute. */
+   Chaîne master : gain -> passe-bas 7 kHz -> compresseur ; envoi réverb ample. */
 (function(){
   var AC = window.AudioContext || window.webkitAudioContext;
   if(!AC){ return; }
-  var ctx, master, comp, revGain, started=false, muted=false, loopTimer=null;
+  var ctx, master, tone, comp, revGain, started=false, muted=false, loopTimer=null;
 
   var CHORDS = [
     {bass:92.50,  notes:[185.00,220.00,277.18], top:369.99}, // F#m
@@ -24,80 +25,68 @@
     return [3400,3200,4800,4000,4400,4600];
   }
 
+  // réverb : impulsion douce et longue (3 s) pour de l'espace, pas du métal
   function makeReverb(){
-    var len=Math.floor(ctx.sampleRate*2.4), buf=ctx.createBuffer(2,len,ctx.sampleRate);
+    var len=Math.floor(ctx.sampleRate*3.0), buf=ctx.createBuffer(2,len,ctx.sampleRate);
     for(var c=0;c<2;c++){ var d=buf.getChannelData(c);
-      for(var i=0;i<len;i++){ d[i]=(Math.random()*2-1)*Math.pow(1-i/len,3.0); } }
+      for(var i=0;i<len;i++){ d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.4); } }
     var cv=ctx.createConvolver(); cv.buffer=buf; return cv;
   }
 
-  function envAD(g,t,a,d,peak){
-    g.gain.setValueAtTime(0.0001,t);
-    g.gain.exponentialRampToValueAtTime(peak,t+a);
-    g.gain.exponentialRampToValueAtTime(0.0001,t+a+d);
-  }
-
-  function pluck(t,freq,gain,pan){
-    var o=ctx.createOscillator(); o.type='triangle'; o.frequency.value=freq;
+  // note "boîte à musique" : sinus + partiel d'octave, longue décroissance, bien réverbérée
+  function bell(t,freq,gain,pan,dec){
+    dec=dec||0.9;
+    var o=ctx.createOscillator();  o.type='sine'; o.frequency.value=freq;
     var o2=ctx.createOscillator(); o2.type='sine'; o2.frequency.value=freq*2;
     var g=ctx.createGain(), g2=ctx.createGain();
-    envAD(g,t,0.006,0.30,gain); envAD(g2,t,0.004,0.14,gain*0.35);
+    g.gain.setValueAtTime(0.0001,t);  g.gain.exponentialRampToValueAtTime(gain,t+0.008);  g.gain.exponentialRampToValueAtTime(0.0001,t+dec);
+    g2.gain.setValueAtTime(0.0001,t); g2.gain.exponentialRampToValueAtTime(gain*0.28,t+0.006); g2.gain.exponentialRampToValueAtTime(0.0001,t+dec*0.6);
     var p=ctx.createStereoPanner?ctx.createStereoPanner():null;
     o.connect(g); o2.connect(g2);
-    if(p){ p.pan.value=pan||0; g.connect(p); g2.connect(p); p.connect(master); }
-    else { g.connect(master); g2.connect(master); }
+    if(p){ p.pan.value=pan||0; g.connect(p); g2.connect(p); p.connect(tone); } else { g.connect(tone); g2.connect(tone); }
     g.connect(revGain); g2.connect(revGain);
-    o.start(t); o2.start(t); o.stop(t+0.55); o2.stop(t+0.55);
+    o.start(t); o2.start(t); o.stop(t+dec+0.05); o2.stop(t+dec+0.05);
   }
 
+  // nappe : deux triangles légèrement désaccordés, filtrés, attaque lente
   function padChord(t,dur,chord){
     var lp=ctx.createBiquadFilter(); lp.type='lowpass';
-    lp.frequency.setValueAtTime(700,t);
-    lp.frequency.linearRampToValueAtTime(1500,t+dur*0.5);
-    lp.frequency.linearRampToValueAtTime(820,t+dur);
+    lp.frequency.setValueAtTime(480,t);
+    lp.frequency.linearRampToValueAtTime(1150,t+dur*0.5);
+    lp.frequency.linearRampToValueAtTime(560,t+dur);
     var g=ctx.createGain();
     g.gain.setValueAtTime(0.0001,t);
-    g.gain.exponentialRampToValueAtTime(0.10,t+0.5);
-    g.gain.setValueAtTime(0.10,Math.max(t+0.5,t+dur-0.5));
+    g.gain.exponentialRampToValueAtTime(0.085,t+0.7);
+    g.gain.setValueAtTime(0.085,Math.max(t+0.7,t+dur-0.7));
     g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
-    var notes=chord.notes.concat([chord.top]);
-    notes.forEach(function(f){ [-6,6].forEach(function(det){
-      var o=ctx.createOscillator(); o.type='sawtooth'; o.frequency.value=f; o.detune.value=det;
+    chord.notes.concat([chord.top]).forEach(function(f){ [-4,4].forEach(function(det){
+      var o=ctx.createOscillator(); o.type='triangle'; o.frequency.value=f; o.detune.value=det;
       o.connect(lp); o.start(t); o.stop(t+dur+0.1);
     }); });
-    lp.connect(g); g.connect(master); g.connect(revGain);
+    lp.connect(g); g.connect(tone); g.connect(revGain);
   }
 
-  function bass(t,dur,freq){
-    for(var tt=t; tt<t+dur-0.05; tt+=0.6){
-      var o=ctx.createOscillator(); o.type='sine'; o.frequency.value=freq;
-      var o2=ctx.createOscillator(); o2.type='triangle'; o2.frequency.value=freq;
-      var g=ctx.createGain(); envAD(g,tt,0.01,0.5,0.16);
-      o.connect(g); o2.connect(g); g.connect(master);
-      o.start(tt); o2.start(tt); o.stop(tt+0.6); o2.stop(tt+0.6);
+  // basse ronde : sinus + partiel, ré-articulée à la blanche pointée (douce)
+  function bassLine(t,dur,freq){
+    for(var tt=t; tt<t+dur-0.05; tt+=1.2){
+      var o=ctx.createOscillator();  o.type='sine';     o.frequency.value=freq;
+      var o2=ctx.createOscillator(); o2.type='triangle'; o2.frequency.value=freq; o2.detune.value=-6;
+      var g=ctx.createGain();
+      g.gain.setValueAtTime(0.0001,tt); g.gain.exponentialRampToValueAtTime(0.14,tt+0.03); g.gain.exponentialRampToValueAtTime(0.0001,tt+1.15);
+      o.connect(g); o2.connect(g); g.connect(tone);
+      o.start(tt); o2.start(tt); o.stop(tt+1.2); o2.stop(tt+1.2);
     }
   }
 
+  // ping radar : très discret, au changement de scène
   function ping(t,freq){
     var o=ctx.createOscillator(); o.type='sine';
     o.frequency.setValueAtTime(freq,t);
-    o.frequency.exponentialRampToValueAtTime(freq*1.5,t+0.14);
-    var g=ctx.createGain(); envAD(g,t,0.005,0.5,0.12);
-    o.connect(g); g.connect(master); g.connect(revGain);
-    o.start(t); o.stop(t+0.6);
-  }
-
-  function bell(t,freqs){
-    freqs.forEach(function(f,i){
-      var tt=t+i*0.13;
-      var o=ctx.createOscillator(); o.type='sine'; o.frequency.value=f;
-      var o2=ctx.createOscillator(); o2.type='sine'; o2.frequency.value=f*2.01;
-      var g=ctx.createGain(), g2=ctx.createGain();
-      envAD(g,tt,0.006,1.5,0.16); envAD(g2,tt,0.006,1.0,0.05);
-      o.connect(g); o2.connect(g2); g.connect(master); g2.connect(master);
-      g.connect(revGain); g2.connect(revGain);
-      o.start(tt); o2.start(tt); o.stop(tt+1.7); o2.stop(tt+1.7);
-    });
+    o.frequency.exponentialRampToValueAtTime(freq*1.34,t+0.16);
+    var g=ctx.createGain();
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.05,t+0.01); g.gain.exponentialRampToValueAtTime(0.0001,t+0.5);
+    o.connect(g); g.connect(revGain); g.connect(tone);
+    o.start(t); o.stop(t+0.55);
   }
 
   function schedulePass(startAt){
@@ -106,15 +95,21 @@
     var total=acc;
     for(var s=0;s<b.length;s++){
       var chord=CHORDS[s%CHORDS.length], st=startAt+cum[s], du=b[s]/1000;
-      padChord(st,du,chord); bass(st,du,chord.bass); ping(st,chord.notes[2]*2);
-      if(s===b.length-1){ bell(st+0.15,[chord.notes[0]*2,chord.notes[1]*2,chord.notes[2]*2]); }
+      padChord(st,du,chord); bassLine(st,du,chord.bass); ping(st,chord.notes[1]*2);
+      if(s===b.length-1){ // carillon final (CTA)
+        [chord.notes[0]*2,chord.notes[2]*2,chord.top*2].forEach(function(f,i){ bell(st+0.2+i*0.16,f,0.11,0,1.8); });
+      }
     }
-    var step=0.3, k=0;
-    for(var tt=0; tt<total-0.05; tt+=step){
+    // mélodie boîte-à-musique : contour doux, une note ~toutes les 0.5 s, octave haute
+    var pat=[0,2,3,2,1,3,2,0], k=0, swing=0;
+    for(var tt=0; tt<total-0.1; tt+= (swing?0.42:0.5), swing=1-swing){
       var sc=0; for(var j=0;j<cum.length;j++){ if(tt>=cum[j]) sc=j; }
       var ch=CHORDS[sc%CHORDS.length], pool=ch.notes.concat([ch.top]);
-      var f=pool[k%pool.length]; if(k%4===3){ f*=2; }
-      if(k%8!==6){ pluck(startAt+tt, f, 0.05, (k%2)?0.25:-0.25); }
+      if(k%8===6){ k++; continue; }                 // respiration
+      var f=pool[pat[k%pat.length]]*2;               // octave au-dessus (boîte à musique)
+      if(k%8===3) f*=2;                              // éclat ponctuel
+      var vel=0.075*(0.85+0.15*((k%3)===0?1:0.6));   // légère dynamique
+      bell(startAt+tt, f, vel, (k%2?0.22:-0.22), 0.95);
       k++;
     }
     return total;
@@ -133,17 +128,18 @@
       ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f5f2ec" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m17 9 4 6M21 9l-4 6"/></svg>'
       : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f5f2ec" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a9 9 0 0 1 0 12"/></svg>';
   }
-  function setMute(m){ muted=m; if(master){ master.gain.linearRampToValueAtTime(m?0.0001:0.75, ctx.currentTime+0.2); } updateBtn(); }
+  function setMute(m){ muted=m; if(master){ master.gain.linearRampToValueAtTime(m?0.0001:0.8, ctx.currentTime+0.2); } updateBtn(); }
 
   function startAudio(){
     if(started){ return; } started=true;
     ctx=new AC(); if(ctx.resume){ ctx.resume(); }
     master=ctx.createGain(); master.gain.value=0.0001;
-    comp=ctx.createDynamicsCompressor();
-    master.connect(comp); comp.connect(ctx.destination);
-    var rev=makeReverb(); revGain=ctx.createGain(); revGain.gain.value=0.32;
-    revGain.connect(rev); rev.connect(comp);
-    master.gain.exponentialRampToValueAtTime(0.75, ctx.currentTime+0.9);
+    tone=ctx.createBiquadFilter(); tone.type='lowpass'; tone.frequency.value=7000; tone.Q.value=0.6;
+    comp=ctx.createDynamicsCompressor(); comp.threshold.value=-16; comp.ratio.value=3;
+    tone.connect(master); master.connect(comp); comp.connect(ctx.destination);
+    var rev=makeReverb(); revGain=ctx.createGain(); revGain.gain.value=0.42;
+    revGain.connect(rev); rev.connect(master);
+    master.gain.exponentialRampToValueAtTime(0.8, ctx.currentTime+1.0);
     if(window.MagoFeedVideo && window.MagoFeedVideo.restart){ try{ window.MagoFeedVideo.restart(); }catch(e){} }
     loop();
     mbtn.style.display='grid'; updateBtn();
