@@ -9995,9 +9995,23 @@ function enhanceA11y(){
    FAVORITES
 ================================ */
 function toggleFav(id,el){
-  var idx=favorites.indexOf(id);if(idx===-1){favorites.push(id);if(el)el.textContent="❤️";}else{favorites.splice(idx,1);if(el)el.textContent="🤍";}
+  var idx=favorites.indexOf(id);var adding=(idx===-1);
+  if(adding){favorites.push(id);if(el)el.textContent="❤️";}else{favorites.splice(idx,1);if(el)el.textContent="🤍";}
   localStorage.setItem("magofavs",JSON.stringify(favorites));renderFavs();playSound("pop");
   if(el){el.style.animation="none";void el.offsetWidth;el.style.animation="heartPop .35s cubic-bezier(.34,1.56,.64,1)";}
+  // Favori = veille automatique : on te previent (push) quand cette boisson est
+  // signalee pres de toi. Reutilise l'infra notifyWatchers deja deployee.
+  if(adding){
+    var d=DRINKS.find(function(x){return x.id===id;});
+    if(d&&typeof isWatched==="function"&&!isWatched(id)&&typeof drinkWatches!=="undefined"){
+      drinkWatches.push({id:d.id,name:d.name,emoji:d.emoji,lat:userLat||null,lng:userLng||null,created:Date.now(),triggered:false});
+      try{saveWatches();}catch(e){}
+      if(window.fbSyncWatch)window.fbSyncWatch(true,d.id,d.name,userLat,userLng);
+      if(window.fbEnablePush&&!window._pushToken){try{window.fbEnablePush(userLat,userLng);}catch(e){}}
+      try{renderAlertsCard();}catch(e){}
+      toast("❤️ En favori · tu seras prévenu quand elle arrive près de toi");
+    }
+  }
 }
 function renderFavs(){
   var el=document.getElementById("fav-list");if(!el)return;
