@@ -1,0 +1,214 @@
+<title>Magofeed — Vidéo publicitaire (16:9)</title>
+<style>
+  :root{
+    --ink:#100e0c;--ground:#1a1714;--ground2:#241f1a;--line:#3a332c;
+    --signal:#e67e22;--gold:#f0b840;--gold-soft:#e8c17a;--paper:#f5f2ec;--mute:#8a817a;--good:#27ae60;--bad:#e74c3c;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:radial-gradient(120% 90% at 50% -10%,#241f1a,var(--ground) 45%,var(--ink));
+    color:var(--paper);font-family:var(--sans);display:grid;place-items:center;min-height:100dvh;overflow:hidden;padding:16px}
+  .stage-wrap{position:relative;width:min(96vw,calc(94dvh*16/9));aspect-ratio:16/9}
+  .stage{position:absolute;inset:0;border-radius:20px;overflow:hidden;container-type:size;
+    background:radial-gradient(120% 130% at 30% 12%,#26201b,var(--ground) 48%,#0d0b09);
+    box-shadow:0 30px 80px -20px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.04) inset;isolation:isolate}
+  .stage::before{content:"";position:absolute;inset:-20%;z-index:0;opacity:.5;
+    background:repeating-radial-gradient(circle at 26% 50%,transparent 0 44px,rgba(230,126,34,.05) 44px 45px);
+    -webkit-mask-image:radial-gradient(circle at 26% 50%,#000 34%,transparent 70%);mask-image:radial-gradient(circle at 26% 50%,#000 34%,transparent 70%)}
+  .stage::after{content:"";position:absolute;inset:0;z-index:60;pointer-events:none;
+    background:radial-gradient(120% 100% at 50% 45%,transparent 58%,rgba(0,0,0,.4) 100%)}
+
+  .scene{position:absolute;inset:0;z-index:1;display:grid;align-content:center;padding:0 7cqw;
+    opacity:0;visibility:hidden;transition:opacity .55s ease,visibility .55s}
+  .scene.active{opacity:1;visibility:visible;transition:opacity .5s ease}
+  .split{grid-template-columns:1.05fr .95fr;gap:5cqw;align-items:center}
+  .center{justify-items:center;text-align:center}
+  .col-txt{text-align:left;display:flex;flex-direction:column;gap:2.4cqh;align-items:flex-start}
+
+  .up{transform:translateY(22px);opacity:0}
+  .scene.active .up{animation:up .8s cubic-bezier(.2,.8,.2,1) forwards}
+  @keyframes up{to{transform:none;opacity:1}}
+  .scene.active .d1{animation-delay:.1s}.scene.active .d2{animation-delay:.26s}.scene.active .d3{animation-delay:.44s}
+  .scene.active .d4{animation-delay:.62s}.scene.active .d5{animation-delay:.82s}.scene.active .d6{animation-delay:1.05s}
+
+  .eyebrow{font-size:clamp(11px,1.5cqw,15px);letter-spacing:.32em;text-transform:uppercase;color:var(--signal);font-weight:700}
+  h1{font-weight:800;letter-spacing:-.025em;line-height:1.02;text-wrap:balance;font-size:clamp(28px,5.4cqw,62px)}
+  .kick{color:var(--mute);font-weight:600;font-size:clamp(15px,2cqw,22px);line-height:1.4;max-width:26ch}
+  .sig{color:var(--signal)}.hl{color:var(--gold)}
+
+  /* logo mark */
+  .mark{position:relative;width:clamp(120px,18cqw,220px);aspect-ratio:1;border-radius:26%;display:grid;place-items:center;
+    background:linear-gradient(160deg,#211c17,#141110);box-shadow:0 24px 60px -18px rgba(0,0,0,.8)}
+  .mark .M{font-weight:800;font-size:clamp(80px,13cqw,150px);letter-spacing:-.04em;margin-top:.14em}
+  .mark .eye{position:absolute;top:12%;left:50%;transform:translateX(-50%);width:20%;aspect-ratio:1;border-radius:50%;
+    background:radial-gradient(circle,var(--gold) 0 26%,#7a5a1e 27% 40%,transparent 41%)}
+  .scene.active .mark .eye::before,.scene.active .mark .eye::after{content:"";position:absolute;inset:0;border-radius:50%;border:2px solid rgba(240,184,64,.5)}
+  .scene.active .mark .eye::before{animation:ping 2.2s ease-out infinite}
+  .scene.active .mark .eye::after{animation:ping 2.2s ease-out infinite .9s}
+  @keyframes ping{0%{transform:scale(1);opacity:.8}100%{transform:scale(3.4);opacity:0}}
+  .scene.active .mark{animation:pop .9s cubic-bezier(.18,.9,.2,1.2) both}
+  @keyframes pop{0%{transform:scale(.75) rotate(-4deg);opacity:0}100%{transform:none;opacity:1}}
+  .wordmark{font-weight:800;letter-spacing:-.02em;font-size:clamp(40px,8cqw,88px);line-height:1}
+  .tagline{color:var(--gold-soft);font-weight:600;font-size:clamp(16px,2.4cqw,28px)}
+
+  /* map card (landscape) */
+  .mapcard{position:relative;width:100%;aspect-ratio:16/11;border-radius:18px;overflow:hidden;border:1px solid var(--line);
+    background:linear-gradient(0deg,#14110e,#1b1712);box-shadow:0 24px 60px -22px rgba(0,0,0,.7)}
+  .mapcard::before{content:"";position:absolute;inset:0;opacity:.5;
+    background:repeating-linear-gradient(38deg,transparent 0 30px,rgba(255,255,255,.028) 30px 32px),
+               repeating-linear-gradient(-52deg,transparent 0 40px,rgba(255,255,255,.025) 40px 42px)}
+  .me{position:absolute;left:50%;top:54%;transform:translate(-50%,-50%);width:16px;height:16px;border-radius:50%;
+    background:var(--signal);box-shadow:0 0 0 4px rgba(230,126,34,.25);z-index:3}
+  .sweep{position:absolute;left:50%;top:54%;transform:translate(-50%,-50%);width:52%;aspect-ratio:1;border-radius:50%;
+    background:conic-gradient(from 0deg,rgba(230,126,34,.28),transparent 32%);
+    -webkit-mask:radial-gradient(circle,#000 0 49%,transparent 50%);mask:radial-gradient(circle,#000 0 49%,transparent 50%);z-index:2}
+  .scene.active .sweep{animation:spin 2.6s linear infinite}
+  @keyframes spin{to{transform:translate(-50%,-50%) rotate(360deg)}}
+  .ring{position:absolute;left:50%;top:54%;transform:translate(-50%,-50%);border-radius:50%;border:1px solid rgba(230,126,34,.3);z-index:1}
+  .scene.active .ring{animation:radiate 2.6s ease-out infinite}
+  @keyframes radiate{0%{width:20px;height:20px;opacity:.7}100%{width:70%;padding-top:70%;height:0;opacity:0}}
+  .pin{position:absolute;z-index:4;transform:translate(-50%,-100%) scale(0);transform-origin:bottom center}
+  .pin .head{width:26px;height:26px;border-radius:50% 50% 50% 2px;transform:rotate(45deg);background:var(--gold);display:grid;place-items:center;box-shadow:0 6px 14px rgba(0,0,0,.5)}
+  .pin .head b{transform:rotate(-45deg);font-size:12px}
+  .pin .tag{position:absolute;bottom:118%;left:50%;transform:translateX(-50%);background:var(--paper);color:#20140a;font-size:10px;font-weight:800;white-space:nowrap;padding:3px 7px;border-radius:6px}
+  .pin .tag::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:var(--paper)}
+  .scene.active .pin{animation:drop .5s cubic-bezier(.2,1.4,.3,1) both}
+  .scene.active .pin.p1{animation-delay:.7s}.scene.active .pin.p2{animation-delay:1s}.scene.active .pin.p3{animation-delay:1.3s}
+  @keyframes drop{to{transform:translate(-50%,-100%) scale(1)}}
+  .result-chip{position:absolute;left:14px;top:14px;z-index:5;display:inline-flex;gap:7px;align-items:center;
+    background:rgba(39,174,96,.16);border:1px solid rgba(39,174,96,.5);color:#8ce0ac;padding:6px 12px;border-radius:999px;font-size:12px;font-weight:800}
+
+  /* community rows */
+  .confirm-stack{display:flex;flex-direction:column;gap:12px;width:100%}
+  .confirm-row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--ground2);border:1px solid var(--line);border-radius:14px;padding:12px 15px}
+  .who{display:flex;align-items:center;gap:10px;font-weight:700;font-size:14px}
+  .avatar{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:13px;color:#20140a}
+  .badge-ok{display:inline-flex;align-items:center;gap:5px;color:#8ce0ac;font-weight:800;font-size:12px}
+  .live-dot{width:8px;height:8px;border-radius:50%;background:var(--good);display:inline-block;animation:blip2 1.4s infinite}
+  @keyframes blip2{0%{box-shadow:0 0 0 0 rgba(39,174,96,.5)}70%{box-shadow:0 0 0 9px rgba(39,174,96,0)}100%{box-shadow:0 0 0 0 rgba(39,174,96,0)}}
+
+  /* features horizontal */
+  .feat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;width:100%}
+  .feat{background:var(--ground2);border:1px solid var(--line);border-radius:16px;padding:18px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px}
+  .feat .ic{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;background:rgba(230,126,34,.14);border:1px solid rgba(230,126,34,.3)}
+  .feat b{font-size:clamp(14px,1.8cqw,19px);font-weight:800}
+  .feat span{font-size:clamp(11px,1.3cqw,13px);color:var(--mute);line-height:1.35}
+
+  /* CTA */
+  .badges{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+  .store{display:inline-flex;align-items:center;gap:10px;background:var(--ground2);border:1px solid var(--line);border-radius:12px;padding:10px 16px;font-weight:700}
+  .store small{display:block;font-size:9px;color:var(--mute);letter-spacing:.06em;text-transform:uppercase}
+  .store b{font-size:15px}
+  .trust{color:var(--mute);font-size:clamp(12px,1.5cqw,15px)}
+  .cta-glow{position:absolute;inset:0;z-index:0;pointer-events:none;background:radial-gradient(50% 60% at 50% 45%,rgba(230,126,34,.16),transparent 70%)}
+
+  .brandtab{position:absolute;top:16px;left:20px;z-index:65;display:flex;align-items:center;gap:8px;font-weight:800;font-size:15px;opacity:.9}
+  .brandtab .b-dot{width:9px;height:9px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 3px rgba(240,184,64,.18)}
+
+  .hud{position:absolute;left:0;right:0;bottom:0;z-index:70;padding:14px 20px;display:flex;align-items:center;gap:12px;
+    background:linear-gradient(0deg,rgba(0,0,0,.5),transparent)}
+  .track{flex:1;display:flex;gap:6px}
+  .seg{flex:1;height:3px;border-radius:3px;background:rgba(255,255,255,.16);overflow:hidden}
+  .seg i{display:block;height:100%;width:0;background:var(--gold);border-radius:3px}
+  .ctrl button{width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:rgba(20,17,14,.7);color:var(--paper);cursor:pointer;display:grid;place-items:center}
+  .ctrl button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+  @media (prefers-reduced-motion:reduce){.scene{transition:opacity .2s}*{animation-duration:.001ms!important;animation-iteration-count:1!important}}
+</style>
+
+<div class="stage-wrap"><div class="stage" id="stage">
+  <div class="brandtab"><span class="b-dot"></span>Magofeed</div>
+
+  <!-- HOOK -->
+  <section class="scene center" data-id="hook">
+    <div style="display:inline-flex;align-items:center;gap:9px;padding:8px 16px;border-radius:999px;background:rgba(231,76,60,.12);border:1px solid rgba(231,76,60,.45);color:#f4a79f;font-weight:700" class="up d1">
+      <span style="width:8px;height:8px;border-radius:50%;background:var(--bad)"></span>En rupture</div>
+    <h1 class="up d2" style="margin-top:2.5cqh">Ta boisson préférée, <span class="sig">introuvable</span> partout ?</h1>
+    <p class="kick up d3" style="margin-top:1.5cqh">Tu fais 3 magasins. Rien. Encore.</p>
+  </section>
+
+  <!-- LOGO -->
+  <section class="scene center" data-id="logo">
+    <div class="mark up"><span class="eye"></span><span class="M">M</span></div>
+    <div class="wordmark up d2" style="margin-top:3.5cqh">Magofeed</div>
+    <div class="tagline up d3" style="margin-top:1.5cqh">Trouve ta boisson près de toi</div>
+  </section>
+
+  <!-- SEARCH -->
+  <section class="scene split" data-id="search">
+    <div class="col-txt">
+      <div class="eyebrow up d1">Cherche · Trouve</div>
+      <h1 class="up d2">Quel magasin l'a <span class="hl">vraiment</span> en stock</h1>
+      <p class="kick up d3">Cherche ta boisson, vois qui l'a autour de toi — trié par distance.</p>
+    </div>
+    <div class="mapcard up d2">
+      <span class="result-chip">✓ 3 magasins l'ont en stock</span>
+      <div class="ring"></div><div class="sweep"></div><div class="me"></div>
+      <div class="pin p1" style="left:30%;top:32%"><div class="head"><b>🥤</b></div><div class="tag">Épicerie Kenza · 250 m</div></div>
+      <div class="pin p2" style="left:66%;top:42%"><div class="head"><b>🥤</b></div><div class="tag">Night Store · 480 m</div></div>
+      <div class="pin p3" style="left:48%;top:74%"><div class="head"><b>🥤</b></div><div class="tag">Le P'tit Marché · 700 m</div></div>
+    </div>
+  </section>
+
+  <!-- COMMUNITY -->
+  <section class="scene split" data-id="community">
+    <div class="col-txt">
+      <div class="eyebrow up d1"><span class="live-dot"></span>&nbsp;En temps réel</div>
+      <h1 class="up d2">Confirmé par la <span class="hl">communauté</span></h1>
+      <p class="kick up d3">Pas « peut-être ». <span class="sig" style="font-weight:800">Vérifié</span> par de vraies personnes.</p>
+    </div>
+    <div class="confirm-stack">
+      <div class="confirm-row up d3"><span class="who"><span class="avatar" style="background:var(--gold)">L</span>Léa · il y a 4 min</span><span class="badge-ok"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#27ae60" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>En stock</span></div>
+      <div class="confirm-row up d4"><span class="who"><span class="avatar" style="background:var(--signal)">Y</span>Yanis · il y a 12 min</span><span class="badge-ok"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#27ae60" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>En stock</span></div>
+      <div class="confirm-row up d5"><span class="who"><span class="avatar" style="background:var(--gold-soft)">S</span>Sofia · il y a 20 min</span><span class="badge-ok"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#27ae60" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>Confirmé</span></div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="scene center" data-id="features">
+    <div class="eyebrow up d1">Tout est dans l'app</div>
+    <h1 class="up d2" style="margin:1.5cqh 0 3cqh">Repère. Confirme. <span class="hl">Partage.</span></h1>
+    <div class="feat-row">
+      <div class="feat up d3"><span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 21s7-6.5 7-11a7 7 0 1 0-14 0c0 4.5 7 11 7 11Z" stroke="#e67e22" stroke-width="2"/><circle cx="12" cy="10" r="2.4" fill="#e67e22"/></svg></span><b>Itinéraire 1 tap</b><span>Le tracé jusqu'au magasin, en mètres.</span></div>
+      <div class="feat up d4"><span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="12" rx="2" stroke="#e67e22" stroke-width="2"/><path d="M7 10v4m4-4v4m4-4v4" stroke="#e67e22" stroke-width="2" stroke-linecap="round"/></svg></span><b>Scan code-barres</b><span>Partage une pépite à la commu.</span></div>
+      <div class="feat up d5"><span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3l2.5 5.2 5.5.8-4 3.9 1 5.6-5-2.7-5 2.7 1-5.6-4-3.9 5.5-.8L12 3Z" stroke="#e67e22" stroke-width="2" stroke-linejoin="round"/></svg></span><b>Points &amp; streak</b><span>Grimpe au classement.</span></div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="scene center" data-id="cta">
+    <div class="cta-glow"></div>
+    <div class="mark up d1" style="width:clamp(90px,13cqw,150px)"><span class="eye"></span><span class="M">M</span></div>
+    <h1 class="up d2" style="margin:2.5cqh 0 1.5cqh">Trouve ta boisson <span class="hl">près de toi</span></h1>
+    <p class="trust up d3">Gratuit · sans pub intrusive · sans traceur</p>
+    <div class="badges up d4" style="margin-top:3cqh">
+      <span class="store"><svg width="20" height="20" viewBox="0 0 24 24" fill="#f5f2ec"><path d="M16.4 12.9c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.8-.8-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7 2-1 2.8-2.1c.9-1.3 1.2-2.5 1.3-2.6-.1 0-2.5-1-2.5-3.7ZM14 5.9c.6-.8 1-1.9.9-3-.9 0-2 .6-2.7 1.4-.6.7-1.1 1.8-1 2.8 1 .1 2.1-.5 2.8-1.2Z"/></svg><span><small>Bientôt sur</small><b>App Store</b></span></span>
+      <span class="store"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M4 3.5 13.5 12 4 20.5c-.3-.2-.5-.6-.5-1V4.5c0-.4.2-.8.5-1Z" fill="#e67e22"/><path d="m16 9.2 2.6 1.5c.9.5.9 1.8 0 2.3L16 14.5 13 12l3-2.8Z" fill="#f0b840"/><path d="M4 3.5c.3-.2.7-.2 1.1 0l9.9 5.7L13.5 12 4 3.5Z" fill="#f5f2ec" opacity=".85"/><path d="M4 20.5 13.5 12l1.5 2.5-9.9 5.7c-.4.2-.8.2-1.1.3Z" fill="#c98b3a"/></svg><span><small>Bientôt sur</small><b>Google Play</b></span></span>
+    </div>
+  </section>
+
+  <div class="hud">
+    <div class="track" id="track"></div>
+    <div class="ctrl"><button id="playBtn" aria-label="Lecture / Pause"></button></div>
+  </div>
+</div></div>
+
+<script>
+(function(){
+  var scenes=[{id:"hook",dur:3400},{id:"logo",dur:3200},{id:"search",dur:4800},{id:"community",dur:4000},{id:"features",dur:4400},{id:"cta",dur:4600}];
+  var els={};scenes.forEach(function(s){els[s.id]=document.querySelector('.scene[data-id="'+s.id+'"]')});
+  var track=document.getElementById('track');
+  var segs=scenes.map(function(){var d=document.createElement('div');d.className='seg';var i=document.createElement('i');d.appendChild(i);track.appendChild(d);return i});
+  var idx=-1,t0=0,raf=null,paused=false,elapsed=0;
+  function show(n){scenes.forEach(function(s,k){els[s.id].classList.toggle('active',k===n)});
+    segs.forEach(function(i,k){i.style.transition='none';i.style.width=k<n?'100%':'0'});idx=n;t0=performance.now();elapsed=0}
+  function tick(now){if(paused){raf=requestAnimationFrame(tick);return}elapsed=now-t0;var d=scenes[idx].dur;var p=Math.min(1,elapsed/d);
+    segs[idx].style.transition='none';segs[idx].style.width=(p*100)+'%';if(elapsed>=d)show((idx+1)%scenes.length);raf=requestAnimationFrame(tick)}
+  function start(){show(0);cancelAnimationFrame(raf);raf=requestAnimationFrame(tick)}
+  var pb=document.getElementById('playBtn');
+  var pI='<svg width="15" height="15" viewBox="0 0 24 24" fill="#f5f2ec"><path d="M8 5v14l11-7z"/></svg>';
+  var qI='<svg width="15" height="15" viewBox="0 0 24 24" fill="#f5f2ec"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
+  pb.innerHTML=qI;pb.addEventListener('click',function(){paused=!paused;pb.innerHTML=paused?pI:qI;if(!paused)t0=performance.now()-elapsed});
+  start();
+})();
+</script>
