@@ -602,7 +602,8 @@ body.dark .toast{background:#f0f0f0;color:#111}
 /* Etiquette du magasin destination (nom + croix) au-dessus du pin */
 .leaflet-tooltip.mago-dest-tip{background:var(--app-bg);color:var(--s1);border:1.5px solid var(--border);border-radius:12px;box-shadow:0 5px 18px rgba(0,0,0,.3);font-family:'Space Grotesk',sans-serif;padding:6px 8px 6px 11px;display:flex;align-items:center;gap:8px;white-space:nowrap;max-width:230px}
 .leaflet-tooltip.mago-dest-tip::before{border-top-color:var(--border)}
-.mago-dest-name{font-size:13px;font-weight:800;overflow:hidden;text-overflow:ellipsis;max-width:170px}
+.mago-dest-name{font-size:13px;font-weight:800;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.mago-dest-dist{font-size:12px;font-weight:800;color:#16a34a;flex-shrink:0}
 .mago-dest-x{width:22px;height:22px;border-radius:50%;background:var(--bg2);color:var(--s1);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;cursor:pointer;flex-shrink:0;border:1px solid var(--border)}
 .mago-dest-x:active{transform:scale(.9)}
 .mago-cluster{display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--cc,#1a1714);color:#fff;font-weight:800;font-family:'Space Grotesk',sans-serif;border:3px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.25),0 0 0 5px color-mix(in srgb,var(--cc,#1a1714) 22%,transparent);transition:transform .15s}
@@ -8587,7 +8588,7 @@ function openExploreMap(opts){
         clearTimeout(_exploreTimer);
         _exploreTimer=setTimeout(function(){exploreLoadStores();},350);
       });
-      exploreMap.on("click",function(){ if(window._routeLayer){clearRoute();playSound("pop");} else {exploreHideCard();} });
+      exploreMap.on("click",exploreHideCard);
       if(typeof userLat==="number"&&userLat){
         L.circleMarker([userLat,userLng],{radius:7,color:"#fff",weight:2,fillColor:"#2e86c1",fillOpacity:1}).addTo(exploreMap);
       }
@@ -8982,8 +8983,27 @@ function goToStore(lat,lng){
   }
   showRouteToStore(lat,lng);
 }
-window._routeLayer=null;window._routeBanner=null;
+window._routeLayer=null;window._routeBanner=null;window._routeAnim=null;
+/* Anime le trace : le chemin se DESSINE de toi jusqu'au magasin en ~1,4 s
+   (easeInOut). setInterval (pas rAF) pour rester fiable meme si l'onglet ne
+   composite pas. Ligne double (bordure blanche + trait noir), bouts arrondis. */
+function animateRouteDraw(coords,group){
+  if(window._routeAnim){clearInterval(window._routeAnim);window._routeAnim=null;}
+  if(!coords||coords.length<2)return;
+  var white=L.polyline([],{color:"#ffffff",weight:10,opacity:.95,lineCap:"round",lineJoin:"round"}).addTo(group);
+  var dark=L.polyline([],{color:"#1a1714",weight:5,opacity:1,lineCap:"round",lineJoin:"round"}).addTo(group);
+  var total=coords.length,dur=1400,t0=Date.now();
+  window._routeAnim=setInterval(function(){
+    var k=Math.min(1,(Date.now()-t0)/dur);
+    var e=k<0.5?2*k*k:1-Math.pow(-2*k+2,2)/2; // easeInOutQuad
+    var n=Math.max(2,Math.round(e*total));
+    var part=coords.slice(0,n);
+    try{white.setLatLngs(part);dark.setLatLngs(part);}catch(err){}
+    if(k>=1){clearInterval(window._routeAnim);window._routeAnim=null;try{white.setLatLngs(coords);dark.setLatLngs(coords);}catch(err){}}
+  },33);
+}
 function clearRoute(){
+  if(window._routeAnim){clearInterval(window._routeAnim);window._routeAnim=null;}
   try{if(window._routeLayer&&exploreMap){exploreMap.removeLayer(window._routeLayer);}}catch(e){}
   try{if(window._navDestMarker&&exploreMap){exploreMap.removeLayer(window._navDestMarker);}}catch(e){}
   window._routeLayer=null;window._navDest=null;window._navDestMarker=null;
@@ -9009,26 +9029,6 @@ function showRouteToStore(lat,lng,store){
     openExploreMap({center:{lat:(lat+userLat)/2,lng:(lng+userLng)/2}});
   }
   toast("Calcul du chemin\u2026");
-  // Feedback INSTANTANE : un trait pointille a vol d'oiseau s'affiche tout de suite
-  // (percu comme fluide, "bim"), remplace par le vrai chemin pieton des que l'API repond.
-  (function(){
-    var _t=0;
-    var draw=function(){
-      if(!exploreMap){if(_t++<25){setTimeout(draw,120);}return;}
-      try{exploreMap.invalidateSize();}catch(e){}
-      var sz=null;try{sz=exploreMap.getSize();}catch(e){}
-      if((!sz||sz.x===0||sz.y===0)&&_t++<25){setTimeout(draw,120);return;}
-      // Retrait inline de l'ancien trace (SANS clearRoute, qui reinitialiserait
-      // _navDest et re-afficherait les pins).
-      try{if(window._routeLayer)exploreMap.removeLayer(window._routeLayer);}catch(e){}
-      var straight=[[userLat,userLng],[lat,lng]];
-      var g=L.layerGroup();
-      L.polyline(straight,{color:"#ffffff",weight:8,opacity:.85,dashArray:"1,12",lineCap:"round"}).addTo(g);
-      g.addTo(exploreMap);window._routeLayer=g;
-      try{exploreMap.fitBounds(L.latLngBounds(straight).pad(0.3),{animate:true,duration:.4});}catch(e){}
-    };
-    draw();
-  })();
   var url="https://routing.openstreetmap.de/routed-foot/route/v1/foot/"+userLng+","+userLat+";"+lng+","+lat+"?overview=full&geometries=geojson";
   fetch(url).then(function(r){return r.json();}).then(function(d){
     if(!d.routes||!d.routes[0])throw new Error("pas de route");
@@ -9045,17 +9045,17 @@ function showRouteToStore(lat,lng,store){
       try{if(window._routeLayer)exploreMap.removeLayer(window._routeLayer);}catch(e){}
       var rb0=document.getElementById("route-banner");if(rb0)rb0.remove();
       var coords=rt.geometry.coordinates.map(function(c){return [c[1],c[0]];});
-      // Trace propre facon Waze : ligne double aux bouts arrondis + depart/arrivee.
+      // Trace anime facon Waze : le chemin se DESSINE de toi jusqu'au magasin
+      // (~1,4 s) au lieu d'apparaitre d'un coup. Depart + arrivee marques.
       var group=L.layerGroup();
-      L.polyline(coords,{color:"#ffffff",weight:10,opacity:.95,lineCap:"round",lineJoin:"round"}).addTo(group);
-      L.polyline(coords,{color:"#1a1714",weight:5,opacity:1,lineCap:"round",lineJoin:"round"}).addTo(group);
       L.circleMarker([userLat,userLng],{radius:7,color:"#fff",weight:3,fillColor:"#2e86c1",fillOpacity:1}).addTo(group);
       var _destC=brandColor(window._navDest&&window._navDest.brand);
       var _destIni=(((window._navDest&&(window._navDest.brand||window._navDest.name))||"?").trim().charAt(0)||"?").toUpperCase();
       var _destName=(window._navDest&&window._navDest.name)?window._navDest.name:"Ce magasin";
+      var _distStr=rt.distance<1000?Math.round(rt.distance)+" m":(rt.distance/1000).toFixed(1)+" km";
       var _destMk=L.marker([lat,lng],{icon:L.divIcon({className:"",html:'<div class="mago-pin sure" style="--pc:'+_destC+';width:34px;height:44px"><div class="mago-pin-head" style="width:34px;height:34px;font-size:13px">'+_destIni+'</div><div class="mago-pin-tip"></div></div>',iconSize:[34,44],iconAnchor:[17,44]}),zIndexOffset:2000});
       // Etiquette au-dessus du pin : nom du magasin + petite croix pour annuler.
-      _destMk.bindTooltip('<span class="mago-dest-name">'+sanitize(_destName)+'</span><span class="mago-dest-x" role="button" tabindex="0" aria-label="Annuler l\'itinéraire" onclick="event.stopPropagation();clearRoute();playSound(\'pop\')">✕</span>',{permanent:true,direction:"top",offset:[0,-46],interactive:true,className:"mago-dest-tip"});
+      _destMk.bindTooltip('<span class="mago-dest-name">'+sanitize(_destName)+'</span><span class="mago-dest-dist">'+_distStr+'</span><span class="mago-dest-x" role="button" tabindex="0" aria-label="Annuler l\'itinéraire" onclick="event.stopPropagation();clearRoute();playSound(\'pop\')">✕</span>',{permanent:true,direction:"top",offset:[0,-46],interactive:true,className:"mago-dest-tip"});
       try{if(window._navDestMarker&&exploreMap)exploreMap.removeLayer(window._navDestMarker);}catch(e){}
       _destMk.addTo(exploreMap);
       window._navDestMarker=_destMk;
@@ -9067,7 +9067,9 @@ function showRouteToStore(lat,lng,store){
       // Cadrer TOUT le chemin A->B (comme Waze/Google Maps), en reservant de la
       // place pour la barre du haut (~150px) et la banniere/feuille du bas (~200px)
       // pour ne pas cacher le depart ou l'arrivee derriere les overlays.
-      try{exploreMap.fitBounds(L.latLngBounds(coords),{paddingTopLeft:[34,150],paddingBottomRight:[34,205],animate:true,duration:.55,maxZoom:17});}catch(e){}
+      try{exploreMap.fitBounds(L.latLngBounds(coords),{paddingTopLeft:[34,150],paddingBottomRight:[34,205],animate:true,duration:.45,maxZoom:17});}catch(e){}
+      // Le chemin se dessine progressivement de toi jusqu'au magasin.
+      animateRouteDraw(coords,group);
       var km=rt.distance/1000;
       var mins=Math.max(1,Math.round(rt.duration/60));
       var host=document.getElementById("explore-map-host");
