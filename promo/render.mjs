@@ -30,6 +30,7 @@ const OVERRIDE = `
   .stage-wrap{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;max-width:none!important;aspect-ratio:auto!important;height:100dvh!important}
   .stage{position:fixed!important;inset:0!important;border-radius:0!important}
   .ctrl,.soundtag{display:none!important}
+  button[aria-label^="Activer"],button[aria-label^="Couper"]{display:none!important}
 `;
 
 function hasFfmpeg() {
@@ -38,10 +39,15 @@ function hasFfmpeg() {
 }
 
 async function transcode(webm, mp4) {
+  const wav = path.join(OUT, 'magofeed-theme.wav');   // bande-son (make-music.mjs)
+  const hasAudio = fs.existsSync(wav);
+  const args = ['-y', '-i', webm];
+  if (hasAudio) args.push('-stream_loop', '-1', '-i', wav);   // boucle la musique sur la durée
+  args.push('-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18');
+  if (hasAudio) args.push('-map', '0:v', '-map', '1:a', '-c:a', 'aac', '-b:a', '192k', '-shortest');
+  args.push('-movflags', '+faststart', mp4);
   return new Promise((res, rej) => {
-    const ff = spawn('ffmpeg', ['-y', '-i', webm,
-      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18',
-      '-movflags', '+faststart', mp4], { stdio: 'ignore' });
+    const ff = spawn('ffmpeg', args, { stdio: 'ignore' });
     ff.on('close', c => c === 0 ? res() : rej(new Error('ffmpeg exit ' + c)));
   });
 }
