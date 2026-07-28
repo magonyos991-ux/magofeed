@@ -1149,7 +1149,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div style="padding:0 20px 20px;display:flex;flex-direction:column;gap:8px">
         <div style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Version</div>
-          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617s</div>
+          <div style="font-size:13px;font-weight:600;color:var(--s2)">1.1.0 · build 0617t</div>
         </div>
         <div onclick="window.open('https://instagram.com/magofeed.app','_blank')" style="background:var(--bg2);border-radius:16px;padding:14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer">
           <div style="font-size:14px;font-weight:600;color:var(--s1)">Instagram</div>
@@ -6946,6 +6946,7 @@ function toggleAdvFilters(){
 // liste + itineraire) — remplace la longue liste en file indienne.
 function openDrinkMapView(){
   if(!curSel)return;
+  window._exploreFromDrink=true;
   openExploreMap({drinkId:curSel.id,name:curSel.name,center:(typeof userLat==="number"&&userLat)?{lat:userLat,lng:userLng}:null});
 }
 // Recherche d'une ville depuis le champ "Magasins" : ouvre la carte et geocode.
@@ -8117,6 +8118,11 @@ function exploreCenterUser(){
   if(typeof userLat==="number"&&userLat){try{exploreMap.setView([userLat,userLng],16);}catch(e){}}
   else toast("Active ta position d'abord");
 }
+function exploreAddStore(){
+  if(exploreFilter&&typeof drinkLocate==="function"){drinkLocate();return;}
+  if(typeof openAddStoreForm==="function"){openAddStoreForm();return;}
+  toast("Ajout indisponible pour le moment");
+}
 function exploreToggleChip(name){
   window._exploreChips[name]=!window._exploreChips[name];
   renderExploreChips();
@@ -8203,6 +8209,7 @@ function openExploreMap(opts){
       '</div>'+
       '<div id="explore-city-results" style="position:absolute;top:calc(122px + env(safe-area-inset-top));left:14px;right:14px;z-index:1300"></div>'+
       '<div id="explore-map" style="flex:1"></div>'+
+      '<div onclick="exploreAddStore()" role="button" tabindex="0" aria-label="Ajouter un magasin" onkeydown="if(event.key===\'Enter\'){exploreAddStore()}" style="position:absolute;right:14px;bottom:calc(96px + env(safe-area-inset-bottom));z-index:1150;display:flex;align-items:center;gap:7px;padding:11px 15px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;box-shadow:0 6px 18px rgba(0,0,0,.28);cursor:pointer">+ Magasin</div>'+
       '<div id="explore-store-card" role="button" tabindex="0" style="display:none;position:absolute;bottom:calc(88px + env(safe-area-inset-bottom));left:14px;right:14px;background:var(--app-bg);border:1.5px solid var(--border);border-radius:18px;padding:12px 14px;align-items:center;gap:12px;box-shadow:0 8px 24px rgba(0,0,0,.22);cursor:pointer;z-index:1200"></div>'+
       '<div id="explore-status" style="position:absolute;bottom:calc(92px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--app-bg);border:1.5px solid var(--border);border-radius:999px;padding:8px 16px;font-size:12px;font-weight:700;color:var(--s1);box-shadow:0 4px 14px rgba(0,0,0,.18);white-space:nowrap;z-index:1100">Chargement\u2026</div>'+
       '<div id="explore-sheet"><div id="explore-sheet-head" onclick="exploreToggleSheet()" role="button" tabindex="0" aria-label="Ouvrir ou fermer la liste des magasins" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();exploreToggleSheet();}"><div id="explore-sheet-grip"></div><div style="display:flex;align-items:center;justify-content:space-between"><div id="explore-sheet-title" style="font-size:13.5px;font-weight:800;color:var(--s1)">Magasins autour de toi</div><div id="explore-sheet-chev" style="font-size:12px;font-weight:700;color:var(--s2);white-space:nowrap">Voir la liste \u25b2</div></div></div><div id="explore-sheet-list"></div></div>';
@@ -8246,6 +8253,9 @@ function closeExploreMap(){
   if(!host)return;
   host.classList.remove("in");
   setTimeout(function(){host.style.display="none";},280);
+  // Ouverte depuis une boisson : on revient a l'accueil, JAMAIS sur l'ancienne
+  // page produit encombree (que l'utilisateur ne doit plus voir).
+  if(window._exploreFromDrink){window._exploreFromDrink=false;try{show("home");}catch(e){}}
 }
 function exploreLoadStores(){
   if(!exploreMap)return;
