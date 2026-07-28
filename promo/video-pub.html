@@ -1,0 +1,516 @@
+<title>Magofeed — Vidéo publicitaire</title>
+<style>
+  :root{
+    --ink:#100e0c;         /* deepest ground   */
+    --ground:#1a1714;      /* brand ground     */
+    --ground2:#241f1a;     /* raised surface   */
+    --line:#3a332c;        /* warm hairline    */
+    --signal:#e67e22;      /* radar orange     */
+    --gold:#f0b840;        /* gold highlight   */
+    --gold-soft:#e8c17a;
+    --paper:#f5f2ec;       /* off-white        */
+    --mute:#8a817a;        /* warm grey        */
+    --good:#27ae60;
+    --bad:#e74c3c;
+    --shadow:0 30px 80px -20px rgba(0,0,0,.7);
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:
+      radial-gradient(120% 90% at 50% -10%, #241f1a 0%, var(--ground) 45%, var(--ink) 100%);
+    color:var(--paper);
+    font-family:var(--sans);
+    display:grid;
+    place-items:center;
+    min-height:100dvh;
+    overflow:hidden;
+    padding:16px;
+  }
+
+  /* ---------- 9:16 stage ---------- */
+  .stage-wrap{
+    position:relative;
+    height:min(94dvh, calc((100vw - 32px) * 16 / 9));
+    aspect-ratio:9/16;
+    max-width:100%;
+  }
+  .stage{
+    position:absolute;
+    inset:0;
+    border-radius:26px;
+    overflow:hidden;
+    background:
+      radial-gradient(130% 80% at 50% 8%, #26201b 0%, var(--ground) 46%, #0d0b09 100%);
+    box-shadow:var(--shadow), 0 0 0 1px rgba(255,255,255,.04) inset;
+    isolation:isolate;
+  }
+
+  /* faint radar grid living under everything */
+  .stage::before{
+    content:"";
+    position:absolute;
+    inset:-20%;
+    background:
+      repeating-radial-gradient(circle at 50% 44%, transparent 0 46px, rgba(230,126,34,.05) 46px 47px);
+    opacity:.5;
+    z-index:0;
+    -webkit-mask-image:radial-gradient(circle at 50% 44%, #000 40%, transparent 78%);
+            mask-image:radial-gradient(circle at 50% 44%, #000 40%, transparent 78%);
+  }
+  /* film grain / vignette */
+  .stage::after{
+    content:"";
+    position:absolute;inset:0;z-index:60;pointer-events:none;
+    background:radial-gradient(120% 90% at 50% 40%, transparent 55%, rgba(0,0,0,.45) 100%);
+  }
+
+  .scene{
+    position:absolute;
+    inset:0;
+    z-index:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    padding:9% 8%;
+    opacity:0;
+    visibility:hidden;
+    transition:opacity .55s ease, visibility .55s;
+  }
+  .scene.active{opacity:1;visibility:visible;transition:opacity .5s ease}
+
+  /* generic entrance atoms (play only while active) */
+  .up{transform:translateY(26px);opacity:0}
+  .scene.active .up{animation:up .8s cubic-bezier(.2,.8,.2,1) forwards}
+  @keyframes up{to{transform:none;opacity:1}}
+  .scene.active .d1{animation-delay:.12s}
+  .scene.active .d2{animation-delay:.28s}
+  .scene.active .d3{animation-delay:.46s}
+  .scene.active .d4{animation-delay:.66s}
+  .scene.active .d5{animation-delay:.9s}
+  .scene.active .d6{animation-delay:1.15s}
+
+  .eyebrow{
+    font-size:clamp(11px,2.9cqw,15px);
+    letter-spacing:.32em;
+    text-transform:uppercase;
+    color:var(--signal);
+    font-weight:700;
+  }
+  .kick{color:var(--mute);font-weight:600;letter-spacing:.02em;
+    font-size:clamp(15px,4.1cqw,21px);line-height:1.4;max-width:22ch}
+  h1{
+    font-weight:800;
+    letter-spacing:-.025em;
+    line-height:1.02;
+    text-wrap:balance;
+    font-size:clamp(30px,10.5cqw,58px);
+  }
+  .stage{container-type:size}
+  .hl{color:var(--gold)}
+  .sig{color:var(--signal)}
+
+  /* ===================================================== */
+  /* SCENE 1 — hook: rupture                               */
+  /* ===================================================== */
+  .rupture-badge{
+    display:inline-flex;align-items:center;gap:9px;
+    padding:8px 16px;border-radius:999px;
+    background:rgba(231,76,60,.12);
+    border:1px solid rgba(231,76,60,.45);
+    color:#f4a79f;font-weight:700;letter-spacing:.02em;
+    font-size:clamp(12px,3.2cqw,16px);
+  }
+  .rupture-badge .dot{width:8px;height:8px;border-radius:50%;background:var(--bad);
+    box-shadow:0 0 0 0 rgba(231,76,60,.6);animation:blip 1.4s ease-out infinite}
+  @keyframes blip{0%{box-shadow:0 0 0 0 rgba(231,76,60,.55)}70%{box-shadow:0 0 0 12px rgba(231,76,60,0)}100%{box-shadow:0 0 0 0 rgba(231,76,60,0)}}
+
+  .shelf{
+    display:flex;gap:12px;justify-content:center;margin-top:6cqh;
+  }
+  .bottle{
+    width:clamp(30px,10cqw,54px);height:clamp(78px,26cqw,132px);
+    border-radius:14px 14px 8px 8px;
+    position:relative;
+    background:linear-gradient(180deg,#2c2620,#201b16);
+    border:1px solid var(--line);
+    opacity:.35;
+    filter:grayscale(1);
+  }
+  .bottle::before{content:"";position:absolute;top:-11px;left:50%;transform:translateX(-50%);
+    width:34%;height:15px;border-radius:5px 5px 0 0;background:#2c2620;border:1px solid var(--line);border-bottom:none}
+  .bottle::after{content:"";position:absolute;inset:auto 0 18% 0;height:34%;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.05),transparent)}
+  .bottle.gone{opacity:.12}
+  .scene.active .bottle{animation:drain 2.4s ease forwards}
+  .bottle:nth-child(2){animation-delay:.15s}
+  .bottle:nth-child(3){animation-delay:.3s}
+  .bottle:nth-child(4){animation-delay:.45s}
+  .bottle:nth-child(5){animation-delay:.6s}
+  @keyframes drain{0%{opacity:.5;filter:grayscale(.4)}100%{opacity:.12;filter:grayscale(1)}}
+
+  /* ===================================================== */
+  /* SCENE 2 — logo reveal                                 */
+  /* ===================================================== */
+  .logo-lockup{display:flex;flex-direction:column;align-items:center;gap:5cqh}
+  .mark{
+    position:relative;
+    width:clamp(120px,42cqw,220px);
+    aspect-ratio:1;
+    border-radius:26%;
+    background:linear-gradient(160deg,#211c17,#141110);
+    border:1px solid rgba(255,255,255,.05);
+    box-shadow:0 24px 60px -18px rgba(0,0,0,.8), 0 0 0 1px rgba(230,126,34,.08);
+    display:grid;place-items:center;
+  }
+  .mark .M{
+    font-weight:800;
+    font-size:clamp(78px,30cqw,150px);
+    color:var(--paper);
+    letter-spacing:-.04em;
+    line-height:1;
+    margin-top:.14em;
+    font-family:var(--sans);
+  }
+  /* radar eye above the M */
+  .mark .eye{
+    position:absolute;
+    top:12%;left:50%;transform:translateX(-50%);
+    width:20%;aspect-ratio:1;border-radius:50%;
+    background:radial-gradient(circle,var(--gold) 0 26%, #7a5a1e 27% 40%, transparent 41%);
+  }
+  .mark .eye::before,.mark .eye::after{
+    content:"";position:absolute;inset:0;border-radius:50%;
+    border:2px solid rgba(240,184,64,.5);
+  }
+  .scene.active .mark .eye::before{animation:ping 2.2s ease-out infinite}
+  .scene.active .mark .eye::after{animation:ping 2.2s ease-out infinite .9s}
+  @keyframes ping{0%{transform:scale(1);opacity:.8}100%{transform:scale(3.4);opacity:0}}
+  .scene.active .mark{animation:pop .9s cubic-bezier(.18,.9,.2,1.2) both}
+  @keyframes pop{0%{transform:scale(.7) rotate(-4deg);opacity:0}100%{transform:none;opacity:1}}
+
+  .wordmark{font-weight:800;letter-spacing:-.02em;font-size:clamp(38px,13cqw,74px);line-height:1}
+  .tagline{color:var(--gold-soft);font-weight:600;font-size:clamp(15px,4.6cqw,24px);letter-spacing:.01em}
+
+  /* ===================================================== */
+  /* Phone mock (scenes 3-5)                               */
+  /* ===================================================== */
+  .phone{
+    width:min(70cqw,320px);
+    aspect-ratio:9/18.6;
+    border-radius:34px;
+    background:#0f0d0b;
+    border:1px solid rgba(255,255,255,.07);
+    box-shadow:var(--shadow),0 0 0 8px #050403, 0 0 0 9px rgba(255,255,255,.05);
+    position:relative;overflow:hidden;
+    display:flex;flex-direction:column;
+  }
+  .phone .notch{position:absolute;top:9px;left:50%;transform:translateX(-50%);
+    width:32%;height:16px;background:#050403;border-radius:0 0 12px 12px;z-index:5}
+  .app-top{padding:26px 16px 10px;display:flex;flex-direction:column;gap:9px;background:var(--ground);z-index:2}
+  .searchbar{
+    display:flex;align-items:center;gap:9px;
+    background:var(--ground2);border:1px solid var(--line);
+    border-radius:12px;padding:10px 12px;font-size:13px;color:var(--paper);text-align:left;
+  }
+  .searchbar svg{flex:0 0 auto}
+  .type-txt{white-space:nowrap;overflow:hidden;border-right:2px solid var(--signal)}
+  .scene.active .type-txt{animation:type 1.5s steps(9) .3s both, caret .7s step-end infinite}
+  @keyframes type{from{width:0}to{width:8.4ch}}
+  @keyframes caret{50%{border-color:transparent}}
+  .result-chip{align-self:flex-start;display:inline-flex;gap:7px;align-items:center;
+    background:rgba(39,174,96,.14);border:1px solid rgba(39,174,96,.4);color:#8ce0ac;
+    padding:5px 11px;border-radius:999px;font-size:12px;font-weight:700}
+
+  /* map area */
+  .map{position:relative;flex:1;background:
+      linear-gradient(0deg,#14110e,#1b1712);
+    overflow:hidden}
+  .map::before{content:"";position:absolute;inset:0;opacity:.5;
+    background:
+      repeating-linear-gradient(38deg, transparent 0 26px, rgba(255,255,255,.028) 26px 28px),
+      repeating-linear-gradient(-52deg, transparent 0 34px, rgba(255,255,255,.025) 34px 36px)}
+  .me{position:absolute;left:50%;top:56%;transform:translate(-50%,-50%);width:16px;height:16px;
+    border-radius:50%;background:var(--signal);box-shadow:0 0 0 4px rgba(230,126,34,.25);z-index:3}
+  .sweep{position:absolute;left:50%;top:56%;transform:translate(-50%,-50%);
+    width:230px;height:230px;border-radius:50%;
+    background:conic-gradient(from 0deg, rgba(230,126,34,.28), transparent 32%);
+    -webkit-mask:radial-gradient(circle,#000 0 49%,transparent 50%);
+            mask:radial-gradient(circle,#000 0 49%,transparent 50%);z-index:2}
+  .scene.active .sweep{animation:spin 2.6s linear infinite}
+  @keyframes spin{to{transform:translate(-50%,-50%) rotate(360deg)}}
+  .ring{position:absolute;left:50%;top:56%;transform:translate(-50%,-50%);border-radius:50%;
+    border:1px solid rgba(230,126,34,.3);z-index:1}
+  .scene.active .ring{animation:radiate 2.6s ease-out infinite}
+  @keyframes radiate{0%{width:20px;height:20px;opacity:.7}100%{width:280px;height:280px;opacity:0}}
+
+  .pin{position:absolute;z-index:4;transform:translate(-50%,-100%) scale(0);transform-origin:bottom center}
+  .pin .head{width:26px;height:26px;border-radius:50% 50% 50% 2px;transform:rotate(45deg);
+    background:var(--gold);box-shadow:0 6px 14px rgba(0,0,0,.5);display:grid;place-items:center}
+  .pin .head b{transform:rotate(-45deg);font-size:12px}
+  .pin .tag{position:absolute;bottom:118%;left:50%;transform:translateX(-50%);
+    background:var(--paper);color:#20140a;font-size:10px;font-weight:800;white-space:nowrap;
+    padding:3px 7px;border-radius:6px;box-shadow:0 6px 14px rgba(0,0,0,.4)}
+  .pin .tag::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);
+    border:5px solid transparent;border-top-color:var(--paper)}
+  .scene.active .pin{animation:drop .5s cubic-bezier(.2,1.4,.3,1) both}
+  .scene.active .pin.p1{animation-delay:.9s}.scene.active .pin.p2{animation-delay:1.25s}.scene.active .pin.p3{animation-delay:1.6s}
+  @keyframes drop{to{transform:translate(-50%,-100%) scale(1)}}
+
+  /* route line (scene 5) */
+  .route{position:absolute;inset:0;z-index:3}
+  .route path{fill:none;stroke:var(--signal);stroke-width:4;stroke-linecap:round;
+    stroke-dasharray:340;stroke-dashoffset:340;filter:drop-shadow(0 0 6px rgba(230,126,34,.5))}
+  .scene.active .route path{animation:draw 1.5s ease .5s forwards}
+  @keyframes draw{to{stroke-dashoffset:0}}
+
+  /* feature cards mini */
+  .feat-grid{display:grid;gap:12px;width:100%;max-width:26ch}
+  .feat{
+    display:flex;align-items:center;gap:13px;text-align:left;
+    background:var(--ground2);border:1px solid var(--line);
+    border-radius:16px;padding:14px 15px;
+  }
+  .feat .ic{flex:0 0 auto;width:42px;height:42px;border-radius:12px;display:grid;place-items:center;
+    background:rgba(230,126,34,.14);border:1px solid rgba(230,126,34,.3)}
+  .feat .ic svg{display:block}
+  .feat b{display:block;font-size:clamp(14px,3.9cqw,18px);font-weight:800;letter-spacing:-.01em}
+  .feat span{display:block;font-size:clamp(11px,3cqw,13px);color:var(--mute);margin-top:2px}
+
+  /* community confirm chips (scene 4) */
+  .confirm-stack{display:flex;flex-direction:column;gap:12px;width:100%;max-width:24ch}
+  .confirm-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:var(--ground2);border:1px solid var(--line);border-radius:14px;padding:12px 14px;text-align:left}
+  .confirm-row .who{display:flex;align-items:center;gap:10px;font-weight:700;font-size:13px}
+  .avatar{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:13px;color:#20140a}
+  .badge-ok{display:inline-flex;align-items:center;gap:5px;color:#8ce0ac;font-weight:800;font-size:12px}
+  .badge-ok svg{display:block}
+  .live-dot{width:8px;height:8px;border-radius:50%;background:var(--good);animation:blip2 1.4s infinite}
+  @keyframes blip2{0%{box-shadow:0 0 0 0 rgba(39,174,96,.5)}70%{box-shadow:0 0 0 9px rgba(39,174,96,0)}100%{box-shadow:0 0 0 0 rgba(39,174,96,0)}}
+
+  /* ===================================================== */
+  /* SCENE 6 — CTA                                         */
+  /* ===================================================== */
+  .cta-mark{width:clamp(74px,24cqw,120px);aspect-ratio:1;border-radius:26%;
+    background:linear-gradient(160deg,#211c17,#141110);display:grid;place-items:center;position:relative;
+    box-shadow:0 20px 50px -16px rgba(0,0,0,.8)}
+  .cta-mark .M{font-weight:800;font-size:clamp(48px,17cqw,86px);color:var(--paper);letter-spacing:-.04em;margin-top:.12em}
+  .cta-mark .eye{position:absolute;top:13%;left:50%;transform:translateX(-50%);width:20%;aspect-ratio:1;border-radius:50%;
+    background:radial-gradient(circle,var(--gold) 0 26%,#7a5a1e 27% 40%,transparent 41%)}
+  .badges{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+  .store{display:inline-flex;align-items:center;gap:9px;background:var(--ground2);border:1px solid var(--line);
+    border-radius:12px;padding:9px 15px;font-weight:700;font-size:13px;color:var(--paper)}
+  .store small{display:block;font-size:9px;color:var(--mute);font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+  .store b{font-size:14px;line-height:1.1}
+  .trust{color:var(--mute);font-size:clamp(11px,3.1cqw,14px);letter-spacing:.02em}
+  .cta-glow{position:absolute;inset:0;z-index:0;pointer-events:none;
+    background:radial-gradient(60% 40% at 50% 42%, rgba(230,126,34,.18),transparent 70%)}
+
+  /* ---------- progress + controls ---------- */
+  .hud{position:absolute;left:0;right:0;bottom:0;z-index:70;padding:14px 16px;
+    display:flex;align-items:center;gap:12px;
+    background:linear-gradient(0deg,rgba(0,0,0,.55),transparent)}
+  .track{flex:1;display:flex;gap:5px}
+  .seg{flex:1;height:3px;border-radius:3px;background:rgba(255,255,255,.16);overflow:hidden}
+  .seg i{display:block;height:100%;width:0;background:var(--gold);border-radius:3px}
+  .ctrl{display:flex;gap:8px}
+  .ctrl button{width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,.18);
+    background:rgba(20,17,14,.7);color:var(--paper);cursor:pointer;display:grid;place-items:center;
+    backdrop-filter:blur(6px);transition:transform .15s,border-color .15s}
+  .ctrl button:hover{transform:scale(1.08);border-color:var(--gold)}
+  .ctrl button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+  .brandtab{position:absolute;top:14px;left:16px;z-index:65;display:flex;align-items:center;gap:8px;
+    font-weight:800;letter-spacing:-.01em;font-size:14px;opacity:.9}
+  .brandtab .b-dot{width:9px;height:9px;border-radius:50%;background:var(--gold);
+    box-shadow:0 0 0 3px rgba(240,184,64,.18)}
+  .soundtag{position:absolute;top:15px;right:16px;z-index:65;font-size:11px;color:var(--mute);letter-spacing:.06em}
+
+  @media (prefers-reduced-motion: reduce){
+    .scene{transition:opacity .2s}
+    *{animation-duration:.001ms !important;animation-iteration-count:1 !important}
+  }
+</style>
+
+<div class="stage-wrap">
+  <div class="stage" id="stage">
+
+    <div class="brandtab"><span class="b-dot"></span>Magofeed</div>
+    <div class="soundtag">◍ pub · 22s</div>
+
+    <!-- ============ SCENE 1 : HOOK ============ -->
+    <section class="scene" data-id="hook">
+      <div class="rupture-badge up d1"><span class="dot"></span>En rupture</div>
+      <h1 class="up d2" style="margin-top:4cqh">Ta boisson préférée,<br><span class="sig">introuvable</span> partout ?</h1>
+      <p class="kick up d3" style="margin-top:3cqh">Tu fais 3 magasins. Rien. Encore.</p>
+      <div class="shelf up d4">
+        <span class="bottle"></span><span class="bottle"></span><span class="bottle"></span>
+        <span class="bottle"></span><span class="bottle"></span>
+      </div>
+    </section>
+
+    <!-- ============ SCENE 2 : LOGO ============ -->
+    <section class="scene" data-id="logo">
+      <div class="logo-lockup">
+        <div class="mark"><span class="eye"></span><span class="M">M</span></div>
+        <div>
+          <div class="wordmark up d2">Magofeed</div>
+          <div class="tagline up d3" style="margin-top:2cqh">Trouve ta boisson près de toi</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SCENE 3 : SEARCH + MAP ============ -->
+    <section class="scene" data-id="search">
+      <div class="eyebrow up d1">Cherche · Trouve</div>
+      <h1 class="up d2" style="margin:2.5cqh 0 3cqh;font-size:clamp(24px,8.2cqw,44px)">Quel magasin l'a<br><span class="hl">vraiment</span> en stock</h1>
+      <div class="phone up d3">
+        <div class="notch"></div>
+        <div class="app-top">
+          <div class="searchbar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#e67e22" stroke-width="2"/><path d="m20 20-3-3" stroke="#e67e22" stroke-width="2" stroke-linecap="round"/></svg>
+            <span class="type-txt">Mogu Mogu</span>
+          </div>
+          <span class="result-chip">✓ 3 magasins l'ont en stock</span>
+        </div>
+        <div class="map">
+          <div class="ring"></div><div class="sweep"></div><div class="me"></div>
+          <div class="pin p1" style="left:34%;top:34%"><div class="head"><b>🥤</b></div><div class="tag">Épicerie Kenza · 250 m</div></div>
+          <div class="pin p2" style="left:68%;top:44%"><div class="head"><b>🥤</b></div><div class="tag">Night Store · 480 m</div></div>
+          <div class="pin p3" style="left:52%;top:76%"><div class="head"><b>🥤</b></div><div class="tag">Le P'tit Marché · 700 m</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SCENE 4 : COMMUNITY / REAL-TIME ============ -->
+    <section class="scene" data-id="community">
+      <div class="eyebrow up d1"><span class="live-dot" style="display:inline-block"></span>&nbsp;En temps réel</div>
+      <h1 class="up d2" style="margin:2.5cqh 0 4cqh">Confirmé par<br>la <span class="hl">communauté</span></h1>
+      <div class="confirm-stack">
+        <div class="confirm-row up d3">
+          <span class="who"><span class="avatar" style="background:var(--gold)">L</span>Léa · il y a 4 min</span>
+          <span class="badge-ok"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#27ae60" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>En stock</span>
+        </div>
+        <div class="confirm-row up d4">
+          <span class="who"><span class="avatar" style="background:var(--signal)">Y</span>Yanis · il y a 12 min</span>
+          <span class="badge-ok"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#27ae60" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>En stock</span>
+        </div>
+        <div class="confirm-row up d5">
+          <span class="who"><span class="avatar" style="background:var(--gold-soft)">S</span>Sofia · il y a 20 min</span>
+          <span class="badge-ok"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#27ae60" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>Confirmé</span>
+        </div>
+      </div>
+      <p class="kick up d6" style="margin-top:3.5cqh">Pas « peut-être ». <span class="sig" style="font-weight:800">Vérifié.</span></p>
+    </section>
+
+    <!-- ============ SCENE 5 : FEATURES ============ -->
+    <section class="scene" data-id="features">
+      <div class="eyebrow up d1">Tout est dans l'app</div>
+      <h1 class="up d2" style="margin:2.5cqh 0 4cqh;font-size:clamp(26px,8.6cqw,46px)">Repère. Confirme.<br><span class="hl">Partage.</span></h1>
+      <div class="feat-grid">
+        <div class="feat up d3">
+          <span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 21s7-6.5 7-11a7 7 0 1 0-14 0c0 4.5 7 11 7 11Z" stroke="#e67e22" stroke-width="2"/><circle cx="12" cy="10" r="2.4" fill="#e67e22"/></svg></span>
+          <div><b>Itinéraire en 1 tap</b><span>Le tracé jusqu'au magasin, distance en mètres.</span></div>
+        </div>
+        <div class="feat up d4">
+          <span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="12" rx="2" stroke="#e67e22" stroke-width="2"/><path d="M7 6V5m4 1V5m4 1V5M7 10v4m4-4v4m4-4v4" stroke="#e67e22" stroke-width="2" stroke-linecap="round"/></svg></span>
+          <div><b>Scan code-barres</b><span>Une pépite ? Partage-la à la communauté.</span></div>
+        </div>
+        <div class="feat up d5">
+          <span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 3l2.5 5.2 5.5.8-4 3.9 1 5.6-5-2.7-5 2.7 1-5.6-4-3.9 5.5-.8L12 3Z" stroke="#e67e22" stroke-width="2" stroke-linejoin="round"/></svg></span>
+          <div><b>Points &amp; streak</b><span>Gagne des points, grimpe au classement.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SCENE 6 : CTA ============ -->
+    <section class="scene" data-id="cta">
+      <div class="cta-glow"></div>
+      <div class="cta-mark up d1"><span class="eye"></span><span class="M">M</span></div>
+      <h1 class="up d2" style="margin:4cqh 0 2cqh">Trouve ta boisson<br><span class="hl">près de toi</span></h1>
+      <p class="trust up d3">Gratuit · sans pub intrusive · sans traceur</p>
+      <div class="badges up d4" style="margin-top:4cqh">
+        <span class="store"><svg width="20" height="20" viewBox="0 0 24 24" fill="#f5f2ec"><path d="M16.4 12.9c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.8-.8-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7 2-1 2.8-2.1c.9-1.3 1.2-2.5 1.3-2.6-.1 0-2.5-1-2.5-3.7ZM14 5.9c.6-.8 1-1.9.9-3-.9 0-2 .6-2.7 1.4-.6.7-1.1 1.8-1 2.8 1 .1 2.1-.5 2.8-1.2Z"/></svg><span><small>Bientôt sur</small><b>App Store</b></span></span>
+        <span class="store"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M4 3.5 13.5 12 4 20.5c-.3-.2-.5-.6-.5-1V4.5c0-.4.2-.8.5-1Z" fill="#e67e22"/><path d="m16 9.2 2.6 1.5c.9.5.9 1.8 0 2.3L16 14.5 13 12l3-2.8Z" fill="#f0b840"/><path d="M4 3.5c.3-.2.7-.2 1.1 0l9.9 5.7L13.5 12 4 3.5Z" fill="#f5f2ec" opacity=".85"/><path d="M4 20.5 13.5 12l1.5 2.5-9.9 5.7c-.4.2-.8.2-1.1.3Z" fill="#c98b3a"/></svg><span><small>Bientôt sur</small><b>Google Play</b></span></span>
+      </div>
+      <div class="wordmark up d5" style="font-size:clamp(22px,7cqw,34px);margin-top:5cqh">Magofeed</div>
+    </section>
+
+    <!-- ---------- HUD ---------- -->
+    <div class="hud">
+      <div class="track" id="track"></div>
+      <div class="ctrl">
+        <button id="playBtn" aria-label="Lecture / Pause"></button>
+        <button id="replayBtn" aria-label="Rejouer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 1 1 2.3 5.6" stroke="#f5f2ec" stroke-width="2" stroke-linecap="round"/><path d="M4 5v4h4" stroke="#f5f2ec" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  var scenes = [
+    {id:"hook",       dur:3400},
+    {id:"logo",       dur:3200},
+    {id:"search",     dur:4800},
+    {id:"community",  dur:4000},
+    {id:"features",   dur:4400},
+    {id:"cta",        dur:4600}
+  ];
+  var els = {};
+  scenes.forEach(function(s){ els[s.id]=document.querySelector('.scene[data-id="'+s.id+'"]'); });
+
+  // build progress segments
+  var track = document.getElementById('track');
+  var segs = scenes.map(function(){
+    var seg=document.createElement('div'); seg.className='seg';
+    var i=document.createElement('i'); seg.appendChild(i); track.appendChild(seg);
+    return i;
+  });
+
+  var idx=-1, t0=0, raf=null, paused=false, elapsed=0;
+
+  function show(n){
+    scenes.forEach(function(s,k){ els[s.id].classList.toggle('active', k===n); });
+    // reset progress bars: past=full, current animating, future=empty
+    segs.forEach(function(i,k){ i.style.transition='none'; i.style.width = k<n?'100%':'0'; });
+    idx=n; t0=performance.now(); elapsed=0;
+  }
+
+  function tick(now){
+    if(paused){ raf=requestAnimationFrame(tick); return; }
+    elapsed = now - t0;
+    var d = scenes[idx].dur;
+    var p = Math.min(1, elapsed/d);
+    segs[idx].style.transition='none';
+    segs[idx].style.width = (p*100)+'%';
+    if(elapsed>=d){
+      var next=(idx+1)%scenes.length;
+      show(next);
+    }
+    raf=requestAnimationFrame(tick);
+  }
+
+  function start(){ show(0); cancelAnimationFrame(raf); raf=requestAnimationFrame(tick); }
+
+  // controls
+  var playBtn=document.getElementById('playBtn');
+  var playIco='<svg width="15" height="15" viewBox="0 0 24 24" fill="#f5f2ec"><path d="M8 5v14l11-7z"/></svg>';
+  var pauseIco='<svg width="15" height="15" viewBox="0 0 24 24" fill="#f5f2ec"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
+  playBtn.innerHTML=pauseIco;
+  playBtn.addEventListener('click',function(){
+    paused=!paused;
+    playBtn.innerHTML = paused?playIco:pauseIco;
+    if(!paused){ t0=performance.now()-elapsed; } // resume from where we paused
+  });
+  document.getElementById('replayBtn').addEventListener('click',start);
+
+  start();
+})();
+</script>
