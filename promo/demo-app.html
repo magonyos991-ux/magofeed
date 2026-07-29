@@ -1,0 +1,312 @@
+<title>Magofeed — Démo app (Mogu Mogu · Châtelet)</title>
+<style>
+  :root{
+    --bg:#efece6; --surface:#ffffff; --row:#f6f4f0; --line:#e2ddd4;
+    --ink:#1a1714; --muted:#8c857c; --muted2:#b4ac9f;
+    --active:#1a1714; --idle:#e6e2da; --idleText:#7b746b;
+    --good:#1f9d55; --goodBg:#e7f6ec; --goodLine:#bfe6cd;
+    --accent:#e67e22; --gold:#f0b840;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:#0b0b0d;font-family:var(--sans);display:grid;place-items:center;min-height:100dvh;overflow:hidden;padding:14px}
+  .stage-wrap{position:relative;height:min(94dvh,calc((100vw - 28px)*16/9));aspect-ratio:9/16;max-width:100%}
+  .stage{position:absolute;inset:0;border-radius:30px;overflow:hidden;container-type:size;background:var(--bg);color:var(--ink);
+    box-shadow:0 30px 80px -20px rgba(0,0,0,.7)}
+
+  /* iOS-like status bar */
+  .status{position:absolute;top:0;left:0;right:0;height:5.2cqh;z-index:30;display:flex;align-items:center;justify-content:space-between;
+    padding:0 7cqw;font-weight:700;font-size:2.6cqw;color:var(--ink)}
+  .status .r{display:flex;align-items:center;gap:1.4cqw}
+  .status .bars{display:flex;gap:.5cqw;align-items:flex-end;height:2.6cqw}
+  .status .bars i{width:.8cqw;background:var(--ink);border-radius:1px}
+  .status .bars i:nth-child(1){height:35%}.status .bars i:nth-child(2){height:55%}.status .bars i:nth-child(3){height:78%}.status .bars i:nth-child(4){height:100%}
+  .batt{width:6cqw;height:3cqw;border:1.4px solid var(--ink);border-radius:1.4px;position:relative;display:inline-block}
+  .batt::after{content:"";position:absolute;right:-1.6px;top:30%;height:40%;width:1.4px;background:var(--ink);border-radius:2px}
+  .batt i{position:absolute;inset:1.2px;width:78%;background:var(--ink);border-radius:1px}
+
+  /* screens */
+  .screen{position:absolute;inset:0;padding-top:5.2cqh;display:flex;flex-direction:column;opacity:0;visibility:hidden;
+    transform:translateX(6%);transition:opacity .32s ease, transform .32s ease, visibility .32s}
+  .screen.on{opacity:1;visibility:visible;transform:none}
+  .screen.back{transform:translateX(-6%)}
+  .body{flex:1;overflow:hidden;padding:0 5.6cqw}
+
+  h2.title{font-size:6.6cqw;font-weight:800;letter-spacing:-.02em;padding:1cqh 0 2cqh}
+  .hi{color:var(--muted);font-weight:600;font-size:4cqw;margin-top:.4cqh}
+
+  /* search pill */
+  .searchpill{display:flex;align-items:center;gap:2.6cqw;background:var(--surface);border:1.6px solid var(--line);
+    border-radius:999px;padding:3cqw 4.4cqw;font-size:4.2cqw;color:var(--muted)}
+  .searchpill.focus{border-color:var(--ink)}
+  .searchpill svg{flex:0 0 auto}
+  .qtext{color:var(--ink);font-weight:600;white-space:nowrap;overflow:hidden}
+  .caret{display:inline-block;width:2px;height:4.6cqw;background:var(--accent);vertical-align:-.6cqw;margin-left:1px;opacity:0}
+  .caret.blink{animation:bl .7s step-end infinite}
+  @keyframes bl{50%{opacity:0}}
+
+  /* tabs + chips */
+  .tabs{display:flex;gap:2cqw;background:var(--idle);border-radius:999px;padding:1.2cqw;margin:2cqh 0}
+  .tab{flex:1;text-align:center;padding:2.4cqw 0;border-radius:999px;font-weight:800;font-size:3.8cqw;color:var(--idleText)}
+  .tab.on{background:var(--active);color:#fff}
+  .chips{display:flex;gap:2.4cqw;margin:0 0 2cqh;overflow:hidden}
+  .chip{padding:2.4cqw 5cqw;border-radius:999px;background:var(--idle);color:var(--idleText);font-weight:800;font-size:3.6cqw;white-space:nowrap}
+  .chip.on{background:var(--active);color:#fff}
+
+  /* home quick chips (recent) */
+  .quick{display:flex;gap:2.4cqw;margin-top:2.4cqh}
+  .quick .chip{background:var(--surface);border:1.4px solid var(--line);color:var(--ink)}
+
+  /* map card on home */
+  .homemap{margin-top:3cqh;border-radius:20px;overflow:hidden;border:1.4px solid var(--line);position:relative;height:20cqh;background:
+    linear-gradient(0deg,#e9e5dd,#f1 eee6)}
+  .homemap{background:#e7e3da}
+  .homemap .streets{position:absolute;inset:0;opacity:.7;
+    background:repeating-linear-gradient(40deg,transparent 0 22px,rgba(0,0,0,.05) 22px 24px),
+               repeating-linear-gradient(-50deg,transparent 0 30px,rgba(0,0,0,.045) 30px 32px)}
+  .homemap .loc{position:absolute;left:5cqw;bottom:3.4cqw;background:var(--surface);border:1.4px solid var(--line);border-radius:999px;
+    padding:2cqw 3.6cqw;font-weight:800;font-size:3.4cqw;display:flex;align-items:center;gap:1.6cqw}
+
+  /* result rows (drinks) */
+  .rows{display:flex;flex-direction:column}
+  .row{display:flex;align-items:center;gap:4cqw;padding:3cqw 0;border-bottom:1.4px solid var(--line)}
+  .rphoto{width:15cqw;height:15cqw;border-radius:16px;display:grid;place-items:center;flex:0 0 auto}
+  .can{width:56%;height:74%;border-radius:16% 16% 22% 22%/10% 10% 14% 14%;position:relative;box-shadow:inset 0 -6px 10px rgba(0,0,0,.08)}
+  .can::before{content:"";position:absolute;top:-9%;left:22%;right:22%;height:12%;border-radius:3px;background:#c9c9cf}
+  .can .lbl{position:absolute;inset:26% 8% 18%;border-radius:6px;background:rgba(255,255,255,.75);display:grid;place-items:center;font-size:5cqw}
+  .rmeta{flex:1;min-width:0}
+  .rmeta b{display:block;font-size:4.4cqw;font-weight:800;letter-spacing:-.01em}
+  .rmeta span{display:block;font-size:3.4cqw;color:var(--muted);margin-top:.4cqh}
+  .chev{color:var(--muted2);font-size:5cqw;flex:0 0 auto}
+  .brandrow{background:var(--row);border:1.4px solid var(--line);border-radius:16px;padding:3.4cqw;margin-bottom:2cqh;border-bottom:1.4px solid var(--line)}
+
+  /* drink detail */
+  .dhead{display:flex;align-items:center;gap:2.6cqw;padding:0 0 1cqh}
+  .backbtn{width:10cqw;height:10cqw;border-radius:14px;background:var(--surface);border:1.4px solid var(--line);display:grid;place-items:center;font-size:4.6cqw;flex:0 0 auto}
+  .dhead b{font-size:5.4cqw;font-weight:800;letter-spacing:-.02em}
+  .dhero{display:flex;align-items:center;gap:4cqw;background:var(--surface);border:1.4px solid var(--line);border-radius:20px;padding:3.6cqw;margin-bottom:2.4cqh}
+  .dhero .rphoto{width:18cqw;height:18cqw}
+  .dhero .info b{font-size:5cqw;font-weight:800}
+  .dhero .info span{color:var(--muted);font-size:3.6cqw;display:block;margin-top:.6cqh}
+  .stars{color:var(--gold);font-weight:800}
+  .countline{display:flex;gap:1.6cqw;align-items:center;font-weight:800;font-size:3.6cqw;margin:.4cqh 0 2cqh;white-space:nowrap}
+  .countline .g{color:var(--good)}
+  .storelist{display:flex;flex-direction:column;gap:2.4cqw}
+  .store{display:flex;align-items:center;gap:3.4cqw;background:var(--surface);border:1.4px solid var(--line);border-radius:16px;padding:3.4cqw}
+  .store .pin{width:11cqw;height:11cqw;border-radius:12px;background:#fbe9d6;display:grid;place-items:center;font-size:5cqw;flex:0 0 auto}
+  .store .m{flex:1;min-width:0}
+  .store .m b{font-size:4.2cqw;font-weight:800;display:block}
+  .store .m span{font-size:3.3cqw;color:var(--muted);display:block;margin-top:.3cqh}
+  .badge{display:inline-flex;align-items:center;gap:1.4cqw;background:var(--goodBg);border:1.4px solid var(--goodLine);color:var(--good);
+    font-weight:800;font-size:3.2cqw;padding:1.4cqw 2.6cqw;border-radius:999px;white-space:nowrap}
+  .dist{font-weight:800;font-size:3.6cqw;color:var(--ink);flex:0 0 auto}
+
+  /* map screen */
+  .mapfull{position:absolute;inset:5.2cqh 0 0;background:#e7e3da;overflow:hidden}
+  .mapfull .streets{position:absolute;inset:0;opacity:.8;
+    background:repeating-linear-gradient(40deg,transparent 0 30px,rgba(0,0,0,.05) 30px 33px),
+               repeating-linear-gradient(-50deg,transparent 0 40px,rgba(0,0,0,.045) 40px 43px)}
+  .mapfull .me{position:absolute;left:32%;top:64%;width:5cqw;height:5cqw;border-radius:50%;background:#2b7fff;border:3px solid #fff;box-shadow:0 0 0 6px rgba(43,127,255,.25)}
+  .mapfull .dpin{position:absolute;left:63%;top:37%;transform:translate(-50%,-100%)}
+  .mapfull .dpin .h{width:11cqw;height:11cqw;border-radius:50% 50% 50% 2px;transform:rotate(45deg);background:var(--accent);display:grid;place-items:center;box-shadow:0 8px 18px rgba(0,0,0,.3)}
+  .mapfull .dpin .h b{transform:rotate(-45deg);font-size:5cqw}
+  .route{position:absolute;inset:0}
+  .route path{fill:none;stroke:#2b7fff;stroke-width:6;stroke-linecap:round;stroke-dasharray:520;stroke-dashoffset:520;filter:drop-shadow(0 1px 2px rgba(0,0,0,.2))}
+  .mapcard{position:absolute;left:4cqw;right:4cqw;bottom:11cqh;background:var(--surface);border:1.4px solid var(--line);border-radius:20px;padding:3.8cqw;box-shadow:0 14px 34px rgba(0,0,0,.18)}
+  .mapcard .top{display:flex;align-items:center;gap:3cqw}
+  .mapcard .top .pin{width:11cqw;height:11cqw;border-radius:12px;background:#fbe9d6;display:grid;place-items:center;font-size:5cqw;flex:0 0 auto}
+  .mapcard .top b{font-size:4.4cqw;font-weight:800;display:block}
+  .mapcard .top span{font-size:3.3cqw;color:var(--muted)}
+  .mapcard .go{margin-top:3cqw;display:flex;gap:2.6cqw}
+  .mapcard .go .btn{flex:1;text-align:center;background:var(--active);color:#fff;font-weight:800;font-size:3.8cqw;padding:3cqw 0;border-radius:14px}
+  .mapcard .go .btn.ghost{background:var(--surface);color:var(--ink);border:1.6px solid var(--ink)}
+
+  /* bottom nav */
+  .nav{position:absolute;left:0;right:0;bottom:0;height:9.5cqh;z-index:25;display:flex;align-items:center;justify-content:space-around;
+    background:rgba(246,244,240,.92);backdrop-filter:blur(8px);border-top:1.4px solid var(--line);padding-bottom:1.4cqh}
+  .nav a{display:flex;flex-direction:column;align-items:center;gap:.6cqh;color:var(--muted2);font-size:2.8cqw;font-weight:700}
+  .nav a.on{color:var(--ink)}
+  .nav a svg{display:block}
+
+  /* finger cursor */
+  .finger{position:absolute;z-index:60;width:14cqw;height:14cqw;left:50%;top:60%;pointer-events:none;
+    transition:left .55s cubic-bezier(.4,.1,.2,1), top .55s cubic-bezier(.4,.1,.2,1);will-change:left,top}
+  .finger .dot{position:absolute;inset:0;border-radius:50%;background:rgba(20,20,25,.28);border:2px solid rgba(255,255,255,.55)}
+  .finger.tap .dot{animation:tapd .32s ease}
+  @keyframes tapd{0%{transform:scale(1)}45%{transform:scale(.78)}100%{transform:scale(1)}}
+  .ripple{position:absolute;z-index:59;width:14cqw;height:14cqw;border-radius:50%;border:2px solid rgba(230,126,34,.6);opacity:0;pointer-events:none;transform:translate(-50%,-50%)}
+  .ripple.go{animation:rp .5s ease-out}
+  @keyframes rp{0%{opacity:.8;transform:translate(-50%,-50%) scale(.4)}100%{opacity:0;transform:translate(-50%,-50%) scale(1.8)}}
+
+  .brandtag{position:absolute;top:6.4cqh;right:5.6cqw;z-index:20;display:flex;align-items:center;gap:1.6cqw;font-weight:800;font-size:3.4cqw;color:var(--ink);opacity:.85}
+  .brandtag .d{width:2.4cqw;height:2.4cqw;border-radius:50%;background:var(--gold)}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="stage-wrap"><div class="stage" id="stage">
+
+  <div class="status">
+    <span>9:41</span>
+    <span class="r"><span class="bars"><i></i><i></i><i></i><i></i></span>5G<span class="batt"><i></i></span></span>
+  </div>
+
+  <!-- ============ HOME ============ -->
+  <section class="screen" id="home">
+    <div class="body">
+      <div class="hi">Bonjour 👋</div>
+      <h2 class="title">Que boit-on ?</h2>
+      <div class="searchpill" id="home-search">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#8c857c" stroke-width="2"/><path d="m20 20-3-3" stroke="#8c857c" stroke-width="2" stroke-linecap="round"/></svg>
+        Rechercher…
+      </div>
+      <div class="quick">
+        <span class="chip">Fanta Citron</span><span class="chip">Mogu Mogu</span><span class="chip">Prime</span>
+      </div>
+      <div class="homemap">
+        <div class="streets"></div>
+        <div class="loc">📍 Autour de moi · Châtelet</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SEARCH + RESULTS ============ -->
+  <section class="screen" id="search">
+    <div class="body">
+      <div class="dhead"><span class="backbtn">←</span><b style="font-size:6cqw">Recherche</b></div>
+      <div class="tabs"><div class="tab on">Boissons</div><div class="tab">Magasins</div><div class="tab">Joueurs</div></div>
+      <div class="searchpill focus" style="margin-bottom:2cqh">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#8c857c" stroke-width="2"/><path d="m20 20-3-3" stroke="#8c857c" stroke-width="2" stroke-linecap="round"/></svg>
+        <span class="qtext" id="qtext"></span><span class="caret" id="caret"></span>
+      </div>
+      <div class="chips"><span class="chip on">Tous</span><span class="chip">Soda</span><span class="chip">Ice Tea</span><span class="chip">Exotique</span></div>
+      <div class="rows" id="reslist" style="opacity:0;transition:opacity .3s">
+        <div class="brandrow"><div class="row" style="border:0;padding:0"><div class="rphoto" style="background:#efeae2"><div class="can" style="background:linear-gradient(#f2eee7,#e7e1d6)"><span class="lbl">🧃</span></div></div><div class="rmeta"><b>Toute la marque Mogu Mogu</b><span>10 boissons</span></div><span class="chev">›</span></div></div>
+        <div class="row" id="res-litchi"><div class="rphoto" style="background:#fdf0ef"><div class="can" style="background:linear-gradient(#ffd9e0,#ffb9c6)"><span class="lbl">🥤</span></div></div><div class="rmeta"><b>Mogu Mogu Litchi</b><span>Mogu Mogu · Exotique · ★ 4.5</span></div><span class="chev">›</span></div>
+        <div class="row"><div class="rphoto" style="background:#fdf3e0"><div class="can" style="background:linear-gradient(#ffe1a8,#ffca6a)"><span class="lbl">🥭</span></div></div><div class="rmeta"><b>Mogu Mogu Mangue</b><span>Mogu Mogu · Exotique · ★ 4.5</span></div><span class="chev">›</span></div>
+        <div class="row"><div class="rphoto" style="background:#fdeaea"><div class="can" style="background:linear-gradient(#ffc2c2,#ff9a9a)"><span class="lbl">🍓</span></div></div><div class="rmeta"><b>Mogu Mogu Fraise</b><span>Mogu Mogu · Exotique · ★ 4.4</span></div><span class="chev">›</span></div>
+        <div class="row"><div class="rphoto" style="background:#eef7ee"><div class="can" style="background:linear-gradient(#cdeecd,#a7dda7)"><span class="lbl">🥥</span></div></div><div class="rmeta"><b>Mogu Mogu Noix de Coco</b><span>Mogu Mogu · Exotique · ★ 4.4</span></div><span class="chev">›</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ DRINK DETAIL + STORES ============ -->
+  <section class="screen" id="detail">
+    <div class="body">
+      <div class="dhead"><span class="backbtn">←</span><b>Mogu Mogu Litchi</b></div>
+      <div class="dhero">
+        <div class="rphoto" style="background:#fdf0ef"><div class="can" style="background:linear-gradient(#ffd9e0,#ffb9c6)"><span class="lbl" style="font-size:7cqw">🥤</span></div></div>
+        <div class="info"><b>Mogu Mogu Litchi</b><span>Mogu Mogu · Exotique</span><span class="stars">★ 4.5</span></div>
+      </div>
+      <div class="countline"><span class="g">● 3 magasins · en stock</span><span style="color:var(--muted)">· Châtelet</span></div>
+      <div class="storelist">
+        <div class="store" id="store1"><span class="pin">🏪</span><div class="m"><b>Night Shop du Marché</b><span>Place du Marché · Châtelet</span></div><div style="text-align:right;display:flex;flex-direction:column;gap:1.2cqw;align-items:flex-end"><span class="badge">✓ En stock</span><span class="dist">240 m</span></div></div>
+        <div class="store"><span class="pin">🏪</span><div class="m"><b>K-Store</b><span>Rue de la Station · Châtelet</span></div><div style="text-align:right;display:flex;flex-direction:column;gap:1.2cqw;align-items:flex-end"><span class="badge">✓ En stock</span><span class="dist">500 m</span></div></div>
+        <div class="store"><span class="pin">🏪</span><div class="m"><b>Épicerie Neuve</b><span>Rue Neuve · Châtelet</span></div><div style="text-align:right;display:flex;flex-direction:column;gap:1.2cqw;align-items:flex-end"><span class="badge">✓ Confirmé</span><span class="dist">750 m</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MAP / ITINÉRAIRE ============ -->
+  <section class="screen" id="map">
+    <div class="mapfull">
+      <div class="streets"></div>
+      <svg class="route" viewBox="0 0 390 500" preserveAspectRatio="none"><path id="routepath" d="M125 320 C 150 250, 190 240, 210 200 S 240 150, 246 130"/></svg>
+      <div class="me"></div>
+      <div class="dpin"><div class="h"><b>🥤</b></div></div>
+      <div class="mapcard">
+        <div class="top"><span class="pin">🏪</span><div style="flex:1"><b>Night Shop du Marché</b><span>Place du Marché · 240 m</span></div><span class="badge">✓ En stock</span></div>
+        <div class="go"><span class="btn">🧭 Itinéraire</span><span class="btn ghost">Voir le magasin</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- bottom nav -->
+  <nav class="nav" id="nav">
+    <a id="nav-accueil"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Accueil</a>
+    <a id="nav-chercher" class="on"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>Chercher</a>
+    <a><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>Scanner</a>
+    <a><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-4.5-7-10a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 5.5-7 10-7 10Z"/></svg>Découvrir</a>
+    <a><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Profil</a>
+  </nav>
+
+  <div class="ripple" id="ripple"></div>
+  <div class="finger" id="finger"><div class="dot"></div></div>
+</div></div>
+
+<script>
+(function(){
+  var stage=document.getElementById('stage');
+  var finger=document.getElementById('finger'), ripple=document.getElementById('ripple');
+  var qtext=document.getElementById('qtext'), caret=document.getElementById('caret');
+  var reslist=document.getElementById('reslist');
+  var routepath=document.getElementById('routepath');
+  var navAccueil=document.getElementById('nav-accueil'), navChercher=document.getElementById('nav-chercher');
+  var screens={home:byId('home'),search:byId('search'),detail:byId('detail'),map:byId('map')};
+  function byId(i){return document.getElementById(i);}
+  var timers=[];
+  function at(ms,fn){ timers.push(setTimeout(fn,ms)); }
+  function clearAll(){ timers.forEach(clearTimeout); timers=[]; }
+
+  function show(name){
+    Object.keys(screens).forEach(function(k){
+      var el=screens[k]; if(k===name){el.classList.add('on');el.classList.remove('back');}
+      else {el.classList.remove('on'); el.classList.toggle('back', order(k)<order(name));}
+    });
+  }
+  function order(k){return {home:0,search:1,detail:2,map:3}[k];}
+
+  // finger placement uses % of stage
+  function moveFinger(px,py){ finger.style.left=px+'%'; finger.style.top=py+'%'; }
+  function tapAt(px,py){
+    moveFinger(px,py);
+    at(540,function(){
+      finger.classList.remove('tap'); void finger.offsetWidth; finger.classList.add('tap');
+      ripple.style.left=px+'%'; ripple.style.top=py+'%'; ripple.classList.remove('go'); void ripple.offsetWidth; ripple.classList.add('go');
+    });
+  }
+
+  var WORD='Mogu Mogu';
+  function typeWord(startMs){
+    qtext.textContent=''; caret.classList.add('blink');
+    for(var i=0;i<=WORD.length;i++){ (function(n){ at(startMs+n*90,function(){ qtext.textContent=WORD.slice(0,n); }); })(i); }
+  }
+
+  function run(){
+    clearAll();
+    // reset
+    show('home'); moveFinger(50,84); reslist.style.opacity='0'; qtext.textContent='';
+    routepath.style.transition='none'; routepath.style.strokeDashoffset='520';
+    navChercher.classList.add('on'); navAccueil.classList.remove('on');
+
+    // 1) HOME → tap search
+    at(300, function(){ moveFinger(50,26); });          // finger to search bar
+    tapAt(50,26);
+    // 2) SEARCH screen
+    at(1250, function(){ show('search'); moveFinger(50,60); });
+    // 3) type Mogu Mogu
+    typeWord(1700);
+    at(1700+WORD.length*90+250, function(){ caret.classList.remove('blink'); reslist.style.opacity='1'; });
+    // 4) tap first result (Mogu Mogu Litchi) ~ y 46%
+    at(3600, function(){ moveFinger(50,46); });
+    tapAt(50,46);
+    // 5) DETAIL screen
+    at(4650, function(){ show('detail'); });
+    // 6) tap first store / itinéraire ~ y 44%
+    at(6300, function(){ moveFinger(50,44); });
+    tapAt(50,44);
+    // 7) MAP screen + draw route
+    at(7350, function(){
+      show('map');
+      at(250,function(){ routepath.style.transition='stroke-dashoffset 1.5s ease'; routepath.style.strokeDashoffset='0'; });
+    });
+    // 8) tap Itinéraire button ~ y 88%
+    at(9600, function(){ moveFinger(38,88); });
+    tapAt(38,88);
+    // hold, then loop
+    at(12600, run);
+  }
+  window.__demoRestart=run;   // pour le rendu propre
+  run();
+})();
+</script>
