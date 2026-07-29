@@ -10,6 +10,7 @@ Tout le nécessaire pour teaser l'app avant sa sortie.
 | `video-pub-16x9.html` | Vidéo animée **16:9** (YouTube / fil Facebook) |
 | `bumper.html` | **Bumper 7 s** (accroche ultra-courte) |
 | `video-tiktok-edm.html` | Variante **TikTok EDM** (~19 s, visuels synchronisés au beat) |
+| `video-hook-8s.html` | Version **hook-first 8 s** (accroche dès l'image 1, sous-titres intégrés — pensée rétention) |
 | `GUIDE-PUBLICATION.md` | **Pas-à-pas** pour publier + outils d'auto-post |
 | `posters.html` | Gabarits des **visuels fixes** (story, carré, bannière) |
 | `kit-reseaux.md` | **Légendes + hashtags + plan de diffusion** prêts à coller |
