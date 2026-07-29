@@ -7158,6 +7158,17 @@ function openDrinkMapView(){
   window._exploreFromDrink=true;
   openExploreMap({drinkId:curSel.id,name:curSel.name,center:(typeof userLat==="number"&&userLat)?{lat:userLat,lng:userLng}:null});
 }
+// Depuis la carte d'une boisson : rouvre la FICHE produit (photo, formats, note,
+// partage) — car ouvrir une boisson va direct sur la carte, la fiche etait dure a
+// atteindre (il fallait un appui long).
+function openDrinkInfoFromMap(){
+  if(!exploreFilter||!curSel)return;
+  try{clearRoute();}catch(e){}
+  var host=document.getElementById("explore-map-host");
+  if(host){host.classList.remove("in");host.style.display="none";}
+  window._exploreFromDrink=false;
+  try{show("results");}catch(e){}
+}
 // Recherche d'une ville depuis le champ "Magasins" : ouvre la carte et geocode.
 function exploreCityFromSearch(q){
   if(!q)return;
@@ -8541,7 +8552,7 @@ function exploreSetHeader(shown,sure){
   var t=document.getElementById("explore-title"),sub=document.getElementById("explore-subtitle");
   if(exploreFilter){
     if(t)t.textContent=exploreFilter.name||"Boisson";
-    if(sub)sub.textContent=shown+" magasin"+(shown>1?"s":"")+(typeof sure==="number"?" · "+sure+" en stock":"");
+    if(sub)sub.textContent=shown+" magasin"+(shown>1?"s":"")+(typeof sure==="number"?" · "+sure+" en stock":"")+" · voir la fiche ›";
   }else{
     if(t)t.textContent="Magasins";
     if(sub)sub.textContent=shown?(shown+" autour de toi"):"autour de toi";
@@ -8641,7 +8652,7 @@ function openExploreMap(opts){
     host.innerHTML='<div style="position:relative;z-index:1250;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;background:linear-gradient(180deg,var(--app-bg),color-mix(in srgb,var(--app-bg) 90%,transparent) 74%,transparent)">'+
         '<div style="display:flex;align-items:center;gap:10px">'+
           '<div onclick="closeExploreMap()" role="button" tabindex="0" aria-label="Retour" onkeydown="if(event.key===\'Enter\'){closeExploreMap();}" style="width:40px;height:40px;border-radius:13px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:19px;color:var(--s1);cursor:pointer;flex-shrink:0">←</div>'+
-          '<div style="flex:1;min-width:0"><div id="explore-title" style="font-size:15px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Magasins</div><div id="explore-subtitle" style="font-size:11px;color:var(--s2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">autour de toi</div></div>'+
+          '<div onclick="openDrinkInfoFromMap()" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){openDrinkInfoFromMap();}" style="flex:1;min-width:0;cursor:pointer"><div id="explore-title" style="font-size:15px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Magasins</div><div id="explore-subtitle" style="font-size:11px;color:var(--s2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">autour de toi</div></div>'+
           '<div onclick="exploreToggleSearch()" role="button" tabindex="0" aria-label="Rechercher une ville" style="width:40px;height:40px;border-radius:13px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;flex-shrink:0">🌍</div>'+
           '<div onclick="exploreCenterUser()" role="button" tabindex="0" aria-label="Ma position" style="width:40px;height:40px;border-radius:13px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.2" stroke="var(--s1)" stroke-width="2"/><path d="M12 2v3.5M12 18.5V22M2 12h3.5M18.5 12H22" stroke="var(--s1)" stroke-width="2" stroke-linecap="round"/></svg></div>'+
         '</div>'+
@@ -9179,6 +9190,7 @@ function showRouteToStore(lat,lng,store){
       var mins=Math.max(1,Math.round(rt.duration/60));
       var _bp=(exploreFilter&&window._navDest)?getStorePrice(window._navDest,exploreFilter.drinkId):null;
       var _bpTxt=(_bp!=null&&_bp>0)?' · <span style="color:#16a34a;font-weight:800">'+_bp.toFixed(2).replace(/\.?0+$/,"")+'€</span>':'';
+      var _sid=String((window._navDest&&window._navDest.id)||"").replace(/'/g,"\\'");
       var host=document.getElementById("explore-map-host");
       if(host){
         var b=document.createElement("div");
@@ -9187,7 +9199,8 @@ function showRouteToStore(lat,lng,store){
         b.innerHTML='<div style="flex:1;min-width:0">'+
           '<div style="font-size:13px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(window._navDest?sanitize(window._navDest.name):"Itin\u00E9raire")+'</div>'+
           '<div style="font-size:12.5px;color:var(--s2);margin-top:2px">\uD83D\uDEB6 '+(km<1?Math.round(km*1000)+" m":km.toFixed(1)+" km")+' \u00b7 ~'+mins+' min \u00e0 pied'+_bpTxt+'</div></div>'+
-          '<div onclick="window.open(\'https://www.google.com/maps/dir/?api=1&travelmode=walking&destination='+lat+','+lng+'\',\'_blank\')" role="button" tabindex="0" style="padding:9px 13px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:11.5px;font-weight:800;color:var(--s1);cursor:pointer;white-space:nowrap">GPS \u2197</div>'+
+          '<div onclick="clearRoute();var h=document.getElementById(\'explore-map-host\');if(h){h.classList.remove(\'in\');h.style.display=\'none\';}if(typeof openStoreDetail===\'function\')openStoreDetail(\''+_sid+'\')" role="button" tabindex="0" aria-label="Voir ce qu\'il y a dans ce magasin" style="padding:9px 12px;border-radius:12px;background:var(--s1);color:var(--app-bg);font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap">D\u00e9tails</div>'+
+          '<div onclick="window.open(\'https://www.google.com/maps/dir/?api=1&travelmode=walking&destination='+lat+','+lng+'\',\'_blank\')" role="button" tabindex="0" style="padding:9px 11px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:11.5px;font-weight:800;color:var(--s1);cursor:pointer;white-space:nowrap">GPS \u2197</div>'+
           '<div onclick="clearRoute()" role="button" tabindex="0" aria-label="Fermer l\'itin\u00e9raire" style="width:32px;height:32px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--s2);cursor:pointer">\u2715</div>';
         host.appendChild(b);
       }
