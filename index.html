@@ -402,6 +402,16 @@ body.dark .gobtn.closed{background:var(--bg2);color:var(--s2)}
 .cfbtn.yes{background:#f0fdf4;border-color:#bbf7d0;color:#15803d}
 .cfbtn.no{background:#fef2f2;border-color:#fecaca;color:#b91c1c}
 .cfbtn.sig{background:var(--s1);color:var(--app-bg);border-color:var(--s1)}
+/* ── Store-detail drink row (refonte : lignes propres + pastille de statut) ── */
+.sd-row{display:flex;align-items:center;gap:12px;padding:13px 14px;cursor:pointer}
+.sd-row .store-ico{width:44px;height:44px}
+.sd-txt{flex:1;min-width:0}
+.sd-txt .store-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sd-pill{padding:4px 11px;border-radius:999px;font-size:10.5px;font-weight:800;white-space:nowrap;flex-shrink:0;letter-spacing:.01em}
+.sd-pill.ok{background:rgba(34,197,94,.14);color:#16a34a}
+body.dark .sd-pill.ok{color:#4ade80}
+.sd-pill.todo{background:var(--bg3);color:var(--s3)}
+.sd-chev{color:var(--s3);font-size:18px;flex-shrink:0;margin-left:-2px}
 
 /* ── External buttons ── */
 .extrow{display:flex;gap:10px;padding:10px 20px 4px}
@@ -7493,18 +7503,16 @@ function renderStoreDetail(){
   var storeIdStr=String(s.id);
   drinks.forEach(function(d){
     var confs=s.confirmations[d.id]||0;
+    var pill=confs>0
+      ? '<span class="sd-pill ok">✓ En stock</span>'
+      : '<span class="sd-pill todo">À confirmer</span>';
     var div=document.createElement("div");div.className="store-card";
     div.innerHTML=
-      '<div class="store-top" style="cursor:pointer" onclick="pick(DRINKS.find(function(x){return x.id==='+d.id+'}))">'+
+      '<div class="sd-row" onclick="pick(DRINKS.find(function(x){return x.id==='+d.id+'}))">'+
         '<div class="store-ico" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
-        '<div style="flex:1"><div class="store-name">'+d.name+'</div><div class="store-meta">'+d.cat+' · ★ '+d.stars+'</div></div>'+
-      '</div>'+
-      '<div class="comm-bar" id="comm-sd-'+storeIdStr+'-'+d.id+'">'+
-        '<span style="font-size:12px;font-weight:500;flex:1;color:var(--s2)">'+confs+' confirmation'+(confs>1?"s":"")+'</span>'+
-        '<div style="display:flex;gap:8px">'+
-          '<button class="cfbtn yes" onclick="event.stopPropagation();doConfirm(this,\''+storeIdStr+'\','+d.id+',1)">Oui</button>'+
-          '<button class="cfbtn no" onclick="event.stopPropagation();doConfirm(this,\''+storeIdStr+'\','+d.id+',-1)">Non</button>'+
-        '</div>'+
+        '<div class="sd-txt"><div class="store-name">'+d.name+'</div><div class="store-meta">'+d.cat+' · ★ '+d.stars+'</div></div>'+
+        pill+
+        '<span class="sd-chev">›</span>'+
       '</div>';
     listEl.appendChild(div);
   });
