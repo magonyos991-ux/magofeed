@@ -8005,6 +8005,73 @@ function osmRunImport(){
     playSound("err");
   });
 }
+
+/* ================================
+   AUTO-OSM — remplit les magasins TOUT SEUL autour de l'utilisateur.
+   Réutilise exactement la logique du bouton "Importer" (même requête,
+   même mapping, même dédoublonnage, même écriture via fbImportStores),
+   mais en silencieux, une seule fois par zone, et 100% fail-safe.
+   Interrupteur : AUTO_OSM = false pour tout désactiver.
+================================ */
+var AUTO_OSM=true;
+var _autoOsmBusy=false;
+var _autoOsmSeen=(function(){try{return JSON.parse(localStorage.getItem("magoAutoOsmSeen")||"{}");}catch(e){return {};}})();
+function autoOsmForArea(lat,lng,zoom){
+  try{
+    if(!AUTO_OSM||_autoOsmBusy)return;
+    if(typeof lat!=="number"||!lat)return;
+    if(zoom!=null&&zoom<12)return;                 // évite les bbox trop larges (pas de requête "monde")
+    var key=lat.toFixed(2)+","+lng.toFixed(2);     // ~1 km
+    var now=Date.now();
+    if(_autoOsmSeen[key]&&(now-_autoOsmSeen[key])<7*24*3600*1000)return; // 1×/semaine/zone
+    _autoOsmSeen[key]=now;
+    try{localStorage.setItem("magoAutoOsmSeen",JSON.stringify(_autoOsmSeen));}catch(e){}
+    _autoOsmBusy=true;
+    var km=2.5,dLat=km/111,dLng=km/(111*Math.cos(lat*Math.PI/180));
+    var bbox=(lat-dLat)+","+(lng-dLng)+","+(lat+dLat)+","+(lng+dLng);
+    var q='[out:json][timeout:40];(node["shop"~"^('+OSM_SHOP_TYPES+')$"]('+bbox+');way["shop"~"^('+OSM_SHOP_TYPES+')$"]('+bbox+'););out center 800;';
+    fetchWithTimeout("https://overpass-api.de/api/interpreter?data="+encodeURIComponent(q),45000)
+      .then(function(r){return r.json();})
+      .then(function(data){
+        var els=(data&&data.elements)||[];
+        var found=els.map(function(e){
+          var la=e.lat!=null?e.lat:(e.center&&e.center.lat);
+          var ln=e.lon!=null?e.lon:(e.center&&e.center.lon);
+          var name=e.tags&&(e.tags.name||e.tags["name:fr"]||e.tags.brand);
+          if(la==null||ln==null||!name)return null;
+          var gcat=guessStoreCat(name+" "+(e.tags.brand||""));
+          var chain=chainIdsFor(name,e.tags.brand);
+          var cd={drinks:[],dv:null,vs:null};
+          if(chain){cd.drinks=chain.ids.slice();cd.dv=chain.ids.slice();cd.vs="catalogue enseigne (auto)";}
+          else if(gcat){cd.drinks=brandIds(M4_CATS[gcat]||[]);}
+          else{cd.drinks=packDrinkIds();}
+          return {id:"o"+e.id,osm:e.id,name:name,emoji:osmShopEmoji(e.tags.shop),lat:la,lng:ln,hours:(e.tags.opening_hours||null),brand:(e.tags.brand||null),type:gcat?("épicerie "+gcat):null,drinks:cd.drinks,drinksVerified:cd.dv,verifiedSource:cd.vs};
+        }).filter(Boolean);
+        var news=found.filter(function(c){
+          return !(STORES||[]).some(function(s){
+            if(String(s.id)===c.id||String(s.id)===String(c.osm))return true;
+            if(typeof s.lat!=="number")return false;
+            var dLa=(s.lat-c.lat)*111000,dLo=(s.lng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
+            var dist=Math.sqrt(dLa*dLa+dLo*dLo);
+            return dist<60&&(normTxt(s.name)===normTxt(c.name)||fuzzyIncludes(c.name,s.name)||fuzzyIncludes(s.name,c.name));
+          });
+        });
+        if(!news.length){_autoOsmBusy=false;return;}
+        var persist=window.fbImportStores?window.fbImportStores(news,function(){}):Promise.resolve(0);
+        persist.then(function(){
+          news.forEach(function(c){
+            if(!(STORES||[]).some(function(s){return String(s.id)===c.id;})){
+              STORES.push({id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,brand:c.brand||"",type:c.type||"",drinks:(c.drinks||[]).slice(),drinksVerified:(c.drinksVerified||[]).slice(),verifiedSource:c.verifiedSource||null,confirmations:{}});
+            }
+          });
+          try{if(typeof exploreLoadStores==="function")exploreLoadStores();}catch(e){}
+          _autoOsmBusy=false;
+        }).catch(function(e){console.warn("autoOsm persist",e);_autoOsmBusy=false;});
+      })
+      .catch(function(e){console.warn("autoOsm",e);_autoOsmBusy=false;});   // fail-safe : rien ne casse
+  }catch(e){console.warn("autoOsm",e);_autoOsmBusy=false;}
+}
+
 function openAvatarPicker(){
   var host=document.getElementById("avatar-picker");
   if(!host){
@@ -8701,6 +8768,7 @@ function openExploreMap(opts){
         try{renderInStockArrows();}catch(e){}
         clearTimeout(_exploreTimer);
         _exploreTimer=setTimeout(function(){exploreLoadStores();},350);
+        try{var _c=exploreMap.getCenter();autoOsmForArea(_c.lat,_c.lng,exploreMap.getZoom());}catch(e){}
       });
       exploreMap.on("click",exploreHideCard);
       if(typeof userLat==="number"&&userLat){
@@ -8709,7 +8777,9 @@ function openExploreMap(opts){
     }
     if(window._exploreFocus){exploreMap.setView([window._exploreFocus.lat,window._exploreFocus.lng],17);}
     else exploreMap.setView([typeof userLat==="number"&&userLat?userLat:50.8466,typeof userLng==="number"&&userLng?userLng:4.3528],14);
-    setTimeout(function(){try{exploreMap.invalidateSize();}catch(e){}exploreLoadStores();},120);
+    setTimeout(function(){try{exploreMap.invalidateSize();}catch(e){}exploreLoadStores();
+      try{var _cc=exploreMap.getCenter();autoOsmForArea(_cc.lat,_cc.lng,exploreMap.getZoom());}catch(e){}
+    },120);
   }
   if(window.L){build();return;}
   var link=document.createElement("link");link.rel="stylesheet";link.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";document.head.appendChild(link);
