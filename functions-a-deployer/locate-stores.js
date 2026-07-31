@@ -21,8 +21,10 @@ const { getFirestore, GeoPoint } = require("firebase-admin/firestore");
 initializeApp();
 const db = getFirestore();
 
-// ── ADAPTE #1 : le nom de ta collection de magasins dans Firestore ──
-const STORES_COLLECTION = "stores"; // <-- mets le vrai nom (ex: "magasins", "shops"…)
+// ── Collection confirmée depuis ta base Firestore : "Stores" (S majuscule) ──
+// (Il existe aussi une collection "stores" en minuscule — vérifie laquelle l'app lit
+//  réellement avant de déployer ; ex. "Carrefour Ixelles" est dans "Stores".)
+const STORES_COLLECTION = "Stores";
 
 // Types OSM = mêmes que le bouton "Importer les magasins" de l'app
 const OSM_SHOP_TYPES =
