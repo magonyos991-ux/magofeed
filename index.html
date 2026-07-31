@@ -412,6 +412,23 @@ body.dark .gobtn.closed{background:var(--bg2);color:var(--s2)}
 body.dark .sd-stat.ok{color:#4ade80}
 .sd-stat.todo{color:var(--s3)}
 .sd-chev{color:var(--s3);font-size:20px;flex-shrink:0;margin-left:2px}
+/* ── Carte "mission" (rétention : incite à scanner/contribuer sur place) ── */
+.sd-mission{margin:8px 20px 2px;border-radius:18px;padding:14px 16px;position:relative;overflow:hidden;
+  background:linear-gradient(135deg,rgba(230,126,34,.13),rgba(240,184,64,.10));border:1px solid rgba(230,126,34,.28)}
+.sd-mission .top{display:flex;gap:12px;align-items:flex-start}
+.sd-mission .ic{font-size:26px;line-height:1;animation:sdpulse 2.4s ease-in-out infinite}
+@keyframes sdpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.16)}}
+.sd-mission b{display:block;font-size:14.5px;font-weight:800;color:var(--s1)}
+.sd-mission .desc{font-size:12px;color:var(--s2);margin-top:2px;line-height:1.4}
+.sd-mission .cta{margin-top:11px;display:flex;gap:8px}
+.sd-mission .btn{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:11px;border-radius:13px;border:none;
+  background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;cursor:pointer;font-family:inherit;transition:transform .12s}
+.sd-mission .btn.ghost{background:transparent;color:var(--s1);border:1.5px solid var(--border)}
+.sd-mission .btn:active{transform:scale(.95)}
+.sd-mission .prog{margin-top:11px;font-size:11px;font-weight:800;color:var(--s2);display:flex;align-items:center;gap:9px}
+.sd-mission .bar{flex:1;height:6px;border-radius:4px;background:rgba(0,0,0,.10);overflow:hidden}
+body.dark .sd-mission .bar{background:rgba(255,255,255,.13)}
+.sd-mission .bar i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#e67e22,#f0b840);transition:width .6s ease}
 
 /* ── External buttons ── */
 .extrow{display:flex;gap:10px;padding:10px 20px 4px}
@@ -1398,6 +1415,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div class="extbtn" id="sd-waze">Waze</div>
         <div class="extbtn" id="sd-share" onclick="shareStore()" role="button" tabindex="0" aria-label="Partager ce magasin" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();shareStore();}"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Partager</div>
       </div>
+      <div id="sd-mission" class="sd-mission"></div>
       <div style="padding:16px 20px 0">
         <div class="searchbox" style="cursor:text;margin-bottom:12px">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--s3)" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="var(--s3)" stroke-width="2" stroke-linecap="round"/></svg>
@@ -7472,6 +7490,31 @@ function resolveStoreAddress(s){
 function storeIsPartner(s){
   return !!(s&&s.verifiedSource&&String(s.verifiedSource).indexOf("photos")!==-1);
 }
+/* Carte "mission" en haut de l'écran magasin : incite à contribuer (scan) et
+   montre la progression (points / niveau) -> rétention. */
+function renderStoreMission(){
+  var el=document.getElementById("sd-mission");if(!el)return;
+  var pts=(window.userStats&&Number(userStats.pts))||0;
+  var msgs=[
+    "Scanne une boisson que tu vois en rayon 📷 — tu remplis la carte et tu gagnes des points.",
+    "Tu vois une pépite pas encore listée ? Scanne-la, la commu te remerciera 🙌",
+    "Chaque scan te fait grimper au classement 🔥 et aide tout le monde à la trouver.",
+    "2 secondes pour scanner = des points pour toi ⭐ et une carte plus fiable pour tous."
+  ];
+  var msg=msgs[Math.floor(Date.now()/30000)%msgs.length];
+  var prog='<div class="prog">⭐ '+pts+' pts</div>';
+  try{
+    var lv=levelInfo(pts);
+    if(lv&&lv.next){
+      var pct=Math.max(4,Math.min(100,Math.round((pts-lv.floor)/(lv.next-lv.floor)*100)));
+      prog='<div class="prog">⭐ '+pts+' pts<span class="bar"><i style="width:'+pct+'%"></i></span>encore '+(lv.next-pts)+' → '+(lv.nextName||"niveau +")+'</div>';
+    }
+  }catch(e){}
+  el.innerHTML=
+    '<div class="top"><span class="ic">🎯</span><div><b>Tu es sur place ?</b><div class="desc">'+msg+'</div></div></div>'+
+    '<div class="cta"><button class="btn" onclick="navTo(\'scan\')">📷 Scanner une boisson</button></div>'+
+    prog;
+}
 function renderStoreDetail(){
   var s=curStoreDetail;if(!s)return;
   document.getElementById("sd-emoji").innerHTML=storeIconHTML(s);
@@ -7487,6 +7530,7 @@ function renderStoreDetail(){
     (dist?'<span class="rbadge">'+dist+'</span>':"");
   var gmaps=document.getElementById("sd-gmaps");if(gmaps)gmaps.onclick=function(){goToStore(s.lat,s.lng);};
   var waze=document.getElementById("sd-waze");if(waze)waze.onclick=function(){window.open("https://waze.com/ul?ll="+s.lat+","+s.lng+"&navigate=yes","_blank");};
+  try{renderStoreMission();}catch(e){}
 
   var drinkIds=(s.drinks||[]).map(Number);
   var allDrinks=DRINKS.filter(function(d){return drinkIds.indexOf(d.id)!==-1;});
