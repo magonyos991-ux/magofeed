@@ -1101,6 +1101,14 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div class="stat-card"><div class="stat-num" id="stat-pts">0</div><div class="stat-lbl" data-i18n="ptsLabel">Points</div></div>
       </div>
       <div id="streak-pill" style="display:flex;align-items:center;justify-content:center;gap:7px;margin:0 20px 6px;padding:10px 14px;background:var(--bg2);border-radius:14px"></div>
+      <div onclick="show('rewards')" role="button" tabindex="0" aria-label="À quoi servent mes points" onkeydown="if(event.key==='Enter'){show('rewards');}" style="display:flex;align-items:center;gap:12px;margin:6px 20px 4px;padding:14px 16px;background:linear-gradient(135deg,#fff3e0,#ffe8cc);border:1.5px solid #f0b840;border-radius:16px;cursor:pointer">
+        <span style="font-size:24px">🏆</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px;font-weight:800;color:#7a4a10">À quoi servent mes points ?</div>
+          <div style="font-size:11.5px;font-weight:600;color:#9a6a2a;margin-top:1px">Niveau, avantages, classement & récompenses</div>
+        </div>
+        <span style="font-size:16px;color:#b45309">›</span>
+      </div>
       <div style="padding:8px 20px 10px" class="t-section" id="t-leaderboard">Classement</div>
       <div id="leaderboard-list" style="padding:0 20px 20px"></div>
       <div style="padding:8px 20px 10px" class="t-section">Boissons favorites</div>
@@ -1113,6 +1121,19 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div id="activity-list">
         <div style="padding:24px;text-align:center;font-size:13px;font-weight:500" class="c3" id="t-noact">Aucune activité pour l'instant</div>
       </div>
+    </div>
+  </div>
+
+  <!-- RÉCOMPENSES / À QUOI SERVENT LES POINTS -->
+  <div id="s-rewards" class="screen">
+    <div style="flex:1;overflow-y:auto">
+      <div style="padding:50px 20px 16px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="back-ico" onclick="show('profile')">←</div>
+          <span class="t-section">Récompenses</span>
+        </div>
+      </div>
+      <div id="rewards-body" style="padding:0 20px 30px"></div>
     </div>
   </div>
 
@@ -3692,7 +3713,7 @@ function refreshLocation(cb){
 /* ================================
    NAVIGATION
 ================================ */
-var NAV_SCREENS=["home","search","results","scan","discover","profile","settings","privacy","terms","storedetail","admin","userprofile"];
+var NAV_SCREENS=["home","search","results","scan","discover","profile","rewards","settings","privacy","terms","storedetail","admin","userprofile"];
 /* ================================
    NAVIGATION "COMME LES APPS PRO"
    - Les 5 onglets (barre du bas) sont des racines : y aller vide la pile.
@@ -3731,6 +3752,7 @@ function show(s){
 }
 function _showRaw(s){
   if(s==="profile"){try{updateProfileStats();}catch(e){}}
+  if(s==="rewards"){try{renderRewards();}catch(e){}}
   if(s==="home"){try{renderMissions();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}}
   if(s!=="scan"&&scanActive)stopScan();
   var target=document.getElementById("s-"+s);
@@ -3974,8 +3996,9 @@ function renderLeaderboard(){
     var row=document.createElement("div");
     row.setAttribute("role","listitem");
     row.style.cssText="display:flex;align-items:center;gap:12px;padding:9px 0"+(i<leaderboardRows.length-1?";border-bottom:1px solid var(--border)":"");
+    var rlv=levelInfo(r.points||0),rcol=levelPseudoColor(rlv.idx);
     row.innerHTML='<div style="width:26px;text-align:center;font-size:'+(i<3?"16px":"12px")+';font-weight:800;color:var(--s2);flex-shrink:0">'+(i<3?medals[i]:(i+1))+'</div>'+
-      '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:'+(isMe?"800":"600")+';color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(r.pseudo)+(isMe?' <span style="font-size:11px;font-weight:700;color:var(--s2)">'+((LANGS[curLang]||LANGS.fr).me)+'</span>':"")+(r.streak>=2?' <span style="font-size:11px" title="'+r.streak+' jours d\'affil\u00E9e">\uD83D\uDD25'+r.streak+'</span>':"")+'</div>'+
+      '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:'+(isMe?"800":"600")+';color:'+(rcol||"var(--s1)")+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span title="'+sanitize(rlv.name)+'">'+rlv.emoji+'</span> '+sanitize(r.pseudo)+(isMe?' <span style="font-size:11px;font-weight:700;color:var(--s2)">'+((LANGS[curLang]||LANGS.fr).me)+'</span>':"")+(r.streak>=2?' <span style="font-size:11px" title="'+r.streak+' jours d\'affil\u00E9e">\uD83D\uDD25'+r.streak+'</span>':"")+'</div>'+
       '<div style="font-size:12.5px;font-weight:700;color:var(--s1);flex-shrink:0">'+r.points+' pts</div>';
     wrap.appendChild(row);
   });
@@ -4064,6 +4087,98 @@ function levelInfo(pts){
   var next=LEVELS[i+1]||null;
   return{idx:i,name:LEVELS[i][1],emoji:LEVELS[i][2],floor:LEVELS[i][0],next:next?next[0]:null,nextName:next?next[1]:null};
 }
+/* ================================
+   RECOMPENSES — a quoi servent les points
+   Les points ne sont plus decoratifs : chaque niveau debloque un AVANTAGE
+   reel et visible (couleur de pseudo, titre affiche partout, coche de
+   confiance). On expose aussi honnetement le classement, le statut de
+   confiance, et la feuille de route des recompenses partenaires (jamais
+   promise tant qu'elle n'existe pas).
+================================ */
+// Avantage concret par niveau (index = niveau atteint). Cosmetique mais REEL.
+var LEVEL_PERKS=[
+  "Toutes les fonctions de base de Magofeed",
+  "Pseudo bronze + apparition au classement des contributeurs",
+  "Anneau doré autour de ton avatar",
+  "Ton badge de niveau affiché au classement, vu de toute la communauté",
+  "Pseudo argent — visible par toute la communauté",
+  "Pseudo or + coche de confiance ✓ sur ton profil",
+  "Pseudo Légende doré ✨ — le sommet de Magofeed"
+];
+// Couleur de pseudo debloquee selon le niveau (lisible en clair ET sombre).
+function levelPseudoColor(idx){
+  return ["","#b0763a","#b0763a","#b0763a","#9aa1aa","#d19a1e","#d19a1e"][idx]||"";
+}
+// Statut de confiance : base sur les vraies contributions validees.
+// (La ponderation cote serveur — anti-triche — se branchera dessus plus tard.)
+function trustLevel(){
+  var da=userStats.discAccepted||0,cf=userStats.confirms||0,score=da*3+cf;
+  if(score>=60)return{key:3,name:"Contributeur de référence",emoji:"🛡️",color:"#16a34a"};
+  if(score>=20)return{key:2,name:"Contributeur de confiance",emoji:"🤝",color:"#0ea5e9"};
+  if(score>=5) return{key:1,name:"Contributeur actif",emoji:"🌱",color:"#65a30d"};
+  return{key:0,name:"Nouveau contributeur",emoji:"👋",color:"var(--s3)"};
+}
+function myLeaderboardRank(){
+  if(!leaderboardRows||!leaderboardRows.length)return null;
+  var myUid=window._fbUser?window._fbUser.uid:null;
+  for(var i=0;i<leaderboardRows.length;i++){if(myUid&&leaderboardRows[i].uid===myUid)return i+1;}
+  return null; // hors top 10
+}
+function renderRewards(){
+  var host=document.getElementById("rewards-body");if(!host)return;
+  var pts=userStats.pts||0,lv=levelInfo(pts);
+  var pct=lv.next?Math.min(100,Math.round((pts-lv.floor)/(lv.next-lv.floor)*100)):100;
+  var toNext=lv.next?(lv.next-pts):0;
+  var tr=trustLevel(),rank=myLeaderboardRank();
+  var h="";
+  // 1) Ton niveau + progression
+  h+='<div style="background:linear-gradient(135deg,#1a1714,#3a2c1e);border-radius:20px;padding:20px;color:#fff;margin-bottom:16px">'+
+    '<div style="display:flex;align-items:center;gap:12px">'+
+      '<div style="font-size:38px;line-height:1">'+lv.emoji+'</div>'+
+      '<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:700;opacity:.75">Niveau '+(lv.idx+1)+'</div>'+
+        '<div style="font-size:19px;font-weight:800">'+sanitize(lv.name)+'</div></div>'+
+      '<div style="text-align:right"><div style="font-size:22px;font-weight:800;color:#f0b840">'+pts+'</div><div style="font-size:10.5px;opacity:.75">points</div></div>'+
+    '</div>'+
+    (lv.next?('<div style="margin-top:14px"><div style="height:9px;background:rgba(255,255,255,.15);border-radius:99px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:linear-gradient(90deg,#e67e22,#f0b840);border-radius:99px"></div></div>'+
+      '<div style="font-size:11.5px;opacity:.85;margin-top:7px">Plus que <b>'+toNext+' points</b> pour devenir <b>'+sanitize(lv.nextName)+'</b></div></div>')
+     :'<div style="font-size:12px;opacity:.85;margin-top:12px">🌠 Tu es au sommet — merci pour tout ce que tu apportes à la communauté.</div>')+
+  '</div>';
+  // 2) Avantages debloques par niveau (#1 deblocages)
+  h+='<div class="t-section" style="padding:6px 0 10px">🎁 Tes avantages</div>';
+  h+='<div style="background:var(--bg2);border-radius:16px;overflow:hidden;margin-bottom:16px">';
+  LEVELS.forEach(function(L,i){
+    var got=lv.idx>=i;
+    var col=levelPseudoColor(i);
+    h+='<div style="display:flex;align-items:center;gap:11px;padding:12px 14px;'+(i?'border-top:1px solid var(--border);':'')+(got?'':'opacity:.5')+'">'+
+      '<div style="font-size:20px;width:26px;text-align:center">'+(got?L[2]:'🔒')+'</div>'+
+      '<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:800;color:'+(got&&col?col:'var(--s1)')+'">'+sanitize(L[1])+' <span style="font-weight:600;color:var(--s3)">· '+L[0]+' pts</span></div>'+
+        '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:1px">'+sanitize(LEVEL_PERKS[i]||"")+'</div></div>'+
+      (got?'<span style="font-size:11px;font-weight:800;color:#16a34a">✓</span>':'')+
+    '</div>';
+  });
+  h+='</div>';
+  // 3) Statut de confiance (#2 reputation — partie visible)
+  h+='<div class="t-section" style="padding:6px 0 10px">'+tr.emoji+' Confiance</div>';
+  h+='<div style="background:var(--bg2);border-radius:16px;padding:15px;margin-bottom:16px">'+
+    '<div style="display:flex;align-items:center;gap:10px"><span style="font-size:22px">'+tr.emoji+'</span>'+
+      '<div style="flex:1"><div style="font-size:13.5px;font-weight:800;color:'+tr.color+'">'+tr.name+'</div>'+
+      '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:1px">'+(userStats.discAccepted||0)+' découverte(s) acceptée(s) · '+(userStats.confirms||0)+' confirmation(s)</div></div></div>'+
+    '<div style="font-size:11px;line-height:1.55;color:var(--s3);margin-top:10px">Plus tu contribues avec des infos justes, plus ta parole compte. Bientôt, tes ajouts seront validés plus vite grâce à ta réputation.</div>'+
+  '</div>';
+  // 4) Classement (#3)
+  h+='<div class="t-section" style="padding:6px 0 10px">📊 Classement</div>';
+  h+='<div onclick="show(\'profile\')" role="button" tabindex="0" style="background:var(--bg2);border-radius:16px;padding:15px;margin-bottom:16px;cursor:pointer">'+
+    '<div style="font-size:13.5px;font-weight:800;color:var(--s1)">'+(rank?('Tu es '+(rank===1?'🥇 1er':rank+'e')+' au classement !'):'Grimpe dans le classement des contributeurs')+'</div>'+
+    '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:3px">'+(rank?'Continue à contribuer pour garder ta place.':'Contribue pour entrer dans le top 10.')+' Bientôt : classements mensuels et par ville. ›</div>'+
+  '</div>';
+  // 5) Recompenses partenaires — ROADMAP HONNETE (#4)
+  h+='<div class="t-section" style="padding:6px 0 10px">🎉 Bientôt : récompenses</div>';
+  h+='<div style="background:linear-gradient(135deg,#fff3e0,#ffe8cc);border:1.5px solid #f0b840;border-radius:16px;padding:15px">'+
+    '<div style="font-size:12.5px;line-height:1.65;color:#7a4a10;font-weight:600">Quand des marques de boissons rejoindront Magofeed, les <b>meilleurs contributeurs seront les premiers récompensés</b> (échantillons, avant-premières, réductions).</div>'+
+    '<div style="font-size:11px;line-height:1.5;color:#9a6a2a;margin-top:8px">🤝 On te promet une seule chose : <b>rien de faux</b>. Aucune récompense ne sera annoncée tant qu\'elle n\'existe pas vraiment. Tes points, eux, sont déjà en train de s\'accumuler.</div>'+
+  '</div>';
+  host.innerHTML=h;
+}
 function updateProfileStats(){
   try{checkBadges();}catch(e){}
   document.getElementById("stat-signals").textContent=userStats.signals;
@@ -4090,6 +4205,7 @@ function updateProfileStats(){
     '</div>';
   }
   renderBadges();
+  try{applyPseudoDisplays();}catch(e){} // couleur/anneau de pseudo debloques suivent le niveau
   try{var _lv=levelInfo(userStats.pts||0);if(window._lastLevelIdx!=null&&_lv.idx>window._lastLevelIdx){celebrateLevelUp(_lv);}window._lastLevelIdx=_lv.idx;}catch(e){}
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
   if(!userStats.activity.length)return;
@@ -9897,9 +10013,18 @@ if(!userPseudo){
   try{localStorage.setItem("magopseudo",userPseudo);}catch(e){}
 }
 function applyPseudoDisplays(){
-  var name=document.getElementById("profile-name-display");if(name)name.textContent=userPseudo;
+  var lv=levelInfo(userStats.pts||0),col=levelPseudoColor(lv.idx);
+  var name=document.getElementById("profile-name-display");
+  if(name){
+    name.textContent=userPseudo;name.style.color=col||"";
+    // Perk niv.6+ (Maître) : coche de confiance doree sur le pseudo
+    if(lv.idx>=5){var ck=document.createElement("span");ck.textContent=" ✓";ck.title="Contributeur de confiance";ck.style.cssText="color:#d19a1e;font-weight:800";name.appendChild(ck);}
+  }
   var el=document.getElementById("profile-pseudo-display");if(el)el.textContent=userPseudo;
   var initials=document.getElementById("avatar-initials");if(initials)initials.textContent=userPseudo.charAt(0).toUpperCase();
+  // Perk niv.3+ (Chasseur) : anneau colore autour de l'avatar ; niv.6 coche
+  var av=document.getElementById("profile-avatar");
+  if(av)av.style.boxShadow=(lv.idx>=2&&col)?("0 0 0 3px var(--app-bg),0 0 0 5px "+col):"";
 }
 function editPseudo(){
   var current=localStorage.getItem("magopseudo")||userPseudo;var newName=prompt("Ton pseudo :",current);
