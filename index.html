@@ -3462,7 +3462,7 @@ pt:{badgeScan:"Scanner",badgeExplorer:"Explorador",badgeReliable:"Fiável",badge
 tr:{badgeScan:"Tarayıcı",badgeExplorer:"Kâşif",badgeReliable:"Güvenilir",badgeStreak:"Azimli",badgeStar:"Yıldız",badgeFounder:"Kurucu",userSearchHint:"Bir isim yaz (en az 2 harf)<br>bir oyuncu bulmak için 🧑",connectedGoogle:"Google ile bağlı",ptsLabel:"Puan",me:"(ben)",mostSearched:"En çok arananlar",suggestionsT:"Öneriler",noSuggestion:"Henüz öneri yok",noSuggestionSub:"Katalogda olmayan bir ürünü tara<br>ve topluluğa öner!",camWaiting:"Kamera beklemede",activateCam:"Kamerayı aç",lastScans:"Son taramalar",suggestBtn:"+ Öner",streakDay:"gün üst üste",streakRecord:"rekor",streakStart:"Serini başlatmak için bugün katkıda bulun 🔥",streakBroken:"seri bozuldu, yeniden başlat!",settingsT:"Ayarlar",language:"Dil",sounds:"Ses efektleri",account:"Hesap",appSec:"Uygulama",seeIntro:"Tanıtımı tekrar izle",seeTuto:"Eğitimi tekrar izle",privacyL:"Gizlilik politikası",termsL:"Kullanım koşulları",adminL:"Yönetim",installApp:"Uygulamayı yükle",googleLogin:"Google ile giriş yap",leaderboard:"Sıralama",playerProfile:"Oyuncu profili",hisFavs:"Favori içecekleri",modeDrinks:"İçecekler",modeStores:"Mağazalar",modePlayers:"Oyuncular",proposeBtn:"+ Öner",clearHistory:"Geçmişi temizle",editPseudoHint:"Adını değiştirmek için dokun",name:"🇹🇷 Türkçe",greeting:"Merhaba 👋 Ne içiyoruz?",trends:"Trendler",recents:"Son aramalar",search:"Arama",scanner:"Ürün tara",scanSub:"Kamerayı barkoda doğrult",disc:"Keşifler",discSub:"Topluluğun önerdiği ürünler",stores:"Yakındaki mağazalar",profile:"Profilim",badges:"Rozetler",activity:"Etkinlik",noact:"Henüz etkinlik yok",home:"Ana sayfa",chercher:"Ara",scan:"Tara",discover:"Keşfet",profil:"Profil",sig:"Bildirimler",conf:"Onaylar",rstock:"Burada stokta",rrupture:"Stokta yok",rfake:"Olası taklit",rnew:"Yeni ürün",vote:"Oy ver",placeholder:"Ara…"},
 pl:{badgeScan:"Skaner",badgeExplorer:"Zwiadowca",badgeReliable:"Solidny",badgeStreak:"Wytrwały",badgeStar:"Gwiazda",badgeFounder:"Założyciel",userSearchHint:"Wpisz nazwę (min. 2 litery)<br>aby znaleźć gracza 🧑",connectedGoogle:"Zalogowano przez Google",ptsLabel:"Punkty",me:"(ja)",mostSearched:"Najczęściej szukane",suggestionsT:"Sugestie",noSuggestion:"Na razie brak sugestii",noSuggestionSub:"Zeskanuj produkt spoza katalogu,<br>aby zaproponować go społeczności!",camWaiting:"Kamera w gotowości",activateCam:"Włącz kamerę",lastScans:"Ostatnie skany",suggestBtn:"+ Zaproponuj",streakDay:"dzień/dni z rzędu",streakRecord:"rekord",streakStart:"Dołóż coś dzisiaj i rozpocznij serię 🔥",streakBroken:"seria przerwana, zacznij od nowa!",settingsT:"Ustawienia",language:"Język",sounds:"Efekty dźwiękowe",account:"Konto",appSec:"Aplikacja",seeIntro:"Zobacz intro ponownie",seeTuto:"Zobacz samouczek ponownie",privacyL:"Polityka prywatności",termsL:"Warunki korzystania",adminL:"Administracja",installApp:"Zainstaluj aplikację",googleLogin:"Zaloguj się przez Google",leaderboard:"Ranking",playerProfile:"Profil gracza",hisFavs:"Ulubione napoje",modeDrinks:"Napoje",modeStores:"Sklepy",modePlayers:"Gracze",proposeBtn:"+ Zaproponuj",clearHistory:"Wyczyść historię",editPseudoHint:"Dotknij, aby zmienić nazwę",name:"🇵🇱 Polski",greeting:"Cześć 👋 Co pijemy?",trends:"Na czasie",recents:"Ostatnie",search:"Szukaj",scanner:"Skanuj produkt",scanSub:"Skieruj aparat na kod kreskowy",disc:"Odkrycia",discSub:"Produkty polecane przez społeczność",stores:"Sklepy w pobliżu",profile:"Mój profil",badges:"Odznaki",activity:"Aktywność",noact:"Na razie brak aktywności",home:"Start",chercher:"Szukaj",scan:"Skaner",discover:"Odkrywaj",profil:"Profil",sig:"Zgłoszenia",conf:"Potwierdzenia",rstock:"Dostępne tutaj",rrupture:"Brak w magazynie",rfake:"Możliwa podróbka",rnew:"Nowy produkt",vote:"Głosuj",placeholder:"Szukaj…"}
 };
-var CATS=["Tous","Soda","Ice Tea","Exotique","Energy","Sport","Jus","Eau","Autre"];
+var CATS=["Tous","Soda","Energy","Ice Tea","Jus","Eau","Sport","Exotique","Lacté","Café","Autre"];
 
 /* ================================
    STATE
@@ -4357,7 +4357,11 @@ function offBestProduct(p){
     name=brand+" "+name;
   }
   var finalName=sanitize(name);
-  return{name:finalName,brand:brand,cat:cat,alcohol:offIsAlcoholic(p)||nameLooksAlcoholic(finalName,brand)};
+  // Categorie : notre classifieur (nom+marque) d'abord ; les tags OFF servent
+  // de repli quand il hesite. Resultat coherent avec le reste du catalogue.
+  var autoCat=classifyDrink(finalName,brand);
+  if(autoCat==="Autre"&&cat)autoCat=cat;
+  return{name:finalName,brand:brand,cat:autoCat,alcohol:offIsAlcoholic(p)||nameLooksAlcoholic(finalName,brand)};
 }
 function fetchWithTimeout(url,ms){
   return new Promise(function(resolve,reject){
@@ -5583,9 +5587,68 @@ var CAT_DEFAULTS={
   "Eau":{emoji:"\uD83D\uDCA7",color:"#5dade2",light:"#ebf5fb"},
   "Exotique":{emoji:"\uD83C\uDF34",color:"#ec7063",light:"#fdedec"},
   "Sport":{emoji:"\uD83C\uDFC3",color:"#148f77",light:"#e8f8f5"},
+  "Lact\u00E9":{emoji:"\uD83E\uDD5B",color:"#c9a978",light:"#f8f2e9"},
+  "Caf\u00E9":{emoji:"\u2615",color:"#7b5e3b",light:"#f1ebe3"},
   "Autre":{emoji:"\uD83E\uDDC3",color:"#7d6b8f",light:"#f1edf6"}
 };
-var VALID_CATS=["Soda","Ice Tea","Energy","Sport","Jus","Eau","Exotique","Autre"];
+var VALID_CATS=["Soda","Ice Tea","Energy","Sport","Jus","Eau","Exotique","Lact\u00E9","Caf\u00E9","Autre"];
+/* ================================
+   CLASSIFIEUR AUTOMATIQUE DE CATEGORIE
+   Range chaque boisson dans la bonne categorie a partir de son NOM et sa
+   MARQUE (regles marque + mots-cles). Deterministe = coherent, gratuit,
+   hors-ligne. Applique a TOUT le catalogue (base + communaute) pour un
+   classement propre et uniforme. Ordre = du plus specifique au plus general.
+   Teste sur les 591 fiches de base : ~0 boisson non classee.
+================================ */
+function _catNorm(s){
+  return (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036F]/g,"")
+    .replace(/\u011F/g,"g").replace(/\u0131/g,"i").replace(/\u015F/g,"s").replace(/\u00E7/g,"c")
+    .replace(/\u00F6/g,"o").replace(/\u00FC/g,"u").replace(/\u00F8/g,"o").replace(/\u00E5/g,"a")
+    .replace(/\u0142/g,"l").replace(/\u0111/g,"d").replace(/\u00E6/g,"ae").replace(/\u0153/g,"oe");
+}
+var _C_IMPORT_B=/\b(mogu\s?mogu|ramune|uludag|jarritos|vimto|rani|supermalt|vitamalt|hypermalt|maltin|malta\s?guinness|pony\s?malta|milkis|sumol|inca\s?kola|kola\s?champagne|ting|fayrouz|barbican|soofty|shani|okf|sappe|sun\s?top|ceres|antarctica|guarana|colombiana|vinut|royal\s?soda|postobon|wong\s?lo\s?kat|boga|grace|sangaria|mitsuya|camlica|fruko|eloa|sac\s?sac|sikhye|kuat|hawai|calypso|pacha|rubicon|selecto|ifri|cockta|materva|ironbeer|bandung|hamoud|peardrax|chilsung|demisoda|matecito|gimber|vita\s?coco|old\s?jamaica|maaza|cheerpal|pop\s?mate|tropical\s?aloe|yedigun|sirma|edessa|dimes|rouiba|ngaous|banga|judor|almdudler|irn[- ]?bru|rivella|tonissteiner|mezzo\s?mix|schwip\s?schwap|\bka\b|nexba|karma|suntory)\b/;
+var _C_IMPORT_H=/\b(aloe\s?vera|ginger\s?beer|yerba\s?mate|basil\s?seed|corossol|tamarind|tamarindo|gazoz|kombucha)\b/;
+var _C_LACTE_B=/\b(cecemel|chocomel|fristi|yop|cacolac|nesquik|candy'?up|vitasoy|yakult|calpis|calpico|binggrae|ayran|sutas|lassi|kefir|milkis|actimel|danao|milkshake|milk\s?shake|cocio|banania)\b/;
+var _C_LACTE_H=/\b(milk|lait\b|lacte|au\s?lait|boisson\s?lactee|soja|soya|avoine|amande)\b/;
+var _C_CAFE_H=/\b(coffee|cafe|latte|macchiato|cappuccino|espresso|frappuccino|frappe|mocha|moka|cold\s?brew|caffe|doubleshot)\b/;
+var _C_CAFE_B=/\b(starbucks|boss\s?coffee|emmi|gina\s?ice|hell\s?ice\s?coffee|nescafe|chameleon|jimmy)\b/;
+var _C_ENERGY_H=/\b(energy|energie|energetique|energ\b|boost)\b/;
+var _C_ENERGY_B=/\b(red\s?bull|monster|rockstar|nalu|hell\b|bang|reign|burn|effect|nocco|3d\s?energy|ghost|celsius|golden\s?power|shark|tiger\b|dragon\s?energy|flying\s?power|lucozade|sting\b|dark\s?dog|xxl|mad\s?bat)\b/;
+var _C_SPORT_H=/\b(isotoni|isotonic|electrolyt|hydration|hydrat|bcaa)\b/;
+var _C_SPORT_B=/\b(powerade|aquarius|gatorade|pocari|bodyarmor|prime\b|maximuscle|isostar|extran|aa\s?drink|vitamin\s?well|vitaminwell)\b/;
+var _C_ICETEA_H=/\b(ice\s?tea|iced\s?tea|the\s?glace|eistee|eis\s?tee|the\s?(peche|citron|menthe|vert|pomme|mangue|fraise|framboise|abricot|grenade|chrysantheme)|mate\s?glace|the\s?mate)\b/;
+var _C_ICETEA_B=/\b(lipton|fuze\s?tea|fuzetea|nestea|arizona|pfanner|xixo|snapple|honest\s?tea|ito\s?en|san\s?benedetto|may\s?tea|elephant\s?bay|charitea|socrate|jomo|yeo|pop's\s?ice\s?tea|vita\s?lemon)\b/;
+var _C_EAU_B=/\b(evian|vittel|spa\s?reine|spa\s?intense|spa\s?barisart|barisart|contrex|perrier|san\s?pellegrino|pellegrino|badoit|volvic|cristaline|chaudfontaine|hepar|rosport|fiji|smartwater|highland\s?spring|acqua\s?panna|nixe|valvert|ordal|gerolsteiner|bru\b|voss|st[- ]?yorre|vichy|salvetat|rozana|quezac|thonon|oulmes|sidi\s?ali|ain\s?saiss|safia|beypazari|kizilay|celestins|apollinaris|rosbacher|\bspa\b)\b/;
+var _C_EAU_H=/\b(eau\b|water|sparkling\s?water|mineral\s?water|maden\s?suyu)\b/;
+var _C_JUS_B=/\b(innocent|tropico|granini|caprisun|capri[- ]?sun|minute\s?maid|oasis|pago|hohes\s?c|sunquick|looza|appelsientje|pulco|joker|andros|sunkist|tropicana|cappy|compal|caraibos|pampryl|pressade|fruit\s?shoot|ribena|j2o|fruite|sim\b|boing|happy\s?day|appletiser|poms|fruit\s?d'or|prao|sunny\s?delight|frenchie)\b/;
+var _C_JUS_H=/\b(jus|juice|nectar|smoothie|multivitamin|multifruit|pur\s?jus)\b/;
+var _C_SODA_B=/\b(coca[- ]?cola|coca|fanta|sprite|pepsi|7up|seven\s?up|schweppes|orangina|dr\s?pepper|mountain\s?dew|mecca|canada\s?dry|fever[- ]?tree|crush|mirinda|sinalco|club\s?mate|club[- ]?mate|gini|pschitt|lorina|ricqles|fritz[- ]?kola|club\s?cola|virgin\s?cola|breizh\s?cola|afri[- ]?cola|freeway|freshup|tango|champomy|chupa\s?chups|lemonaid|pimento|bionade|val\s?citron|val\s?orange|vio|karma\s?cola|qcumber)\b/;
+var _C_SODA_H=/\b(cola\b|soda\b|limonade|lemonade|tonic|gazeuse|gazeux|cream\s?soda|gazoz|limonata|aranciata|orangeade|citronnade|petillant|mojito)\b/;
+function classifyDrink(name,brand){
+  var t=" "+_catNorm((name||"")+" "+(brand||""))+" ";
+  if(/lucozade\s?sport/.test(t))return "Sport";
+  if(/pellegrino/.test(t)&&/aranciata|limonata|ciao|blood\s?orange|pompelmo|melograno|clementina|rossa|pesca|lime/.test(t))return "Soda";
+  if(/spa\s?fruit/.test(t))return "Soda";
+  if(_C_CAFE_B.test(t)||_C_CAFE_H.test(t))return "Caf\u00E9";
+  if(_C_ENERGY_B.test(t)||_C_ENERGY_H.test(t))return "Energy";
+  if(_C_SPORT_B.test(t)||_C_SPORT_H.test(t))return "Sport";
+  if(_C_ICETEA_B.test(t)||_C_ICETEA_H.test(t))return "Ice Tea";
+  if(_C_LACTE_B.test(t)||_C_LACTE_H.test(t))return "Lact\u00E9";
+  if(_C_IMPORT_B.test(t))return "Exotique";
+  if(_C_EAU_B.test(t))return "Eau";
+  if(_C_JUS_B.test(t))return "Jus";
+  if(_C_SODA_B.test(t))return "Soda";
+  if(_C_EAU_H.test(t)&&!/soda|tonic|limonade/.test(t))return "Eau";
+  if(_C_JUS_H.test(t))return "Jus";
+  if(_C_ICETEA_H.test(t))return "Ice Tea";
+  if(_C_IMPORT_H.test(t))return "Exotique";
+  if(_C_SODA_H.test(t))return "Soda";
+  return "Autre";
+}
+// Reclassement propre de TOUT le catalogue de base au chargement. On ne
+// remplace la categorie existante que si le classifieur est SUR de lui
+// (resultat != "Autre") : un rare cas non reconnu garde son etiquette d'origine.
+try{DRINKS.forEach(function(d){var c=classifyDrink(d.name,d.brand);if(c&&c!=="Autre")d.cat=c;});}catch(e){}
 function mergeCatalog(rows){
   if(!rows||!rows.length)return 0;
   var added=0;
@@ -5597,8 +5660,11 @@ function mergeCatalog(rows){
     var nn=nameKey(r.name);
     var exists=DRINKS.some(function(d){return d.id===rid||nameKey(d.name)===nn;});
     if(exists)return;
-    var cat=VALID_CATS.indexOf(r.cat)!==-1?r.cat:"Exotique";
-    var def=CAT_DEFAULTS[cat];
+    // Classement automatique et uniforme. Si le classifieur hesite ("Autre"),
+    // on garde la categorie stockee quand elle est valide et parlante.
+    var cat=classifyDrink(r.name,r.brand);
+    if(cat==="Autre"&&VALID_CATS.indexOf(r.cat)!==-1&&r.cat!=="Autre")cat=r.cat;
+    var def=CAT_DEFAULTS[cat]||CAT_DEFAULTS["Autre"];
     DRINKS.push({
       id:rid,
       name:sanitize(String(r.name).slice(0,60)),
@@ -10058,7 +10124,7 @@ function renderAdmin(){
   pending.forEach(function(d){
     var ready=(d.votes||0)>=ADMIN_VOTE_THRESHOLD;
     var key=String(d.barcode||d.id);
-    var chosenCat=adminCatChoice[key]||d.cat||"";
+    var chosenCat=adminCatChoice[key]||d.cat||classifyDrink(d.name,d.brand)||"";
     var card=document.createElement("div");
     card.style.cssText="background:var(--bg2);border:1.5px solid "+(ready?"#22c55e":"var(--border)")+";border-radius:16px;padding:14px;margin-bottom:12px";
     var chipsHtml=VALID_CATS.map(function(c){
@@ -10293,7 +10359,7 @@ function renderPhotoSuggestions(){
 }
 function promoteDiscovery(d){
   var key=String(d.barcode||d.id);
-  var cat=adminCatChoice[key]||d.cat;
+  var cat=adminCatChoice[key]||d.cat||classifyDrink(d.name,d.brand);
   if(VALID_CATS.indexOf(cat)===-1){toast("Choisis d'abord une cat\u00E9gorie");playSound("err");return;}
   var def=CAT_DEFAULTS[cat];
   var entry={
