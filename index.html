@@ -429,6 +429,14 @@ body.dark .sd-stat.ok{color:#4ade80}
 .sd-mission .bar{flex:1;height:6px;border-radius:4px;background:rgba(0,0,0,.10);overflow:hidden}
 body.dark .sd-mission .bar{background:rgba(255,255,255,.13)}
 .sd-mission .bar i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#e67e22,#f0b840);transition:width .6s ease}
+/* apparition en cascade des lignes de boissons (magasin) */
+@keyframes sdRowIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+/* confettis au passage de niveau */
+@keyframes confFall{to{transform:translateY(104vh) rotate(680deg);opacity:.35}}
+@media (prefers-reduced-motion:reduce){
+  .store-card{animation:none!important}
+  .sd-mission .ic{animation:none!important}
+}
 
 /* ── External buttons ── */
 .extrow{display:flex;gap:10px;padding:10px 20px 4px}
@@ -3911,6 +3919,25 @@ function flyPts(n){
   setTimeout(function(){el.remove();},1100);
 }
 var LEVELS=[[0,"Curieux","\uD83C\uDF31"],[50,"Explorateur","\uD83E\uDDED"],[150,"Chasseur","\uD83C\uDFF9"],[300,"Connaisseur","\uD83E\uDDC9"],[600,"Expert","\uD83C\uDF96\uFE0F"],[1200,"Ma\u00EEtre des rayons","\uD83D\uDC51"],[2500,"L\u00E9gende","\uD83C\uDF20"]];
+/* Célébration au passage de niveau : son + toast + confettis (pur DOM, sans lib). */
+function confettiBurst(){
+  var host=document.createElement("div");
+  host.style.cssText="position:fixed;inset:0;z-index:9999;pointer-events:none;overflow:hidden";
+  var colors=["#e67e22","#f0b840","#27ae60","#2e86c1","#e74c3c","#f5f2ec"];
+  for(var i=0;i<46;i++){
+    var s=document.createElement("div");
+    var left=Math.random()*100,size=6+Math.random()*7,dur=1.1+Math.random()*1.2,delay=Math.random()*0.25;
+    s.style.cssText="position:absolute;top:-16px;left:"+left+"%;width:"+size+"px;height:"+(size*0.5)+"px;background:"+colors[i%colors.length]+";border-radius:2px;opacity:.95;transform:rotate("+(Math.random()*360)+"deg);animation:confFall "+dur+"s "+delay+"s linear forwards";
+    host.appendChild(s);
+  }
+  document.body.appendChild(host);
+  setTimeout(function(){try{host.remove();}catch(e){}},2700);
+}
+function celebrateLevelUp(lv){
+  try{if(typeof playSound==="function")playSound("win");}catch(e){}
+  try{if(typeof toast==="function")toast("🎉 Niveau "+(lv.idx+1)+" · "+lv.name+" débloqué !");}catch(e){}
+  try{confettiBurst();}catch(e){}
+}
 function levelInfo(pts){
   var i=0;
   for(var k=0;k<LEVELS.length;k++){if(pts>=LEVELS[k][0])i=k;}
@@ -3943,6 +3970,7 @@ function updateProfileStats(){
     '</div>';
   }
   renderBadges();
+  try{var _lv=levelInfo(userStats.pts||0);if(window._lastLevelIdx!=null&&_lv.idx>window._lastLevelIdx){celebrateLevelUp(_lv);}window._lastLevelIdx=_lv.idx;}catch(e){}
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
   if(!userStats.activity.length)return;
   var al=document.getElementById("activity-list");
@@ -7551,12 +7579,13 @@ function renderStoreDetail(){
   if(!drinks.length){listEl.innerHTML='<div style="padding:32px 20px;text-align:center;font-size:13px;color:var(--s3)">Aucun résultat pour ce filtre 😕</div>';return;}
   listEl.innerHTML="";
   var storeIdStr=String(s.id);
-  drinks.forEach(function(d){
+  drinks.forEach(function(d,_i){
     var confs=s.confirmations[d.id]||0;
     var stat=confs>0
       ? '<span class="sd-stat ok">● En stock</span>'
       : '<span class="sd-stat todo">● À confirmer</span>';
     var div=document.createElement("div");div.className="store-card";
+    div.style.animation="sdRowIn .34s ease both";div.style.animationDelay=(Math.min(_i,9)*0.035)+"s";
     div.innerHTML=
       '<div class="sd-row" onclick="pick(DRINKS.find(function(x){return x.id==='+d.id+'}))">'+
         '<div class="store-ico" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
