@@ -10,8 +10,8 @@ Tout est **testable/déployable par toi**, jamais mis en prod sans essai.
 
 | Fichier | Rôle | Risque | Quand |
 |---|---|---|---|
-| `firestore.rules` | **Règles de sécurité** : verrouille qui peut écrire quoi | Faible | **Maintenant** |
-| `notifications-push.js` | **Push réel** sur le téléphone (découverte promue / photo à refaire), même app fermée | Faible (n'ajoute aucun point) | **Maintenant** |
+| `firestore.rules` | **Règles de sécurité** : verrouille qui peut écrire quoi (inclut désormais `presence` = temps réel, et `hunts` = chasses de zone) | Faible | **Maintenant (à re-publier)** |
+| `notifications-push.js` | **Push réel** sur le téléphone (découverte promue / photo à refaire / **chasse près de toi**), même app fermée | Faible (n'ajoute aucun point) | **Maintenant** |
 | `locate-stores.js` | Remplace le faux « +0 magasins » : localise de vrais commerces via OSM, sans stock inventé | Faible | Quand tu veux |
 | `points-serveur-PHASE2.js` | Points **validés côté serveur** (infalsifiables) + bases de la réputation | Moyen (change qui crédite les points) | Plus tard, en suivant la « Bascule Phase 2 » |
 
@@ -46,8 +46,13 @@ fonctions **ajoutent seulement le push** (aucun point → zéro risque de doublo
 3. Vérifie que **Cloud Messaging** est activé et que la clé VAPID est bien celle
    déjà dans l'app (`window.MAGO_VAPID_KEY`). Les utilisateurs doivent avoir
    activé les notifications (l'app enregistre alors leur token dans `pushTokens`).
-4. Déploie : `firebase deploy --only functions:notifyDiscoveryPromoted,functions:notifyPhotoRejected`
+4. Déploie : `firebase deploy --only functions:notifyDiscoveryPromoted,functions:notifyPhotoRejected,functions:notifyHuntNearby`
 5. Teste : promeus une découverte de test → l'auteur doit recevoir le push.
+
+> 🎯 **notifyHuntNearby** : quand quelqu'un met une boisson en veille (= lance une
+> « chasse »), les gens à moins de ~15 km reçoivent « Chasse près de toi ». Le
+> tableau in-app « Chasses près de toi » marche DÉJÀ sans serveur (il lit la
+> collection `hunts`) ; cette fonction ajoute seulement le push téléphone.
 
 ## 3) (Optionnel) Localiser les magasins — `locate-stores.js`
 

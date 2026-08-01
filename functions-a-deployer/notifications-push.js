@@ -17,7 +17,7 @@
  *
  * Firebase Functions v2 (Node 18+). Déploiement : voir README.md.
  */
-const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { onDocumentUpdated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
@@ -93,5 +93,60 @@ exports.notifyPhotoRejected = onDocumentUpdated(
       "Ta photo de « " + name + " » ne correspondait pas au produit. Peux-tu en reprendre une bien nette ?",
       { type: "photoRejected", barcode: String(after.barcode || "") }
     );
+  }
+);
+
+/* CHASSE DE ZONE — push temps réel « à la chasse ! ».
+   Quand un NOUVEAU chercheur rejoint une chasse (hunts/{drinkId}.seekers gagne
+   un uid), on prévient les gens autour (pushTokens à moins de ~15 km) qu'une
+   boisson est activement recherchée près d'eux : « 🎯 Quelqu'un cherche X — si
+   tu la vois, signale-la et gagne des points ». On ne notifie pas le chercheur
+   lui-même, ni au-delà du rayon. Distance = pushTokens.lat/lng (déjà stockés).
+   ⚠️ Sur une grosse base, filtre par geohash au lieu de tout charger. */
+function _dist(aLat, aLng, bLat, bLng) {
+  if (aLat == null || bLat == null) return Infinity;
+  const dLa = (aLat - bLat) * 111, dLo = (aLng - bLng) * 111 * Math.cos(aLat * Math.PI / 180);
+  return Math.sqrt(dLa * dLa + dLo * dLo);
+}
+exports.notifyHuntNearby = onDocumentWritten(
+  { document: "hunts/{drinkId}", region: REGION },
+  async (event) => {
+    const before = (event.data.before.exists && event.data.before.data()) || {};
+    const after = (event.data.after.exists && event.data.after.data()) || {};
+    if (!after || !after.seekers) return;
+    const bSeek = before.seekers || {}, aSeek = after.seekers || {};
+    // Nouveaux chercheurs (uid présent maintenant, absent ou nul avant)
+    const newSeekers = Object.keys(aSeek).filter(function(u){ return aSeek[u] && !bSeek[u]; });
+    if (!newSeekers.length) return;
+    // Centre = position (arrondie) du nouveau chercheur le plus récent
+    let center = null;
+    newSeekers.forEach(function(u){ const s = aSeek[u]; if (s && s.lat != null && (!center || s.at > center.at)) center = s; });
+    if (!center) return;
+    const seekerUids = new Set(Object.keys(aSeek).filter(function(u){ return aSeek[u]; }));
+    const name = String(after.drinkName || "une boisson").slice(0, 40);
+    // Anti-spam : au plus un push "chasse" par tranche de 6 h par boisson
+    const now = Date.now();
+    if (before._lastPush && now - before._lastPush < 6 * 3600 * 1000) return;
+    try { await event.data.after.ref.set({ _lastPush: now }, { merge: true }); } catch (e) {}
+    // Diffusion aux tokens proches (hors chercheurs)
+    const tokensSnap = await db.collection("pushTokens").get();
+    const msgs = [];
+    tokensSnap.forEach(function(d){
+      if (seekerUids.has(d.id)) return;         // pas le(s) chercheur(s)
+      const t = d.data();
+      if (!t.token) return;
+      if (_dist(center.lat, center.lng, t.lat, t.lng) > 15) return; // hors zone
+      msgs.push({
+        token: t.token,
+        notification: { title: "🎯 Chasse près de toi", body: "Quelqu'un cherche « " + name + " ». Si tu la vois en magasin, signale-la et gagne des points !" },
+        data: { type: "hunt", drinkId: String(after.drinkId || "") },
+        webpush: { fcmOptions: { link: "https://magonyos991-ux.github.io/magofeed/" } }
+      });
+    });
+    // Envoi (par lots de 500 max côté FCM)
+    for (let i = 0; i < msgs.length; i += 500) {
+      try { await getMessaging().sendEach(msgs.slice(i, i + 500)); } catch (e) { console.warn("hunt push batch:", e && e.message); }
+    }
+    console.log("Chasse « " + name + " » : " + msgs.length + " notifiés.");
   }
 );

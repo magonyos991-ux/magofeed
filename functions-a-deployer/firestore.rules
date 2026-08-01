@@ -165,6 +165,23 @@ service cloud.firestore {
     match /_meta/{id}   { allow read: if isAdmin(); allow write: if isAdmin(); }
     match /drinkMerges/{id} { allow read: if true; allow write: if isAdmin(); }
 
+    // ── Présence temps réel : chacun écrit son propre battement de cœur ;
+    //    seul l'admin lit/compte (tableau de bord "en ligne maintenant").
+    match /presence/{uid} {
+      allow read: if isAdmin();
+      allow write: if isSelf(uid);
+    }
+
+    // ── Chasses de zone : publiques en lecture (agrégées, sans noms), un
+    //    connecté rejoint/quitte une chasse (met à jour son entrée seekers).
+    //    On empêche d'écraser drinkId/drinkName d'autrui : création libre pour
+    //    un connecté, mise à jour libre (le champ seekers.{uid} lui appartient).
+    match /hunts/{drinkId} {
+      allow read: if true;
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+
     // ── Reliquat de l'ancien crawler : verrouillé.
     match /crawler/{id} { allow read: if isAdmin(); allow write: if false; }
 

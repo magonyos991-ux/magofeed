@@ -944,6 +944,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       </div>
       <div class="brands-rail" id="brands-rail"></div>
       <div id="missions-card" style="margin-bottom:14px"></div>
+      <div id="hunts-card"></div>
       <div id="alerts-card"></div>
       <div id="deals-wrap"></div>
       <div id="top-rail-wrap" style="display:none">
@@ -1705,6 +1706,13 @@ onAuthStateChanged(auth, async function(user) {
     var unread = (myNotifs || []).filter(function(n) { return !n.read; });
     if (unread.length) window.dispatchEvent(new CustomEvent("fbNotifsReady", { detail: unread }));
   } catch (e) { console.warn("Notifs load:", e); }
+  // Présence temps réel : un battement maintenant + toutes les 45 s si visible.
+  try {
+    window.fbHeartbeat();
+    if (!window._hbTimer) window._hbTimer = setInterval(function() {
+      if (document.visibilityState === "visible") window.fbHeartbeat();
+    }, 45000);
+  } catch (e) {}
 });
 
 /* ── Chargement géolocalisé ──
@@ -2305,7 +2313,77 @@ window.fbFounderStats = async function() {
     cnt(query(collection(db, "users"))),
     cnt(query(collection(db, "photoSuggestions")))
   ]);
-  return { discToday: res[0], activeToday: res[1], storesWeek: res[2], totalUsers: res[3], pendingPhotos: res[4] };
+  var online = await window.fbCountOnline();
+  return { discToday: res[0], activeToday: res[1], storesWeek: res[2], totalUsers: res[3], pendingPhotos: res[4], onlineNow: online };
+};
+
+/* ── Présence en temps réel (usage RÉEL, chiffres honnêtes) ──
+   Chaque app ouverte écrit un "battement de cœur" (presence/{uid}.lastSeen)
+   toutes les ~45 s tant que l'onglet est visible. On compte "en ligne
+   maintenant" = battements de moins de 2 min. Aucune donnée inventée : ces
+   nombres viennent directement des vrais utilisateurs connectés. */
+window.fbHeartbeat = async function() {
+  try {
+    var user = auth.currentUser; if (!user) return;
+    await setDoc(doc(db, "presence", user.uid), {
+      lastSeen: serverTimestamp(),
+      pseudo: (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24)
+    }, { merge: true });
+  } catch (e) { /* règles pas encore publiées, ou hors-ligne : sans gravité */ }
+};
+window.fbCountOnline = async function() {
+  try {
+    var since = Timestamp.fromMillis(Date.now() - 120000); // 2 min
+    var s = await getCountFromServer(query(collection(db, "presence"), where("lastSeen", ">=", since)));
+    return s.data().count;
+  } catch (e) { return null; }
+};
+
+/* ── Chasses de zone : quand quelqu'un met une boisson en veille, ça crée une
+   "chasse" visible par les gens autour (rayon ~15 km). But : mobiliser la
+   communauté pour localiser une boisson rare. Données agrégées et localisation
+   volontairement arrondie (~1 km) — aucun nom, aucune position précise. */
+function _coarse(x){ return Math.round(x * 100) / 100; }
+window.fbJoinHunt = async function(drinkId, drinkName, emoji, lat, lng) {
+  try {
+    var user = await ensureAuthed();
+    var seeker = {}; seeker["seekers." + user.uid] = {
+      lat: lat != null ? _coarse(lat) : null, lng: lng != null ? _coarse(lng) : null, at: Date.now()
+    };
+    await setDoc(doc(db, "hunts", String(drinkId)), Object.assign({
+      drinkId: Number(drinkId) || drinkId, drinkName: String(drinkName || "").slice(0, 60),
+      emoji: String(emoji || "🥤").slice(0, 4), updatedAt: serverTimestamp()
+    }, seeker), { merge: true });
+  } catch (e) { console.warn("join hunt:", e); }
+};
+window.fbLeaveHunt = async function(drinkId) {
+  try {
+    var user = auth.currentUser; if (!user) return;
+    var patch = {}; patch["seekers." + user.uid] = null; // marqué parti, filtré à la lecture
+    await setDoc(doc(db, "hunts", String(drinkId)), patch, { merge: true });
+  } catch (e) { /* silencieux */ }
+};
+window.fbLoadNearbyHunts = async function(lat, lng, radiusKm) {
+  try {
+    var snap = await getDocs(query(collection(db, "hunts"), limit(200)));
+    var out = [], myUid = auth.currentUser ? auth.currentUser.uid : null;
+    var R = radiusKm || 15, fresh = Date.now() - 30 * 86400000;
+    snap.forEach(function(d) {
+      var h = d.data(); var seekers = h.seekers || {};
+      var near = 0, mine = false;
+      Object.keys(seekers).forEach(function(uid) {
+        var s = seekers[uid]; if (!s || !s.at || s.at < fresh) return;
+        if (lat != null && s.lat != null) {
+          var dLa = (lat - s.lat) * 111, dLo = (lng - s.lng) * 111 * Math.cos(lat * Math.PI / 180);
+          if (Math.sqrt(dLa * dLa + dLo * dLo) > R) return;
+        }
+        near++; if (uid === myUid) mine = true;
+      });
+      if (near > 0) out.push({ drinkId: h.drinkId, drinkName: h.drinkName, emoji: h.emoji, seekers: near, mine: mine });
+    });
+    out.sort(function(a, b) { return b.seekers - a.seekers; });
+    return out;
+  } catch (e) { console.warn("load hunts:", e); return []; }
 };
 
 window.fbLoadFormatSuggestions = async function() {
@@ -3753,7 +3831,7 @@ function show(s){
 function _showRaw(s){
   if(s==="profile"){try{updateProfileStats();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
-  if(s==="home"){try{renderMissions();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}}
+  if(s==="home"){try{renderMissions();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{renderHunts();}catch(e){}}
   if(s!=="scan"&&scanActive)stopScan();
   var target=document.getElementById("s-"+s);
   var current=document.querySelector(".screen.on");
@@ -7394,11 +7472,14 @@ function toggleWatch(d){
   var i=drinkWatches.findIndex(function(w){return Number(w.id)===Number(d.id);});
   if(i!==-1){
     drinkWatches.splice(i,1);
-    toast("\uD83D\uDD15 Veille retir\u00E9e");
+    toast("\uD83D\uDD15 Veille retir\u00e9e");
+    if(window.fbLeaveHunt)window.fbLeaveHunt(d.id);
   }else{
     drinkWatches.push({id:d.id,name:d.name,emoji:d.emoji,lat:userLat||null,lng:userLng||null,created:Date.now(),triggered:false});
     playSound("pop");
-    toast("\uD83D\uDD14 Tu seras pr\u00E9venu d\u00E8s qu'on la signale pr\u00E8s de toi !");
+    toast("\uD83D\uDD14 Alerte activ\u00e9e \u00B7 une chasse est lanc\u00e9e pr\u00E8s de toi \uD83C\uDFAF");
+    // Chasse de zone : les gens autour verront que cette boisson est recherch\u00e9e
+    if(window.fbJoinHunt)window.fbJoinHunt(d.id,d.name,d.emoji,userLat,userLng);
     if(window.fbEnablePush&&!window._pushToken){
       window.fbEnablePush(userLat,userLng).then(function(r){
         if(r&&r.ok)toast("\uD83D\uDCF2 Notifications activ\u00e9es \u2014 m\u00eame app ferm\u00e9e !");
@@ -7469,6 +7550,42 @@ function openWatchStore(storeId,drinkId){
 function removeWatch(id){
   drinkWatches=drinkWatches.filter(function(w){return Number(w.id)!==Number(id);});
   saveWatches();renderAlertsCard();
+}
+/* ================================
+   🎯 CHASSES DE ZONE
+   Les boissons que des gens autour de toi (rayon ~15 km) recherchent
+   activement (veille posée). Si tu en croises une en magasin, signale-la :
+   tu aides la communauté ET tu gagnes des points. Rendu au chargement de
+   l'accueil ; données réelles agrégées (aucun nom, position arrondie).
+================================ */
+function renderHunts(){
+  var host=document.getElementById("hunts-card");if(!host)return;
+  if(!window.fbLoadNearbyHunts){host.innerHTML="";return;}
+  window.fbLoadNearbyHunts(userLat,userLng,15).then(function(hunts){
+    // On met en avant ce que CHERCHENT les autres (pas seulement toi)
+    var others=hunts.filter(function(h){return h.seekers>0;});
+    if(!others.length){host.innerHTML="";return;}
+    var rows=others.slice(0,5).map(function(h){
+      var who=h.seekers>1?(h.seekers+" personnes cherchent"):(h.mine?"Tu cherches":"1 personne cherche");
+      return '<div class="hunt-row" data-did="'+h.drinkId+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 0;cursor:pointer">'+
+        '<span style="font-size:20px;width:26px;text-align:center">'+(h.emoji||"🥤")+'</span>'+
+        '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(h.drinkName||"Boisson")+'</div>'+
+        '<div style="font-size:11px;font-weight:600;color:var(--s2)">'+who+' près d\'ici</div></div>'+
+        '<span style="font-size:11px;font-weight:800;color:#e67e22;flex-shrink:0">Je l\'ai vue →</span>'+
+      '</div>';
+    }).join("");
+    host.innerHTML='<div style="background:linear-gradient(135deg,#fff3e0,#ffe8cc);border:1.5px solid #f0b840;border-radius:18px;padding:13px 16px 6px;margin-bottom:14px">'+
+      '<div style="font-size:13px;font-weight:800;color:#7a4a10;margin-bottom:1px">🎯 Chasses près de toi</div>'+
+      '<div style="font-size:11px;font-weight:600;color:#9a6a2a;margin-bottom:4px">Tu croises une de ces boissons en magasin ? Signale-la — tu gagnes des points en aidant.</div>'+rows+'</div>';
+    host.querySelectorAll(".hunt-row").forEach(function(row){
+      row.onclick=function(){
+        var did=Number(row.getAttribute("data-did"));
+        var d=DRINKS.find(function(x){return Number(x.id)===did;});
+        if(d)pick(d);else toast("Boisson introuvable");
+      };
+      row.onkeydown=function(ev){if(ev.key==="Enter")row.click();};
+    });
+  }).catch(function(){host.innerHTML="";});
 }
 function renderAlertsCard(){
   var host=document.getElementById("alerts-card");if(!host)return;
@@ -7640,9 +7757,17 @@ function renderStoreList(){
   var advWrap='<div id="store-adv-filters" style="display:'+(advOpen?'block':'none')+'">'+brandBar+budgetBar+'</div>';
   var nearbyMode=window._nearbyFallback&&window._nearbyFallback[curSel.id];
   var mapCta=stores.length?'<div style="padding:8px 16px 4px"><button onclick="openDrinkMapView()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:13.5px;font-weight:800;cursor:pointer;font-family:inherit">🗺️ Voir les '+totalStores+' magasin'+(totalStores>1?"s":"")+' sur la carte</button></div>':"";
-  el.innerHTML=stores.length?mapCta+renderSortBar()+advToggle+advWrap:advToggle+advWrap+'<div style="padding:26px 20px 8px;text-align:center"><div style="font-size:15px;font-weight:700;color:var(--s1);margin-bottom:6px">Aucun magasin trouvé</div><div style="font-size:13px;color:var(--s2);line-height:1.5">Cette boisson n\'est pas encore localis\u00E9e par ici.</div>'+
-    '<div onclick="toggleNearbyFallback()" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')toggleNearbyFallback()" style="display:inline-block;margin-top:14px;margin-right:8px;padding:11px 20px;border-radius:999px;background:var(--bg2);border:1.5px solid var(--border);color:var(--s1);font-size:12.5px;font-weight:800;cursor:pointer">\uD83D\uDDFA\uFE0F Voir les magasins autour de moi</div>'+
-    '<div onclick="toggleWatch(curSel)" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')toggleWatch(curSel)" aria-label="Me pr\u00E9venir" style="display:inline-block;margin-top:14px;padding:11px 20px;border-radius:999px;background:'+(isWatched(curSel.id)?"var(--bg3);color:var(--s2);border:1.5px solid var(--border)":"var(--s1);color:var(--app-bg);border:none")+';font-size:12.5px;font-weight:800;cursor:pointer">'+(isWatched(curSel.id)?"\uD83D\uDD15 Retirer la veille":"\uD83D\uDD14 Me pr\u00E9venir quand elle arrive pr\u00E8s de moi")+'</div>'+
+  var watched=isWatched(curSel.id);
+  var alertCta=watched
+    ? '<div onclick="toggleWatch(curSel)" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')toggleWatch(curSel)" style="display:inline-block;margin-top:16px;padding:12px 22px;border-radius:999px;background:var(--bg3);border:1.5px solid var(--border);color:var(--s2);font-size:13px;font-weight:800;cursor:pointer">\uD83D\uDD15 Retirer l\'alerte</div>'
+    : '<div onclick="toggleWatch(curSel)" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')toggleWatch(curSel)" aria-label="M\'alerter" style="display:inline-block;margin-top:16px;padding:13px 24px;border-radius:999px;background:#e67e22;color:#fff;border:none;font-size:13.5px;font-weight:800;cursor:pointer;box-shadow:0 6px 18px rgba(230,126,34,.35)">\uD83D\uDD14 M\'alerter &amp; lancer la chasse \uD83C\uDFAF</div>';
+  el.innerHTML=stores.length?mapCta+renderSortBar()+advToggle+advWrap:advToggle+advWrap+
+    '<div style="padding:22px 20px 8px;text-align:center">'+
+      '<div style="font-size:36px;line-height:1;margin-bottom:8px">\uD83D\uDD14</div>'+
+      '<div style="font-size:15.5px;font-weight:800;color:var(--s1);margin-bottom:5px">'+(watched?"Alerte activ\u00E9e pour cette boisson":"Personne ne l\'a signal\u00E9e par ici\u2026 pour l\'instant")+'</div>'+
+      '<div style="font-size:12.5px;color:var(--s2);line-height:1.6;max-width:290px;margin:0 auto">'+(watched?"Tu seras pr\u00E9venu d\u00E8s qu\'on la trouve pr\u00E8s de toi, et une chasse est lanc\u00E9e dans ta zone \uD83C\uDFAF":"Active l\'alerte : tu seras pr\u00E9venu d\u00E8s qu\'on la trouve pr\u00E8s de toi. Et ta demande lance une <b>chasse</b> \u2014 les gens autour t\'aident \u00E0 la d\u00E9nicher.")+'</div>'+
+      alertCta+
+      '<div style="margin-top:10px"><span onclick="toggleNearbyFallback()" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')toggleNearbyFallback()" style="display:inline-block;padding:9px 18px;border-radius:999px;background:var(--bg2);border:1.5px solid var(--border);color:var(--s1);font-size:12px;font-weight:700;cursor:pointer">\uD83D\uDDFA\uFE0F Voir les magasins autour de moi</span></div>'+
     '</div>'+locateBtn;
 
   if(!stores.length){
@@ -10243,24 +10368,32 @@ function renderFounderDash(){
       '<div class="fd-num" style="font-size:19px;font-weight:800;color:var(--s1);margin:2px 0">'+(val==null?"\u2013":val)+'</div>'+
       '<div style="font-size:9.5px;font-weight:700;color:var(--s2);text-transform:uppercase;letter-spacing:.4px">'+label+'</div></div>';
   }
-  host.innerHTML='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:2px 0 10px">\uD83D\uDCCA Aujourd\'hui sur Magofeed</div>'+
+  function onlineTile(val){
+    var live=val!=null&&val>0;
+    return '<div style="background:'+(live?"linear-gradient(135deg,#052e16,#14532d)":"var(--bg2)")+';border:1.5px solid '+(live?"#16a34a":"var(--border)")+';border-radius:16px;padding:12px 6px;text-align:center">'+
+      '<div style="font-size:17px">'+(live?"\uD83D\uDFE2":"\u26AA")+'</div>'+
+      '<div style="font-size:19px;font-weight:800;color:'+(live?"#fff":"var(--s1)")+';margin:2px 0">'+(val==null?"\u2013":val)+'</div>'+
+      '<div style="font-size:9.5px;font-weight:700;color:'+(live?"#bbf7d0":"var(--s2)")+';text-transform:uppercase;letter-spacing:.4px">en ligne maintenant</div></div>';
+  }
+  host.innerHTML='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:2px 0 10px">\uD83D\uDCCA Magofeed en vrai (chiffres r\u00E9els)</div>'+
     '<div id="fd-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">'+
-    tile("\uD83C\uDD95",null,"d\u00E9couvertes du jour")+
+    onlineTile(null)+
     tile("\uD83E\uDDD1","...","actifs aujourd'hui")+
+    tile("\uD83C\uDF0D",null,"joueurs au total")+
+    tile("\uD83C\uDD95",null,"d\u00E9couvertes du jour")+
     tile("\uD83C\uDFEA",null,"magasins / 7 j")+
     tile("\u23F3",pendingDisc,"\u00E0 valider",true)+
-    tile("\uD83D\uDCF8",null,"photos en attente",true)+
-    tile("\uD83C\uDF0D",null,"joueurs au total")+
     '</div>';
   if(!window.fbFounderStats)return;
   window.fbFounderStats().then(function(s){
     var grid=document.getElementById("fd-grid");if(!grid)return;
-    grid.innerHTML=tile("\uD83C\uDD95",s.discToday,"d\u00E9couvertes du jour")+
+    grid.innerHTML=onlineTile(s.onlineNow)+
       tile("\uD83E\uDDD1",s.activeToday,"actifs aujourd'hui")+
+      tile("\uD83C\uDF0D",s.totalUsers,"joueurs au total")+
+      tile("\uD83C\uDD95",s.discToday,"d\u00E9couvertes du jour")+
       tile("\uD83C\uDFEA",s.storesWeek,"magasins / 7 j")+
       tile("\u23F3",pendingDisc,"\u00E0 valider",true)+
-      tile("\uD83D\uDCF8",s.pendingPhotos,"photos en attente",true)+
-      tile("\uD83C\uDF0D",s.totalUsers,"joueurs au total");
+      tile("\uD83D\uDCF8",s.pendingPhotos,"photos en attente",true);
   }).catch(function(e){console.warn("dash:",e);});
 }
 function renderAdminHistory(){
