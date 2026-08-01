@@ -1676,6 +1676,13 @@ onAuthStateChanged(auth, async function(user) {
     }
   } catch (e) { console.warn("Firestore user doc error:", e); }
   window.dispatchEvent(new CustomEvent("fbAuthChanged", { detail: user }));
+  // Messages in-app en attente pour cet utilisateur (sa decouverte a ete
+  // promue, sa photo est a refaire...). On les remonte a l'interface.
+  try {
+    var myNotifs = await window.fbLoadMyNotifs();
+    var unread = (myNotifs || []).filter(function(n) { return !n.read; });
+    if (unread.length) window.dispatchEvent(new CustomEvent("fbNotifsReady", { detail: unread }));
+  } catch (e) { console.warn("Notifs load:", e); }
 });
 
 /* ── Chargement géolocalisé ──
@@ -2080,6 +2087,17 @@ window.fbPromoteDiscovery = async function(disc, entry) {
   try {
     await updateDoc(doc(db, "discoveries", String(disc.fbId || disc.barcode || disc.id)), { promoted: true });
   } catch (e) { console.warn("Discovery flag error:", e); }
+  // On previent l'auteur de la decouverte : sa boisson est desormais dans Magofeed.
+  // (In-app pour l'instant ; un vrai push telephone demandera une Cloud Function.)
+  try {
+    if (disc.by) await window.fbNotifyUser(disc.by, {
+      type: "promoted",
+      title: "🎉 Ta découverte est dans Magofeed !",
+      body: "« " + String(disc.name || "Ta boisson").slice(0, 40) + " » que tu as repérée fait maintenant partie du catalogue. Merci d'agrandir la carte des boissons 🥤",
+      drinkId: entry.id,
+      barcode: String(disc.barcode || "")
+    });
+  } catch (e) { console.warn("Notify promote:", e); }
 };
 
 /* Photo publique d'une boisson (marques exotiques absentes d'OpenFoodFacts) :
@@ -2559,6 +2577,58 @@ window.fbSearchUsers = async function(prefix) {
 window.fbMarkDiscoveryPhoto = async function(discId) {
   await updateDoc(doc(db, "discoveries", String(discId)), { hasPhoto: true });
 };
+
+/* ── Boite de notifications in-app (sans serveur) ──
+   Un vrai push (telephone, app fermee) demande une Cloud Function que je ne
+   peux pas deployer d'ici. Mais on peut deja notifier HONNETEMENT dans l'app :
+   on ecrit un message destine a un utilisateur (userNotifs), qu'il decouvre a
+   sa prochaine ouverture. Sert a prevenir l'auteur d'une decouverte quand elle
+   entre au catalogue, ou quand sa photo doit etre refaite.
+   NB Firestore : autorise dans tes regles la creation d'un doc userNotifs par
+   un admin, et la lecture/maj par le destinataire (to == uid). */
+window.fbNotifyUser = async function(uid, notif) {
+  if (!uid) return;
+  try {
+    await addDoc(collection(db, "userNotifs"), Object.assign(
+      { to: String(uid), read: false, createdAt: serverTimestamp() }, notif || {}));
+  } catch (e) { console.warn("Notify user error:", e); }
+};
+window.fbLoadMyNotifs = async function() {
+  try {
+    var user = auth.currentUser; if (!user) return [];
+    var snap = await getDocs(query(collection(db, "userNotifs"), where("to", "==", user.uid), limit(20)));
+    var rows = [];
+    snap.forEach(function(d) { var x = d.data(); x.docId = d.id; rows.push(x); });
+    rows.sort(function(a, b) { return (b.createdAt && b.createdAt.seconds || 0) - (a.createdAt && a.createdAt.seconds || 0); });
+    return rows;
+  } catch (e) { console.warn("Load notifs error:", e); return []; }
+};
+window.fbMarkNotifRead = async function(docId) {
+  try { await updateDoc(doc(db, "userNotifs", String(docId)), { read: true }); } catch (e) {}
+};
+
+/* Rejet d'une MAUVAISE photo par l'admin (ex : photo d'Oasis Tropical envoyee
+   pour un Oasis Pomme-Cassis-Framboise). On efface la photo, on retire le flag
+   hasPhoto (la decouverte redevient promouvable) et on previent son auteur de
+   la reprendre. Jamais d'image fausse au catalogue : mieux vaut pas de photo. */
+window.fbRejectDiscoveryPhoto = async function(disc) {
+  var id = String(disc.fbId || disc.barcode || disc.id);
+  // On lit d'ABORD qui a envoye la photo (champ "by") avant de la supprimer.
+  var by = (disc && disc.by) || null;
+  try {
+    var snap = await getDoc(doc(db, "discoveryPhotos", id));
+    if (!by && snap.exists()) by = snap.data().by || null;
+  } catch (e) {}
+  try { await deleteDoc(doc(db, "discoveryPhotos", id)); } catch (e) { console.warn("Del photo:", e); }
+  // hasPhoto retire -> la decouverte redevient promouvable ; photoRejected garde une trace
+  try { await updateDoc(doc(db, "discoveries", id), { hasPhoto: false, photoRejected: true }); } catch (e) { console.warn("Flag photo:", e); }
+  if (by) await window.fbNotifyUser(by, {
+    type: "photoRejected",
+    title: "📸 Photo à refaire",
+    body: "Ta photo de « " + String(disc.name || "ta découverte").slice(0, 40) + " » ne correspondait pas au produit. Peux-tu en reprendre une bien nette ?",
+    barcode: String(disc.barcode || disc.id || "")
+  });
+};
 window.fbSaveDiscoveryPhoto = async function(discId, base64) {
   var user = await ensureAuthed();
   await setDoc(doc(db, "discoveryPhotos", String(discId)), {
@@ -2619,7 +2689,7 @@ window.fbAddDiscovery = async function(barcode, name, brand, cat, extra) {
       await batch.commit();
       return { isNew: false, data: Object.assign({}, existing, updates) };
     }
-    var data = { name: name, brand: brand || "", votes: 1, barcode: String(barcode), createdAt: serverTimestamp() };
+    var data = { name: name, brand: brand || "", votes: 1, barcode: String(barcode), by: user.uid, createdAt: serverTimestamp() };
     if (cat) data.cat = cat;
     if (extra) Object.assign(data, extra); // ex : hasPhoto/manualProposal des propositions photo
     batch.set(ref, data);
@@ -3593,6 +3663,29 @@ function haversine(a,b,c,d){
   var x=Math.sin(dL/2)*Math.sin(dL/2)+Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin(dG/2)*Math.sin(dG/2);
   return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
 }
+/* Rafraichit la position EN TEMPS REEL (initGPS ne lit qu'une fois au
+   demarrage : si tu ouvres l'app chez toi puis vas au magasin, userLat/Lng
+   reste bloque chez toi et "Ou l'as-tu trouve ?" propose les magasins du
+   point de depart). On rappelle donc le GPS au moment du scan pour que les
+   distances et la liste des magasins collent a l'endroit ou tu es vraiment. */
+var _lastGpsRefresh=0,_gpsRefreshing=false;
+function refreshLocation(cb){
+  if(!navigator.geolocation){cb&&cb(false);return;}
+  if(_gpsRefreshing){cb&&cb(false);return;}
+  _gpsRefreshing=true;
+  navigator.geolocation.getCurrentPosition(function(pos){
+    _gpsRefreshing=false;
+    userLat=pos.coords.latitude;userLng=pos.coords.longitude;
+    _lastGpsRefresh=Date.now();
+    STORES.forEach(function(s){if(typeof s.lat==="number")s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));});
+    STORES.sort(function(a,b){return(a.dist||0)-(b.dist||0);});
+    var dot=document.getElementById("gps-dot");if(dot)dot.style.background="#22c55e";
+    // Recharge depuis Firestore les magasins REELLEMENT autour de la position
+    // actuelle (le lot charge au demarrage peut etre a des kilometres).
+    if(window.fbLoadNearbyStores){try{window.fbLoadNearbyStores(userLat,userLng,10);}catch(e){}}
+    cb&&cb(true);
+  },function(){_gpsRefreshing=false;cb&&cb(false);},{enableHighAccuracy:true,timeout:8000,maximumAge:15000});
+}
 
 /* ================================
    NAVIGATION
@@ -3938,6 +4031,29 @@ function celebrateLevelUp(lv){
   try{if(typeof toast==="function")toast("🎉 Niveau "+(lv.idx+1)+" · "+lv.name+" débloqué !");}catch(e){}
   try{confettiBurst();}catch(e){}
 }
+/* Banniere de fete quand une decouverte de l'utilisateur entre au catalogue.
+   Moment fort de retention : la personne qui a repere la boisson voit que sa
+   contribution a servi a toute la communaute. Confettis + son + carte a
+   fermer. Aucun chiffre invente : juste le fait, vrai, que sa boisson est la. */
+function showPromotedBanner(n){
+  try{playSound("win");}catch(e){}
+  try{confettiBurst();}catch(e){}
+  var ov=document.createElement("div");
+  ov.style.cssText="position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.55);backdrop-filter:blur(3px)";
+  var card=document.createElement("div");
+  card.style.cssText="max-width:340px;width:100%;background:var(--bg2,#fff);border:1.5px solid var(--border,#e5e0d8);border-radius:22px;padding:26px 22px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.3);animation:sdRowIn .4s ease both";
+  card.innerHTML='<div style="font-size:44px;line-height:1;margin-bottom:10px">🎉</div>'+
+    '<div style="font-size:17px;font-weight:800;color:var(--s1);margin-bottom:8px">'+sanitize(n.title||"Ta découverte est dans Magofeed !")+'</div>'+
+    '<div style="font-size:13px;line-height:1.6;color:var(--s2);margin-bottom:18px">'+sanitize(n.body||"")+'</div>';
+  var btn=document.createElement("button");
+  btn.textContent="Super, merci ! 🙌";
+  btn.style.cssText="width:100%;padding:13px;border:none;border-radius:14px;background:#e67e22;color:#fff;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit";
+  btn.onclick=function(){try{ov.remove();}catch(e){}};
+  card.appendChild(btn);
+  ov.appendChild(card);
+  ov.onclick=function(e){if(e.target===ov)try{ov.remove();}catch(err){}};
+  document.body.appendChild(ov);
+}
 function levelInfo(pts){
   var i=0;
   for(var k=0;k<LEVELS.length;k++){if(pts>=LEVELS[k][0])i=k;}
@@ -3991,6 +4107,10 @@ function updateProfileStats(){
    SCANNER
 ================================ */
 function startScan(){
+  // On active la camera = l'utilisateur est physiquement au magasin : on
+  // rafraichit sa position pour que "Ou l'as-tu trouve ?" propose les bons
+  // magasins (ceux autour de lui MAINTENANT, pas ceux du demarrage de l'app).
+  try{refreshLocation();}catch(e){}
   var sa=document.querySelector("#s-scan .scan-area");if(sa)sa.classList.add("live");
   var video=document.getElementById("scan-video"),hint=document.getElementById("scan-hint"),btn=document.getElementById("scan-btn");
   if(scanActive)return;
@@ -4072,6 +4192,29 @@ function offIsAlcoholic(p){
   // Inclut volontairement les bieres/vins 0.0% : choix produit du fondateur
   return /\b(alcohols?|alcools?|beers?|bieres?|wines?|vins?|ciders?|cidres?|spirits?|liqueurs?|vodkas?|whisky|whiskey|whiskies|rhums?|rums?|gins?|sake|tequila|cocktails?[- ]alcoolises?)\b/.test(tags);
 }
+/* Filet de securite anti-alcool base sur le NOM (et la marque).
+   OpenFoodFacts est souvent vide de categories pour les marques distributeur
+   (ex : "lidl Argus pils 500ml" -> aucune categorie "beers" -> passe entre
+   les mailles de offIsAlcoholic). Or le type est ecrit dans le nom : "pils".
+   On bloque donc aussi sur des mots-cles alcool presents dans le libelle.
+   Faux positifs neutralises d'abord : "ginger ale/beer", "root beer",
+   "gingembre", "vinaigre", "virgin", "sans alcool"/"0.0%" (choix produit :
+   on bloque quand meme les 0.0%, mais on evite qu'un "cola sans alcool"
+   soit qualifie d'alcool par le mot "alcool" lui-meme). */
+function nameLooksAlcoholic(name,brand){
+  var t=" "+normTxt((name||"")+" "+(brand||""))+" ";
+  t=t.replace(/ginger[- ]?ale/g," ").replace(/ginger[- ]?beers?/g," ")
+     .replace(/root[- ]?beers?/g," ").replace(/gingembre/g," ").replace(/ginger/g," ")
+     .replace(/vinaigres?/g," ").replace(/virgin/g," ").replace(/vitamine?s?/g," ")
+     .replace(/sans[- ]?alcool/g," ").replace(/alcohol[- ]?free/g," ").replace(/0[.,]0\s*%?/g," ");
+  // Mots de TYPE (biere/pils/vin/spiritueux) : ecrits dans presque tous les libelles
+  if(/\b(pils|pilsner|pilsener|biere|bieres|beer|beers|lager|lagers|ipa|stout|porter|trappist|trappiste|abbaye|kriek|gueuze|geuze|lambic|witbier|weizen|weissbier|tripel|dubbel|vin|vins|wine|wines|wein|vino|cava|prosecco|champagne|cremant|porto|sherry|xeres|sangria|cidre|cidres|cider|ciders|vodka|whisky|whiskey|whiskies|bourbon|rhum|rhums|tequila|mezcal|cognac|brandy|armagnac|calvados|grappa|schnaps|schnapps|liqueur|liqueurs|aperol|campari|martini|vermouth|pastis|ricard|jagermeister|bacardi|absinthe|eau[- ]de[- ]vie|gin|gins)\b/.test(t))return true;
+  // MARQUES d'alcool connues (surtout bieres belges) : un nom de marque seul
+  // ("Jupiler", "Duvel") ne contient aucun mot de type -> filet supplementaire
+  // pour la saisie manuelle. Pour les scans, offIsAlcoholic (categories OFF)
+  // couvre deja ces marques ; ici on double la securite.
+  return /\b(jupiler|stella\s?artois|maes|carapils|cara\s?pils|duvel|chimay|leffe|hoegaarden|desperados|heineken|primus|karmeliet|kwak|orval|westmalle|rochefort|chouffe|kasteel|vedett|cornet|grimbergen|affligem|ciney|tongerlo|omer|jupiler|corona\s?extra|budweiser|carlsberg|beck\s?s|becks|guinness|kronenbourg|smirnoff|absolut|jack\s?daniel|johnnie\s?walker|ballantine|jameson|chivas|baileys|malibu|captain\s?morgan|hennessy|cointreau|bombay\s?sapphire|tanqueray|moet|veuve\s?clicquot|dom\s?perignon)\b/.test(t);
+}
 function offBestProduct(p){
   var brand=sanitize(((p.brands||"").split(",")[0]||"").trim());
   var candidates=[p.product_name_fr,p.product_name,p.generic_name_fr,p.generic_name];
@@ -4093,7 +4236,8 @@ function offBestProduct(p){
   } else if(brand&&normTxt(name).indexOf(normTxt(brand))===-1){
     name=brand+" "+name;
   }
-  return{name:sanitize(name),brand:brand,cat:cat,alcohol:offIsAlcoholic(p)};
+  var finalName=sanitize(name);
+  return{name:finalName,brand:brand,cat:cat,alcohol:offIsAlcoholic(p)||nameLooksAlcoholic(finalName,brand)};
 }
 function fetchWithTimeout(url,ms){
   return new Promise(function(resolve,reject){
@@ -4134,6 +4278,15 @@ function renderWhereFound(ctx){
   var host=document.getElementById("scan-where");if(!host)return;
   host.innerHTML="";host.style.display="none";
   if(!ctx)return;
+  // Filet de securite : si la position n'a pas ete rafraichie tres recemment,
+  // on la reactualise et on redessine avec les VRAIES distances une fois
+  // connue (empeche d'afficher les magasins du point de depart quand on a
+  // bouge). Le flag _fresh evite toute boucle infinie.
+  if(ctx._fresh!==true&&(Date.now()-_lastGpsRefresh>60000)){
+    refreshLocation(function(ok){
+      if(ok&&lastScanContext===ctx){renderWhereFound(Object.assign({},ctx,{_fresh:true}));}
+    });
+  }
   var near=(STORES||[]).filter(function(s){return typeof s.dist==="number";})
     .sort(function(a,b){return a.dist-b.dist;}).slice(0,3);
   if(!near.length&&!(STORES||[]).length)return; // aucun magasin charge : rien a proposer
@@ -7666,6 +7819,16 @@ function openDiscPhotoSheet(discId,discName){
   host.style.display="block";
 }
 function addDiscovery(name,brand,barcode,cat){
+  // Garde anti-alcool universelle : ce point de passage centralise TOUTES les
+  // creations de decouverte (scan OFF, cache local, nom tape a la main pour un
+  // produit inconnu). Meme si OpenFoodFacts ne dit rien, un nom qui parle de
+  // biere/pils/vin/spiritueux est refuse (regle produit non negociable), sauf
+  // si l'utilisateur a explicitement conteste via overrideAlcohol.
+  if(!(window._alcoholOverrides||{})[String(barcode).replace(/[^0-9]/g,"")]&&nameLooksAlcoholic(name,brand)){
+    toast("🚫 Magofeed reste 100% sans alcool — boisson non ajoutée");
+    playSound("err");
+    return;
+  }
   var already=DISCOVERIES.find(function(d){return String(d.barcode)===String(barcode);});
   if(already){
     // Corrige un nom générique "Produit <code>" laissé par un premier scan sans nom saisi
@@ -9784,8 +9947,10 @@ function renderAdmin(){
         '<button class="admin-reject" style="padding:10px 14px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s2);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">\uD83D\uDDD1\uFE0F</button>'+
       '</div>';
     if(d.hasPhoto){
+      var photoWrap=document.createElement("div");
+      photoWrap.style.cssText="display:flex;gap:8px;margin-bottom:10px";
       var photoBtn=document.createElement("button");
-      photoBtn.style.cssText="width:100%;margin-bottom:10px;padding:9px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit";
+      photoBtn.style.cssText="flex:1;padding:9px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit";
       photoBtn.textContent="\uD83D\uDCF7 Voir la photo envoy\u00E9e";
       photoBtn.onclick=function(){
         photoBtn.textContent="Chargement\u2026";
@@ -9795,10 +9960,19 @@ function renderAdmin(){
           var img=document.createElement("img");
           img.src=data;img.alt="Photo de "+d.name;
           img.style.cssText="width:100%;max-height:260px;object-fit:contain;background:#fff;border-radius:12px;margin-bottom:10px";
-          photoBtn.replaceWith(img);
+          photoWrap.replaceWith(img);
         });
       };
-      card.insertBefore(photoBtn,card.querySelector(".admin-cat-chip")?card.children[1]:null);
+      // Bouton "mauvaise photo" : retire une image erronee sans jeter la
+      // decouverte, et previent l'auteur d'en reprendre une bien nette.
+      var badBtn=document.createElement("button");
+      badBtn.title="Signaler une mauvaise photo";
+      badBtn.style.cssText="padding:9px 12px;border-radius:12px;border:1.5px solid #f0b0a0;background:var(--bg3);color:#b91c1c;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit;flex-shrink:0";
+      badBtn.textContent="\uD83D\uDEAB Mauvaise photo";
+      badBtn.onclick=function(){rejectDiscoveryPhoto(d);};
+      photoWrap.appendChild(photoBtn);
+      photoWrap.appendChild(badBtn);
+      card.insertBefore(photoWrap,card.querySelector(".admin-cat-chip")?card.children[1]:null);
     }
     card.querySelectorAll(".admin-cat-chip").forEach(function(btn){
       btn.onclick=function(){adminCatChoice[key]=btn.getAttribute("data-cat");renderAdmin();};
@@ -10026,6 +10200,20 @@ function rejectDiscovery(d){
   toast("D\u00E9couverte rejet\u00E9e");
   if(window.fbRejectDiscovery){
     window.fbRejectDiscovery(d).catch(function(e){console.warn("Reject error:",e);});
+  }
+}
+/* Rejet d'une MAUVAISE photo (ex : photo d'Oasis Tropical envoyee pour un
+   Oasis Pomme-Cassis-Framboise). La decouverte n'est PAS supprimee : on
+   efface juste la photo erronee pour pouvoir promouvoir la boisson quand
+   meme, et on previent l'auteur d'en reprendre une. Regle d'or : jamais
+   d'image fausse au catalogue. */
+function rejectDiscoveryPhoto(d){
+  if(!confirm("Signaler la photo de \u00AB "+d.name+" \u00BB comme MAUVAISE ?\n\nLa photo sera retir\u00E9e (la d\u00E9couverte reste et devient promouvable), et son auteur sera invit\u00E9 \u00E0 en reprendre une."))return;
+  d.hasPhoto=false;d.photoRejected=true;
+  renderAdmin();
+  playSound("pop");toast("\uD83D\uDEAB Photo retir\u00E9e \u00B7 auteur pr\u00E9venu");
+  if(window.fbRejectDiscoveryPhoto){
+    window.fbRejectDiscoveryPhoto(d).catch(function(e){console.warn("Reject photo error:",e);toast("\u26A0\uFE0F Retrait local seulement (erreur Firestore)");});
   }
 }
 function showPrivacy(){show("privacy");}
@@ -10372,6 +10560,21 @@ try{
   });
   window.addEventListener("fbAuthChanged", function(e) {
     updateAccountUI(e.detail);
+  });
+  // Notifications in-app : decouverte promue (fete + confettis), photo a refaire, etc.
+  window.addEventListener("fbNotifsReady", function(e) {
+    var unread=e.detail||[];
+    if(!unread.length)return;
+    // La plus marquante d'abord (une promotion se fete), le reste en toasts.
+    var promoted=unread.filter(function(n){return n.type==="promoted";});
+    var rest=unread.filter(function(n){return n.type!=="promoted";});
+    if(promoted.length){
+      showPromotedBanner(promoted[0]);
+      promoted.slice(1).forEach(function(n){setTimeout(function(){toast("🎉 "+(n.title||"Découverte promue"));},600);});
+    }
+    rest.forEach(function(n,i){setTimeout(function(){toast((n.title?n.title+" · ":"")+(n.body||""));},400+i*1800);});
+    // Marque tout comme lu (une seule fois)
+    unread.forEach(function(n){if(n.docId&&window.fbMarkNotifRead)window.fbMarkNotifRead(n.docId);});
   });
   // Données communautaires partagées (découvertes, tendances, notes) chargées depuis Firestore
   window.addEventListener("fbDiscoveriesLoaded", function(e) {
