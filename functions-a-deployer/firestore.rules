@@ -1,0 +1,196 @@
+rules_version = '2';
+/*
+ * Magofeed — Règles de sécurité Firestore.
+ *
+ * Objectif : ouvrir juste ce qu'il faut, verrouiller le reste. En particulier :
+ *  - Personne ne peut se déclarer admin (collection admins gérée à la main).
+ *  - Un utilisateur ne peut promouvoir/rejeter une découverte, ni écrire une
+ *    notification à autrui — seul un admin le peut.
+ *  - Chacun n'écrit que son propre profil, son token push, ses votes.
+ *
+ * ⚠️ LIMITE HONNÊTE (Phase 1) : le solde de points (users/{uid}.points) reste
+ *    écrit par le client. Un utilisateur avancé peut donc encore se donner des
+ *    points via la console. Pour rendre les points INFALSIFIABLES, il faut
+ *    passer les crédits côté serveur (voir points-serveur-PHASE2.js), puis
+ *    remplacer la règle users.update par la version stricte en bas de ce
+ *    fichier. Fais-le seulement quand la Phase 2 est déployée et testée.
+ *
+ * ⚠️ ADAPTE : ce projet a eu deux collections de magasins ("Stores" majuscule =
+ *    données historiques, "stores" minuscule = ce que l'app écrit). Les deux
+ *    sont couvertes ci-dessous. Garde celle que ton app lit réellement.
+ *
+ * Test avant prod : émulateur Firestore ou onglet "Règles > Terrain de jeu".
+ */
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ──
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    function isSelf(uid) { return isSignedIn() && request.auth.uid == uid; }
+    // Clés modifiées par une mise à jour
+    function changed() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // ── Admins : lecture de son propre doc (pour savoir si on est admin).
+    //    Aucune écriture client : on ajoute un admin à la main dans la console.
+    match /admins/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow write: if false;
+    }
+
+    // ── Profils utilisateurs : lisibles par tous (classement), écrits par soi.
+    //    (Phase 1 : points inclus. Version stricte en bas du fichier.)
+    match /users/{uid} {
+      allow read: if true;
+      allow create, update: if isSelf(uid);
+      allow delete: if isSelf(uid) || isAdmin();
+      // Sous-collections éventuelles (favoris, etc.) : réservées au propriétaire
+      match /{doc=**} {
+        allow read, write: if isSelf(uid);
+      }
+    }
+
+    // ── Tokens push : chacun le sien. (Les Cloud Functions utilisent l'Admin
+    //    SDK et contournent ces règles pour lire les tokens.)
+    match /pushTokens/{uid} {
+      allow read, write: if isSelf(uid);
+    }
+
+    // ── Notifications in-app : le destinataire lit les siennes et peut les
+    //    marquer lues ; SEUL un admin en crée (à la promotion / au rejet photo).
+    match /userNotifs/{docId} {
+      allow read:   if isSignedIn() && resource.data.to == request.auth.uid;
+      allow create: if isAdmin();
+      allow update: if isSignedIn() && resource.data.to == request.auth.uid
+                    && changed().hasOnly(['read']);
+      allow delete: if isAdmin();
+    }
+
+    // ── Catalogue : public en lecture, écrit par l'admin uniquement.
+    match /catalog/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /drinkPhotos/{id} {
+      allow read: if true;            // image publique d'une boisson
+      allow write: if isAdmin();
+    }
+
+    // ── Découvertes communautaires : publiques ; création par tout connecté ;
+    //    un utilisateur peut faire évoluer les champs "doux" (votes/photo/lieu)
+    //    mais PAS promoted/rejected/by/photoRejected — réservés à l'admin.
+    match /discoveries/{id} {
+      allow read: if true;
+      allow create: if isSignedIn()
+        && !('promoted' in request.resource.data)
+        && !('rejected' in request.resource.data);
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        changed().hasOnly(['votes','hasPhoto','name','brand','cat','foundIn'])
+      );
+      allow delete: if isAdmin();
+
+      // Un vote = un doc votedBy/{uid} (dédoublonnage infalsifiable).
+      match /votedBy/{uid} {
+        allow read: if isAdmin();
+        allow create: if isSelf(uid);   // create échoue si le doc existe déjà
+        allow update, delete: if false;
+      }
+    }
+    // Photo jointe à une découverte : lisible par les connectés (modération
+    //    admin), créée par les connectés, supprimée par l'admin.
+    match /discoveryPhotos/{id} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Suggestions (photos / formats) : proposées par les connectés,
+    //    traitées par l'admin.
+    match /photoSuggestions/{id} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+    match /formatSuggestions/{id} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Magasins : publics en lecture ; la communauté crée et met à jour
+    //    (stock/prix) ; suppression réservée à l'admin. (ADAPTE : garde la
+    //    casse réellement utilisée par ton app.)
+    match /stores/{id} {
+      allow read: if true;
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+    match /Stores/{id} {
+      allow read: if true;
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+
+    // ── Signalements : déposés par les connectés, lus par l'admin.
+    match /reports/{id} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Veilles "préviens-moi" : chacun gère les siennes (id = uid_drinkId,
+    //    champ uid == propriétaire).
+    match /watches/{id} {
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // ── Agrégats publics (compteurs de scans, notes) : lecture libre, écriture
+    //    par les connectés (increment). Ce ne sont pas des données sensibles.
+    match /stats/{id} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // ── Métadonnées / fusions de doublons / curseurs : lecture libre,
+    //    écriture admin (ou Cloud Functions via Admin SDK).
+    match /meta/{id}    { allow read: if true; allow write: if isAdmin(); }
+    match /_meta/{id}   { allow read: if isAdmin(); allow write: if isAdmin(); }
+    match /drinkMerges/{id} { allow read: if true; allow write: if isAdmin(); }
+
+    // ── Reliquat de l'ancien crawler : verrouillé.
+    match /crawler/{id} { allow read: if isAdmin(); allow write: if false; }
+
+    // ── Tout le reste : refusé par défaut (rien n'est laissé ouvert par oubli).
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+/*
+ * ============================================================================
+ * VERSION STRICTE des points (à activer en PHASE 2, une fois les crédits
+ * passés côté serveur). Remplace le bloc users/{uid} ci-dessus par celui-ci :
+ *
+ *   match /users/{uid} {
+ *     allow read: if true;
+ *     allow create: if isSelf(uid);
+ *     allow update: if isSelf(uid)
+ *       // le client ne peut PLUS toucher aux champs sensibles : le serveur seul
+ *       && !changed().hasAny(['points','discAccepted','trust','confirms','signals']);
+ *     allow delete: if isSelf(uid) || isAdmin();
+ *     match /{doc=**} { allow read, write: if isSelf(uid); }
+ *   }
+ *
+ * À ce moment-là, TOUS les crédits de points doivent venir d'une Cloud Function
+ * (Admin SDK, qui contourne ces règles). Sinon les points cessent d'augmenter.
+ * ============================================================================
+ */
