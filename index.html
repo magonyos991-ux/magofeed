@@ -1593,6 +1593,7 @@ window.fbSyncUserStats = function(stats) {
       points: stats.pts || 0,
       signals: stats.signals || 0,
       confirms: stats.confirms || 0,
+      discAccepted: stats.discAccepted || 0,
       streak: st.streak || 0,
       bestStreak: st.best || 0,
       updatedAt: serverTimestamp()
@@ -3449,7 +3450,8 @@ var curCat="Tous",curSel=null,recents=[DRINKS[14],DRINKS[22]];
 var accentColor="#1a1714",accentLight="#f0eee9";
 var userLat=null,userLng=null;
 var scanActive=false,quaggaRunning=false;
-var userStats={signals:0,confirms:0,pts:0,activity:[]};
+var userStats={signals:0,confirms:0,pts:0,discAccepted:0,activity:[]};
+var PROMO_REWARD=50; // points gagnes quand TA decouverte est acceptee au catalogue
 var reportTarget=null,curMode="light",curLang="fr";
 var searchDebounce=null;
 var mapRenderedFor=null;
@@ -3896,6 +3898,7 @@ function badgeDefs(){
     {key:"scan",emoji:"\uD83D\uDD0D",name:T.badgeScan||"Scanneur",tiers:[1,15,50],value:Object.keys(scanCounts).length},
     {key:"explorer",emoji:"\uD83D\uDCCD",name:T.badgeExplorer||"\u00C9claireur",tiers:[1,5,15],value:Object.keys(contributedStores).length},
     {key:"reliable",emoji:"\u2705",name:T.badgeReliable||"Fiable",tiers:[3,15,50],value:userStats.confirms||0},
+    {key:"discoverer",emoji:"\ud83e\udded",name:"D\u00e9couvreur",tiers:[1,5,15],value:userStats.discAccepted||0},
     {key:"streak",emoji:"\uD83D\uDD25",name:T.badgeStreak||"Assidu",tiers:[3,7,30],value:(userStreak&&userStreak.best)||0},
     {key:"star",emoji:"\u2B50",name:T.badgeStar||"\u00C9toile",tiers:[100,500,2000],value:userStats.pts||0},
     {key:"founder",emoji:"\uD83D\uDC51",name:T.badgeFounder||"Fondateur",tiers:[1],value:isAdmin?1:0,special:true}
@@ -4035,7 +4038,7 @@ function celebrateLevelUp(lv){
    Moment fort de retention : la personne qui a repere la boisson voit que sa
    contribution a servi a toute la communaute. Confettis + son + carte a
    fermer. Aucun chiffre invente : juste le fait, vrai, que sa boisson est la. */
-function showPromotedBanner(n){
+function showPromotedBanner(n,rewardPts){
   try{playSound("win");}catch(e){}
   try{confettiBurst();}catch(e){}
   var ov=document.createElement("div");
@@ -4044,7 +4047,8 @@ function showPromotedBanner(n){
   card.style.cssText="max-width:340px;width:100%;background:var(--bg2,#fff);border:1.5px solid var(--border,#e5e0d8);border-radius:22px;padding:26px 22px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.3);animation:sdRowIn .4s ease both";
   card.innerHTML='<div style="font-size:44px;line-height:1;margin-bottom:10px">🎉</div>'+
     '<div style="font-size:17px;font-weight:800;color:var(--s1);margin-bottom:8px">'+sanitize(n.title||"Ta découverte est dans Magofeed !")+'</div>'+
-    '<div style="font-size:13px;line-height:1.6;color:var(--s2);margin-bottom:18px">'+sanitize(n.body||"")+'</div>';
+    '<div style="font-size:13px;line-height:1.6;color:var(--s2);margin-bottom:'+(rewardPts?"14px":"18px")+'">'+sanitize(n.body||"")+'</div>'+
+    (rewardPts?'<div style="display:inline-block;background:#fff7ed;border:1.5px solid #f0b840;color:#b45309;font-size:15px;font-weight:800;padding:8px 16px;border-radius:999px;margin-bottom:18px">🏆 +'+rewardPts+' points de découvreur</div>':'');
   var btn=document.createElement("button");
   btn.textContent="Super, merci ! 🙌";
   btn.style.cssText="width:100%;padding:13px;border:none;border-radius:14px;background:#e67e22;color:#fff;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit";
@@ -10547,6 +10551,7 @@ try{
     userStats.pts=Math.max(userStats.pts,d.points||0);
     userStats.signals=Math.max(userStats.signals,d.signals||0);
     userStats.confirms=Math.max(userStats.confirms,d.confirms||0);
+    userStats.discAccepted=Math.max(userStats.discAccepted||0,d.discAccepted||0);
     // Le pseudo du compte Firestore fait foi : on l'adopte localement pour que
     // le pseudo genere sur ce nouvel appareil n'ecrase pas celui du compte
     var incomingPseudo=d.pseudo?String(d.pseudo).slice(0,24):null;
@@ -10568,8 +10573,24 @@ try{
     // La plus marquante d'abord (une promotion se fete), le reste en toasts.
     var promoted=unread.filter(function(n){return n.type==="promoted";});
     var rest=unread.filter(function(n){return n.type!=="promoted";});
+    // RECOMPENSE : quand TA decouverte entre au catalogue, tu gagnes gros.
+    // On credite ici car l'auteur n'est pas celui qui clique "promouvoir"
+    // (c'est l'admin). Verrou awardOnce par notif -> jamais double-credite.
+    var earned=0;
+    promoted.forEach(function(n){
+      if(awardOnce("promo:"+(n.docId||n.drinkId||n.barcode||n.title),FOREVER)){
+        userStats.pts+=PROMO_REWARD;
+        userStats.discAccepted=(userStats.discAccepted||0)+1;
+        earned+=PROMO_REWARD;
+      }
+    });
+    if(earned){
+      try{flyPts(earned);}catch(err){}
+      updateProfileStats();
+      if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+    }
     if(promoted.length){
-      showPromotedBanner(promoted[0]);
+      showPromotedBanner(promoted[0],earned?PROMO_REWARD:0);
       promoted.slice(1).forEach(function(n){setTimeout(function(){toast("🎉 "+(n.title||"Découverte promue"));},600);});
     }
     rest.forEach(function(n,i){setTimeout(function(){toast((n.title?n.title+" · ":"")+(n.body||""));},400+i*1800);});
