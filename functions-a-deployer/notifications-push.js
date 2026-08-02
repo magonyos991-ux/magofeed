@@ -29,7 +29,9 @@ const REGION = "europe-west1"; // ADAPTE si ton projet est ailleurs
 /* Envoi d'un push à un utilisateur via le token stocké dans pushTokens/{uid}
    (écrit par l'app quand l'utilisateur active les notifications). Silencieux
    si l'utilisateur n'a pas de token : on ne casse jamais le flux. */
-async function pushToUser(uid, title, body, data) {
+const APP_URL = "https://magonyos991-ux.github.io/magofeed/";
+
+async function pushToUser(uid, title, body, data, link) {
   if (!uid) return;
   try {
     const snap = await db.collection("pushTokens").doc(String(uid)).get();
@@ -41,7 +43,8 @@ async function pushToUser(uid, title, body, data) {
       data: data || {},
       webpush: {
         notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png" },
-        fcmOptions: { link: "https://magonyos991-ux.github.io/magofeed/" }
+        // Le tap ouvre l'app SUR la bonne fiche (ex: #store=ID -> magasin + carte)
+        fcmOptions: { link: link || APP_URL }
       }
     });
   } catch (e) {
@@ -174,11 +177,14 @@ exports.notifyStockToWatchers = onDocumentUpdated(
         const wd = w.data();
         if (sLat != null && wd.lat != null && _dist(sLat, sLng, wd.lat, wd.lng) > 12) continue;
         const dName = String(wd.drinkName || "Ta boisson").slice(0, 40);
+        const storeId = String(event.params.id);
         await pushToUser(
           wd.uid,
           "✅ Trouvée près de toi !",
           "« " + dName + " » vient d'être repérée chez " + sName + ". Fonce l'acheter avant qu'elle parte !",
-          { type: "found", drinkId: String(drinkId), storeId: String(event.params.id) }
+          { type: "found", drinkId: String(drinkId), storeId: storeId },
+          // Tap sur la notif -> ouvre directement la fiche du magasin (+ carte) :
+          APP_URL + "#store=" + encodeURIComponent(storeId)
         );
       }
     }
