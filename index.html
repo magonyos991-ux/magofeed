@@ -962,6 +962,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
     </div>
     <div class="scroll" style="padding-top:16px">
       <div class="chips" id="cats-home"></div>
+      <div id="home-extras">
       <div class="sec-hd">
         <div class="t-section" id="t-brands">Marques</div>
         <div class="sec-count" id="brands-count"></div>
@@ -975,13 +976,14 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div class="sec-hd"><div class="t-section"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3 2.5.5 5 2.5 5 5.5a4.5 4.5 0 1 1-9 0c0-1.15.43-2.2 1-3 .28.6.5 1.5 1.5 3z"/><path d="M12 2c1 3 4 4.5 4 8.5"/><path d="M12 2C8 5 6 8 6 11.5"/></svg> <span id="t-toprail">Tes plus recherchées</span></div></div>
         <div id="top-rail" style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 12px;margin:0 -2px;scrollbar-width:none;-webkit-overflow-scrolling:touch"></div>
       </div>
+      </div><!-- /home-extras -->
       <div class="sec-hd">
         <div class="t-section" id="t-trends">Tendances</div>
         <div class="sec-count" id="trends-count"></div>
       </div>
       <div class="grid" id="trends"></div>
-      <div class="sec-hd"><div class="t-section" id="t-recents">Récents</div></div>
-      <div id="recents"></div>
+      <div id="home-recents"><div class="sec-hd"><div class="t-section" id="t-recents">Récents</div></div>
+      <div id="recents"></div></div>
     </div>
     <p id="gps-label" style="display:flex;align-items:center;justify-content:center;gap:6px">
       <span id="gps-dot" style="width:7px;height:7px;border-radius:50%;background:var(--s3);flex-shrink:0;display:inline-block"></span>
@@ -1301,7 +1303,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div class="set-row static">
           <div class="set-ico">📦</div>
           <div class="set-txt"><div class="set-title">Version</div></div>
-          <span class="set-val">1.2.0 · build 0802a</span>
+          <span class="set-val">1.2.0 · build 0802b</span>
         </div>
         <div class="set-row" onclick="window.open('https://instagram.com/magofeed.app','_blank')" role="button" tabindex="0" aria-label="Instagram" onkeydown="if(event.key==='Enter'){window.open('https://instagram.com/magofeed.app','_blank');}">
           <div class="set-ico">📸</div>
@@ -5818,7 +5820,13 @@ function renderCats(id){
     btn.className="chip"+(curCat===c?" on":"");
     btn.innerHTML='<span>'+c+'</span>';
     btn.setAttribute("data-cat",c);
-    btn.onclick=function(){curCat=c;renderCats("cats-home");renderCats("cats-search");renderList();renderTrends();playSound("pop");};
+    btn.onclick=function(){
+      curCat=c;renderCats("cats-home");renderCats("cats-search");renderList();renderTrends();playSound("pop");
+      // Accueil : on remonte en haut pour voir les boissons de la catégorie
+      // juste sous les puces (les sections "parcourir" sont masquées).
+      var hp=document.getElementById("s-home");
+      if(hp&&hp.classList.contains("on")){var sc=hp.querySelector(".scroll");if(sc&&sc.scrollTo)sc.scrollTo({top:0,behavior:"smooth"});}
+    };
     el.appendChild(btn);
   });
 }
@@ -6146,9 +6154,21 @@ function renderTopRail(){
     rail.appendChild(tile);
   });
 }
+/* Mode filtre sur l'accueil : dès qu'une catégorie (≠ Tous) est choisie, on
+   masque les sections "parcourir" (Marques, missions, chasses, veilles…) pour
+   que les boissons de la catégorie soient JUSTE sous les puces — plus besoin de
+   scroller tout en bas. On renomme aussi le titre par la catégorie choisie. */
+function applyHomeFilter(){
+  var filtering=curCat&&curCat!=="Tous";
+  var ex=document.getElementById("home-extras");if(ex)ex.style.display=filtering?"none":"";
+  var rc=document.getElementById("home-recents");if(rc)rc.style.display=filtering?"none":"";
+  var tt=document.getElementById("t-trends");
+  if(tt)tt.textContent=filtering?curCat:"Tendances";
+}
 function renderTrends(){
   renderTopRail();
   try{renderMissions();}catch(e){}
+  try{applyHomeFilter();}catch(e){}
   var el=document.getElementById("trends");if(!el)return;el.innerHTML="";
   var all=DRINKS.filter(function(d){return curCat==="Tous"||d.cat===curCat;});
   var f=interleaveByBrand(all);
@@ -6542,6 +6562,29 @@ function shadeHex(hex,pct){
   function s(c){c=Math.round(pct>0?c+(255-c)*pct:c*(1+pct));return Math.max(0,Math.min(255,c));}
   return "#"+((1<<24)+(s(r)<<16)+(s(g)<<8)+s(b)).toString(16).slice(1);
 }
+/* ================================
+   SYMBOLES MAGOFEED — jeu d'icônes maison par catégorie
+   Des glyphes SVG dessinés pour Magofeed (style ligne unifié), qui remplacent
+   les emojis : look propre, cohérent et qui n'appartient qu'à l'app.
+================================ */
+function _catPaths(cat){
+  var P={
+    "Soda":'<rect x="7.5" y="3.5" width="9" height="17" rx="2.6"/><path d="M9.5 3.5 10 2h4l.5 1.5"/><path d="M9.5 9h5"/>',
+    "Energy":'<path d="M13 2.5 5.5 13H11l-1 8.5L18.5 10H13z"/>',
+    "Ice Tea":'<path d="M6.5 8h11l-1 11.5a2 2 0 0 1-2 1.8H9.5a2 2 0 0 1-2-1.8z"/><path d="M6.5 8 7.5 4.5h8"/><path d="M14 4.5 15.5 2"/><path d="M9.5 12h5"/>',
+    "Jus":'<path d="M7.5 8h9v11.2a2 2 0 0 1-2 2h-5a2 2 0 0 1-2-2z"/><path d="M7.5 8 9 4.5h5L15.5 6"/><path d="M13 4.5 15 2"/>',
+    "Eau":'<path d="M12 3s6 6.4 6 10.4a6 6 0 0 1-12 0C6 9.4 12 3 12 3z"/>',
+    "Sport":'<path d="M12 3s5.2 5.6 5.2 9.2a5.2 5.2 0 0 1-10.4 0C6.8 8.6 12 3 12 3z"/><path d="M12 10.5v4.4M9.8 12.7h4.4"/>',
+    "Exotique":'<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/><path d="M12 3.5c2.6 2.4 4 5.4 4 8.5s-1.4 6.1-4 8.5c-2.6-2.4-4-5.4-4-8.5s1.4-6.1 4-8.5z"/>',
+    "Lacté":'<path d="M8.5 3h7l-.6 3h-5.8z"/><path d="M9.1 6h5.8l-.7 13.2a2 2 0 0 1-2 1.8h-.4a2 2 0 0 1-2-1.8z"/><path d="M9 11h6"/>',
+    "Café":'<path d="M5 8h11v5.5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5z"/><path d="M16 9h1.8a2.4 2.4 0 0 1 0 4.8H16"/><path d="M8 2.5c-.5 1 .5 2 0 3M11.5 2.5c-.5 1 .5 2 0 3"/>',
+    "Autre":'<path d="M9.5 2.5h5M10.5 2.5v3l-1.8 2.4a3 3 0 0 0-.7 2v9.1a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V10a3 3 0 0 0-.7-2l-1.8-2.4v-3"/>'
+  };
+  return P[cat]||P["Autre"];
+}
+function magoCatIcon(cat,size,color,sw){
+  return '<svg width="'+(size||24)+'" height="'+(size||24)+'" viewBox="0 0 24 24" fill="none" stroke="'+(color||"currentColor")+'" stroke-width="'+(sw||1.7)+'" stroke-linecap="round" stroke-linejoin="round">'+_catPaths(cat)+'</svg>';
+}
 function drinkCanSVG(d,emojiSize){
   var c=d.color||"#e67e22";
   var top=shadeHex(c,0.35),dark=shadeHex(c,-0.25);
@@ -6553,8 +6596,8 @@ function drinkCanSVG(d,emojiSize){
     '<ellipse cx="32" cy="11" rx="21" ry="5" fill="#d9dadb"/>'+
     '<ellipse cx="32" cy="11" rx="15" ry="3.2" fill="#c2c4c6"/>'+
     '<rect x="28" y="8" width="8" height="3.4" rx="1.7" fill="#9ea1a4"/>'+
-    '<rect x="14" y="34" width="36" height="24" rx="6" fill="rgba(255,255,255,.82)"/>'+
-    '<text x="32" y="51.5" text-anchor="middle" dominant-baseline="middle" font-size="'+(emojiSize||15)+'">'+d.emoji+'</text>'+
+    '<rect x="14" y="34" width="36" height="24" rx="6" fill="rgba(255,255,255,.9)"/>'+
+    '<g transform="translate(23,37) scale(.75)" fill="none" stroke="'+dark+'" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+_catPaths(d.cat)+'</g>'+
     '<rect x="13" y="14" width="5" height="60" rx="2.5" fill="rgba(255,255,255,.28)"/>'+
   '</svg>';
 }
@@ -7791,8 +7834,10 @@ function _drawHunts(map){
   if(!list.length){host.innerHTML="";return;}
   var rows=list.slice(0,6).map(function(h){
     var who=h.seekers>1?(h.seekers+" personnes cherchent"):(h.mine?"Tu cherches":"1 personne cherche");
+    var hd=DRINKS.find(function(x){return Number(x.id)===Number(h.drinkId);});
+    var hcat=hd?hd.cat:"Autre",hcol=(CAT_DEFAULTS[hcat]||{}).color||"#7a4a10";
     return '<div class="hunt-row" data-did="'+h.drinkId+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 0;cursor:pointer">'+
-      '<span style="font-size:20px;width:26px;text-align:center">'+(h.emoji||"🥤")+'</span>'+
+      '<span style="width:26px;display:flex;justify-content:center;color:'+hcol+'">'+magoCatIcon(hcat,22,hcol)+'</span>'+
       '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(h.drinkName||"Boisson")+'</div>'+
       '<div style="font-size:11px;font-weight:600;color:var(--s2)">'+who+' près d\'ici</div></div>'+
       '<span style="font-size:11px;font-weight:800;color:#e67e22;flex-shrink:0">Je l\'ai vue →</span>'+
@@ -7839,10 +7884,12 @@ function renderAlertsCard(){
   var rows=drinkWatches.map(function(w){
     var right=w.triggered
       ?'<span style="font-size:11px;font-weight:800;color:#15803d">\u2713 chez '+sanitize(w.storeName||"")+(w.dist!=null?" \u00B7 "+fmtDist(w.dist):"")+'</span>'
-      :'<span style="font-size:11px;font-weight:700;color:var(--s3)">\uD83D\uDC40 en veille</span>';
+      :'<span style="font-size:11px;font-weight:700;color:var(--s3)">en veille</span>';
     var lineAction=w.triggered?"openWatchStore('"+String(w.storeId).replace(/'/g,"\\'")+"',"+w.id+")":"var d=DRINKS.find(function(x){return x.id==="+w.id+"});if(d)pick(d)";
+    var wd=DRINKS.find(function(x){return Number(x.id)===Number(w.id);});
+    var wcat=wd?wd.cat:"Autre",wcol=(CAT_DEFAULTS[wcat]||{}).color||"var(--s2)";
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0" data-wid="'+w.id+'">'+
-      '<span style="font-size:17px;cursor:pointer" onclick="'+lineAction+'">'+(w.emoji||"\uD83E\uDD64")+'</span>'+
+      '<span style="cursor:pointer;display:flex;color:'+wcol+'" onclick="'+lineAction+'">'+magoCatIcon(wcat,20,wcol)+'</span>'+
       '<span style="flex:1;min-width:0;font-size:12.5px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')this.click()" onclick="'+lineAction+'">'+w.name+'</span>'+
       '<span style="cursor:pointer" onclick="'+lineAction+'">'+right+'</span>'+
       '<span onclick="removeWatch('+w.id+')" role="button" tabindex="0" aria-label="Retirer la veille" style="font-size:12px;color:var(--s3);cursor:pointer;padding:4px">\u2715</span>'+
