@@ -2432,6 +2432,12 @@ window.fbLoadNearbyHunts = async function(lat, lng, radiusKm) {
         if (lat != null && s.lat != null) {
           var dLa = (lat - s.lat) * 111, dLo = (lng - s.lng) * 111 * Math.cos(lat * Math.PI / 180);
           if (Math.sqrt(dLa * dLa + dLo * dLo) > R) return;
+        } else if (uid !== myUid) {
+          // Sans position (viewer ou chercheur), on ne peut PAS affirmer
+          // "près de toi" : on ne compte alors que soi-même (les chasses des
+          // autres restent masquées tant que le GPS n'a pas répondu — évite
+          // d'afficher des chasses de l'autre bout du monde comme locales).
+          return;
         }
         near++; if (uid === myUid) mine = true;
       });
@@ -3840,6 +3846,9 @@ function refreshLocation(cb){
     // Recharge depuis Firestore les magasins REELLEMENT autour de la position
     // actuelle (le lot charge au demarrage peut etre a des kilometres).
     if(window.fbLoadNearbyStores){try{window.fbLoadNearbyStores(userLat,userLng,10);}catch(e){}}
+    // Maintenant qu'on a une vraie position, on redessine les chasses avec les
+    // bonnes distances (sinon la liste chargée sans GPS restait figée).
+    try{var hp=document.getElementById("s-home");if(hp&&hp.classList.contains("on"))renderHunts();}catch(e){}
     cb&&cb(true);
   },function(){_gpsRefreshing=false;cb&&cb(false);},{enableHighAccuracy:true,timeout:8000,maximumAge:15000});
 }
@@ -4028,15 +4037,29 @@ function confirmWithPrice(sid,did){
    selon le cas). Le meme clic repete a l'infini ne donne plus rien. */
 var awardLog={};
 try{awardLog=JSON.parse(localStorage.getItem("magoAwards")||"{}");}catch(e){}
+// Date d'expiration d'une entrée. Compat : ancien format = timestamp (nombre) ;
+// nouveau = {t,exp}. Pour l'ancien, on applique la TTL passée à l'appel.
+function _awardExp(e,hours){
+  if(e==null)return 0;
+  return (typeof e==="object")?(e.exp||0):(e+(hours||24)*3600000);
+}
 function awardFree(key,hours){
-  var ttl=(hours||24)*3600000;
-  return !(awardLog[key]&&(Date.now()-awardLog[key])<ttl);
+  return Date.now()>=_awardExp(awardLog[key],hours);
 }
 function awardOnce(key,hours){
   if(!awardFree(key,hours))return false;
-  var now=Date.now();
-  Object.keys(awardLog).forEach(function(k){if(now-awardLog[k]>90*86400000)delete awardLog[k];});
-  awardLog[key]=now;
+  var now=Date.now(),ttlMs=(hours||24)*3600000;
+  // Purge UNIQUEMENT les clés réellement expirées. Avant, tout ce qui datait de
+  // +90 j sautait — y compris les récompenses uniques "à vie" (FOREVER), qui
+  // pouvaient donc être recréditées après 90 j (ex : +50 d'une découverte
+  // promue, points photo…). Corrigé : on ne supprime qu'une clé dont l'exp est
+  // passée (les FOREVER expirent dans ~10 ans, donc restent).
+  Object.keys(awardLog).forEach(function(k){
+    var e=awardLog[k];
+    var exp=(typeof e==="object")?(e.exp||0):(e+90*86400000); // legacy : ancienne TTL implicite
+    if(now>=exp)delete awardLog[k];
+  });
+  awardLog[key]={t:now,exp:now+ttlMs};
   try{localStorage.setItem("magoAwards",JSON.stringify(awardLog));}catch(e){}
   return true;
 }
