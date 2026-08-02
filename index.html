@@ -2407,6 +2407,18 @@ window.fbLeaveHunt = async function(drinkId) {
     await setDoc(doc(db, "hunts", String(drinkId)), patch, { merge: true });
   } catch (e) { /* silencieux */ }
 };
+/* Nombre d'AUTRES personnes qui chassent cette boisson (pour récompenser
+   celui qui la trouve et la signale : il aide une vraie demande). */
+window.fbHuntSeekers = async function(drinkId) {
+  try {
+    var s = await getDoc(doc(db, "hunts", String(drinkId)));
+    if (!s.exists()) return 0;
+    var seekers = s.data().seekers || {}, me = auth.currentUser ? auth.currentUser.uid : null;
+    var n = 0, fresh = Date.now() - 30 * 86400000;
+    Object.keys(seekers).forEach(function(u) { var x = seekers[u]; if (x && x.at && x.at >= fresh && u !== me) n++; });
+    return n;
+  } catch (e) { return 0; }
+};
 window.fbLoadNearbyHunts = async function(lat, lng, radiusKm) {
   try {
     var snap = await getDocs(query(collection(db, "hunts"), limit(200)));
@@ -3944,6 +3956,7 @@ function report(type){
   trackStoreContribution(s.fbId||s.id);
   // Firebase sync
   if(window.fbAddReport) window.fbAddReport(s.fbId||s.id, d.id, type);
+  if(type==="stock"){try{maybeRewardHuntHelp(d.id,s);}catch(e){}}
   closeModal();playSound("win");toast(msgs[type]);
   updateProfileStats();renderStoreList();
 }
@@ -4004,6 +4017,7 @@ function confirmWithPrice(sid,did){
   if(window.fbTouchCache)window.fbTouchCache();
   playSound("pop");updateProfileStats();
   toast(price?"✅ "+price.toFixed(2)+"€ enregistré · +3 pts":"✅ Stock confirmé · +3 pts");
+  try{maybeRewardHuntHelp(did,s);}catch(e){}
   renderStoreList();
 }
 
@@ -4028,6 +4042,22 @@ function awardOnce(key,hours){
 }
 var FOREVER=24*3650; // dedup "a vie" (10 ans)
 function trackStoreContribution(storeId){if(storeId!=null)contributedStores[String(storeId)]=true;bumpStreak();}
+/* Récompense "chasseur" : si la boisson que tu viens de confirmer en stock est
+   activement recherchée par d'AUTRES (une chasse), tu gagnes un bonus — tu as
+   aidé une vraie demande. Le(s) demandeur(s), eux, sont prévenus par leur veille
+   (checkWatches à l'ouverture, + push téléphone si la Cloud Function est
+   déployée) : chacun reçoit ce qui le concerne. */
+function maybeRewardHuntHelp(drinkId,store){
+  if(!window.fbHuntSeekers)return;
+  window.fbHuntSeekers(drinkId).then(function(n){
+    if(n>0&&awardOnce("huntHelp:"+drinkId+":"+((store&&store.id)||""),24)){
+      userStats.pts+=5;try{flyPts(5);}catch(e){}updateProfileStats();
+      if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+      playSound("win");
+      toast("🎯 Tu as aidé une chasse ! "+n+" personne"+(n>1?"s":"")+" cherchai"+(n>1?"ent":"t")+" ça · +5 pts");
+    }
+  }).catch(function(){});
+}
 /* ================================
    BADGES A PALIERS — bronze / argent / or
    Chaque famille mesure une vraie contribution ; le passage d'un palier

@@ -150,3 +150,37 @@ exports.notifyHuntNearby = onDocumentWritten(
     console.log("Chasse « " + name + " » : " + msgs.length + " notifiés.");
   }
 );
+
+/* CHASSE TROUVÉE — l'autre moitié : quand un chasseur AJOUTE une boisson à un
+   magasin (le tableau `drinks` du magasin gagne un id), on prévient ceux qui la
+   guettaient (collection `watches`) et qui sont à proximité : « ✅ Trouvée près
+   de toi — voilà où l'acheter ». Le chasseur, lui, a déjà son bonus in-app.
+   ⚠️ ADAPTE : casse de la collection magasins ("stores" vs "Stores"). */
+exports.notifyStockToWatchers = onDocumentUpdated(
+  { document: "stores/{id}", region: REGION },
+  async (event) => {
+    const before = event.data.before.data() || {};
+    const after = event.data.after.data() || {};
+    const bd = new Set((before.drinks || []).map(String));
+    const added = (after.drinks || []).map(String).filter(function(x){ return !bd.has(x); });
+    if (!added.length) return;
+    const sLat = after.lat, sLng = after.lng, sName = String(after.name || "un magasin");
+    for (const drinkId of added) {
+      let watchSnap;
+      try {
+        watchSnap = await db.collection("watches").where("drinkId", "==", Number(drinkId) || drinkId).get();
+      } catch (e) { console.warn("watches query:", e && e.message); continue; }
+      for (const w of watchSnap.docs) {
+        const wd = w.data();
+        if (sLat != null && wd.lat != null && _dist(sLat, sLng, wd.lat, wd.lng) > 12) continue;
+        const dName = String(wd.drinkName || "Ta boisson").slice(0, 40);
+        await pushToUser(
+          wd.uid,
+          "✅ Trouvée près de toi !",
+          "« " + dName + " » vient d'être repérée chez " + sName + ". Fonce l'acheter avant qu'elle parte !",
+          { type: "found", drinkId: String(drinkId), storeId: String(event.params.id) }
+        );
+      }
+    }
+  }
+);

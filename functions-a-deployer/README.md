@@ -46,13 +46,18 @@ fonctions **ajoutent seulement le push** (aucun point → zéro risque de doublo
 3. Vérifie que **Cloud Messaging** est activé et que la clé VAPID est bien celle
    déjà dans l'app (`window.MAGO_VAPID_KEY`). Les utilisateurs doivent avoir
    activé les notifications (l'app enregistre alors leur token dans `pushTokens`).
-4. Déploie : `firebase deploy --only functions:notifyDiscoveryPromoted,functions:notifyPhotoRejected,functions:notifyHuntNearby`
+4. Déploie : `firebase deploy --only functions:notifyDiscoveryPromoted,functions:notifyPhotoRejected,functions:notifyHuntNearby,functions:notifyStockToWatchers`
 5. Teste : promeus une découverte de test → l'auteur doit recevoir le push.
 
 > 🎯 **notifyHuntNearby** : quand quelqu'un met une boisson en veille (= lance une
 > « chasse »), les gens à moins de ~15 km reçoivent « Chasse près de toi ». Le
 > tableau in-app « Chasses près de toi » marche DÉJÀ sans serveur (il lit la
 > collection `hunts`) ; cette fonction ajoute seulement le push téléphone.
+>
+> ✅ **notifyStockToWatchers** : l'autre moitié de la chasse — quand un chasseur
+> ajoute la boisson à un magasin, ceux qui la guettaient (veille) et sont à
+> proximité reçoivent « Trouvée près de toi, voilà où l'acheter ». (En attendant
+> le déploiement, ils sont déjà prévenus dans l'app à leur prochaine ouverture.)
 
 ## 3) (Optionnel) Localiser les magasins — `locate-stores.js`
 
