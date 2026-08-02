@@ -433,6 +433,7 @@ body.dark .sd-mission .bar{background:rgba(255,255,255,.13)}
 @keyframes sdRowIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
 /* confettis au passage de niveau */
 @keyframes confFall{to{transform:translateY(104vh) rotate(680deg);opacity:.35}}
+@keyframes fbSheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
 @media (prefers-reduced-motion:reduce){
   .store-card{animation:none!important}
   .sd-mission .ic{animation:none!important}
@@ -1145,6 +1146,14 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
           <div style="font-size:11.5px;font-weight:600;color:#9a6a2a;margin-top:1px">Niveau, avantages, classement & récompenses</div>
         </div>
         <span style="font-size:16px;color:#b45309">›</span>
+      </div>
+      <div onclick="openFeedback()" role="button" tabindex="0" aria-label="Donner mon avis" onkeydown="if(event.key==='Enter'){openFeedback();}" style="display:flex;align-items:center;gap:12px;margin:2px 20px 8px;padding:13px 16px;background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;cursor:pointer">
+        <span style="line-height:0;color:#f0b840"><svg width="22" height="22" viewBox="0 0 24 24" fill="#f0b840" stroke="#f0b840" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2.5l2.9 5.9 6.5.95-4.7 4.58 1.1 6.47L12 17.9l-5.8 3.06 1.1-6.47-4.7-4.58 6.5-.95z"/></svg></span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px;font-weight:800;color:var(--s1)">Donne ton avis</div>
+          <div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:1px">Aide à améliorer Magofeed — ce qui va, ce qui manque</div>
+        </div>
+        <span style="font-size:16px;color:var(--s3)">›</span>
       </div>
       <div style="padding:8px 20px 10px" class="t-section" id="t-leaderboard">Classement</div>
       <div id="leaderboard-list" style="padding:0 20px 20px"></div>
@@ -2196,6 +2205,28 @@ window.fbLoadUser = async function(uid) {
     var s = await getDoc(doc(db, "users", String(uid)));
     return s.exists() ? Object.assign({ uid: String(uid) }, s.data()) : null;
   } catch (e) { console.warn("Load user error:", e); return null; }
+};
+
+/* Avis des utilisateurs (note /5 + texte) : nourrit l'amélioration de l'app.
+   Créé par tout connecté, lu par l'admin (règles). */
+window.fbSubmitFeedback = async function(rating, text) {
+  var user = await ensureAuthed();
+  await addDoc(collection(db, "feedback"), {
+    rating: Math.max(0, Math.min(5, Number(rating) || 0)),
+    text: String(text || "").slice(0, 1000),
+    by: user.uid,
+    pseudo: (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
+    createdAt: serverTimestamp()
+  });
+};
+window.fbLoadFeedback = async function() {
+  try {
+    var snap = await getDocs(query(collection(db, "feedback"), limit(60)));
+    var rows = [];
+    snap.forEach(function(d) { var x = d.data(); x.id = d.id; rows.push(x); });
+    rows.sort(function(a, b) { return (b.createdAt && b.createdAt.seconds || 0) - (a.createdAt && a.createdAt.seconds || 0); });
+    return rows;
+  } catch (e) { console.warn("feedback load:", e); return []; }
 };
 window.fbLoadLeaderboard = async function() {
   try {
@@ -4290,6 +4321,68 @@ function showPromotedBanner(n,rewardPts){
   ov.onclick=function(e){if(e.target===ov)try{ov.remove();}catch(err){}};
   document.body.appendChild(ov);
 }
+/* ================================
+   AVIS UTILISATEUR (note /5 + retour écrit)
+   Une vraie demande d'avis pour guider l'avenir de l'app : ce qui plaît, ce
+   qui manque, ce qu'il faut retirer. Étoiles en SVG (pas d'emoji), envoi dans
+   Firestore (collection feedback), lisible par l'admin.
+================================ */
+function _fbStar(filled){
+  return '<svg width="34" height="34" viewBox="0 0 24 24" fill="'+(filled?"#f0b840":"none")+'" stroke="'+(filled?"#f0b840":"var(--s3)")+'" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2.5l2.9 5.9 6.5.95-4.7 4.58 1.1 6.47L12 17.9l-5.8 3.06 1.1-6.47-4.7-4.58 6.5-.95z"/></svg>';
+}
+var _fbRating=0;
+function openFeedback(){
+  if(document.getElementById("feedback-ov"))return;
+  _fbRating=0;
+  var ov=document.createElement("div");
+  ov.id="feedback-ov";
+  ov.style.cssText="position:fixed;inset:0;z-index:10001;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px)";
+  var card=document.createElement("div");
+  card.style.cssText="width:100%;max-width:440px;background:var(--app-bg);border-radius:24px 24px 0 0;padding:24px 22px calc(26px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28);animation:fbSheetUp .32s cubic-bezier(.2,.8,.3,1) both";
+  card.innerHTML='<div style="width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 18px"></div>'+
+    '<div style="font-size:19px;font-weight:800;color:var(--s1);text-align:center">Ton avis compte</div>'+
+    '<div style="font-size:13px;color:var(--s2);text-align:center;margin:6px auto 18px;line-height:1.5;max-width:320px">Tu testes Magofeed — dis-nous franchement ce qui te plaît, ce qui manque ou ce qu\'il faut retirer. Ça guide vraiment la suite.</div>'+
+    '<div id="fb-stars" style="display:flex;justify-content:center;gap:10px;margin-bottom:4px"></div>'+
+    '<div id="fb-rate-label" style="text-align:center;font-size:12px;font-weight:700;color:#c69a57;height:16px;margin-bottom:14px"></div>'+
+    '<textarea id="fb-text" rows="4" placeholder="Ce qui est bien, ce qu\'il faut améliorer ou retirer…" style="width:100%;box-sizing:border-box;padding:13px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-family:inherit;resize:none;outline:none"></textarea>'+
+    '<button id="fb-send" style="width:100%;margin-top:14px;padding:14px;border-radius:14px;border:none;background:#e67e22;color:#fff;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">Envoyer mon avis</button>'+
+    '<div id="fb-cancel" role="button" tabindex="0" style="text-align:center;margin-top:12px;font-size:12.5px;font-weight:600;color:var(--s3);cursor:pointer">Plus tard</div>';
+  ov.appendChild(card);
+  ov.onclick=function(e){if(e.target===ov)ov.remove();};
+  document.body.appendChild(ov);
+  var host=card.querySelector("#fb-stars");
+  var labels=["","À revoir","Bof","Correct","Bien","Excellent !"];
+  function draw(){
+    host.innerHTML="";
+    for(var i=1;i<=5;i++){(function(n){
+      var sp=document.createElement("span");sp.style.cssText="cursor:pointer;line-height:0";sp.innerHTML=_fbStar(n<=_fbRating);
+      sp.onclick=function(){_fbRating=n;draw();card.querySelector("#fb-rate-label").textContent=labels[n];try{playSound("pop");}catch(e){}};
+      host.appendChild(sp);
+    })(i);}
+  }
+  draw();
+  card.querySelector("#fb-cancel").onclick=function(){ov.remove();};
+  card.querySelector("#fb-send").onclick=function(){
+    var txt=(card.querySelector("#fb-text").value||"").trim();
+    if(!_fbRating&&!txt){toast("Ajoute une note ou un petit mot");try{playSound("err");}catch(e){}return;}
+    if(window.fbSubmitFeedback)window.fbSubmitFeedback(_fbRating,txt).catch(function(e){console.warn("feedback:",e);});
+    try{localStorage.setItem("magoFeedbackDone","1");}catch(e){}
+    ov.remove();
+    try{playSound("win");}catch(e){}
+    toast("Merci ! Ton avis nous aide énormément.");
+  };
+}
+/* Invite douce à donner son avis : une seule fois, après un peu de contribution
+   (assez pour avoir un vrai ressenti), jamais si déjà donné. */
+function maybeAskFeedback(){
+  try{
+    if(localStorage.getItem("magoFeedbackDone")==="1")return;
+    if(localStorage.getItem("magoFeedbackAsked")==="1")return;
+    if((userStats.pts||0)<25)return;
+    localStorage.setItem("magoFeedbackAsked","1");
+    setTimeout(function(){openFeedback();},1200);
+  }catch(e){}
+}
 function levelInfo(pts){
   var i=0;
   for(var k=0;k<LEVELS.length;k++){if(pts>=LEVELS[k][0])i=k;}
@@ -4416,6 +4509,7 @@ function updateProfileStats(){
   renderBadges();
   try{applyPseudoDisplays();}catch(e){} // couleur/anneau de pseudo debloques suivent le niveau
   try{var _lv=levelInfo(userStats.pts||0);if(window._lastLevelIdx!=null&&_lv.idx>window._lastLevelIdx){celebrateLevelUp(_lv);}window._lastLevelIdx=_lv.idx;}catch(e){}
+  try{maybeAskFeedback();}catch(e){} // invite douce à donner son avis (1x, après un peu de contribution)
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
   if(!userStats.activity.length)return;
   var al=document.getElementById("activity-list");
@@ -10399,6 +10493,7 @@ function renderAdmin(){
   var el=document.getElementById("admin-list");if(!el)return;
   el.innerHTML="";
   renderFounderDash();
+  renderFeedbackAdmin();
   renderPhotoSuggestions();
   renderFormatSuggestions();
   renderAdminHistory();
@@ -10559,6 +10654,40 @@ function renderFounderDash(){
       tile("\u23F3",pendingDisc,"\u00E0 valider",true)+
       tile("\uD83D\uDCF8",s.pendingPhotos,"photos en attente",true);
   }).catch(function(e){console.warn("dash:",e);});
+}
+/* Avis des utilisateurs côté admin : note moyenne + derniers retours écrits.
+   C'est le canal direct pour savoir quoi améliorer/retirer. */
+function renderFeedbackAdmin(){
+  var host=document.getElementById("admin-feedback");
+  if(!host){
+    host=document.createElement("div");
+    host.id="admin-feedback";
+    var list=document.getElementById("admin-list");
+    if(list&&list.parentNode)list.parentNode.insertBefore(host,list);
+  }
+  host.innerHTML="";
+  if(!window.fbLoadFeedback)return;
+  window.fbLoadFeedback().then(function(rows){
+    if(!rows.length)return;
+    var rated=rows.filter(function(r){return r.rating>0;});
+    var avg=rated.length?(rated.reduce(function(a,r){return a+r.rating;},0)/rated.length):0;
+    function stars(n){var s="";for(var i=1;i<=5;i++)s+=(i<=Math.round(n)?"★":"☆");return s;}
+    var hd=document.createElement("div");
+    hd.style.cssText="font-size:13px;font-weight:800;color:var(--s1);margin:2px 0 10px";
+    hd.innerHTML='💬 Avis des utilisateurs ('+rows.length+')'+(rated.length?' · <span style="color:#c69a57">'+stars(avg)+' '+avg.toFixed(1)+'/5</span>':'');
+    host.appendChild(hd);
+    rows.slice(0,15).forEach(function(r){
+      var card=document.createElement("div");
+      card.style.cssText="background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;padding:11px 13px;margin-bottom:8px";
+      card.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'+
+        '<span style="font-size:12px;font-weight:800;color:var(--s1)">'+sanitize(r.pseudo||"Anonyme")+'</span>'+
+        (r.rating?'<span style="font-size:12px;color:#c69a57;font-weight:800">'+stars(r.rating)+'</span>':'')+
+      '</div>'+
+      (r.text?'<div style="font-size:12.5px;color:var(--s2);line-height:1.5;margin-top:5px">'+sanitize(r.text)+'</div>':'<div style="font-size:11.5px;color:var(--s3);margin-top:4px;font-style:italic">(note sans commentaire)</div>');
+      host.appendChild(card);
+    });
+    var sep=document.createElement("div");sep.style.cssText="height:1px;background:var(--border);margin:6px 0 14px";host.appendChild(sep);
+  }).catch(function(e){console.warn("feedback admin:",e);});
 }
 function renderAdminHistory(){
   var host=document.getElementById("admin-history");
