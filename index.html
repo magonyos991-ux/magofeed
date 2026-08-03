@@ -1750,6 +1750,7 @@ onAuthStateChanged(auth, async function(user) {
   window.fbCheckAdmin();
   window.fbLoadCatalog();
   window.fbLoadDrinkMerges();
+  window.fbLoadDrinkNames();
   window.fbLoadDrinkImages();
   try {
     var snap = await getDoc(userDocRef(user.uid));
@@ -1854,6 +1855,40 @@ window.fbSaveDrinkMerge = async function(oldId, newId) {
   await setDoc(doc(db, "meta", "drinkMerges"), upd, { merge: true });
   window.DRINK_MERGES[Number(oldId)] = Number(newId);
   (window.STORES || []).forEach(applyMergesToStore);
+};
+/* Renommages de fiches decides par l'admin : id -> {name, brand}. Corrige un nom
+   de produit mal reconnu (ex. "AA Drink" -> "AA Drink Pro Energy") pour TOUTE la
+   communaute. Stockes dans meta/drinkNames (lecture publique, ecriture admin :
+   deja couvert par firestore.rules "match /meta/{id}"), appliques au boot. */
+window.DRINK_NAMES = {};
+window.applyDrinkNames = function() {
+  var list = window.DRINKS; if (!list) return;
+  Object.keys(window.DRINK_NAMES).forEach(function(id){
+    var ov = window.DRINK_NAMES[id]; if (!ov) return;
+    var d = list.find(function(x){ return Number(x.id) === Number(id); });
+    if (!d) return;
+    if (ov.name)  d.name  = ov.name;
+    if (ov.brand) d.brand = ov.brand;
+  });
+};
+window.fbLoadDrinkNames = async function() {
+  try {
+    var snap = await getDoc(doc(db, "meta", "drinkNames"));
+    if (!snap.exists()) return;
+    var m = snap.data() || {};
+    Object.keys(m).forEach(function(k){ window.DRINK_NAMES[k] = m[k]; });
+    window.applyDrinkNames();
+    window.dispatchEvent(new CustomEvent("fbNamesLoaded"));
+  } catch (e) { console.warn("Names:", e); }
+};
+window.fbSaveDrinkRename = async function(id, newName, newBrand) {
+  var ov = { name: String(newName) };
+  if (newBrand) ov.brand = String(newBrand);
+  var upd = {};
+  upd[String(id)] = ov;
+  await setDoc(doc(db, "meta", "drinkNames"), upd, { merge: true });
+  window.DRINK_NAMES[String(id)] = ov;
+  window.applyDrinkNames();
 };
 function normalizeStore(data, id, distKm) {
   data.fbId = id;
@@ -7242,6 +7277,26 @@ function adminMergeDrink(){
     try{pick(target);}catch(e){}
   }).catch(function(e){playSound("err");toast("\u00c9chec ("+(e&&e.message||"erreur")+")");});
 }
+function adminRenameDrink(){
+  if(!isAdmin||!curSel)return;
+  var d=curSel;
+  var newName=prompt("Corriger le NOM de « "+d.name+" » :\n(ex. AA Drink → AA Drink Pro Energy)\n\nNouveau nom :",d.name);
+  if(newName===null)return;
+  newName=newName.trim();
+  if(!newName){toast("Nom vide");playSound("err");return;}
+  var newBrand=prompt("Marque de « "+newName+" » :\n(laisse tel quel si c'est déjà bon)",d.brand||"");
+  if(newBrand===null)newBrand=d.brand||"";
+  newBrand=newBrand.trim();
+  if(newName===d.name&&newBrand===(d.brand||"")){toast("Aucun changement");return;}
+  if(!confirm("Renommer pour TOUTE la communauté :\n« "+d.name+" » → « "+newName+" »"+(newBrand&&newBrand!==(d.brand||"")?"\nMarque : "+newBrand:"")+" ?"))return;
+  toast("Renommage en cours…");
+  window.fbSaveDrinkRename(d.id,newName,newBrand).then(function(){
+    d.name=newName;if(newBrand)d.brand=newBrand;
+    playSound("win");
+    toast("✓ Renommé — « "+newName+" » (partagé pour tous)");
+    try{pick(d);}catch(e){}
+  }).catch(function(e){playSound("err");toast("Échec ("+(e&&e.message||"erreur")+")");});
+}
 function adminCleanDuplicateUsers(){
   if(!isAdmin)return;
   if(!confirm("Nettoyer les doublons du classement ?\nPour chaque pseudo en double : on garde le compte le plus r\u00e9cent (ton compte actuel en priorit\u00e9), son score devient le meilleur du groupe, les copies sont supprim\u00e9es."))return;
@@ -7351,6 +7406,7 @@ function openAdminSheet(){
     '<div id="ash-fill" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Remplissage enseignes (auto)</div>'+
     '<div id="ash-clean" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Purger Lidl / Aldi / Match</div>'+
     '<div id="ash-dedup" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Nettoyer doublons classement</div>'+
+    '<div id="ash-rename" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Renommer / corriger le nom</div>'+
     '<div id="ash-merge" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Fusionner cette fiche avec\u2026</div>'+
     '<div id="ash-batch" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Rayon par photos (lot \u2192 magasin)</div>'+
     '<div id="ash-brand" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Assigner \u00E0 une enseigne</div>'+
@@ -7366,6 +7422,7 @@ function openAdminSheet(){
   bind("ash-fill",adminFillEnseignes);
   bind("ash-clean",adminCleanUnverified);
   bind("ash-dedup",adminCleanDuplicateUsers);
+  bind("ash-rename",adminRenameDrink);
   bind("ash-merge",adminMergeDrink);
   bind("ash-batch",adminBatchAssign);
   bind("ash-brand",adminAssignBrand);
