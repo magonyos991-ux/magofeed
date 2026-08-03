@@ -40,13 +40,21 @@ function hasFfmpeg() {
   return r.status === 0;
 }
 
-async function transcode(webm, mp4) {
+// `trim` = secondes à couper au début (pré-roll : chargement de la page).
+async function transcode(webm, mp4, trim, dur) {
   const wav = path.join(OUT, 'magofeed-theme.wav');   // bande-son (make-music.mjs)
   const hasAudio = fs.existsSync(wav);
-  const args = ['-y', '-i', webm];
+  const args = ['-y'];
+  if (trim > 0) args.push('-ss', trim.toFixed(3));
+  args.push('-i', webm);
   if (hasAudio) args.push('-stream_loop', '-1', '-i', wav);   // boucle la musique sur la durée
-  args.push('-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18');
-  if (hasAudio) args.push('-map', '0:v', '-map', '1:a', '-c:a', 'aac', '-b:a', '192k', '-shortest');
+  args.push('-t', dur.toFixed(3));
+  args.push('-c:v', 'libx264', '-preset', 'slow', '-pix_fmt', 'yuv420p', '-crf', '18',
+            '-profile:v', 'high', '-level', '4.0');
+  if (hasAudio) {
+    args.push('-map', '0:v', '-map', '1:a', '-c:a', 'aac', '-b:a', '192k',
+              '-af', `afade=t=out:st=${Math.max(0, dur - 0.8).toFixed(2)}:d=0.8`, '-shortest');
+  }
   args.push('-movflags', '+faststart', mp4);
   return new Promise((res, rej) => {
     const ff = spawn('ffmpeg', args, { stdio: 'ignore' });
@@ -54,17 +62,53 @@ async function transcode(webm, mp4) {
   });
 }
 
-const browser = await chromium.launch({ executablePath: process.env.PW_CHROME });
+// Page d'attente (même fond que les vidéos) : l'enregistreur démarre dessus,
+// on ne navigue vers la vidéo qu'une fois la capture stabilisée.
+const HOLD = 'data:text/html,<body style="margin:0;background:%23100e0c"></body>';
+
+// PW_CHROME permet de pointer un Chromium déjà installé (utile si la version de
+// Playwright ne correspond pas aux navigateurs présents sur la machine).
+function findChrome() {
+  if (process.env.PW_CHROME) return process.env.PW_CHROME;
+  const root = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  if (!root || !fs.existsSync(root)) return undefined;
+  const dir = fs.readdirSync(root).filter(d => /^chromium-\d+$/.test(d)).sort().pop();
+  if (!dir) return undefined;
+  const bin = path.join(root, dir, 'chrome-linux', 'chrome');
+  return fs.existsSync(bin) ? bin : undefined;
+}
+
+const browser = await chromium.launch({ executablePath: findChrome() });
 for (const t of targets) {
   const ctx = await browser.newContext({
     viewport: { width: t.w, height: t.h },
     deviceScaleFactor: 1,
     recordVideo: { dir: OUT, size: { width: t.w, height: t.h } },
+    reducedMotion: 'no-preference',
   });
+  // injecté AVANT le 1er script de la page : l'overlay « Activer le son »
+  // n'apparaît jamais, même une frame.
+  await ctx.addInitScript(css => {
+    const add = () => {
+      const s = document.createElement('style');
+      s.textContent = css;
+      (document.head || document.documentElement).appendChild(s);
+    };
+    if (document.documentElement) add();
+    else document.addEventListener('readystatechange', add, { once: true });
+  }, OVERRIDE);
+
   const page = await ctx.newPage();
+  const recStart = Date.now();               // ≈ début de l'enregistrement
+  await page.goto(HOLD);
+  await page.waitForTimeout(900);            // laisse la capture s'amorcer
+
   await page.goto(pathToFileURL(path.join(DIR, t.file)).href, { waitUntil: 'load' });
-  await page.addStyleTag({ content: OVERRIDE });
-  await page.waitForTimeout(400);            // laisse la 1re scène s'installer
+  // resynchronise les scènes sur l'instant présent quand la vidéo l'expose
+  await page.evaluate(() => {
+    if (window.MagoFeedVideo && window.MagoFeedVideo.restart) window.MagoFeedVideo.restart();
+  });
+  const t0 = Date.now();                     // image 1 de la vidéo finale
   await page.waitForTimeout(t.dur);          // durée d'un cycle complet
   const video = page.video();
   await ctx.close();                         // finalise le webm
@@ -75,7 +119,9 @@ for (const t of targets) {
   if (wantMp4) {
     if (hasFfmpeg()) {
       const mp4Path = path.join(OUT, t.out + '.mp4');
-      await transcode(webmPath, mp4Path);
+      // 0,15 s de marge : mieux vaut garder une image de fond que rogner la scène 1
+      const trim = Math.max(0, (t0 - recStart) / 1000 - 0.15);
+      await transcode(webmPath, mp4Path, trim, t.dur / 1000);
       console.log('✓ ' + path.basename(mp4Path));
     } else {
       console.log('⚠  ffmpeg introuvable dans le PATH — MP4 ignoré (webm conservé).');
