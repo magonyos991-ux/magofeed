@@ -2069,6 +2069,12 @@ window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
     } catch (e2) { /* pas de cache disponible */ }
     setTimeout(function() { if (banner) banner.style.display = "none"; }, 3000);
     window._fbLoading = false;
+    // Echec reseau + aucun cache : on marque quand meme le chargement comme
+    // termine et on emet fbStoresLoaded (liste vide). Sans ca, les vues en
+    // attente (le squelette de pick()) resteraient bloquees indefiniment sur un
+    // skeleton. La fiche se rend alors en mode degrade (carte, 0 magasin connu).
+    window._fbReady = true;
+    window.dispatchEvent(new CustomEvent("fbStoresLoaded", { detail: [] }));
     return [];
   }
 };
@@ -3925,7 +3931,17 @@ function initGPS(){
         var lbl=document.getElementById("gps-label");
         if(lbl)lbl.innerHTML='<span style="width:7px;height:7px;border-radius:50%;background:#22c55e;flex-shrink:0;display:inline-block"></span><span style="font-size:12px;font-weight:500;color:var(--s2)">'+txt+'</span>';
       }).catch(function(){});
-  },function(){},{enableHighAccuracy:true,timeout:12000,maximumAge:30000});
+  },function(err){
+    // Echec GPS (refus, timeout, capteur absent) : ne plus rester muet.
+    // On signale l'etat pour que l'utilisateur comprenne pourquoi les magasins
+    // proposes sont ceux du centre par defaut, et qu'il cherche sa ville a la main.
+    var dot=document.getElementById("gps-dot");if(dot)dot.style.background="#f59e0b";
+    var lbl=document.getElementById("gps-label");
+    if(lbl){
+      var msg=(err&&err.code===1)?"GPS refusé — cherche ta ville dans Explorer":"Position indisponible — réessaie ou cherche ta ville";
+      lbl.innerHTML='<span style="width:7px;height:7px;border-radius:50%;background:#f59e0b;flex-shrink:0;display:inline-block"></span><span style="font-size:12px;font-weight:500;color:var(--s2)">'+msg+'</span>';
+    }
+  },{enableHighAccuracy:true,timeout:12000,maximumAge:30000});
 }
 function haversine(a,b,c,d){
   var R=6371000,dL=(c-a)*Math.PI/180,dG=(d-b)*Math.PI/180;
@@ -4663,6 +4679,10 @@ function resetScanUI(){
   if(res){res.style.display="none";res.innerHTML="";res.className="scan-result";}
   if(hint)hint.textContent=(LANGS[curLang]||LANGS.fr).camWaiting;
   if(rescanLink)rescanLink.style.display="none";
+  // Retire les liens injectes par le scan precedent (evite qu'ils restent
+  // figes sur un ancien code-barre apres « Scanner un autre »).
+  Array.prototype.forEach.call(document.querySelectorAll(".scan-injected"),function(n){n.remove();});
+  var _snf1=document.getElementById("scan-not-family");if(_snf1)_snf1.style.display="none";
 }
 function rescan(){resetScanUI();startScan();}
 
@@ -5396,6 +5416,11 @@ function onBarcodeDetected(r){
   var found=DRINKS.find(function(d){return d.barcodes&&d.barcodes.indexOf(code)!==-1;});
   var foundDiscovery=DISCOVERIES.find(function(d){return String(d.barcode)===String(code);});
   res.style.display="block";
+  // Nettoie les liens injectes par un scan precedent (« deja au catalogue ? »,
+  // « produit different ») : sinon ils restent visibles, figes sur l'ancien
+  // code-barre, et un tap ajouterait le MAUVAIS produit.
+  Array.prototype.forEach.call(document.querySelectorAll(".scan-injected"),function(n){n.remove();});
+  var _snf0=document.getElementById("scan-not-family");if(_snf0)_snf0.style.display="none";
   if(found){
     res.className="scan-result found";
     var hasPhoto=!!getCachedDrinkImage(found);
@@ -5415,7 +5440,7 @@ function onBarcodeDetected(r){
   } else if(foundDiscovery){
     var alreadyVoted=hasVotedDiscovery(foundDiscovery.id);
     res.className="scan-result found";
-    res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="font-size:28px">'+discGlyph(26)+'</div><div><div style="font-size:15px;font-weight:700;color:#166534">'+foundDiscovery.name+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">'+(alreadyVoted?"Déjà voté par toi · ":"Déjà suggérée par la communauté · ")+(foundDiscovery.votes||0)+' vote'+(foundDiscovery.votes>1?"s":"")+'</div></div></div>';
+    res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="font-size:28px">'+discGlyph(26)+'</div><div><div style="font-size:15px;font-weight:700;color:#166534">'+sanitize(foundDiscovery.name)+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">'+(alreadyVoted?"Déjà voté par toi · ":"Déjà suggérée par la communauté · ")+(foundDiscovery.votes||0)+' vote'+(foundDiscovery.votes>1?"s":"")+'</div></div></div>';
     if(alreadyVoted){
       btn.style.display="none";
     } else {
@@ -5512,6 +5537,7 @@ function onBarcodeDetected(r){
           btn.onclick=function(){addDiscovery(best.name,best.brand,code,best.cat);};
           recordScan(code,best.name,best.brand,best.cat,"off");
           var lnk2=document.createElement("div");
+          lnk2.className="scan-injected";
           lnk2.setAttribute("role","button");lnk2.setAttribute("tabindex","0");
           lnk2.style.cssText="text-align:center;font-size:11.5px;font-weight:600;color:var(--s3);padding:8px;cursor:pointer;text-decoration:underline";
           lnk2.textContent="C'est une boisson d\u00E9j\u00E0 au catalogue ?";
@@ -5538,6 +5564,7 @@ function onBarcodeDetected(r){
           };
           playSound("err");
           var lnk=document.createElement("div");
+          lnk.className="scan-injected";
           lnk.setAttribute("role","button");lnk.setAttribute("tabindex","0");
           lnk.style.cssText="text-align:center;font-size:11.5px;font-weight:600;color:var(--s3);padding:8px;cursor:pointer;text-decoration:underline";
           lnk.textContent="C'est une boisson d\u00E9j\u00E0 au catalogue ?";
@@ -6394,6 +6421,7 @@ function setSearchMode(mode){
   renderList();
   playSound("pop");
 }
+var _listLimit=120,_listSig=" ";
 function renderList(){
   if(searchMode==="stores"){renderStoreSearchList();return;}
   if(searchMode==="users"){renderUserSearchList();return;}
@@ -6408,6 +6436,11 @@ function renderList(){
     f=base.filter(function(d){return(curCat==="Tous"||d.cat===curCat)&&fuzzyIncludes(q,d.name+" "+d.brand);});
     isFuzzy=f.length>0;
   }
+  // Plafonnement d'affichage : a requete vide + "Tous", la liste peut faire ~600
+  // boissons -> reflow massif sur telephone. On rend un lot avec un "Voir plus".
+  // Le compteur se remet a zero des que la recherche/categorie/marque change.
+  var _sig=q+"|"+curCat+"|"+(curBrandFilter||"");
+  if(_sig!==_listSig){_listLimit=120;_listSig=_sig;}
   // Bandeau du filtre marque actif : liste complete garantie (champ brand exact)
   if(curBrandFilter){
     var bb=document.createElement("div");bb.className="brand-banner";
@@ -6453,7 +6486,7 @@ function renderList(){
     fzHdr.textContent="R\u00E9sultats proches de \u00AB "+q+" \u00BB";
     el.appendChild(fzHdr);
   }
-  f.forEach(function(d){
+  f.slice(0,_listLimit).forEach(function(d){
     queueImageFetch(d);
     var div=document.createElement("div");div.className="ritem";
     div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
@@ -6461,6 +6494,14 @@ function renderList(){
       '<span class="c3" style="font-size:18px">›</span>';
     div.onclick=function(){pick(d);};a11yCard(div,d.name+", "+d.brand);el.appendChild(div);
   });
+  if(f.length>_listLimit){
+    var moreBtn=document.createElement("div");moreBtn.className="ritem";
+    moreBtn.style.cssText="justify-content:center;text-align:center;font-weight:700;color:var(--s1);cursor:pointer";
+    moreBtn.innerHTML='<div style="flex:1;text-align:center">Voir plus ('+(f.length-_listLimit)+')</div>';
+    moreBtn.onclick=function(){_listLimit+=200;renderList();};
+    a11yCard(moreBtn,"Voir plus de boissons");
+    el.appendChild(moreBtn);
+  }
   if(matchingDiscoveries.length){
     var hdr=document.createElement("div");
     hdr.style.cssText="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin:"+(f.length?"16px":"0")+" 0 10px";
@@ -6469,7 +6510,7 @@ function renderList(){
     matchingDiscoveries.forEach(function(d){
       var div=document.createElement("div");div.className="ritem";
       div.innerHTML='<div class="rphoto" style="background:var(--bg2)">'+discGlyph(22)+'</div>'+
-        '<div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">Pas encore au catalogue · ★ '+(d.votes||0)+' vote'+(d.votes>1?"s":"")+'</div></div>'+
+        '<div style="flex:1"><div class="rname">'+sanitize(d.name)+'</div><div class="rsub">Pas encore au catalogue · ★ '+(d.votes||0)+' vote'+(d.votes>1?"s":"")+'</div></div>'+
         '<span class="c3" style="font-size:18px">›</span>';
       div.onclick=function(){show("discover");};
       a11yCard(div,d.name+", suggestion de la communaut\u00E9");
@@ -6583,7 +6624,7 @@ function renderStoreSearchList(){
     var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):"";
     var div=document.createElement("div");div.className="ritem";
     div.innerHTML='<div class="rphoto" style="background:var(--bg2)">'+storeIconHTML(s)+'</div>'+
-      '<div style="flex:1"><div class="rname">'+s.name+'</div><div class="rsub">'+(s.brand||s.type||"")+(dist?" · "+dist:"")+(openLabel(s)?" · "+openLabel(s):"")+'</div></div>'+
+      '<div style="flex:1"><div class="rname">'+sanitize(s.name)+'</div><div class="rsub">'+sanitize(s.brand||s.type||"")+(dist?" · "+dist:"")+(openLabel(s)?" · "+openLabel(s):"")+'</div></div>'+
       '<span class="c3" style="font-size:18px">›</span>';
     div.onclick=function(){openStoreDetail(String(s.id));};
     a11yCard(div,s.name+(s.brand?", "+s.brand:""));
@@ -11223,6 +11264,7 @@ function adminRenameDiscovery(d){
   if(newBrand===null)newBrand=d.brand||"";
   newBrand=newBrand.trim();
   if(newName===(d.name||"")&&newBrand===(d.brand||"")){toast("Aucun changement");return;}
+  if(!window.fbRenameDiscovery){toast("Indisponible — vérifie ta connexion");playSound("err");return;}
   toast("Renommage…");
   window.fbRenameDiscovery(d,newName,newBrand).then(function(){
     d.name=newName;d.brand=newBrand;
@@ -11734,6 +11776,11 @@ try{
     var rows=e.detail||[];
     communityCatalogLoaded=true;
     var n=mergeCatalog(rows);
+    // Les fiches communautaires viennent d'etre ajoutees a DRINKS : on (re)applique
+    // les renommages admin (meta/drinkNames), sinon un nom corrige sur une fiche
+    // communautaire est perdu (fbLoadDrinkNames a pu resoudre AVANT ce catalogue,
+    // quand la fiche n'existait pas encore -> override ignore).
+    if(window.applyDrinkNames)window.applyDrinkNames();
     if(rows.length)idbSet("catalog:last",{ts:Date.now(),rows:rows});
   });
   // Acces admin : la securite reelle est dans firestore.rules (collection admins),

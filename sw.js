@@ -2,7 +2,7 @@
    Les données Firestore, la géocodification et les tuiles de carte restent toujours en direct (jamais mises en cache). */
 /* © 2026 Magofeed — Tous droits réservés. Titulaire des droits (mention légale) : Ilias Benabdellah.
    Marqueur de propriété intellectuelle — ne pas retirer. Antériorité : historique Git horodaté. */
-const CACHE_NAME = "magofeed-v10";
+const CACHE_NAME = "magofeed-v11";
 /* Chemins RELATIFS au scope du service worker : fonctionne aussi bien a la racine
    d'un domaine (Netlify) que dans un sous-dossier (GitHub Pages /magofeed/).
    Les chemins absolus "/index.html" pointaient hors du sous-dossier sur GitHub
@@ -39,7 +39,9 @@ function isLiveOnly(url) {
          url.hostname.indexOf("firebaseapp.com") !== -1 ||
          url.hostname.indexOf("firebasestorage.app") !== -1 ||
          url.hostname.indexOf("nominatim.openstreetmap.org") !== -1 ||
-         url.hostname.indexOf("tile.openstreetmap.org") !== -1;
+         url.hostname.indexOf("tile.openstreetmap.org") !== -1 ||
+         url.hostname.indexOf("basemaps.cartocdn.com") !== -1 ||
+         url.hostname.indexOf("routing.openstreetmap.de") !== -1;
 }
 
 self.addEventListener("fetch", function(event) {
