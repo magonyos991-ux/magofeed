@@ -2230,6 +2230,16 @@ window.fbPromoteDiscovery = async function(disc, entry) {
   } catch (e) { console.warn("Notify promote:", e); }
 };
 
+/* Renommer une decouverte avant sa promotion (corrige un nom generique issu
+   d'OpenFoodFacts, ex. "AA Drink" -> "AA Drink Pro Energy"). Reserve a l'admin
+   par firestore.rules (update limite aux champs name/brand/cat/votes/...). */
+window.fbRenameDiscovery = async function(disc, newName, newBrand) {
+  var ref = doc(db, "discoveries", String(disc.fbId || disc.barcode || disc.id));
+  var upd = { name: String(newName) };
+  if (newBrand != null) upd.brand = String(newBrand);
+  await updateDoc(ref, upd);
+};
+
 /* Photo publique d'une boisson (marques exotiques absentes d'OpenFoodFacts) :
    appliquee par l'admin depuis une proposition/suggestion, lue par tous. */
 window.fbApplyDrinkPhoto = async function(drinkId, base64) {
@@ -10939,6 +10949,7 @@ function renderAdmin(){
       '</div>'+
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+chipsHtml+'</div>'+
       '<div style="display:flex;gap:8px">'+
+        '<button class="admin-rename" style="padding:10px 12px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">Renommer</button>'+
         '<button class="admin-promote" style="flex:1;padding:10px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">\u2713 Promouvoir</button>'+
         '<button class="admin-reject" style="padding:10px 14px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s2);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit"></button>'+
       '</div>';
@@ -10973,6 +10984,7 @@ function renderAdmin(){
     card.querySelectorAll(".admin-cat-chip").forEach(function(btn){
       btn.onclick=function(){adminCatChoice[key]=btn.getAttribute("data-cat");renderAdmin();};
     });
+    card.querySelector(".admin-rename").onclick=function(){adminRenameDiscovery(d);};
     card.querySelector(".admin-promote").onclick=function(){promoteDiscovery(d);};
     card.querySelector(".admin-reject").onclick=function(){rejectDiscovery(d);};
     el.appendChild(card);
@@ -11200,6 +11212,23 @@ function renderPhotoSuggestions(){
       host.appendChild(card);
     });
   });
+}
+function adminRenameDiscovery(d){
+  if(!isAdmin)return;
+  var newName=prompt("Nom exact de cette découverte :\n(ex. AA Drink → AA Drink Pro Energy)",d.name||"");
+  if(newName===null)return;
+  newName=newName.trim();
+  if(!newName){toast("Nom vide");playSound("err");return;}
+  var newBrand=prompt("Marque :\n(laisse tel quel si c'est déjà bon)",d.brand||"");
+  if(newBrand===null)newBrand=d.brand||"";
+  newBrand=newBrand.trim();
+  if(newName===(d.name||"")&&newBrand===(d.brand||"")){toast("Aucun changement");return;}
+  toast("Renommage…");
+  window.fbRenameDiscovery(d,newName,newBrand).then(function(){
+    d.name=newName;d.brand=newBrand;
+    playSound("win");toast("✓ Renommé — « "+newName+" »");
+    renderAdmin();
+  }).catch(function(e){playSound("err");toast("Échec ("+(e&&e.message||"erreur")+")");});
 }
 function promoteDiscovery(d){
   var key=String(d.barcode||d.id);
