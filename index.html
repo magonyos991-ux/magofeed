@@ -3714,7 +3714,7 @@ pt:{badgeScan:"Scanner",badgeExplorer:"Explorador",badgeReliable:"Fiável",badge
 tr:{badgeScan:"Tarayıcı",badgeExplorer:"Kâşif",badgeReliable:"Güvenilir",badgeStreak:"Azimli",badgeStar:"Yıldız",badgeFounder:"Kurucu",userSearchHint:"Bir isim yaz (en az 2 harf)<br>bir oyuncu bulmak için",connectedGoogle:"Google ile bağlı",ptsLabel:"Puan",me:"(ben)",mostSearched:"En çok arananlar",suggestionsT:"Öneriler",noSuggestion:"Henüz öneri yok",noSuggestionSub:"Katalogda olmayan bir ürünü tara<br>ve topluluğa öner!",camWaiting:"Kamera beklemede",activateCam:"Kamerayı aç",lastScans:"Son taramalar",suggestBtn:"+ Öner",streakDay:"gün üst üste",streakRecord:"rekor",streakStart:"Serini başlatmak için bugün katkıda bulun",streakBroken:"seri bozuldu, yeniden başlat!",settingsT:"Ayarlar",language:"Dil",sounds:"Ses efektleri",account:"Hesap",appSec:"Uygulama",seeIntro:"Tanıtımı tekrar izle",seeTuto:"Eğitimi tekrar izle",privacyL:"Gizlilik politikası",termsL:"Kullanım koşulları",adminL:"Yönetim",installApp:"Uygulamayı yükle",googleLogin:"Google ile giriş yap",leaderboard:"Sıralama",playerProfile:"Oyuncu profili",hisFavs:"Favori içecekleri",modeDrinks:"İçecekler",modeStores:"Mağazalar",modePlayers:"Oyuncular",proposeBtn:"+ Öner",clearHistory:"Geçmişi temizle",editPseudoHint:"Adını değiştirmek için dokun",name:"Türkçe",greeting:"Merhaba, ne içiyoruz?",trends:"Trendler",recents:"Son aramalar",search:"Arama",scanner:"Ürün tara",scanSub:"Kamerayı barkoda doğrult",disc:"Keşifler",discSub:"Topluluğun önerdiği ürünler",stores:"Yakındaki mağazalar",profile:"Profilim",badges:"Rozetler",activity:"Etkinlik",noact:"Henüz etkinlik yok",home:"Ana sayfa",chercher:"Ara",scan:"Tara",discover:"Keşfet",profil:"Profil",sig:"Bildirimler",conf:"Onaylar",rstock:"Burada stokta",rrupture:"Stokta yok",rfake:"Olası taklit",rnew:"Yeni ürün",vote:"Oy ver",placeholder:"Ara…"},
 pl:{badgeScan:"Skaner",badgeExplorer:"Zwiadowca",badgeReliable:"Solidny",badgeStreak:"Wytrwały",badgeStar:"Gwiazda",badgeFounder:"Założyciel",userSearchHint:"Wpisz nazwę (min. 2 litery)<br>aby znaleźć gracza",connectedGoogle:"Zalogowano przez Google",ptsLabel:"Punkty",me:"(ja)",mostSearched:"Najczęściej szukane",suggestionsT:"Sugestie",noSuggestion:"Na razie brak sugestii",noSuggestionSub:"Zeskanuj produkt spoza katalogu,<br>aby zaproponować go społeczności!",camWaiting:"Kamera w gotowości",activateCam:"Włącz kamerę",lastScans:"Ostatnie skany",suggestBtn:"+ Zaproponuj",streakDay:"dzień/dni z rzędu",streakRecord:"rekord",streakStart:"Dołóż coś dzisiaj i rozpocznij serię",streakBroken:"seria przerwana, zacznij od nowa!",settingsT:"Ustawienia",language:"Język",sounds:"Efekty dźwiękowe",account:"Konto",appSec:"Aplikacja",seeIntro:"Zobacz intro ponownie",seeTuto:"Zobacz samouczek ponownie",privacyL:"Polityka prywatności",termsL:"Warunki korzystania",adminL:"Administracja",installApp:"Zainstaluj aplikację",googleLogin:"Zaloguj się przez Google",leaderboard:"Ranking",playerProfile:"Profil gracza",hisFavs:"Ulubione napoje",modeDrinks:"Napoje",modeStores:"Sklepy",modePlayers:"Gracze",proposeBtn:"+ Zaproponuj",clearHistory:"Wyczyść historię",editPseudoHint:"Dotknij, aby zmienić nazwę",name:"Polski",greeting:"Cześć, co pijemy?",trends:"Na czasie",recents:"Ostatnie",search:"Szukaj",scanner:"Skanuj produkt",scanSub:"Skieruj aparat na kod kreskowy",disc:"Odkrycia",discSub:"Produkty polecane przez społeczność",stores:"Sklepy w pobliżu",profile:"Mój profil",badges:"Odznaki",activity:"Aktywność",noact:"Na razie brak aktywności",home:"Start",chercher:"Szukaj",scan:"Skaner",discover:"Odkrywaj",profil:"Profil",sig:"Zgłoszenia",conf:"Potwierdzenia",rstock:"Dostępne tutaj",rrupture:"Brak w magazynie",rfake:"Możliwa podróbka",rnew:"Nowy produkt",vote:"Głosuj",placeholder:"Szukaj…"}
 };
-var CATS=["Tous","Soda","Energy","Ice Tea","Jus","Eau","Sport","Exotique","Lacté","Café","Autre"];
+var CATS=["Tous","Soda","Energy","Ice Tea","Jus","Eau","Sport","Exotique","Lacté","Café","Snacks","Autre"];
 
 /* ================================
    STATE
@@ -4763,12 +4763,17 @@ function isGenericProductName(name){
 }
 function offGuessCategory(p){
   var tags=(p.categories_tags||[]).join(" ").toLowerCase();
+  // Aliment (non-boisson) -> "Snacks", UNIQUEMENT si aucun signal de boisson.
+  // Fail-safe : au moindre doute (tag de boisson présent), on ne met pas Snacks,
+  // pour ne jamais déranger la catégorisation d'une vraie boisson.
+  var isBev=/beverage|boisson|drink|water|eaux|juice|jus|soda|tea|the-|coffee|cafe|milk|lait|smoothie|nectar|limonad|\bcola/.test(tags);
+  if(!isBev&&/chocolate|chocolat|snack|biscuit|cookie|spread|tartinable|candy|bonbon|confiser|cereal|cracker|chips|crisp|wafer|gaufre|granola|pate-a-tartiner|confectionery|sweets|pralin/.test(tags))return"Snacks";
   if(/sports-drink|isotonic|boissons-pour-sportifs|hydration/.test(tags))return"Sport";
   if(/energy-drink|energy_drink|boissons-energisantes/.test(tags))return"Energy";
   if(/ice-tea|iced-tea|tea-based|the-glace/.test(tags))return"Ice Tea";
   if(/juice|jus-de|nectar/.test(tags))return"Jus";
   if(/water|eaux/.test(tags))return"Eau";
-  if(/soda|carbonated|gazeuse|lemonade|limonade|cola/.test(tags))return"Soda";
+  if(/soda|carbonated|gazeuse|lemonade|limonade|\bcola/.test(tags))return"Soda";
   return"";
 }
 function offIsAlcoholic(p){
@@ -6077,9 +6082,10 @@ var CAT_DEFAULTS={
   "Sport":{emoji:"",color:"#148f77",light:"#e8f8f5"},
   "Lact\u00E9":{emoji:"",color:"#c9a978",light:"#f8f2e9"},
   "Caf\u00E9":{emoji:"",color:"#7b5e3b",light:"#f1ebe3"},
+  "Snacks":{emoji:"",color:"#8d6e63",light:"#efe7e2"},
   "Autre":{emoji:"",color:"#7d6b8f",light:"#f1edf6"}
 };
-var VALID_CATS=["Soda","Ice Tea","Energy","Sport","Jus","Eau","Exotique","Lact\u00E9","Caf\u00E9","Autre"];
+var VALID_CATS=["Soda","Ice Tea","Energy","Sport","Jus","Eau","Exotique","Lact\u00E9","Caf\u00E9","Snacks","Autre"];
 /* ================================
    CLASSIFIEUR AUTOMATIQUE DE CATEGORIE
    Range chaque boisson dans la bonne categorie a partir de son NOM et sa
@@ -6848,6 +6854,7 @@ function _catPaths(cat){
     "Exotique":'<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/><path d="M12 3.5c2.6 2.4 4 5.4 4 8.5s-1.4 6.1-4 8.5c-2.6-2.4-4-5.4-4-8.5s1.4-6.1 4-8.5z"/>',
     "Lacté":'<path d="M8.5 3h7l-.6 3h-5.8z"/><path d="M9.1 6h5.8l-.7 13.2a2 2 0 0 1-2 1.8h-.4a2 2 0 0 1-2-1.8z"/><path d="M9 11h6"/>',
     "Café":'<path d="M5 8h11v5.5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5z"/><path d="M16 9h1.8a2.4 2.4 0 0 1 0 4.8H16"/><path d="M8 2.5c-.5 1 .5 2 0 3M11.5 2.5c-.5 1 .5 2 0 3"/>',
+    "Snacks":'<rect x="4.5" y="6.5" width="15" height="11" rx="2"/><path d="M9.5 6.5v11M14.5 6.5v11M4.5 12h15"/>',
     "Autre":'<path d="M9.5 2.5h5M10.5 2.5v3l-1.8 2.4a3 3 0 0 0-.7 2v9.1a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V10a3 3 0 0 0-.7-2l-1.8-2.4v-3"/>'
   };
   return P[cat]||P["Autre"];
