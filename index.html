@@ -4403,11 +4403,64 @@ function confettiBurst(){
   document.body.appendChild(host);
   setTimeout(function(){try{host.remove();}catch(e){}},2700);
 }
+/* Animation plein écran de passage de niveau : le nouveau niveau s'affiche au
+   centre, une grande barre se remplit à 100%, confettis + son. Ne se déclenche
+   QUE sur un vrai passage de niveau (voir checkLevelUp), y compris au démarrage
+   si le niveau a été gagné pendant que l'app était fermée. */
 function celebrateLevelUp(lv){
   try{if(typeof playSound==="function")playSound("win");}catch(e){}
-  try{if(typeof toast==="function")toast("Niveau "+(lv.idx+1)+" · "+lv.name+" débloqué !");}catch(e){}
-  try{confettiBurst();}catch(e){}
+  var reduce=false;try{reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;}catch(e){}
+  var prevName=(LEVELS[lv.idx-1]&&LEVELS[lv.idx-1][1])||"Débutant";
+  var ov=document.createElement("div");
+  ov.style.cssText="position:fixed;inset:0;z-index:10002;display:flex;align-items:center;justify-content:center;padding:30px;background:rgba(10,8,6,.66);backdrop-filter:blur(4px);opacity:0;transition:opacity .35s ease";
+  ov.innerHTML='<div style="max-width:330px;width:100%;text-align:center">'+
+    '<div style="font-size:12px;font-weight:900;letter-spacing:2px;text-transform:uppercase;color:#f0b840;margin-bottom:10px">★ Niveau supérieur ★</div>'+
+    '<div style="font-size:13px;font-weight:600;color:rgba(255,255,255,.55);text-decoration:line-through;margin-bottom:3px">'+sanitize(prevName)+'</div>'+
+    '<div id="lvup-name" style="font-size:32px;font-weight:900;color:#fff;line-height:1.1;margin-bottom:18px;opacity:0;transform:scale(.6) translateY(8px);transition:opacity .45s ease,transform .55s cubic-bezier(.2,1.5,.4,1)">'+sanitize(lv.name)+'</div>'+
+    '<div style="height:16px;border-radius:9px;background:rgba(255,255,255,.16);overflow:hidden;box-shadow:inset 0 1px 3px rgba(0,0,0,.3)">'+
+      '<div id="lvup-bar" style="height:100%;width:0%;border-radius:9px;background:linear-gradient(90deg,#e67e22,#f0b840);box-shadow:0 0 14px rgba(240,184,64,.7);transition:width 1.15s cubic-bezier(.25,.8,.3,1)"></div>'+
+    '</div>'+
+    '<div style="font-size:12px;font-weight:800;color:rgba(255,255,255,.7);margin-top:11px">Niveau '+(lv.idx+1)+' / '+LEVELS.length+'</div>'+
+    '<button id="lvup-close" style="margin-top:24px;padding:13px 34px;border-radius:14px;border:none;background:#fff;color:#111;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">Continuer</button>'+
+  '</div>';
+  document.body.appendChild(ov);
+  function close(){ov.style.opacity="0";setTimeout(function(){if(ov.parentNode)ov.remove();},360);}
+  var cb=ov.querySelector("#lvup-close");if(cb)cb.onclick=close;
+  ov.addEventListener("click",function(e){if(e.target===ov)close();});
+  requestAnimationFrame(function(){
+    ov.style.opacity="1";
+    var bar=ov.querySelector("#lvup-bar"),nm=ov.querySelector("#lvup-name");
+    if(reduce){if(bar)bar.style.transition="none";if(nm)nm.style.transition="none";}
+    setTimeout(function(){if(bar)bar.style.width="100%";},reduce?0:180);
+    setTimeout(function(){if(nm){nm.style.opacity="1";nm.style.transform="scale(1) translateY(0)";}},reduce?0:650);
+    if(!reduce)setTimeout(function(){try{confettiBurst();}catch(e){}},1050);
+  });
+  setTimeout(function(){if(ov.parentNode&&document.body.contains(ov))close();},8000);
 }
+/* Détecte un vrai passage de niveau et déclenche l'animation UNE seule fois par
+   niveau, via une mémoire persistante (magoLevelSeen). Fonctionne en session ET
+   au démarrage (si on a gagné le niveau pendant que l'app était fermée). */
+function checkLevelUp(){
+  try{
+    if(!window._statsReady)return; // pas encore de vrais points : évite une fausse fête au boot avant chargement
+    var lv=levelInfo(userStats.pts||0);
+    var raw=localStorage.getItem("magoLevelSeen");
+    var seen=(raw==null)?null:parseInt(raw,10);
+    if(seen==null||isNaN(seen)){
+      // Première référence : on mémorise le niveau réel actuel SANS fêter.
+      try{localStorage.setItem("magoLevelSeen",String(lv.idx));}catch(e){}
+      window._lastLevelIdx=lv.idx;return;
+    }
+    if(lv.idx>seen){
+      celebrateLevelUp(lv);
+      try{localStorage.setItem("magoLevelSeen",String(lv.idx));}catch(e){}
+    }
+    window._lastLevelIdx=lv.idx;
+  }catch(e){}
+}
+// Filet hors-ligne : si aucun compte Firestore ne répond, on débloque quand même
+// la détection après le démarrage (pour les gains de niveau en session).
+setTimeout(function(){if(!window._statsReady){window._statsReady=true;try{checkLevelUp();}catch(e){}}},5000);
 /* Banniere de fete quand une decouverte de l'utilisateur entre au catalogue.
    Moment fort de retention : la personne qui a repere la boisson voit que sa
    contribution a servi a toute la communaute. Confettis + son + carte a
@@ -4619,7 +4672,7 @@ function updateProfileStats(){
   }
   renderBadges();
   try{applyPseudoDisplays();}catch(e){} // couleur/anneau de pseudo debloques suivent le niveau
-  try{var _lv=levelInfo(userStats.pts||0);if(window._lastLevelIdx!=null&&_lv.idx>window._lastLevelIdx){celebrateLevelUp(_lv);}window._lastLevelIdx=_lv.idx;}catch(e){}
+  try{checkLevelUp();}catch(e){}
   try{maybeAskFeedback();}catch(e){} // invite douce à donner son avis (1x, après un peu de contribution)
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
   if(!userStats.activity.length)return;
@@ -11767,6 +11820,9 @@ try{
       try{localStorage.setItem("magopseudo",userPseudo);}catch(err){}
       applyPseudoDisplays();
     }
+    // Les vrais points sont maintenant chargés : la détection de niveau peut se
+    // fier à eux (fête un niveau gagné pendant que l'app était fermée).
+    window._statsReady=true;
     updateProfileStats();
   });
   window.addEventListener("fbAuthChanged", function(e) {
