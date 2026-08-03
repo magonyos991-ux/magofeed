@@ -1303,7 +1303,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div class="set-row static">
           <div class="set-ico">📦</div>
           <div class="set-txt"><div class="set-title">Version</div></div>
-          <span class="set-val">1.3.0 · build 0802g</span>
+          <span class="set-val">1.4.0 · build 0803a</span>
         </div>
         <div class="set-row" onclick="window.open('https://instagram.com/magofeed.app','_blank')" role="button" tabindex="0" aria-label="Instagram" onkeydown="if(event.key==='Enter'){window.open('https://instagram.com/magofeed.app','_blank');}">
           <div class="set-ico">📸</div>
@@ -1501,9 +1501,10 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         </div>
         <div class="chips" id="sd-cats" style="margin-bottom:8px"></div>
       </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 20px 8px">
-        <div class="t-section">Boissons disponibles</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 20px 8px">
+        <div class="t-section" style="flex:1;min-width:0">Boissons disponibles</div>
         <div class="sec-count" id="sd-drink-count"></div>
+        <div id="sd-add-drink" onclick="openAddDrinkToStore()" role="button" tabindex="0" aria-label="Ajouter une boisson à ce magasin" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openAddDrinkToStore();}" style="flex-shrink:0;display:inline-flex;align-items:center;gap:5px;padding:0 13px;height:34px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> Ajouter</div>
       </div>
       <div id="sd-drink-list"></div>
     </div>
@@ -1572,9 +1573,12 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
   </div>
   <div id="store-picker" role="dialog" aria-modal="true" aria-label="Choisir un magasin" style="display:none;position:fixed;inset:0;z-index:4300;background:rgba(12,10,8,.55)" onclick="closeStorePicker()">
     <div onclick="event.stopPropagation()" style="position:absolute;left:0;right:0;bottom:0;max-height:72vh;background:var(--app-bg);border-radius:22px 22px 0 0;padding:18px 20px 26px;display:flex;flex-direction:column">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-        <div style="font-size:15px;font-weight:800;color:var(--s1)">Dans quel magasin ?</div>
-        <div onclick="closeStorePicker()" role="button" tabindex="0" aria-label="Fermer" onkeydown="if(event.key==='Enter'){closeStorePicker();}" style="width:34px;height:34px;border-radius:12px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer">✕</div>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;gap:10px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:15px;font-weight:800;color:var(--s1)">Où as-tu vu cette boisson ?</div>
+          <div style="font-size:11.5px;font-weight:500;color:var(--s2);margin-top:2px;line-height:1.4">Touche le magasin où tu l'as vue. S'il n'est pas dans la liste, ajoute-le avec le bouton du haut.</div>
+        </div>
+        <div onclick="closeStorePicker()" role="button" tabindex="0" aria-label="Fermer" onkeydown="if(event.key==='Enter'){closeStorePicker();}" style="flex-shrink:0;width:34px;height:34px;border-radius:12px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer">✕</div>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:10px">
         <input id="store-picker-q" type="text" placeholder="Cherche : Colruyt, Delhaize…" oninput="renderStorePicker()" style="flex:1;min-width:0;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:'Space Grotesk',sans-serif;outline:none">
@@ -3834,6 +3838,10 @@ function setAccent(d){accentColor=d?d.color:"#1a1714";accentLight=d?d.light:"#f0
 ================================ */
 function initGPS(){
   if(!navigator.geolocation)return;
+  // enableHighAccuracy : force le VRAI GPS plutôt qu'une estimation par
+  // Wi-Fi/IP (qui pouvait te placer dans une autre ville — d'où des magasins
+  // à Melun/Paris alors qu'on est ailleurs). maximumAge court = pas de vieux
+  // point recyclé quand on a bougé.
   navigator.geolocation.getCurrentPosition(function(pos){
     userLat=pos.coords.latitude;userLng=pos.coords.longitude;
     // Recalcule immédiatement les distances des magasins déjà en mémoire (chargés autour du centre par défaut)
@@ -3852,7 +3860,7 @@ function initGPS(){
         var lbl=document.getElementById("gps-label");
         if(lbl)lbl.innerHTML='<span style="width:7px;height:7px;border-radius:50%;background:#22c55e;flex-shrink:0;display:inline-block"></span><span style="font-size:12px;font-weight:500;color:var(--s2)">'+txt+'</span>';
       }).catch(function(){});
-  },function(){});
+  },function(){},{enableHighAccuracy:true,timeout:12000,maximumAge:30000});
 }
 function haversine(a,b,c,d){
   var R=6371000,dL=(c-a)*Math.PI/180,dG=(d-b)*Math.PI/180;
@@ -5029,9 +5037,9 @@ function renderStorePicker(){
   function addRow(){
     var row=document.createElement("div");
     row.style.cssText="display:flex;align-items:center;justify-content:center;gap:8px;padding:13px;border:none;border-radius:14px;margin:2px 0 10px;cursor:pointer;font-size:13.5px;font-weight:800;color:var(--app-bg);background:var(--s1)";
-    row.innerHTML="\u2795 Ajouter un magasin manuellement";
+    row.innerHTML="\u2795 Mon magasin n'est pas dans la liste";
     row.onclick=openAddStoreForm;
-    a11yCard(row,"Ajouter un magasin manuellement");
+    a11yCard(row,"Ajouter un magasin absent de la liste");
     return row;
   }
   // Bouton "Ajouter" TOUJOURS en haut : plus besoin de scroller tout en bas.
@@ -8546,6 +8554,93 @@ function renderStoreDetail(){
 }
 
 /* ================================
+   AJOUTER UNE BOISSON À CE MAGASIN (depuis sa fiche)
+   Avant : on ne pouvait rattacher une boisson à un magasin qu'en la scannant
+   sur place, ou depuis la fiche BOISSON (+ Magasin). Impossible d'enrichir
+   un magasin qu'on regarde. Ici : un tap sur « Ajouter » ouvre une recherche
+   dans le catalogue ; un tap sur une boisson la rattache à CE magasin (même
+   mécanique que le scan : confirmation + points + sync Firestore + push aux
+   guetteurs). N'importe quel magasin peut ainsi être complété par la commu.
+================================ */
+function openAddDrinkToStore(){
+  var s=curStoreDetail;if(!s){toast("Ouvre d'abord un magasin");return;}
+  var old=document.getElementById("add-drink-ov");if(old)old.remove();
+  var ov=document.createElement("div");
+  ov.id="add-drink-ov";
+  ov.style.cssText="position:fixed;inset:0;z-index:10002;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px)";
+  var card=document.createElement("div");
+  card.style.cssText="width:100%;max-width:440px;max-height:86vh;display:flex;flex-direction:column;background:var(--app-bg);border-radius:24px 24px 0 0;padding:16px 18px calc(16px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28);animation:fbSheetUp .32s cubic-bezier(.2,.8,.3,1) both";
+  card.innerHTML='<div style="width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 12px;flex-shrink:0"></div>'+
+    '<div style="font-size:16px;font-weight:800;color:var(--s1);margin-bottom:2px;flex-shrink:0">Ajouter une boisson</div>'+
+    '<div style="font-size:12px;color:var(--s2);margin-bottom:12px;flex-shrink:0;line-height:1.45">chez <b>'+sanitize(s.name)+'</b> — cherche la boisson que tu as vue en rayon, puis tape dessus.</div>'+
+    '<div class="searchbox" style="margin-bottom:12px;flex-shrink:0"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--s3)" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="var(--s3)" stroke-width="2" stroke-linecap="round"/></svg><input id="add-drink-q" placeholder="Coca, Fanta, Ramune…" autocomplete="off" style="font-family:inherit"></div>'+
+    '<div id="add-drink-list" style="overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1"></div>';
+  ov.appendChild(card);
+  ov.onclick=function(e){if(e.target===ov)ov.remove();};
+  document.body.appendChild(ov);
+  var inp=card.querySelector("#add-drink-q");
+  inp.addEventListener("input",function(){_renderAddDrinkList(inp.value);});
+  _renderAddDrinkList("");
+  setTimeout(function(){try{inp.focus();}catch(e){}},150);
+}
+function _renderAddDrinkList(q){
+  var host=document.getElementById("add-drink-list");if(!host)return;
+  var s=curStoreDetail;if(!s)return;
+  var have={};(s.drinks||[]).forEach(function(x){have[Number(x)]=true;});
+  var nq=(typeof normTxt==="function")?normTxt(q||""):(q||"").toLowerCase();
+  var list=(DRINKS||[]).filter(function(d){
+    if(!nq)return true;
+    return fuzzyHit(d.name,nq)||fuzzyHit(d.brand,nq);
+  });
+  if(nq&&!list.length){list=(DRINKS||[]).filter(function(d){return fuzzyIncludes(q,d.name+" "+d.brand);});}
+  // Les boissons pas encore dans ce magasin d'abord (ce sont celles qu'on veut ajouter).
+  list.sort(function(a,b){return (have[Number(a.id)]?1:0)-(have[Number(b.id)]?1:0);});
+  list=list.slice(0,40);
+  if(!list.length){host.innerHTML='<div style="text-align:center;padding:26px 14px;color:var(--s3);font-size:12.5px;line-height:1.5">Aucune boisson trouvée dans le catalogue.<br>Si elle n\'existe pas encore, <b>scanne-la</b> pour la proposer.</div>';return;}
+  host.innerHTML=list.map(function(d){
+    var yes=!!have[Number(d.id)];
+    return '<div class="add-drink-row" data-id="'+d.id+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 2px;border-bottom:1px solid var(--border);cursor:'+(yes?"default":"pointer")+';'+(yes?"opacity:.5":"")+'">'+
+      '<span class="store-ico" style="width:34px;height:34px;flex-shrink:0;background:'+(d.light||"var(--bg2)")+'">'+drinkIconHTML(d)+'</span>'+
+      '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(d.name)+'</div>'+
+      '<div style="font-size:11px;color:var(--s2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(d.cat||"")+(d.brand?" · "+sanitize(d.brand):"")+'</div></div>'+
+      (yes?'<span style="font-size:11px;font-weight:800;color:#16a34a;flex-shrink:0">✓ déjà là</span>':'<span style="font-size:20px;font-weight:800;color:var(--s1);flex-shrink:0;line-height:1">+</span>')+
+    '</div>';
+  }).join("");
+  host.querySelectorAll(".add-drink-row").forEach(function(row){
+    row.onclick=function(){
+      var id=Number(row.getAttribute("data-id"));
+      if(have[id])return;
+      var d=DRINKS.find(function(x){return Number(x.id)===id;});
+      if(d)addDrinkToStoreHere(d);
+    };
+    row.onkeydown=function(ev){if(ev.key==="Enter")row.click();};
+  });
+}
+function addDrinkToStoreHere(d){
+  var s=curStoreDetail;if(!s||!d)return;
+  // Double sécurité anti-alcool (le catalogue est déjà filtré, mais on ne prend aucun risque).
+  if(typeof nameLooksAlcoholic==="function"&&nameLooksAlcoholic(d.name,d.brand)){toast("🚫 Magofeed reste sans alcool");return;}
+  if(!s.drinks)s.drinks=[];
+  var did=d.id;
+  if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
+  if(!s.confirmations)s.confirmations={};
+  s.confirmations[did]=(s.confirmations[did]||0)+1;
+  if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(function(e){console.warn(e);});
+  if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
+  var key="tag:"+did+":"+String(s.id);
+  if(awardOnce(key,FOREVER)){userStats.pts+=3;flyPts(3);toast("📍 « "+d.name+" » ajoutée chez "+sanitize(s.name)+" · +3 pts");}
+  else{toast("📍 « "+d.name+" » est déjà chez "+sanitize(s.name));}
+  try{trackStoreContribution(String(s.id));}catch(e){}
+  updateProfileStats();
+  if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+  playSound("win");
+  // Rafraîchit la fiche magasin dessous + la liste du sélecteur.
+  try{renderStoreDetail();}catch(e){}
+  var inp=document.getElementById("add-drink-q");
+  _renderAddDrinkList(inp?inp.value:"");
+}
+
+/* ================================
    DISCOVERIES
 ================================ */
 function hasVotedDiscovery(id){return votedDiscoveries.indexOf(String(id))!==-1;}
@@ -10422,7 +10517,7 @@ function renderSortBar(){
   var labels={distance:"Plus proche",open:"Ouvert d'abord",trust:"Plus fiable"};
   var isDark=document.body.classList.contains("dark");
   var html='<div style="display:flex;gap:8px;padding:8px 20px 4px;overflow-x:auto;flex-shrink:0">';
-  html+='<div onclick="drinkLocate()" role="button" tabindex="0" aria-label="Ajouter un magasin qui vend cette boisson" onkeydown="if(event.key===\'Enter\')drinkLocate()" style="flex-shrink:0;display:flex;align-items:center;gap:5px;padding:0 15px;height:38px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:12.5px;font-weight:800;cursor:pointer;white-space:nowrap">+ Magasin</div>';
+  html+='<div onclick="drinkLocate()" role="button" tabindex="0" aria-label="Dire dans quel magasin tu as vu cette boisson" onkeydown="if(event.key===\'Enter\')drinkLocate()" style="flex-shrink:0;display:flex;align-items:center;gap:5px;padding:0 15px;height:38px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:12.5px;font-weight:800;cursor:pointer;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6-5.7-6-10a6 6 0 0 1 12 0c0 4.3-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg> J\'ai vu ça ici</div>';
   html+='<div onclick="toggleWatch(curSel)" role="button" tabindex="0" aria-label="Veille sur cette boisson" onkeydown="if(event.key===\'Enter\')toggleWatch(curSel)" style="flex-shrink:0;padding:8px 12px;border-radius:999px;background:'+(isWatched(curSel.id)?"var(--s1)":"var(--bg2)")+';color:'+(isWatched(curSel.id)?"var(--app-bg)":"var(--s1)")+';border:1.5px solid '+(isWatched(curSel.id)?"var(--s1)":"var(--border)")+';font-size:13px;cursor:pointer">'+(isWatched(curSel.id)?'<svg width="16px" height="16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>':'<svg width="16px" height="16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/><line x1="3" y1="3" x2="21" y2="21"/></svg>')+'</div>';
   html+='<div onclick="shareDrink(curSel)" role="button" tabindex="0" aria-label="Partager cette boisson" onkeydown="if(event.key===\'Enter\')shareDrink(curSel)" style="flex-shrink:0;padding:8px 12px;border-radius:999px;background:var(--bg2);color:var(--s1);border:1.5px solid var(--border);font-size:13px;cursor:pointer"><svg width="16px" height="16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg></div>';
   html+='<div onclick="openExploreMap({drinkId:curSel.id,name:curSel.name})" role="button" tabindex="0" aria-label="Voir sur la carte" onkeydown="if(event.key===\'Enter\'){openExploreMap({drinkId:curSel.id,name:curSel.name});}" style="flex-shrink:0;padding:8px 14px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14"/><path d="M15 6v14"/></svg> Carte</div>';
