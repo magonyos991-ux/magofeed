@@ -8587,10 +8587,14 @@ function renderStoreDetailCats(allDrinks){
     el.appendChild(btn);
   });
 }
+var _sdSearchTimer=null;
 function onStoreDetailSearchInput(){
   var q=document.getElementById("sd-search");
   curStoreDetailQuery=q?q.value:"";
-  renderStoreDetail();
+  // Debounce : ne pas reconstruire la fiche magasin a chaque frappe (evite la
+  // saccade sur un gros magasin), comme la recherche principale.
+  if(_sdSearchTimer)clearTimeout(_sdSearchTimer);
+  _sdSearchTimer=setTimeout(function(){_sdSearchTimer=null;renderStoreDetail();},120);
 }
 // Beaucoup de magasins OSM n'ont pas d'adresse complète : on la déduit par géocodage inverse (comme pour le GPS),
 // mise en cache par coordonnées arrondies pour ne pas re-interroger Nominatim à chaque ouverture.
@@ -8867,6 +8871,7 @@ function addDiscovery(name,brand,barcode,cat){
     return;
   }
   var already=DISCOVERIES.find(function(d){return String(d.barcode)===String(barcode);});
+  var contribute=false; // n'ecrire dans Firestore (vote +1 / creation) que si c'est reellement du
   if(already){
     // Corrige un nom générique "Produit <code>" laissé par un premier scan sans nom saisi
     if((!already.name||already.name==="Produit "+barcode)&&name&&name!=="Produit "+barcode){
@@ -8879,6 +8884,7 @@ function addDiscovery(name,brand,barcode,cat){
       markVotedDiscovery(already.id);
       userStats.pts+=2;
       toast("Déjà suggérée · vote ajouté +2 pts");
+      contribute=true;
     }
   } else {
     // Anti-doublon : le nom tape correspond a une boisson du catalogue ?
@@ -8902,13 +8908,16 @@ function addDiscovery(name,brand,barcode,cat){
     markVotedDiscovery(barcode);
     userStats.signals++;userStats.pts+=20;flyPts(20);bumpDaily("photos");
     toast("Ajouté aux découvertes · +20 pts");
+    contribute=true;
   }
   bumpStreak();
   updateProfileStats();renderDiscoveries();
   stopScan();playSound("win");show("discover");
   if(!already)setTimeout(function(){openDiscPhotoSheet(barcode,name);},450);
-  // Partagé avec toute la communauté via Firestore (dédoublonné par code-barre)
-  if(window.fbAddDiscovery)window.fbAddDiscovery(barcode,name,brand,cat).catch(function(){});
+  // Partagé avec toute la communauté via Firestore (dédoublonné par code-barre).
+  // Uniquement si un vote/une création est réellement dû : sinon (déjà voté) on
+  // n'incrémente pas le compteur Firestore à tort.
+  if(contribute&&window.fbAddDiscovery)window.fbAddDiscovery(barcode,name,brand,cat).catch(function(){});
 }
 /* Localisation des decouvertes : ou la boisson a ete reperee (magasins des
    scans) + "Je sais ou !" pour l'indiquer soi-meme, depuis chez soi,
@@ -11285,7 +11294,10 @@ function promoteDiscovery(d){
     emoji:def.emoji,color:def.color,light:def.light,
     tag:String(d.name).toUpperCase().slice(0,20),
     stars:4.0,
-    barcodes:d.barcode?[String(d.barcode)]:[]
+    // N'inscrire que les VRAIS codes-barres (chiffres) : les propositions
+    // manuelles portent un id synthetique "m1699..." qui ne matchera jamais un
+    // scan et ne doit pas polluer le tableau barcodes de la fiche catalogue.
+    barcodes:(d.barcode&&/^[0-9]{6,}$/.test(String(d.barcode)))?[String(d.barcode)]:[]
   };
   d.promoted=true;
   mergeCatalog([entry]);
@@ -11782,6 +11794,17 @@ try{
     // quand la fiche n'existait pas encore -> override ignore).
     if(window.applyDrinkNames)window.applyDrinkNames();
     if(rows.length)idbSet("catalog:last",{ts:Date.now(),rows:rows});
+  });
+  // Retour de connexion : relancer les chargements clés. Sans ça, une app
+  // démarrée hors-ligne (sans cache) ne se remplissait jamais seule au retour
+  // du réseau — l'utilisateur devait recharger la page à la main.
+  window.addEventListener("online", function() {
+    try {
+      if(typeof userLat==="number"&&typeof userLng==="number"&&window.fbLoadNearbyStores){
+        window.fbLoadNearbyStores(userLat,userLng,10);
+      }
+      if(!communityCatalogLoaded&&window.fbLoadCatalog)window.fbLoadCatalog();
+    } catch(e){}
   });
   // Acces admin : la securite reelle est dans firestore.rules (collection admins),
   // ceci ne fait qu'afficher ou cacher le menu
