@@ -989,6 +989,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       </div>
       <div class="brands-rail" id="brands-rail"></div>
       <div id="missions-card" style="margin-bottom:14px"></div>
+      <div id="wanted-card" style="margin-bottom:14px"></div>
       <div id="hunts-card"></div>
       <div id="alerts-card"></div>
       <div id="deals-wrap"></div>
@@ -4018,7 +4019,7 @@ function show(s){
 function _showRaw(s){
   if(s==="profile"){try{updateProfileStats();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
-  if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{renderHunts();}catch(e){}}
+  if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{renderHunts();}catch(e){}}
   if(s!=="scan"&&scanActive)stopScan();
   var target=document.getElementById("s-"+s);
   var current=document.querySelector(".screen.on");
@@ -6259,6 +6260,60 @@ function renderMissions(){
       '<div style="font-size:11px;font-weight:800;color:'+(all?"#c69a57":"var(--s2)")+'">'+(all?"\u2713 +10 pts !":done+"/"+defs.length)+'</div>'+
     '</div>'+rows+'</div>';
 }
+/* Mission « boisson recherchée » : l'app met en avant une boisson du catalogue
+   dont AUCUN magasin n'est connu (localement) et récompense l'utilisateur qui la
+   repère en magasin (+30 pts). Double bénéfice : remplit les données manquantes
+   et engage. Cible déterministe sur la journée (stable), stockée en local. */
+function pickMissionDrink(){
+  var have={};
+  (window.STORES||[]).forEach(function(s){(s.drinks||[]).forEach(function(id){have[Number(id)]=1;});});
+  var cands=DRINKS.filter(function(d){return !have[Number(d.id)]&&!(typeof nameLooksAlcoholic==="function"&&nameLooksAlcoholic(d.name,d.brand));});
+  if(!cands.length)cands=DRINKS.slice();
+  var day=_dailyKey(),h=0;
+  for(var i=0;i<day.length;i++)h=(h*31+day.charCodeAt(i))>>>0;
+  return cands[h%cands.length];
+}
+function getMission(){
+  var m=null;try{m=JSON.parse(localStorage.getItem("magoMission")||"null");}catch(e){}
+  var day=_dailyKey();
+  if(!m||m.date!==day||!m.drinkId){
+    var d=pickMissionDrink();
+    if(!d)return null;
+    m={date:day,drinkId:d.id,done:false};
+    try{localStorage.setItem("magoMission",JSON.stringify(m));}catch(e){}
+  }
+  return m;
+}
+function renderWantedDrink(){
+  var host=document.getElementById("wanted-card");if(!host)return;
+  var m=getMission();
+  if(!m){host.innerHTML="";return;}
+  var d=DRINKS.find(function(x){return Number(x.id)===Number(m.drinkId);});
+  if(!d){host.innerHTML="";return;}
+  if(m.done){
+    host.innerHTML='<div style="background:var(--bg2);border:1.5px solid #16a34a;border-radius:18px;padding:13px 16px;display:flex;align-items:center;gap:11px">'+
+      '<span style="width:24px;height:24px;border-radius:50%;background:#16a34a;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">✓</span>'+
+      '<div style="font-size:12.5px;font-weight:700;color:var(--s1);line-height:1.35">Mission du jour accomplie · <span style="color:#16a34a">+30 pts</span> !<br><span style="font-weight:600;color:var(--s2)">Une nouvelle boisson à trouver demain.</span></div></div>';
+    return;
+  }
+  queueImageFetch(d);
+  var img=getCachedDrinkImage(d);
+  host.innerHTML='<div id="wanted-inner" role="button" tabindex="0" style="background:var(--bg2);border:1.5px solid #f0b840;border-radius:18px;padding:14px 16px;cursor:pointer;position:relative;overflow:hidden">'+
+    '<div style="display:flex;align-items:center;gap:12px">'+
+      '<div style="width:46px;height:46px;border-radius:12px;overflow:hidden;background:'+d.light+';display:flex;align-items:center;justify-content:center;flex-shrink:0">'+(img?'<img src="'+img+'" alt="" style="width:100%;height:100%;object-fit:cover">':drinkIconHTML(d))+'</div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#e67e22">Boisson recherchée</div>'+
+        '<div style="font-size:15px;font-weight:800;color:var(--s1);line-height:1.15">'+sanitize(d.name)+'</div>'+
+        '<div style="font-size:11.5px;color:var(--s2);margin-top:2px">On ne sait pas encore où la trouver · <b style="color:#e67e22">+30 pts</b> si tu la repères</div>'+
+      '</div>'+
+    '</div>'+
+    '<button id="wanted-go" style="margin-top:11px;width:100%;padding:11px;border-radius:13px;border:none;background:'+d.color+';color:#fff;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">Je vais la chercher</button>'+
+  '</div>';
+  var open=function(){pick(d);};
+  var go=document.getElementById("wanted-go");if(go)go.onclick=function(ev){ev.stopPropagation();open();};
+  var inner=document.getElementById("wanted-inner");
+  if(inner){inner.onclick=open;inner.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();open();}};}
+}
 function renderTopRail(){
   var wrap=document.getElementById("top-rail-wrap");
   var rail=document.getElementById("top-rail");
@@ -6488,10 +6543,11 @@ function renderList(){
   }
   f.slice(0,_listLimit).forEach(function(d){
     queueImageFetch(d);
+    var isFav=favorites.indexOf(d.id)!==-1;
     var div=document.createElement("div");div.className="ritem";
     div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
       '<div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.brand+' · '+d.cat+' · ★ '+d.stars+'</div></div>'+
-      '<span class="c3" style="font-size:18px">›</span>';
+      '<span class="rfav" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();toggleFav('+d.id+',this);}" style="display:flex;align-items:center;padding:6px 4px;cursor:pointer">'+heartSVG(isFav,20)+'</span>';
     div.onclick=function(){pick(d);};a11yCard(div,d.name+", "+d.brand);el.appendChild(div);
   });
   if(f.length>_listLimit){
@@ -8778,7 +8834,19 @@ function addDrinkToStoreHere(d){
   if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(function(e){console.warn(e);});
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
   var key="tag:"+did+":"+String(s.id);
-  if(awardOnce(key,FOREVER)){userStats.pts+=3;flyPts(3);toast("« "+d.name+" » ajoutée chez "+sanitize(s.name)+" · +3 pts");}
+  if(awardOnce(key,FOREVER)){
+    userStats.pts+=3;flyPts(3);toast("« "+d.name+" » ajoutée chez "+sanitize(s.name)+" · +3 pts");
+    // Mission « boisson recherchée » accomplie ? (+30 pts bonus, une seule fois)
+    try{
+      var _mm=getMission();
+      if(_mm&&!_mm.done&&Number(_mm.drinkId)===Number(did)){
+        _mm.done=true;try{localStorage.setItem("magoMission",JSON.stringify(_mm));}catch(e){}
+        userStats.pts+=30;
+        setTimeout(function(){flyPts(30);playSound("win");toast("Mission accomplie ! Tu as repéré « "+d.name+" » · +30 pts");},700);
+        try{renderWantedDrink();}catch(e){}
+      }
+    }catch(e){}
+  }
   else{toast("« "+d.name+" » est déjà chez "+sanitize(s.name));}
   try{trackStoreContribution(String(s.id));}catch(e){}
   updateProfileStats();
