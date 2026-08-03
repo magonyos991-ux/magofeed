@@ -89,10 +89,16 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && !('promoted' in request.resource.data)
         && !('rejected' in request.resource.data);
-      allow update: if isAdmin() || (
-        isSignedIn() &&
-        changed().hasOnly(['votes','hasPhoto','name','brand','cat','foundIn'])
-      );
+      // Anti-vandalisme : n'importe quel connecté peut faire évoluer les champs
+      // "doux" (voter, joindre une photo, ajouter un lieu). MAIS renommer/re-
+      // catégoriser une découverte (name/brand/cat) est réservé à SON AUTEUR
+      // (by == uid) ou à l'admin — sinon un malveillant pouvait rebaptiser la
+      // trouvaille d'un autre.
+      allow update: if isAdmin()
+        || (isSignedIn() && resource.data.by == request.auth.uid
+            && changed().hasOnly(['votes','hasPhoto','name','brand','cat','foundIn']))
+        || (isSignedIn()
+            && changed().hasOnly(['votes','hasPhoto','foundIn']));
       allow delete: if isAdmin();
 
       // Un vote = un doc votedBy/{uid} (dédoublonnage infalsifiable).
@@ -126,14 +132,24 @@ service cloud.firestore {
     // ── Magasins : publics en lecture ; la communauté crée et met à jour
     //    (stock/prix) ; suppression réservée à l'admin. (ADAPTE : garde la
     //    casse réellement utilisée par ton app.)
+    //    Anti-vandalisme : tout connecté peut enrichir le STOCK (drinks,
+    //    confirmations, prix, horaires…). MAIS écraser l'identité du magasin
+    //    (name/brand/lat/lng/emoji) est réservé à son créateur (addedBy) ou à
+    //    l'admin — sinon on pouvait renommer/déplacer le magasin d'un autre.
     match /stores/{id} {
       allow read: if true;
-      allow create, update: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isAdmin()
+        || (isSignedIn() && resource.data.addedBy == request.auth.uid)
+        || (isSignedIn() && !changed().hasAny(['name','brand','lat','lng','emoji']));
       allow delete: if isAdmin();
     }
     match /Stores/{id} {
       allow read: if true;
-      allow create, update: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isAdmin()
+        || (isSignedIn() && resource.data.addedBy == request.auth.uid)
+        || (isSignedIn() && !changed().hasAny(['name','brand','lat','lng','emoji']));
       allow delete: if isAdmin();
     }
 
