@@ -511,6 +511,7 @@ body.dark .sd-mission .bar{background:rgba(255,255,255,.13)}
 }
 .scan-frame::before{top:-2px;left:-2px;border-width:3px 0 0 3px;border-radius:7px 0 0 0}
 .scan-frame::after{bottom:-2px;right:-2px;border-width:0 3px 3px 0;border-radius:0 0 7px 0}
+.scan-corners{position:absolute;inset:0;pointer-events:none}
 .scan-corners::before,.scan-corners::after{
   content:'';position:absolute;width:24px;height:24px;border-color:#f0b840;border-style:solid;
 }
@@ -1095,7 +1096,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div class="scan-area">
         <video id="scan-video" autoplay playsinline muted></video>
         <div class="scan-overlay">
-          <div class="scan-frame scan-corners"></div>
+          <div class="scan-frame"><span class="scan-corners"></span></div>
         </div>
         <div class="scan-idle">
           <div class="si-ico"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></svg></div>
@@ -4045,7 +4046,12 @@ function show(s){
 function _showRaw(s){
   if(s==="profile"){try{updateProfileStats();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
-  if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{renderHunts();}catch(e){}}
+  if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{renderHunts();}catch(e){}
+    // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
+    // le filtre boisson de la carte (sinon la carte rouvrait toujours sur la derniere
+    // boisson cherchee, ex. "Red Bull", au lieu de montrer tous les magasins).
+    try{var _q=document.getElementById("q");if(_q)_q.value="";var _sl=document.getElementById("search-list");if(_sl)_sl.innerHTML="";exploreFilter=null;window._exploreFromDrink=false;}catch(e){}
+  }
   try{updateMissionFab();}catch(e){}
   if(s!=="scan"&&scanActive)stopScan();
   var target=document.getElementById("s-"+s);
@@ -4308,8 +4314,64 @@ function renderBadges(){
       '<div style="font-size:9.5px;font-weight:700;color:'+(tier?ring:"var(--s3)")+';margin-top:2px;text-transform:uppercase;letter-spacing:.5px">'+
         (def.special?(tier?"OBTENU":""):(maxed?TIER_NAMES[tier-1]+" MAX":(tier?TIER_NAMES[tier-1]:"")+(maxed?"":" "+Math.min(def.value,next)+"/"+next)))+
       '</div>';
+    cell.style.cursor="pointer";
+    cell.setAttribute("role","button");
+    cell.setAttribute("tabindex","0");
+    (function(d,t){cell.onclick=function(){showBadgeInfo(d,t);};cell.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();showBadgeInfo(d,t);}};})(def,tier);
     grid.appendChild(cell);
   });
+}
+/* Explication valorisante d'un badge quand on tape dessus (l'app doit nourrir
+   la curiosite : chaque badge raconte ce que la personne apporte a Magofeed). */
+var BADGE_INFO={
+  scan:{what:"Le badge des curieux.",why:"Chaque code-barre que tu scannes identifie une boisson et fait grandir le catalogue de toute la communauté. Sans les Scanneurs, Magofeed serait vide — toi, tu le remplis.",unit:"scannées"},
+  explorer:{what:"Le badge des éclaireurs de terrain.",why:"Tu ajoutes de vrais magasins sur la carte. Grâce à toi, les autres savent enfin où chercher. Un véritable explorateur.",unit:"magasins"},
+  reliable:{what:"Le badge de confiance.",why:"Tes confirmations disent « oui, c'est bien en stock ici ». C'est exactement ce qui rend Magofeed fiable : on peut compter sur toi.",unit:"confirmations"},
+  discoverer:{what:"Le badge des dénicheurs de pépites.",why:"Tu proposes des boissons encore inconnues, et elles rejoignent le catalogue. Tu fais découvrir de nouvelles saveurs à tout le monde.",unit:"découvertes"},
+  streak:{what:"Le badge des fidèles.",why:"Tu reviens contribuer jour après jour. Cette régularité, c'est l'âme d'une communauté vivante — et tu en fais partie.",unit:"jours d'affilée"},
+  star:{what:"Le badge de prestige.",why:"Tes points, c'est la somme de tout ce que tu apportes à Magofeed. Plus il brille, plus tu comptes pour la communauté.",unit:"points"},
+  founder:{what:"Le badge unique du créateur.",why:"Magofeed existe grâce à cette personne. Un badge qui ne se gagne pas — il se mérite en bâtissant.",unit:""}
+};
+function showBadgeInfo(def,tier){
+  if(document.getElementById("badge-info"))return;
+  var info=BADGE_INFO[def.key]||{};
+  var col=tier?TIER_COLORS[tier-1]:"var(--s3)";
+  var cap=function(s){return s.charAt(0).toUpperCase()+s.slice(1);};
+  var tierLabel=def.special?(tier?"Obtenu":"Verrouillé"):(tier?("Palier "+TIER_NAMES[tier-1]):"À débloquer");
+  var progressHtml="";
+  if(!def.special){
+    progressHtml='<div style="display:flex;flex-direction:column;gap:9px;margin:16px 0 2px">'+
+      def.tiers.map(function(th,i){
+        var got=def.value>=th;
+        return '<div style="display:flex;align-items:center;gap:11px">'+
+          '<span style="width:24px;height:24px;border-radius:50%;border:2px solid '+(got?TIER_COLORS[i]:"var(--border)")+';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:'+(got?TIER_COLORS[i]:"var(--s3)")+'">'+(got?"✓":(i+1))+'</span>'+
+          '<span style="flex:1;font-size:13px;font-weight:800;color:var(--s1)">'+cap(TIER_NAMES[i])+'</span>'+
+          '<span style="font-size:12.5px;font-weight:800;color:var(--s2)">'+th+' '+(info.unit||"")+'</span>'+
+        '</div>';
+      }).join("")+'</div>';
+    var nextTh=def.tiers[Math.min(tier,def.tiers.length-1)];
+    var maxed=tier>=def.tiers.length;
+    progressHtml+='<div style="font-size:12.5px;font-weight:800;color:'+(maxed?"#c69a57":"var(--s2)")+';margin-top:10px;text-align:center">'+(maxed?("Palier maximum atteint · "+def.value+" "+(info.unit||"")+" 🏆"):("Toi : "+def.value+" / "+nextTh+" "+(info.unit||"")))+'</div>';
+  }
+  var ov=document.createElement("div");
+  ov.id="badge-info";
+  ov.style.cssText="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px";
+  ov.innerHTML='<div style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:22px;max-width:360px;width:100%;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.45)">'+
+    '<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">'+
+      '<span style="width:58px;height:58px;border-radius:17px;background:var(--bg2);border:2px solid '+(tier?col:"var(--border)")+';display:flex;align-items:center;justify-content:center;flex-shrink:0;color:'+(tier?col:"var(--s3)")+'">'+badgeIcon(def.key,32,(tier?col:"var(--s3)"))+'</span>'+
+      '<div style="min-width:0"><div style="font-size:20px;font-weight:850;color:var(--s1)">'+def.name+'</div>'+
+      '<div style="font-size:11.5px;font-weight:800;color:'+(tier?col:"var(--s3)")+';text-transform:uppercase;letter-spacing:.5px">'+tierLabel+'</div></div>'+
+    '</div>'+
+    (info.what?'<div style="font-size:14px;font-weight:800;color:var(--s1);margin-bottom:5px">'+info.what+'</div>':'')+
+    '<div style="font-size:13.5px;color:var(--s2);line-height:1.55">'+(info.why||"")+'</div>'+
+    progressHtml+
+    '<button id="badge-info-close" style="width:100%;margin-top:18px;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">Fermer</button>'+
+  '</div>';
+  document.body.appendChild(ov);
+  var close=function(){ov.remove();};
+  var cb=document.getElementById("badge-info-close");if(cb)cb.onclick=close;
+  ov.addEventListener("click",function(e){if(e.target===ov)close();});
+  try{playSound("pop");}catch(e){}
 }
 /* Classement des contributeurs : top 10 par points (collection users de Firestore).
    Les pseudos viennent de la communaute, donc toujours passes par sanitize(). */
@@ -6411,6 +6473,10 @@ function openMissions(){
 function updateMissionFab(){
   try{
     var fab=ensureMissionFab();
+    // Ne jamais montrer la pastille pendant le splash ou l'intro (onboarding).
+    var _ob=document.getElementById("onboarding"),_sp=document.getElementById("splash");
+    var _introUp=(_ob&&getComputedStyle(_ob).display!=="none"&&!_ob.classList.contains("hidden"))||(_sp&&getComputedStyle(_sp).display!=="none"&&!_sp.classList.contains("hidden"));
+    if(_introUp){fab.style.display="none";return;}
     var newcomer=(userStats.pts||0)<1&&!Object.keys(scanCounts||{}).length&&!(userStats.signals||0)&&!(userStats.confirms||0);
     var miss=0;
     if(!newcomer){try{miss=missionDefs().filter(function(m){return m.have<m.need;}).length;}catch(e){}}
