@@ -374,7 +374,15 @@ async function main() {
   } else console.log('  !! champ prix introuvable');
 
   // 6. l'itinéraire : le trajet se trace de toi jusqu'au magasin
-  await tapIn('#store-list', 'Y aller', { pause: 300 });
+  // On note le magasin visé avant de toucher « Y aller » : si l'app n'a pas
+  // tracé le trajet (elle s'y prend 400 ms après le passage en plein écran, et
+  // sous charge ça déborde), on relance son propre appel.
+  const goCall = await page.evaluate(() => {
+    const b = [...document.querySelectorAll('#store-list [onclick]')]
+      .find(e => /goToStore/.test(e.getAttribute('onclick')));
+    return b ? b.getAttribute('onclick') : null;
+  });
+  await tapIn('#store-list', 'Y aller', { pause: 250 });
   // La carte plein écran est positionnée dans l'écran de la fiche, qui est
   // défilé : sans ça elle s'ouvre décalée de la hauteur du défilement. On
   // remet le conteneur à zéro pendant la transition, ça ne se voit pas.
@@ -383,25 +391,29 @@ async function main() {
     while (el) { if (el.scrollTop) el.scrollTop = 0; el = el.parentElement; }
     const se = document.scrollingElement; if (se) se.scrollTop = 0;
   });
-  await wait(2300);
-  // La carte passe en plein écran juste avant que l'app ne cadre le trajet ;
-  // le temps qu'elle prenne sa taille, le cadrage se fait à côté. On le refait
-  // une fois la carte installée — en vol plané, ça se voit bien à l'écran.
+  const traced = () => page.waitForFunction(() => !!window._drinkRouteLayer, null, { timeout: 6000 })
+    .then(() => true).catch(() => false);
+  let ok = await traced();
+  const m = goCall && goCall.match(/goToStore\(\s*([-\d.]+)\s*,\s*([-\d.]+)/);
+  if (!ok && m) {
+    await page.evaluate(([a, b]) => { try { window.goToStore(Number(a), Number(b)); } catch (e) {} }, [m[1], m[2]]);
+    ok = await traced();
+  }
+  if (!ok) console.log('  !! itinéraire non tracé');
+  await wait(1400);
+  // Le cadrage du trajet se fait avant que la carte ait sa taille définitive :
+  // on le refait une fois installée — en vol plané, ça se voit bien à l'écran.
   await page.evaluate(() => {
-    const m = window._leafletMap, g = window._drinkRouteLayer;
-    if (!m) return;
-    m.invalidateSize();
+    const mp = window._leafletMap, g = window._drinkRouteLayer;
+    if (!mp) return;
+    mp.invalidateSize();
     if (!g || !window.L) return;
     let pts = [];
     g.eachLayer(ly => { if (ly.getLatLngs) pts = pts.concat(ly.getLatLngs().flat(Infinity)); });
-    if (pts.length) m.flyToBounds(window.L.latLngBounds(pts).pad(0.35), { duration: 1.9, easeLinearity: 0.2 });
+    if (pts.length) mp.flyToBounds(window.L.latLngBounds(pts).pad(0.35), { duration: 1.9, easeLinearity: 0.2 });
   });
-  await wait(3200); await shot('itineraire');
-  console.log('  debug:', JSON.stringify(await page.evaluate(() => {
-    const R = sel => { const e = document.querySelector(sel); if (!e) return null; const q = e.getBoundingClientRect(); return [Math.round(q.width), Math.round(q.height), Math.round(q.top)]; };
-    return { vw: innerWidth, vh: innerHeight, full: R('#map-box.map-fullscreen'), box: R('#map-box'), app: R('#app') };
-  })));
-  await wait(2400); await shot('itineraire-fin');
+  await wait(2600); await shot('itineraire');
+  await wait(2000); await shot('itineraire-fin');
 
   const video = SHOTS ? null : page.video();
   const trim = Math.max(0, (t0 - recStart) / 1000 - 0.2);   // chargement à couper
