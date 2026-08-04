@@ -1153,12 +1153,24 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div id="profile-name-display" style="font-size:18px;font-weight:800;letter-spacing:-.3px" class="c1"></div>
         <div id="profile-status-display" style="font-size:12px;font-weight:500;margin-top:3px" class="c2">Membre Magofeed</div>
       </div>
-      <div class="stat-grid">
-        <div class="stat-card"><div class="stat-num" id="stat-signals">0</div><div class="stat-lbl" id="t-sig">Signalements</div></div>
-        <div class="stat-card"><div class="stat-num" id="stat-confirms">0</div><div class="stat-lbl" id="t-conf">Confirmations</div></div>
+      <div class="stat-grid" style="padding-bottom:8px">
+        <div class="stat-card"><div class="stat-num" id="stat-scans">0</div><div class="stat-lbl">Scans</div></div>
+        <div class="stat-card"><div class="stat-num" id="stat-disc">0</div><div class="stat-lbl">Découvertes</div></div>
         <div class="stat-card"><div class="stat-num" id="stat-pts">0</div><div class="stat-lbl" data-i18n="ptsLabel">Points</div></div>
       </div>
+      <div class="stat-grid" style="grid-template-columns:1fr 1fr">
+        <div class="stat-card"><div class="stat-num" id="stat-confirms">0</div><div class="stat-lbl" id="t-conf">Confirmations</div></div>
+        <div class="stat-card"><div class="stat-num" id="stat-signals">0</div><div class="stat-lbl" id="t-sig">Signalements</div></div>
+      </div>
       <div id="streak-pill" style="display:flex;align-items:center;justify-content:center;gap:7px;margin:0 20px 6px;padding:10px 14px;background:var(--bg2);border-radius:14px"></div>
+      <div onclick="inviteFriend()" role="button" tabindex="0" aria-label="Inviter un ami" onkeydown="if(event.key==='Enter'){inviteFriend();}" style="display:flex;align-items:center;gap:12px;margin:6px 20px;padding:14px 16px;background:linear-gradient(135deg,#0e7a4d,#14532d);border-radius:16px;cursor:pointer">
+        <span style="display:flex;color:#fff"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px;font-weight:800;color:#fff">Inviter un ami</div>
+          <div style="font-size:11.5px;font-weight:600;color:#bbf7d0;margin-top:1px">Partage Magofeed — plus on est, plus on trouve</div>
+        </div>
+        <span style="font-size:16px;color:#bbf7d0">›</span>
+      </div>
       <div onclick="show('rewards')" role="button" tabindex="0" aria-label="À quoi servent mes points" onkeydown="if(event.key==='Enter'){show('rewards');}" style="display:flex;align-items:center;gap:12px;margin:6px 20px 4px;padding:14px 16px;background:linear-gradient(135deg,#fff3e0,#ffe8cc);border:1.5px solid #f0b840;border-radius:16px;cursor:pointer">
         <span style="display:flex;color:#e6a417"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h12v3a6 6 0 0 1-12 0z"/><path d="M6 6H4.5A1.5 1.5 0 0 0 6 8.5M18 6h1.5A1.5 1.5 0 0 1 18 8.5"/><path d="M9 15.5h6M10 19h4M12 13.5V15"/></svg></span>
         <div style="flex:1;min-width:0">
@@ -4039,6 +4051,7 @@ function _showRaw(s){
   if(s==="profile"){try{updateProfileStats();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
   if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{renderHunts();}catch(e){}}
+  try{updateMissionFab();}catch(e){}
   if(s!=="scan"&&scanActive)stopScan();
   var target=document.getElementById("s-"+s);
   var current=document.querySelector(".screen.on");
@@ -4663,9 +4676,13 @@ function renderRewards(){
 }
 function updateProfileStats(){
   try{checkBadges();}catch(e){}
-  document.getElementById("stat-signals").textContent=userStats.signals;
-  document.getElementById("stat-confirms").textContent=userStats.confirms;
-  document.getElementById("stat-pts").textContent=userStats.pts;
+  var _scn=0;try{_scn=Object.keys(scanCounts||{}).length;}catch(e){}
+  var _st=function(id,v){var el=document.getElementById(id);if(el)el.textContent=(v==null?0:v);};
+  _st("stat-scans",_scn);
+  _st("stat-disc",userStats.discAccepted||0);
+  _st("stat-signals",userStats.signals);
+  _st("stat-confirms",userStats.confirms);
+  _st("stat-pts",userStats.pts);
   var lvHost=document.getElementById("level-bar");
   if(!lvHost){
     lvHost=document.createElement("div");
@@ -6343,6 +6360,71 @@ function renderMissions(){
       '<div style="font-size:13px;font-weight:800;color:var(--s1)">Missions du jour</div>'+
       '<div style="font-size:11px;font-weight:800;color:'+(all?"#c69a57":"var(--s2)")+'">'+(all?"\u2713 +10 pts !":done+"/"+defs.length)+'</div>'+
     '</div>'+rows+'</div>';
+  try{updateMissionFab();}catch(e){}
+}
+/* \u2500\u2500 Inviter un ami : LE levier viral. Partage natif du telephone si dispo,
+   sinon copie du lien. Message tout pret pour donner envie de cliquer. */
+function inviteFriend(){
+  var url="https://magonyos991-ux.github.io/magofeed/";
+  var text="Tu cherches une boisson rare pres de chez toi ? \ud83e\udd64 Avec Magofeed tu vois direct ou l'acheter. C'est gratuit :";
+  try{playSound("pop");}catch(e){}
+  if(navigator.share){
+    navigator.share({title:"Magofeed",text:text,url:url}).catch(function(){});
+  }else if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text+" "+url).then(function(){toast("Lien copie \u2014 colle-le ou tu veux !");}).catch(function(){prompt("Copie ce lien :",url);});
+  }else{ prompt("Copie ce lien :",url); }
+}
+/* \u2500\u2500 Pastille MISSIONS flottante et deplacable \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+   Acces permanent aux missions/chasses depuis n'importe quel ecran. Badge =
+   missions du jour a finir + chasses actives autour. Deplacable a la verticale
+   (position memorisee en local). Tap = ouvre l'accueil sur les missions. */
+function ensureMissionFab(){
+  var ex=document.getElementById("mission-fab");
+  if(ex)return ex;
+  var fab=document.createElement("div");
+  fab.id="mission-fab";
+  fab.setAttribute("role","button");
+  fab.setAttribute("tabindex","0");
+  fab.setAttribute("aria-label","Voir mes missions et chasses");
+  fab.style.cssText="position:fixed;right:14px;z-index:900;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#0e7a4d,#14532d);box-shadow:0 6px 20px rgba(0,0,0,.32);display:none;align-items:center;justify-content:center;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none";
+  var saved=parseInt(localStorage.getItem("magoFabTop")||"",10);
+  var defTop=Math.round((window.innerHeight||640)*0.62);
+  fab.style.top=((saved&&saved>60)?saved:defTop)+"px";
+  fab.innerHTML='<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg>'+
+    '<span id="mission-fab-badge" style="position:absolute;top:-3px;right:-3px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:#e67e22;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid var(--app-bg)">0</span>';
+  document.body.appendChild(fab);
+  var startY=0,startTop=0,moved=false,dragging=false;
+  function down(e){dragging=true;moved=false;var y=(e.touches?e.touches[0].clientY:e.clientY);startY=y;startTop=parseInt(fab.style.top,10)||0;fab.style.cursor="grabbing";if(e.cancelable)e.preventDefault();}
+  function move(e){if(!dragging)return;var y=(e.touches?e.touches[0].clientY:e.clientY);var dy=y-startY;if(Math.abs(dy)>4)moved=true;var nt=startTop+dy;var max=(window.innerHeight||640)-130;nt=Math.max(70,Math.min(max,nt));fab.style.top=nt+"px";if(e.cancelable)e.preventDefault();}
+  function up(){if(!dragging)return;dragging=false;fab.style.cursor="grab";if(moved){try{localStorage.setItem("magoFabTop",String(parseInt(fab.style.top,10)||0));}catch(_){}}else{openMissions();}}
+  fab.addEventListener("touchstart",down,{passive:false});
+  fab.addEventListener("touchmove",move,{passive:false});
+  fab.addEventListener("touchend",up);
+  fab.addEventListener("mousedown",down);
+  window.addEventListener("mousemove",move);
+  window.addEventListener("mouseup",up);
+  fab.addEventListener("keydown",function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();openMissions();}});
+  return fab;
+}
+function openMissions(){
+  try{navTo("home");}catch(e){try{show("home");}catch(_){}}
+  setTimeout(function(){
+    var t=document.getElementById("missions-card")||document.getElementById("hunts-card");
+    if(t&&t.scrollIntoView){try{t.scrollIntoView({behavior:"smooth",block:"center"});}catch(e){}}
+  },220);
+}
+function updateMissionFab(){
+  try{
+    var fab=ensureMissionFab();
+    var newcomer=(userStats.pts||0)<1&&!Object.keys(scanCounts||{}).length&&!(userStats.signals||0)&&!(userStats.confirms||0);
+    var miss=0;
+    if(!newcomer){try{miss=missionDefs().filter(function(m){return m.have<m.need;}).length;}catch(e){}}
+    var hunts=window._huntCount||0;
+    var total=miss+hunts;
+    var badge=document.getElementById("mission-fab-badge");
+    if(total>0){ if(badge)badge.textContent=(total>99?"99+":total); fab.style.display="flex"; }
+    else{ fab.style.display="none"; }
+  }catch(e){}
 }
 /* Mission « boisson recherchée » : l'app met en avant une boisson du catalogue
    dont AUCUN magasin n'est connu (localement) et récompense l'utilisateur qui la
@@ -8307,6 +8389,7 @@ function _drawHunts(map){
   var host=document.getElementById("hunts-card");if(!host)return;
   var list=Object.keys(map).map(function(k){return map[k];}).filter(function(h){return h.seekers>0;});
   list.sort(function(a,b){return b.seekers-a.seekers;});
+  window._huntCount=list.length;try{updateMissionFab();}catch(e){}
   if(!list.length){host.innerHTML="";return;}
   var rows=list.slice(0,6).map(function(h){
     var who=h.seekers>1?(h.seekers+" personnes cherchent"):(h.mine?"Tu cherches":"1 personne cherche");
