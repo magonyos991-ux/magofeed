@@ -68,16 +68,32 @@ Ce qu'il faut savoir :
 
 ### Fluidité
 
-Les défilements et les déplacements de carte sont **animés dans la page**
-(`requestAnimationFrame`, `map.panBy`) et non pilotés cran par cran depuis Node :
-chaque commande envoyée au navigateur coûte un aller-retour d'environ 40 ms, ce qui
-se voyait comme des à-coups.
+Trois choses jouent, dans cet ordre d'importance :
 
-L'enregistreur de Playwright capture au rythme du compositeur, soit **~25 images/s**
-sur cette taille d'image (mesuré : 25 i/s en 1080 de large, 34 i/s en 540 — c'est le
-plafond de la machine, sans GPU). L'option `--smooth` reconstruit les images
-intermédiaires par estimation de mouvement (`minterpolate`) pour livrer du **50 i/s**.
-C'est ce qui est livré dans `out/`. Comptez ~30 min de calcul pour 50 s de vidéo.
+1. **La largeur de capture.** C'est le facteur décisif, et il ne touche pas à la
+   netteté. Mesuré sur un vrai défilement de l'accueil, machine sans GPU :
+
+   | largeur filmée | images/s |
+   |---|---|
+   | 1080 px | **4** |
+   | 1010 px | 19 |
+   | 900 px | 27 |
+   | **810 px** | **30** |
+
+   Au-dessus de ~900 px le rendu logiciel s'effondre. On filme donc en **810** et on
+   agrandit en 1080 au montage (`scale=1080:flags=lanczos`) : côte à côte, le texte
+   est indiscernable du 1080 natif, pour sept fois plus d'images.
+
+2. **Les mouvements sont animés dans la page** (`requestAnimationFrame`,
+   `map.flyTo`) et non pilotés cran par cran depuis Node : chaque commande envoyée
+   au navigateur coûte un aller-retour d'environ 40 ms, ce qui se voyait comme des
+   à-coups.
+
+3. **L'interpolation** (`--smooth`). L'enregistreur écrit à cadence fixe et répète
+   les images quand le rendu n'a pas suivi ; `mpdecimate` les retire, puis
+   `minterpolate` reconstruit un **60 i/s** régulier. Retirer les doublons d'abord
+   divise par deux les images figées du résultat (25 % → 14 %). Comptez ~30 min de
+   calcul pour 40 s de vidéo.
 
 ## Générer les fichiers
 
