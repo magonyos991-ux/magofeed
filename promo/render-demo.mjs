@@ -5,6 +5,7 @@
 // Usage :
 //   node promo/render-demo.mjs              -> promo/out/magofeed-demo.mp4
 //   node promo/render-demo.mjs --shots      -> captures PNG de chaque étape (mise au point)
+//   node promo/render-demo.mjs --smooth     -> sortie 50 i/s (interpolation, ~30 min)
 //   node promo/render-demo.mjs --no-music   -> sans bande-son
 //
 // Prérequis : npm i playwright  ·  ffmpeg dans le PATH pour le MP4.
@@ -27,6 +28,10 @@ fs.mkdirSync(OUT, { recursive: true });
 
 const SHOTS = process.argv.includes('--shots');
 const NO_MUSIC = process.argv.includes('--no-music');
+// L'enregistreur capture au rythme du compositeur (~25 i/s sur cette taille).
+// --smooth recalcule les images intermédiaires pour sortir en 50 i/s : c'est
+// nettement plus fluide sur les défilements, mais comptez ~30 min de calcul.
+const SMOOTH = process.argv.includes('--smooth');
 const PORT = Number(process.env.MAGOFEED_PORT || 8099);
 
 /* ── Réglages de la démo ─────────────────────────────────────────── */
@@ -160,6 +165,13 @@ async function installRelay(ctx) {
 /* ── Habillage : indicateur de tap, comme sur une vraie démo ─────── */
 const TAP_CSS = `
   html{zoom:__ZOOM__}
+  /* Sous zoom CSS, les éléments plein écran (position:fixed, inset:0, 100dvh)
+     se calculent sur la fenêtre réelle (1080×2337) et non sur le gabarit
+     téléphone : on leur rend leur taille, sinon la carte plein écran et la
+     feuille du bas débordent largement hors de l'image. */
+  #map-box.map-fullscreen,#explore-map-host{
+    width:__PW__px!important;height:__PH__px!important;
+    top:0!important;left:0!important;right:auto!important;bottom:auto!important}
   #__demotap{position:fixed;z-index:2147483647;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;
     pointer-events:none;opacity:0;background:rgba(26,23,20,.16);border:2px solid rgba(26,23,20,.4)}
   #__demotap.go{animation:__tapa .5s ease-out}
@@ -210,7 +222,7 @@ async function main() {
       // les coordonnées viennent du repère de la fenêtre, le point est dans le repère zoomé
       window.__tap = (x, y) => { d.style.left = (x / zoom) + 'px'; d.style.top = (y / zoom) + 'px'; d.classList.remove('go'); void d.offsetWidth; d.classList.add('go'); };
     });
-  }, { stores, center: CENTER, radiusKm: CACHE_RADIUS_KM, pseudo: PSEUDO, css: TAP_CSS.replace('__ZOOM__', String(ZOOM)), zoom: ZOOM });
+  }, { stores, center: CENTER, radiusKm: CACHE_RADIUS_KM, pseudo: PSEUDO, css: TAP_CSS.replace('__ZOOM__', String(ZOOM)).replace(/__PW__/g, String(PHONE.width)).replace(/__PH__/g, String(PHONE.height)), zoom: ZOOM });
 
   const page = await ctx.newPage();
   const recStart = Date.now();          // l'enregistrement démarre ici
@@ -235,6 +247,17 @@ async function main() {
   }
   // Sur les libellés, on clique l'élément lui-même (l'onde visuelle est juste
   // posée par-dessus) : un clic aux coordonnées peut atterrir sur un enfant.
+  async function tapIn(container, txt, { exact = false, pause = 900 } = {}) {
+    const loc = page.locator(container).getByText(txt, { exact }).first();
+    const box = await loc.boundingBox().catch(() => null);
+    if (!box) { console.log(`  !! « ${txt} » introuvable dans ${container}`); return false; }
+    await page.evaluate(([x, y]) => window.__tap && window.__tap(x, y),
+      [Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2)]);
+    await wait(180);
+    await loc.click({ force: true }).catch(() => {});
+    await wait(pause);
+    return true;
+  }
   async function tapText(txt, { pause = 900 } = {}) {
     const loc = page.getByText(txt, { exact: false }).first();
     const box = await loc.boundingBox().catch(() => null);
@@ -247,24 +270,35 @@ async function main() {
     return true;
   }
   // glissement du doigt (carte Leaflet)
-  const P = (x, y) => ({ x: Math.round(x * ZOOM), y: Math.round(y * ZOOM) });   // repère téléphone -> fenêtre
-  async function drag(a, b, ms = 600) {
-    const from = P(a.x, a.y), to = P(b.x, b.y);
-    await page.mouse.move(from.x, from.y); await page.mouse.down();
-    const n = 24;
-    for (let i = 1; i <= n; i++) {
-      await page.mouse.move(from.x + (to.x - from.x) * i / n, from.y + (to.y - from.y) * i / n);
-      await wait(ms / n);
-    }
-    await page.mouse.up();
+  // Défilement : animé image par image DANS la page. Chaque cran de molette
+  // envoyé depuis Node coûte un aller-retour (~40 ms) et se voyait comme une
+  // saccade ; ici le navigateur anime tout seul, à sa cadence d'affichage.
+  async function scroll(dy, ms = 1100, at = { x: 195, y: 460 }) {
+    await page.evaluate(([x, y, dy, ms]) => new Promise(done => {
+      let el = document.elementFromPoint(x, y);
+      while (el && el !== document.body) {
+        const st = getComputedStyle(el);
+        if (/(auto|scroll)/.test(st.overflowY) && el.scrollHeight > el.clientHeight + 4) break;
+        el = el.parentElement;
+      }
+      const box = (el && el !== document.body) ? el : (document.scrollingElement || document.documentElement);
+      const from = box.scrollTop, t0 = performance.now();
+      const ease = t => t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      (function step() {
+        const t = Math.min(1, (performance.now() - t0) / ms);
+        box.scrollTop = from + dy * ease(t);
+        if (t < 1) requestAnimationFrame(step); else done();
+      })();
+    }), [at.x, at.y, dy, ms]);
   }
-  // défilement : la molette agit sur le conteneur sous le curseur, ce qu'un
-  // glissement à la souris ne fait pas dans les listes de l'app.
-  async function scroll(dy, steps = 5, at = { x: 195, y: 500 }) {
-    const p = P(at.x, at.y);
-    await page.mouse.move(p.x, p.y);
-    // le zoom CSS s'applique aussi aux deltas de molette : on garde les pixels « téléphone »
-    for (let i = 0; i < steps; i++) { await page.mouse.wheel(0, dy / steps); await wait(90); }
+  // Déplacement de carte : on laisse Leaflet animer (transform CSS), là encore
+  // plus fluide qu'un glissement piloté depuis Node.
+  async function panMap(dx, dy, ms = 1400) {
+    await page.evaluate(([dx, dy, ms]) => {
+      const m = window.exploreMap || window._leafletMap;
+      if (m) m.panBy([dx, dy], { animate: true, duration: ms / 1000 });
+    }, [dx, dy, ms]);
+    await wait(ms + 300);
   }
 
   /* ── Le scénario ──────────────────────────────────────────────── */
@@ -274,40 +308,63 @@ async function main() {
 
   // 1. l'accueil
   await wait(2200); await shot('accueil');
-  await scroll(360, 5); await wait(1500); await shot('accueil-defile');
-  await scroll(-360, 5); await wait(800);
+  await scroll(360, 1200); await wait(1300); await shot('accueil-defile');
+  await scroll(-360, 900); await wait(800);
 
   // 2. on cherche une boisson
   await tap('#t-placeholder', { pause: 1500 }); await shot('recherche');
   await page.locator('#q').click({ force: true });
   await page.locator('#q').type(QUERY, { delay: 210 });
-  await wait(2200); await shot('suggestions');
+  await wait(2000); await shot('suggestions');
 
   // 3. la carte des magasins qui l'ont
   await tapText(DRINK, { pause: 6500 }); await shot('carte');
-  // dézoom (équivalent d'un pincement) pour découvrir tous les points
   await page.evaluate(() => { try { window.exploreMap.setZoom(window.exploreMap.getZoom() - 2, { animate: true }); } catch (e) {} });
-  await wait(3500); await shot('carte-large');
-  await drag({ x: 250, y: 520 }, { x: 170, y: 600 }, 800); await wait(2600); await shot('carte-pan');
+  await wait(3000); await shot('carte-large');
+  await panMap(110, -80, 1600); await wait(1200); await shot('carte-pan');
 
   // 4. la fiche de la boisson : on la met en favori
   await tapText('voir la fiche', { pause: 3500 }); await shot('fiche');
-  await tap('#res-fav', { pause: 2200 }); await shot('favori');
+  await tap('#res-fav', { pause: 1800 }); await shot('favori');
 
-  // 5. on confirme un stock — la boucle communautaire de l'app
-  await scroll(430, 6); await wait(2000); await shot('magasins');
-  await scroll(260, 4); await wait(1800); await shot('magasins-2');
-  const oui = page.locator('#store-list').getByText('Oui', { exact: true }).first();
-  const boxOui = await oui.boundingBox().catch(() => null);
-  if (boxOui) {
-    await page.evaluate(([x, y]) => window.__tap && window.__tap(x, y), [Math.round(boxOui.x + boxOui.width / 2), Math.round(boxOui.y + boxOui.height / 2)]);
-    await wait(180);
-    await oui.click({ force: true }).catch(() => {});
-    await wait(3200); await shot('confirme');
-  } else console.log('  !! bouton Oui introuvable');
+  // 5. on confirme le stock, puis on donne le prix vu en rayon
+  await scroll(430, 1300); await wait(1400); await shot('magasins');
+  await scroll(250, 900); await wait(1300); await shot('magasins-2');
+  await tapIn('#store-list', 'Oui', { exact: true, pause: 2600 }); await shot('confirme');
 
-  // 6. retour à l'accueil
-  await tap('#nt-home', { pause: 3000 }); await shot('fin');
+  const priceInput = page.locator('#store-list input').first();
+  if (await priceInput.count().catch(() => 0)) {
+    await priceInput.click({ force: true }).catch(() => {});
+    await priceInput.type('1.30', { delay: 220 }).catch(() => {});
+    await wait(900); await shot('prix-saisi');
+    await tapIn('#store-list', 'OK', { exact: true, pause: 2600 }); await shot('prix');
+  } else console.log('  !! champ prix introuvable');
+
+  // 6. l'itinéraire : le trajet se trace de toi jusqu'au magasin
+  await tapIn('#store-list', 'Y aller', { pause: 3000 });
+  // La carte passe en plein écran juste avant que l'app ne cadre le trajet ;
+  // le temps qu'elle prenne sa taille, le cadrage se fait à côté. On le refait
+  // une fois la carte installée — en vol plané, ça se voit bien à l'écran.
+  await page.evaluate(() => {
+    const m = window._leafletMap, g = window._drinkRouteLayer;
+    if (!m) return;
+    m.invalidateSize();
+    if (!g || !window.L) return;
+    let pts = [];
+    g.eachLayer(ly => { if (ly.getLatLngs) pts = pts.concat(ly.getLatLngs().flat(Infinity)); });
+    if (pts.length) m.flyToBounds(window.L.latLngBounds(pts).pad(0.35), { duration: 1.8 });
+  });
+  await wait(4500); await shot('itineraire');
+  console.log('  debug route:', JSON.stringify(await page.evaluate(() => {
+    const m = window._leafletMap, b = document.getElementById('drink-route-banner');
+    const r = b && b.getBoundingClientRect();
+    const R = sel => { const e = document.querySelector(sel); if (!e) return null; const q = e.getBoundingClientRect(); return [Math.round(q.width), Math.round(q.height)]; };
+    return { boxes: { app: R('#app'), full: R('#map-box.map-fullscreen'), host: R('#explore-map-host'), body: R('body') },
+      zoom: m && m.getZoom(), route: !!window._drinkRouteLayer,
+      banner: r && { top: Math.round(r.top), bottom: Math.round(r.bottom), h: Math.round(r.height) },
+      navDist: (document.getElementById('nav-dist') || {}).innerText, vh: innerHeight };
+  })));
+  await wait(3500); await shot('itineraire-fin');
 
   const video = SHOTS ? null : page.video();
   const trim = Math.max(0, (t0 - recStart) / 1000 - 0.2);   // chargement à couper
@@ -342,6 +399,19 @@ async function main() {
     '-crf', '19', '-pix_fmt', 'yuv420p', '-profile:v', 'high', '-level', '4.0', '-movflags', '+faststart',
     path.join(OUT, 'magofeed-demo-9x16.mp4')]);
   console.log('✓ magofeed-demo-9x16.mp4');
+
+  if (SMOOTH) {
+    console.log('Interpolation vers 50 i/s… (long)');
+    const INTERP = 'minterpolate=fps=50:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1';
+    for (const name of ['magofeed-demo', 'magofeed-demo-9x16']) {
+      const src = path.join(OUT, name + '.mp4'), tmp = path.join(OUT, name + '.50.mp4');
+      await ff(['-y', '-i', src, '-filter_complex', `[0:v]${INTERP}[v]`, '-map', '[v]', '-map', '0:a?',
+        '-c:v', 'libx264', '-preset', 'medium', '-crf', '19', '-pix_fmt', 'yuv420p',
+        '-profile:v', 'high', '-level', '4.2', '-c:a', 'copy', '-movflags', '+faststart', tmp]);
+      fs.renameSync(tmp, src);
+      console.log('✓ ' + name + '.mp4 (50 i/s)');
+    }
+  }
 }
 
 function hasFfmpeg() { return spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status === 0; }

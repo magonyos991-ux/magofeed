@@ -38,13 +38,18 @@ Tu peux aussi importer `out/magofeed-theme.wav` directement dans ton logiciel de
 ## Démo filmée de l'app 📱
 
 `render-demo.mjs` ne fabrique pas d'animation : il **ouvre la vraie app**, la pilote
-comme un utilisateur (accueil → recherche « Mogu » → carte des magasins → fiche →
-confirmation d'un stock) et enregistre l'écran. C'est l'équivalent d'un screen
-recording de téléphone, en 1080 × 2336.
+comme un utilisateur et enregistre l'écran. C'est l'équivalent d'un screen recording
+de téléphone, en 1080 × 2336.
+
+Le parcours filmé : accueil → recherche « Mogu » → carte des magasins qui l'ont →
+fiche produit → mise en favori → **confirmation du stock** → **saisie du prix vu en
+rayon** (« 1.30€ enregistré · +3 pts ») → **itinéraire piéton tracé jusqu'au
+magasin** (« 168 m · ~2 min »).
 
 ```bash
-node promo/render-demo.mjs           # -> out/magofeed-demo.mp4 + out/magofeed-demo-9x16.mp4
-node promo/render-demo.mjs --shots   # captures PNG de chaque étape (pour régler le scénario)
+node promo/render-demo.mjs            # -> out/magofeed-demo.mp4 + out/magofeed-demo-9x16.mp4
+node promo/render-demo.mjs --smooth   # même chose, sorti en 50 i/s (interpolation, ~30 min)
+node promo/render-demo.mjs --shots    # captures PNG de chaque étape (pour régler le scénario)
 node promo/render-demo.mjs --no-music # sans bande-son
 ```
 
@@ -59,7 +64,20 @@ Ce qu'il faut savoir :
 - Le compteur de points du profil reste à zéro : il vient du serveur, injoignable
   depuis un navigateur piloté. C'est pour ça que la démo s'arrête à la confirmation.
 - Sur une machine sans sortie réseau directe pour le navigateur, `MAGOFEED_RELAY=1`
-  fait passer les requêtes (fonds de carte, photos produits) par `curl`.
+  fait passer les requêtes (fonds de carte, photos produits, itinéraire OSRM) par `curl`.
+
+### Fluidité
+
+Les défilements et les déplacements de carte sont **animés dans la page**
+(`requestAnimationFrame`, `map.panBy`) et non pilotés cran par cran depuis Node :
+chaque commande envoyée au navigateur coûte un aller-retour d'environ 40 ms, ce qui
+se voyait comme des à-coups.
+
+L'enregistreur de Playwright capture au rythme du compositeur, soit **~25 images/s**
+sur cette taille d'image (mesuré : 25 i/s en 1080 de large, 34 i/s en 540 — c'est le
+plafond de la machine, sans GPU). L'option `--smooth` reconstruit les images
+intermédiaires par estimation de mouvement (`minterpolate`) pour livrer du **50 i/s**.
+C'est ce qui est livré dans `out/`. Comptez ~30 min de calcul pour 50 s de vidéo.
 
 ## Générer les fichiers
 
