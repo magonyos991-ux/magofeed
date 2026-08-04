@@ -4243,17 +4243,17 @@ function maybeRewardHuntHelp(drinkId,store){
    declenche une celebration (toast + son). L'etat des paliers atteints est
    persiste pour ne feter chaque palier qu'une seule fois.
 ================================ */
-var TIER_NAMES=["bronze","argent","or"];
-var TIER_COLORS=["#cd7f32","#c0c0c0","#ffd700"];
+var TIER_NAMES=["bronze","argent","or","platine","diamant"];
+var TIER_COLORS=["#cd7f32","#c0c0c0","#ffd700","#5ec8d8","#8ab6ff"];
 function badgeDefs(){
   var T=LANGS[curLang]||LANGS.fr;
   return [
-    {key:"scan",emoji:"",name:T.badgeScan||"Scanneur",tiers:[1,15,50],value:Object.keys(scanCounts).length},
-    {key:"explorer",emoji:"",name:T.badgeExplorer||"\u00C9claireur",tiers:[1,5,15],value:Object.keys(contributedStores).length},
-    {key:"reliable",emoji:"\u2713",name:T.badgeReliable||"Fiable",tiers:[3,15,50],value:userStats.confirms||0},
-    {key:"discoverer",emoji:"",name:"D\u00e9couvreur",tiers:[1,5,15],value:userStats.discAccepted||0},
-    {key:"streak",emoji:"",name:T.badgeStreak||"Assidu",tiers:[3,7,30],value:(userStreak&&userStreak.best)||0},
-    {key:"star",emoji:"\u2605",name:T.badgeStar||"\u00C9toile",tiers:[100,500,2000],value:userStats.pts||0},
+    {key:"scan",emoji:"",name:T.badgeScan||"Scanneur",tiers:[1,15,50,150,500],value:Object.keys(scanCounts).length},
+    {key:"explorer",emoji:"",name:T.badgeExplorer||"\u00C9claireur",tiers:[1,5,15,40,100],value:Object.keys(contributedStores).length},
+    {key:"reliable",emoji:"\u2713",name:T.badgeReliable||"Fiable",tiers:[3,15,50,150,400],value:userStats.confirms||0},
+    {key:"discoverer",emoji:"",name:"D\u00e9couvreur",tiers:[1,5,15,40,100],value:userStats.discAccepted||0},
+    {key:"streak",emoji:"",name:T.badgeStreak||"Assidu",tiers:[3,7,30,90,365],value:(userStreak&&userStreak.best)||0},
+    {key:"star",emoji:"\u2605",name:T.badgeStar||"\u00C9toile",tiers:[100,500,2000,7500,25000],value:userStats.pts||0},
     {key:"founder",emoji:"",name:T.badgeFounder||"Fondateur",tiers:[1],value:isAdmin?1:0,special:true}
   ];
 }
@@ -4355,8 +4355,8 @@ function showBadgeInfo(def,tier){
   }
   var ov=document.createElement("div");
   ov.id="badge-info";
-  ov.style.cssText="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px";
-  ov.innerHTML='<div style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:22px;max-width:360px;width:100%;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.45)">'+
+  ov.style.cssText="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;opacity:0;transition:opacity .22s ease";
+  ov.innerHTML='<div id="badge-info-card" style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:22px;max-width:360px;width:100%;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.45);transform:scale(.6);opacity:0;transition:transform .36s cubic-bezier(.34,1.56,.4,1),opacity .22s ease">'+
     '<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">'+
       '<span style="width:58px;height:58px;border-radius:17px;background:var(--bg2);border:2px solid '+(tier?col:"var(--border)")+';display:flex;align-items:center;justify-content:center;flex-shrink:0;color:'+(tier?col:"var(--s3)")+'">'+badgeIcon(def.key,32,(tier?col:"var(--s3)"))+'</span>'+
       '<div style="min-width:0"><div style="font-size:20px;font-weight:850;color:var(--s1)">'+def.name+'</div>'+
@@ -4368,7 +4368,9 @@ function showBadgeInfo(def,tier){
     '<button id="badge-info-close" style="width:100%;margin-top:18px;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">Fermer</button>'+
   '</div>';
   document.body.appendChild(ov);
-  var close=function(){ov.remove();};
+  var _bc=document.getElementById("badge-info-card");
+  requestAnimationFrame(function(){ov.style.opacity="1";if(_bc){_bc.style.transform="scale(1)";_bc.style.opacity="1";}});
+  var close=function(){ov.style.opacity="0";if(_bc){_bc.style.transform="scale(.88)";_bc.style.opacity="0";}setTimeout(function(){if(ov.parentNode)ov.remove();},200);};
   var cb=document.getElementById("badge-info-close");if(cb)cb.onclick=close;
   ov.addEventListener("click",function(e){if(e.target===ov)close();});
   try{playSound("pop");}catch(e){}
@@ -6452,7 +6454,7 @@ function ensureMissionFab(){
   var top=(savedTop&&savedTop>60)?Math.min(savedTop,vh-140):Math.round(vh*0.6);
   fab.style.top=top+"px";
   fab.style.left=(savedSide==="left"?12:(vw-W-12))+"px";
-  fab.innerHTML='<svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 1px 1px rgba(0,0,0,.25))"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>'+
+  fab.innerHTML='<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 1.5px 1.5px rgba(0,0,0,.3))"><path d="M6 21.5V3"/><path d="M6 4h11.5l-2.4 3.9 2.4 3.9H6z" fill="#fff" stroke="none"/></svg>'+
     '<span id="mission-fab-badge" style="position:absolute;top:-4px;right:-4px;min-width:21px;height:21px;padding:0 5px;border-radius:11px;background:#e67e22;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2.5px solid var(--app-bg);box-shadow:0 2px 6px rgba(0,0,0,.25)">0</span>';
   document.body.appendChild(fab);
   var sx=0,sy=0,ox=0,oy=0,moved=false,dragging=false,idleT=null;
@@ -6484,8 +6486,21 @@ function ensureMissionFab(){
 }
 /* Panneau missions & chasses (ouvert au tap sur la pastille) : missions du jour
    + chasses autour, avec les VRAIES photos des boissons. */
+/* Effet "goutte d'eau" : un cercle qui jaillit de la pastille et s'elargit. */
+function fabRipple(){
+  try{
+    var f=document.getElementById("mission-fab");if(!f)return;
+    var r=f.getBoundingClientRect();var cx=r.left+r.width/2,cy=r.top+r.height/2;
+    var rip=document.createElement("div");
+    rip.style.cssText="position:fixed;left:"+cx+"px;top:"+cy+"px;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;background:radial-gradient(circle,rgba(34,192,127,.55),rgba(14,122,77,.12) 70%,transparent);z-index:999;pointer-events:none;transform:scale(0);opacity:.95;transition:transform .55s cubic-bezier(.2,.7,.3,1),opacity .55s ease";
+    document.body.appendChild(rip);
+    requestAnimationFrame(function(){rip.style.transform="scale(70)";rip.style.opacity="0";});
+    setTimeout(function(){if(rip.parentNode)rip.remove();},600);
+  }catch(e){}
+}
 function openMissions(){
   if(document.getElementById("mission-sheet"))return;
+  fabRipple();
   var defs=[];try{defs=missionDefs();}catch(e){}
   var hunts=window._huntList||[];
   var missDone=defs.filter(function(m){return m.have>=m.need;}).length;
@@ -6527,6 +6542,13 @@ function openMissions(){
   var close=function(){if(card)card.style.transform="translateY(100%)";setTimeout(function(){if(ov.parentNode)ov.remove();},300);};
   var cb=document.getElementById("ms-close");if(cb)cb.onclick=close;
   ov.addEventListener("click",function(e){if(e.target===ov)close();});
+  // Glisser la feuille vers le bas pour la fermer (comme une vraie bottom sheet).
+  var _sy=null,_dy=0;
+  if(card){
+    card.addEventListener("touchstart",function(e){if(card.scrollTop>0){_sy=null;return;}_sy=e.touches[0].clientY;_dy=0;card.style.transition="none";},{passive:true});
+    card.addEventListener("touchmove",function(e){if(_sy===null)return;var d=e.touches[0].clientY-_sy;if(d<0)return;_dy=d;card.style.transform="translateY("+d+"px)";},{passive:true});
+    card.addEventListener("touchend",function(){if(_sy===null)return;card.style.transition="transform .3s cubic-bezier(.2,.8,.2,1)";if(_dy>110){close();}else{card.style.transform="none";}_sy=null;_dy=0;},{passive:true});
+  }
   ov.querySelectorAll(".ms-hunt").forEach(function(row){
     row.onclick=function(){var did=Number(row.getAttribute("data-did"));var d=DRINKS.find(function(x){return Number(x.id)===did;});close();if(d)setTimeout(function(){pick(d);},260);else toast("Boisson introuvable");};
     row.onkeydown=function(ev){if(ev.key==="Enter")row.click();};
