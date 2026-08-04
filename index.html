@@ -190,6 +190,10 @@ body.dark .search-mode-btn.on{background:#f0f0f0;color:#1a1714}
 /* ── Chips ── */
 .chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;margin-bottom:22px}
 .brands-rail{display:flex;gap:10px;overflow-x:auto;padding:2px 0 8px;margin-bottom:14px;-webkit-overflow-scrolling:touch}
+.brands-letters{display:flex;gap:6px;overflow-x:auto;padding:0 0 10px;-webkit-overflow-scrolling:touch}
+.brands-letters::-webkit-scrollbar{display:none}
+.bl-chip{flex:none;min-width:34px;height:32px;padding:0 10px;border-radius:999px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s2);font-size:13px;font-weight:800;cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent;transition:background .15s,color .15s}
+.bl-chip.on{background:var(--s1);color:var(--app-bg);border-color:var(--s1)}
 .brand-tile{
   flex:none;display:flex;flex-direction:column;align-items:center;gap:7px;
   cursor:pointer;padding:4px;border-radius:16px;
@@ -6320,11 +6324,27 @@ var BRAND_DOMAINS={
   "orangina":"orangina.fr","tropico":"tropico.fr","evian":"evian.com",
   "volvic":"volvic.com","perrier":"perrier.com","jarritos":"jarritos.com"
 };
+var brandLetterFilter=null;
+function _brandLetter(b){
+  var c=(normTxt(b||"").charAt(0)||"#").toUpperCase();
+  return /[A-Z]/.test(c)?c:"#";
+}
 function renderBrandsRail(){
   var el=document.getElementById("brands-rail");if(!el)return;
-  var groups=getBrandGroups();
+  var all=getBrandGroups();
   var cnt=document.getElementById("brands-count");
-  if(cnt)cnt.textContent=groups.length+" marques";
+  // Barre A-Z : uniquement les lettres qui existent (+ "#" pour chiffres/autres).
+  var letters=[],seen={};
+  all.forEach(function(g){var L=_brandLetter(g.brand);if(!seen[L]){seen[L]=1;letters.push(L);}});
+  letters.sort(function(a,b){if(a==="#")return 1;if(b==="#")return -1;return a<b?-1:1;});
+  if(brandLetterFilter&&letters.indexOf(brandLetterFilter)===-1)brandLetterFilter=null;
+  var lb=document.getElementById("brands-letters");
+  if(!lb){lb=document.createElement("div");lb.id="brands-letters";lb.className="brands-letters";if(el.parentNode)el.parentNode.insertBefore(lb,el);}
+  function chip(txt,val,on){return '<button class="bl-chip'+(on?" on":"")+'" data-l="'+(val===null?"":val)+'" aria-label="Marques '+txt+'">'+txt+'</button>';}
+  lb.innerHTML=chip("Tous",null,!brandLetterFilter)+letters.map(function(L){return chip(L,L,brandLetterFilter===L);}).join("");
+  lb.querySelectorAll(".bl-chip").forEach(function(bt){bt.onclick=function(){var v=bt.getAttribute("data-l");brandLetterFilter=v||null;try{playSound("pop");}catch(e){}renderBrandsRail();};});
+  var groups=brandLetterFilter?all.filter(function(g){return _brandLetter(g.brand)===brandLetterFilter;}):all;
+  if(cnt)cnt.textContent=groups.length+" marque"+(groups.length>1?"s":"")+(brandLetterFilter?" · "+brandLetterFilter:"");
   el.innerHTML="";
   groups.forEach(function(g){
     var div=document.createElement("div");div.className="brand-tile";
