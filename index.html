@@ -6435,25 +6435,42 @@ function inviteFriend(){
    Acces permanent aux missions/chasses depuis n'importe quel ecran. Badge =
    missions du jour a finir + chasses actives autour. Deplacable a la verticale
    (position memorisee en local). Tap = ouvre l'accueil sur les missions. */
+var MISSION_FAB_W=58;
 function ensureMissionFab(){
   var ex=document.getElementById("mission-fab");
   if(ex)return ex;
+  var W=MISSION_FAB_W;
   var fab=document.createElement("div");
   fab.id="mission-fab";
   fab.setAttribute("role","button");
   fab.setAttribute("tabindex","0");
   fab.setAttribute("aria-label","Voir mes missions et chasses");
-  fab.style.cssText="position:fixed;right:14px;z-index:900;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#0e7a4d,#14532d);box-shadow:0 6px 20px rgba(0,0,0,.32);display:none;align-items:center;justify-content:center;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none";
-  var saved=parseInt(localStorage.getItem("magoFabTop")||"",10);
-  var defTop=Math.round((window.innerHeight||640)*0.62);
-  fab.style.top=((saved&&saved>60)?saved:defTop)+"px";
-  fab.innerHTML='<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg>'+
-    '<span id="mission-fab-badge" style="position:absolute;top:-3px;right:-3px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:#e67e22;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid var(--app-bg)">0</span>';
+  fab.style.cssText="position:fixed;z-index:900;width:"+W+"px;height:"+W+"px;border-radius:50%;background:radial-gradient(120% 120% at 30% 25%,#22c07f,#0e7a4d 55%,#0b5c39);box-shadow:0 8px 22px rgba(14,122,77,.5),inset 0 1.5px 0 rgba(255,255,255,.35),inset 0 -3px 8px rgba(0,0,0,.2);display:none;align-items:center;justify-content:center;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none;opacity:1;transition:opacity .3s ease";
+  var vw=window.innerWidth||390,vh=window.innerHeight||700;
+  var savedTop=parseInt(localStorage.getItem("magoFabTop")||"",10);
+  var savedSide=localStorage.getItem("magoFabSide")||"right";
+  var top=(savedTop&&savedTop>60)?Math.min(savedTop,vh-140):Math.round(vh*0.6);
+  fab.style.top=top+"px";
+  fab.style.left=(savedSide==="left"?12:(vw-W-12))+"px";
+  fab.innerHTML='<svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 1px 1px rgba(0,0,0,.25))"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>'+
+    '<span id="mission-fab-badge" style="position:absolute;top:-4px;right:-4px;min-width:21px;height:21px;padding:0 5px;border-radius:11px;background:#e67e22;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2.5px solid var(--app-bg);box-shadow:0 2px 6px rgba(0,0,0,.25)">0</span>';
   document.body.appendChild(fab);
-  var startY=0,startTop=0,moved=false,dragging=false;
-  function down(e){dragging=true;moved=false;var y=(e.touches?e.touches[0].clientY:e.clientY);startY=y;startTop=parseInt(fab.style.top,10)||0;fab.style.cursor="grabbing";if(e.cancelable)e.preventDefault();}
-  function move(e){if(!dragging)return;var y=(e.touches?e.touches[0].clientY:e.clientY);var dy=y-startY;if(Math.abs(dy)>4)moved=true;var nt=startTop+dy;var max=(window.innerHeight||640)-130;nt=Math.max(70,Math.min(max,nt));fab.style.top=nt+"px";if(e.cancelable)e.preventDefault();}
-  function up(){if(!dragging)return;dragging=false;fab.style.cursor="grab";if(moved){try{localStorage.setItem("magoFabTop",String(parseInt(fab.style.top,10)||0));}catch(_){}}else{openMissions();}}
+  var sx=0,sy=0,ox=0,oy=0,moved=false,dragging=false,idleT=null;
+  function idle(){if(idleT)clearTimeout(idleT);fab.style.opacity="1";idleT=setTimeout(function(){fab.style.opacity="0.6";},2600);}
+  function P(e){return (e.touches&&e.touches[0])?e.touches[0]:e;}
+  function down(e){dragging=true;moved=false;var p=P(e);sx=p.clientX;sy=p.clientY;ox=parseInt(fab.style.left,10)||0;oy=parseInt(fab.style.top,10)||0;fab.style.transition="opacity .2s ease";fab.style.cursor="grabbing";fab.style.opacity="1";if(idleT)clearTimeout(idleT);if(e.cancelable)e.preventDefault();}
+  function move(e){if(!dragging)return;var p=P(e);var dx=p.clientX-sx,dy=p.clientY-sy;if(Math.abs(dx)>4||Math.abs(dy)>4)moved=true;var w=window.innerWidth,h=window.innerHeight;fab.style.left=Math.max(8,Math.min(ox+dx,w-W-8))+"px";fab.style.top=Math.max(60,Math.min(oy+dy,h-140))+"px";if(e.cancelable)e.preventDefault();}
+  function snap(){
+    var w=window.innerWidth,h=window.innerHeight;
+    var cx=(parseInt(fab.style.left,10)||0)+W/2;
+    var side=cx<w/2?"left":"right";
+    var t=Math.max(60,Math.min(parseInt(fab.style.top,10)||0,h-140));
+    fab.style.transition="left .34s cubic-bezier(.34,1.4,.4,1),top .34s cubic-bezier(.34,1.4,.4,1),opacity .3s ease";
+    fab.style.left=(side==="left"?12:(w-W-12))+"px";fab.style.top=t+"px";
+    try{localStorage.setItem("magoFabSide",side);localStorage.setItem("magoFabTop",String(t));}catch(_){}
+    idle();
+  }
+  function up(){if(!dragging)return;dragging=false;fab.style.cursor="grab";if(moved){snap();}else{openMissions();idle();}}
   fab.addEventListener("touchstart",down,{passive:false});
   fab.addEventListener("touchmove",move,{passive:false});
   fab.addEventListener("touchend",up);
@@ -6461,14 +6478,60 @@ function ensureMissionFab(){
   window.addEventListener("mousemove",move);
   window.addEventListener("mouseup",up);
   fab.addEventListener("keydown",function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();openMissions();}});
+  window.addEventListener("resize",function(){var side=localStorage.getItem("magoFabSide")||"right";var w=window.innerWidth,h=window.innerHeight;fab.style.transition="none";fab.style.left=(side==="left"?12:(w-W-12))+"px";fab.style.top=Math.max(60,Math.min(parseInt(fab.style.top,10)||0,h-140))+"px";});
+  idle();
   return fab;
 }
+/* Panneau missions & chasses (ouvert au tap sur la pastille) : missions du jour
+   + chasses autour, avec les VRAIES photos des boissons. */
 function openMissions(){
-  try{navTo("home");}catch(e){try{show("home");}catch(_){}}
-  setTimeout(function(){
-    var t=document.getElementById("missions-card")||document.getElementById("hunts-card");
-    if(t&&t.scrollIntoView){try{t.scrollIntoView({behavior:"smooth",block:"center"});}catch(e){}}
-  },220);
+  if(document.getElementById("mission-sheet"))return;
+  var defs=[];try{defs=missionDefs();}catch(e){}
+  var hunts=window._huntList||[];
+  var missDone=defs.filter(function(m){return m.have>=m.need;}).length;
+  var missRows=defs.map(function(m){
+    var ok=m.have>=m.need;
+    return '<div style="display:flex;align-items:center;gap:11px;padding:9px 0">'+
+      '<span style="width:22px;height:22px;border-radius:50%;border:2px solid '+(ok?"#16a34a":"var(--border)")+';display:flex;align-items:center;justify-content:center;font-size:12px;color:#16a34a;flex-shrink:0">'+(ok?"✓":"")+'</span>'+
+      '<span style="flex:1;font-size:13.5px;font-weight:700;color:var(--s1);'+(ok?"text-decoration:line-through;opacity:.55":"")+'">'+m.label+'</span>'+
+      '<span style="font-size:12px;font-weight:800;color:var(--s2)">'+Math.min(m.have,m.need)+'/'+m.need+'</span></div>';
+  }).join("");
+  var huntRows=hunts.length?hunts.slice(0,8).map(function(h){
+    var hd=DRINKS.find(function(x){return Number(x.id)===Number(h.drinkId);});
+    if(hd&&!getCachedDrinkImage(hd)){try{fetchVerifiedOFFImage(hd);}catch(e){}}
+    var who=h.seekers>1?(h.seekers+" cherchent"):(h.mine?"Tu cherches":"1 cherche");
+    var thumb=hd?drinkIconHTML(hd):magoCatIcon("Autre",20,"#7a4a10");
+    return '<div class="ms-hunt" data-did="'+h.drinkId+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 0;cursor:pointer;border-top:1px solid var(--border)">'+
+      '<span style="width:40px;height:40px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0">'+thumb+'</span>'+
+      '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(h.drinkName||"Boisson")+'</div><div style="font-size:11.5px;font-weight:600;color:var(--s2)">'+who+' près d\'ici</div></div>'+
+      '<span style="font-size:12px;font-weight:800;color:#e67e22;flex-shrink:0">Je l\'ai vue →</span></div>';
+  }).join(""):'<div style="padding:16px 0 4px;font-size:12.5px;color:var(--s3);text-align:center">Aucune chasse près de toi pour l\'instant.</div>';
+  var ov=document.createElement("div");
+  ov.id="mission-sheet";
+  ov.style.cssText="position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center";
+  ov.innerHTML='<div id="ms-card" style="background:var(--app-bg);border-radius:24px 24px 0 0;width:100%;max-width:520px;max-height:82vh;overflow-y:auto;padding:10px 20px calc(24px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.35);transform:translateY(100%);transition:transform .34s cubic-bezier(.2,.8,.2,1)">'+
+    '<div style="width:40px;height:4px;border-radius:3px;background:var(--border);margin:0 auto 14px"></div>'+
+    '<div style="font-size:18px;font-weight:850;color:var(--s1);margin-bottom:2px">Tes missions &amp; chasses</div>'+
+    '<div style="font-size:12.5px;font-weight:600;color:var(--s2);margin-bottom:14px">Gagne des points en contribuant près de chez toi.</div>'+
+    '<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:12px 15px;margin-bottom:14px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px"><span style="font-size:13px;font-weight:800;color:var(--s1)">Missions du jour</span><span style="font-size:11.5px;font-weight:800;color:'+(defs.length&&missDone===defs.length?"#c69a57":"var(--s2)")+'">'+missDone+'/'+defs.length+'</span></div>'+
+      missRows+
+    '</div>'+
+    '<div style="font-size:13px;font-weight:800;color:var(--s1);margin:0 2px 2px">Chasses près de toi</div>'+
+    huntRows+
+    '<button id="ms-close" style="width:100%;margin-top:18px;padding:13px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">Fermer</button>'+
+  '</div>';
+  document.body.appendChild(ov);
+  var card=document.getElementById("ms-card");
+  requestAnimationFrame(function(){if(card)card.style.transform="none";});
+  var close=function(){if(card)card.style.transform="translateY(100%)";setTimeout(function(){if(ov.parentNode)ov.remove();},300);};
+  var cb=document.getElementById("ms-close");if(cb)cb.onclick=close;
+  ov.addEventListener("click",function(e){if(e.target===ov)close();});
+  ov.querySelectorAll(".ms-hunt").forEach(function(row){
+    row.onclick=function(){var did=Number(row.getAttribute("data-did"));var d=DRINKS.find(function(x){return Number(x.id)===did;});close();if(d)setTimeout(function(){pick(d);},260);else toast("Boisson introuvable");};
+    row.onkeydown=function(ev){if(ev.key==="Enter")row.click();};
+  });
+  try{playSound("pop");}catch(e){}
 }
 function updateMissionFab(){
   try{
@@ -8446,18 +8509,23 @@ function removeWatch(id){
    tu aides la communauté ET tu gagnes des points. Rendu au chargement de
    l'accueil ; données réelles agrégées (aucun nom, position arrondie).
 ================================ */
-function _drawHunts(map){
+function _drawHunts(map,noReflow){
   var host=document.getElementById("hunts-card");if(!host)return;
   var list=Object.keys(map).map(function(k){return map[k];}).filter(function(h){return h.seekers>0;});
   list.sort(function(a,b){return b.seekers-a.seekers;});
-  window._huntCount=list.length;try{updateMissionFab();}catch(e){}
+  window._huntCount=list.length;window._huntList=list;window._huntMap=map;try{updateMissionFab();}catch(e){}
   if(!list.length){host.innerHTML="";return;}
+  var needPhoto=false;
   var rows=list.slice(0,6).map(function(h){
     var who=h.seekers>1?(h.seekers+" personnes cherchent"):(h.mine?"Tu cherches":"1 personne cherche");
     var hd=DRINKS.find(function(x){return Number(x.id)===Number(h.drinkId);});
-    var hcat=hd?hd.cat:"Autre",hcol=(CAT_DEFAULTS[hcat]||{}).color||"#7a4a10";
+    // Vraie photo du produit (OpenFoodFacts verifie) si connue, sinon canette
+    // stylisee — plus jamais un simple glyphe. On declenche le chargement de la
+    // photo pour les boissons pas encore vues.
+    if(hd&&!getCachedDrinkImage(hd)){needPhoto=true;try{fetchVerifiedOFFImage(hd);}catch(e){}}
+    var thumb=hd?drinkIconHTML(hd):magoCatIcon("Autre",22,"#7a4a10");
     return '<div class="hunt-row" data-did="'+h.drinkId+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 0;cursor:pointer">'+
-      '<span style="width:26px;display:flex;justify-content:center;color:'+hcol+'">'+magoCatIcon(hcat,22,hcol)+'</span>'+
+      '<span style="width:42px;height:42px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid rgba(240,184,64,.55);display:flex;align-items:center;justify-content:center;flex-shrink:0">'+thumb+'</span>'+
       '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:800;color:#2a1e12;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(h.drinkName||"Boisson")+'</div>'+
       '<div style="font-size:11px;font-weight:600;color:#8a6338">'+who+' près d\'ici</div></div>'+
       '<span style="font-size:11px;font-weight:800;color:#e67e22;flex-shrink:0">Je l\'ai vue →</span>'+
@@ -8474,6 +8542,11 @@ function _drawHunts(map){
     };
     row.onkeydown=function(ev){if(ev.key==="Enter")row.click();};
   });
+  // Les photos OpenFoodFacts arrivent en asynchrone : on redessine UNE fois (sans
+  // re-interroger le reseau) quand elles sont pretes, si on est encore sur l'accueil.
+  if(needPhoto&&!noReflow){
+    setTimeout(function(){try{var hp=document.getElementById("s-home");if(hp&&hp.classList.contains("on")&&window._huntMap)_drawHunts(window._huntMap,true);}catch(e){}},1800);
+  }
 }
 function renderHunts(){
   var host=document.getElementById("hunts-card");if(!host)return;
