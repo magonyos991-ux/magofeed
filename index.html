@@ -11287,6 +11287,82 @@ function renderFounderDash(){
       tile("\u23F3",pendingDisc,"\u00E0 valider",true)+
       tile("",s.pendingPhotos,"photos en attente",true);
   }).catch(function(e){console.warn("dash:",e);});
+  // ── LIVE : rafraichit "en ligne maintenant" toutes les 20 s tant que l'ecran
+  //    admin est ouvert. S'arrete tout seul des qu'on quitte l'ecran (aucune
+  //    lecture inutile en arriere-plan). Cout : 1 comptage agrege / 20 s.
+  if(window._fdLiveTimer){clearInterval(window._fdLiveTimer);window._fdLiveTimer=null;}
+  window._fdLiveTimer=setInterval(function(){
+    var sc=document.getElementById("s-admin");
+    if(!sc||!sc.classList.contains("on")){clearInterval(window._fdLiveTimer);window._fdLiveTimer=null;return;}
+    if(!window.fbCountOnline)return;
+    window.fbCountOnline().then(function(n){
+      var grid=document.getElementById("fd-grid");if(!grid)return;
+      var first=grid.firstElementChild;if(!first)return;
+      var tmp=document.createElement("div");tmp.innerHTML=onlineTile(n);
+      if(tmp.firstElementChild)first.replaceWith(tmp.firstElementChild);
+    }).catch(function(){});
+  },20000);
+}
+/* ── Recap quotidien du fondateur (in-app) ──────────────────────────────────
+   A la premiere ouverture de la journee, le fondateur voit un resume HONNETE
+   des chiffres du jour (en ligne, nouveaux, actifs, decouvertes). Une fois par
+   jour maximum (memorise en local). Le vrai push telephone "meme app fermee"
+   est fourni separement (functions-a-deployer/recap-fondateur.js). */
+function _recapTile(v,label){
+  return '<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;padding:12px 6px;text-align:center">'+
+    '<div style="font-size:22px;font-weight:800;color:var(--s1)">'+(v==null?"–":v)+'</div>'+
+    '<div style="font-size:9px;font-weight:700;color:var(--s2);text-transform:uppercase;letter-spacing:.3px;margin-top:3px">'+label+'</div></div>';
+}
+function _recapMessage(s){
+  var nt=s.newToday||0, on=s.onlineNow||0;
+  if(nt>0&&on>0)return "🎉 "+nt+" nouveau"+(nt>1?"x":"")+" aujourd'hui et du monde en ligne. La machine tourne — continue de partager ton lien !";
+  if(nt>0)return "🎉 "+nt+" nouveau"+(nt>1?"x":"")+" aujourd'hui. Beau debut — partage encore pour amplifier.";
+  if(on>0)return "Des gens sont en ligne en ce moment. Profite-en pour partager ton lien et faire venir du monde.";
+  return "Personne de nouveau aujourd'hui. C'est normal au debut : partage ton lien sur tes reseaux, un post a la fois. 💪";
+}
+function showFounderRecap(s){
+  if(document.getElementById("founder-recap"))return;
+  var dateStr;
+  try{dateStr=new Date().toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});}catch(e){dateStr="Aujourd'hui";}
+  var ov=document.createElement("div");
+  ov.id="founder-recap";
+  ov.style.cssText="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px";
+  var n=function(v){return v==null?"–":v;};
+  ov.innerHTML=
+    '<div style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:22px;max-width:360px;width:100%;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.45)">'+
+      '<div style="font-size:12px;font-weight:700;color:var(--s2);text-transform:capitalize">'+dateStr+'</div>'+
+      '<div style="font-size:20px;font-weight:800;color:var(--s1);margin:2px 0 16px">Ton recap Magofeed</div>'+
+      '<div style="background:linear-gradient(135deg,#052e16,#14532d);border-radius:16px;padding:18px;text-align:center;margin-bottom:12px">'+
+        '<div style="font-size:36px;font-weight:800;color:#fff;line-height:1">'+n(s.onlineNow)+'</div>'+
+        '<div style="font-size:11px;font-weight:700;color:#bbf7d0;text-transform:uppercase;letter-spacing:.5px;margin-top:5px">en ligne en ce moment</div>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">'+
+        _recapTile(n(s.newToday),"nouveaux")+
+        _recapTile(n(s.activeToday),"actifs")+
+        _recapTile(n(s.discToday),"decouvertes")+
+      '</div>'+
+      '<div style="font-size:13px;color:var(--s2);line-height:1.5;margin-bottom:18px">'+_recapMessage(s)+'</div>'+
+      '<div style="display:flex;gap:8px">'+
+        '<button id="recap-close" style="flex:1;padding:12px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-weight:700;font-size:14px;cursor:pointer">Fermer</button>'+
+        '<button id="recap-dash" style="flex:1.2;padding:12px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);font-weight:700;font-size:14px;cursor:pointer">Tableau de bord</button>'+
+      '</div>'+
+    '</div>';
+  document.body.appendChild(ov);
+  var close=function(){ov.remove();};
+  var cb=document.getElementById("recap-close");if(cb)cb.onclick=close;
+  var dbtn=document.getElementById("recap-dash");if(dbtn)dbtn.onclick=function(){close();showAdmin();};
+  ov.addEventListener("click",function(e){if(e.target===ov)close();});
+}
+function maybeFounderRecap(){
+  try{
+    if(!isAdmin||!window.fbFounderStats)return;
+    var today=new Date().toISOString().slice(0,10);
+    if(localStorage.getItem("magoRecapDate")===today)return; // deja vu aujourd'hui
+    window.fbFounderStats().then(function(s){
+      localStorage.setItem("magoRecapDate",today);
+      showFounderRecap(s);
+    }).catch(function(){});
+  }catch(e){}
 }
 /* Avis des utilisateurs côté admin : note moyenne + derniers retours écrits.
    C'est le canal direct pour savoir quoi améliorer/retirer. */
@@ -11974,7 +12050,7 @@ try{
     // pour le fondateur dans les notifs et le classement. Le fondateur (admin)
     // recoit un marqueur et garde son pseudo ; les autres sont regeneres.
     try{
-      if(isAdmin){localStorage.setItem("magoFounder","1");}
+      if(isAdmin){localStorage.setItem("magoFounder","1");setTimeout(maybeFounderRecap,3500);}
       else if(userPseudo==="Magonyos"&&localStorage.getItem("magoFounder")!=="1"){
         userPseudo=generatePseudo();
         localStorage.setItem("magopseudo",userPseudo);
