@@ -8726,22 +8726,40 @@ function foundHere(storeId){
   lastScanContext={drinkId:curSel.id,from:"fiche"};
   tagScanToStore(s);
 }
-/* "Je l'ai vu ici" depuis la carte : en itinerant vers un magasin, l'utilisateur
-   confirme que la boisson chassee y est bien presente. On rattache la boisson au
-   magasin (meme mecanique communautaire que la fiche/scan), sans repasser par le
-   scanner. Repond au manque : avant, choisir un magasin ne montrait QUE le chemin,
-   jamais de quoi confirmer le stock. */
-function confirmStoreHasDrink(storeId){
+/* Signalement de stock depuis la carte (bannière d'itinéraire), en itinérant vers
+   un magasin pour la boisson chassée. Deux gestes, même mécanique communautaire
+   que la fiche/report() :
+     inStock=true  -> "En stock" : rattache la boisson au magasin (confirmations++).
+     inStock=false -> "En rupture" : signal négatif (confirmations--) qui fait sortir
+                      le magasin des résultats et des notifs de veille.
+   Répond au manque : avant, choisir un magasin ne montrait QUE le chemin — aucun
+   moyen de dire "elle y est" NI "elle n'y est plus". */
+function mapStockReport(storeId,inStock){
   if(!exploreFilter||exploreFilter.drinkId==null){toast("Choisis d'abord une boisson à chercher");playSound("err");return;}
   var s=(STORES||[]).find(function(x){return String(x.id)===String(storeId)||String(x.fbId)===String(storeId);});
   if(!s)return;
-  lastScanContext={drinkId:exploreFilter.drinkId,from:"map"};
-  tagScanToStore(s);
-  var btn=document.getElementById("route-confirm-btn");
-  if(btn){
-    btn.innerHTML='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Confirmé · merci !';
-    btn.style.background="#0f8a43";btn.style.borderColor="#0f8a43";btn.style.color="#fff";
-    btn.onclick=null;btn.style.cursor="default";btn.disabled=true;
+  var did=exploreFilter.drinkId,sid=String(s.id);
+  if(inStock){
+    lastScanContext={drinkId:did,from:"map"};
+    tagScanToStore(s); // ajoute la boisson + confirmations++ + points + son "win"
+  }else{
+    if(!awardFree("mapstk:"+sid+":"+did,24)){toast("Déjà signalé aujourd'hui");playSound("err");return;}
+    if(!s.confirmations)s.confirmations={};
+    s.confirmations[did]=(s.confirmations[did]||0)-1;
+    userStats.signals=(userStats.signals||0)+1;userStats.pts+=5;flyPts(5);
+    if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||sid,did,-1);
+    if(window.fbTouchCache)window.fbTouchCache();
+    if(typeof resetWatchTrigger==="function")resetWatchTrigger(did,s.fbId||sid);
+    trackStoreContribution(s.fbId||sid);
+    updateProfileStats();
+    if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+    playSound("err");toast("Rupture signalée · +5 pts");
+  }
+  // Retour visuel : les deux boutons laissent place à une confirmation calme.
+  var row=document.getElementById("route-stock-row");
+  if(row){
+    var col=inStock?"#16a34a":"#dc2626";
+    row.innerHTML='<div style="flex:1;text-align:center;padding:11px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:13px;font-weight:800;color:'+col+'">'+(inStock?"En stock — merci !":"Rupture notée — merci !")+'</div>';
   }
   try{if(exploreMap)exploreLoadStores(true);}catch(e){}
 }
@@ -11008,6 +11026,15 @@ function clearRoute(){
   try{if(window._navDestMarker&&exploreMap){exploreMap.removeLayer(window._navDestMarker);}}catch(e){}
   window._routeLayer=null;window._navDest=null;window._navDestMarker=null;
   var b=document.getElementById("route-banner");if(b)b.remove();
+  // Réaffiche la feuille "liste des magasins" et la pastille de statut masquées
+  // pendant l'itinéraire.
+  var _sheetR=document.getElementById("explore-sheet");
+  if(_sheetR&&typeof _sheetR.dataset.prevTransform!=="undefined"){
+    _sheetR.style.transition="transform .34s cubic-bezier(.32,.72,0,1)";
+    _sheetR.style.transform=_sheetR.dataset.prevTransform;
+    delete _sheetR.dataset.prevTransform;
+  }
+  var _statusR=document.getElementById("explore-status");if(_statusR)_statusR.style.display="";
   if(typeof setExploreFab==="function")setExploreFab(true);
   // On avait masque les autres magasins pour l'itineraire : on les re-affiche.
   try{
@@ -11078,22 +11105,36 @@ function showRouteToStore(lat,lng,store){
       var host=document.getElementById("explore-map-host");
       if(host){
         var _hunt=!!(exploreFilter&&exploreFilter.drinkId!=null);
-        var _huntName=_hunt?sanitize(exploreFilter.name||"cette boisson"):"";
+        var _hd=_hunt?DRINKS.find(function(x){return Number(x.id)===Number(exploreFilter.drinkId);}):null;
+        var _thumb=_hd?'<span style="flex-shrink:0;width:38px;height:38px;border-radius:11px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center">'+drinkIconHTML(_hd)+'</span>':'';
+        // La feuille "liste des magasins" et la pastille de statut sont masqu\u00e9es
+        // pendant l'itin\u00e9raire : la banni\u00e8re poss\u00e8de le bas de l'\u00e9cran, sans rien
+        // recouvrir (avant, le bouton passait sous la feuille "Voir la liste").
+        var _sheet=document.getElementById("explore-sheet");
+        if(_sheet){_sheet.dataset.prevTransform=_sheet.style.transform||"";_sheet.style.transition="transform .3s ease";_sheet.style.transform="translateY(110%)";}
+        var _statusEl=document.getElementById("explore-status");if(_statusEl)_statusEl.style.display="none";
         var b=document.createElement("div");
         b.id="route-banner";
-        b.style.cssText="position:absolute;left:12px;right:12px;bottom:14px;z-index:1000;background:var(--app-bg);border:1.5px solid var(--border);border-radius:18px;padding:13px 15px;display:flex;flex-direction:column;gap:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);font-family:'Space Grotesk',sans-serif";
+        b.style.cssText="position:absolute;left:12px;right:12px;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:1200;background:var(--app-bg);border:1.5px solid var(--border);border-radius:20px;padding:12px 13px;display:flex;flex-direction:column;gap:11px;box-shadow:0 12px 34px rgba(0,0,0,.30);font-family:'Space Grotesk',sans-serif";
         b.innerHTML=
-          '<div style="display:flex;align-items:center;gap:12px;width:100%">'+
+          '<div style="display:flex;align-items:center;gap:11px;width:100%">'+
+            _thumb+
             '<div style="flex:1;min-width:0">'+
-              '<div style="font-size:13.5px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(window._navDest?sanitize(window._navDest.name):"Itin\u00e9raire")+'</div>'+
-              '<div style="font-size:12.5px;color:var(--s2);margin-top:2px">'+(km<1?Math.round(km*1000)+" m":km.toFixed(1)+" km")+' \u00b7 ~'+mins+' min \u00e0 pied'+_bpTxt+'</div>'+
+              '<div style="font-size:14px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(window._navDest?sanitize(window._navDest.name):"Itin\u00e9raire")+'</div>'+
+              '<div style="font-size:12px;color:var(--s2);margin-top:1px">'+(km<1?Math.round(km*1000)+" m":km.toFixed(1)+" km")+' \u00b7 ~'+mins+' min \u00e0 pied'+_bpTxt+'</div>'+
             '</div>'+
-            '<div onclick="clearRoute()" role="button" tabindex="0" aria-label="Fermer l\'itin\u00e9raire" style="flex-shrink:0;width:32px;height:32px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--s2);cursor:pointer">\u2715</div>'+
+            '<div onclick="clearRoute()" role="button" tabindex="0" aria-label="Fermer l\'itin\u00e9raire" style="flex-shrink:0;width:30px;height:30px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--s2);cursor:pointer">\u2715</div>'+
           '</div>'+
-          (_hunt?'<button id="route-confirm-btn" onclick="confirmStoreHasDrink(\''+_sid+'\')" aria-label="Confirmer que '+_huntName+' est disponible ici" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border-radius:13px;border:1.5px solid #16a34a;background:#16a34a;color:#fff;font-size:13.5px;font-weight:800;cursor:pointer;font-family:inherit"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Je l\u2019ai vu ici</button>':'')+
-          '<div style="display:flex;gap:8px;width:100%">'+
-            '<div onclick="clearRoute();var h=document.getElementById(\'explore-map-host\');if(h){h.classList.remove(\'in\');h.style.display=\'none\';}if(typeof openStoreDetail===\'function\')openStoreDetail(\''+_sid+'\')" role="button" tabindex="0" aria-label="Voir ce qu\'il y a dans ce magasin" style="flex:1;text-align:center;padding:10px;border-radius:12px;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap">D\u00e9tails</div>'+
-            '<div onclick="window.open(\'https://www.google.com/maps/dir/?api=1&travelmode=walking&destination='+lat+','+lng+'\',\'_blank\')" role="button" tabindex="0" style="flex:1;text-align:center;padding:10px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:12px;font-weight:800;color:var(--s1);cursor:pointer;white-space:nowrap">GPS \u2197</div>'+
+          (_hunt?
+            '<div style="font-size:12px;font-weight:700;color:var(--s2);margin:-2px 2px 0">Tu la vois en rayon ?</div>'+
+            '<div id="route-stock-row" style="display:flex;gap:9px;width:100%">'+
+              '<button onclick="mapStockReport(\''+_sid+'\',true)" aria-label="Signaler en stock ici" style="flex:1;display:flex;align-items:center;justify-content:center;gap:7px;padding:12px 8px;border-radius:13px;border:1.5px solid #16a34a;background:#16a34a;color:#fff;font-size:13.5px;font-weight:800;cursor:pointer;font-family:inherit"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>En stock</button>'+
+              '<button onclick="mapStockReport(\''+_sid+'\',false)" aria-label="Signaler en rupture ici" style="flex:1;display:flex;align-items:center;justify-content:center;gap:7px;padding:12px 8px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:#dc2626;font-size:13.5px;font-weight:800;cursor:pointer;font-family:inherit"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>En rupture</button>'+
+            '</div>'
+          :'')+
+          '<div style="display:flex;gap:9px;width:100%">'+
+            '<div onclick="clearRoute();var h=document.getElementById(\'explore-map-host\');if(h){h.classList.remove(\'in\');h.style.display=\'none\';}if(typeof openStoreDetail===\'function\')openStoreDetail(\''+_sid+'\')" role="button" tabindex="0" aria-label="Voir ce qu\'il y a dans ce magasin" style="flex:1;text-align:center;padding:9px;border-radius:12px;background:'+(_hunt?"var(--bg2)":"var(--s1)")+';border:1.5px solid '+(_hunt?"var(--border)":"var(--s1)")+';color:'+(_hunt?"var(--s1)":"var(--app-bg)")+';font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap">D\u00e9tails du magasin</div>'+
+            '<div onclick="window.open(\'https://www.google.com/maps/dir/?api=1&travelmode=walking&destination='+lat+','+lng+'\',\'_blank\')" role="button" tabindex="0" style="flex-shrink:0;text-align:center;padding:9px 15px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:11.5px;font-weight:800;color:var(--s1);cursor:pointer;white-space:nowrap">GPS \u2197</div>'+
           '</div>';
         host.appendChild(b);
       }
