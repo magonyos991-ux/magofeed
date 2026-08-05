@@ -4093,7 +4093,7 @@ function _showRaw(s){
   var activeTab=navScreens.includes(s)?s:(["settings","privacy","terms"].includes(s)?"profile":null);
   document.querySelectorAll(".ntab").forEach(function(tab){tab.classList.remove("on");});
   if(activeTab){var tab=document.querySelector(".ntab[data-screen='"+activeTab+"']");if(tab)tab.classList.add("on");}
-  if(s==="search")setTimeout(function(){var q=document.getElementById("q");if(q)q.focus();},transitioning?260:120);
+  if(s==="search"){try{renderList();}catch(e){}setTimeout(function(){var q=document.getElementById("q");if(q)q.focus();},transitioning?260:120);}
   if(s==="discover"){renderDiscoveries();renderTopScanned();}
   if(s==="profile"){renderLeaderboard();refreshLeaderboard();renderStreak();}
   if(s==="admin")renderAdmin();
@@ -5396,6 +5396,9 @@ function tagScanToStore(s){
     if(curSel&&Number(curSel.id)===Number(ctx.drinkId)&&typeof renderStoreList==="function"){
       try{renderStoreList();}catch(e){}
     }
+  }else if(ctx.from==="map"){
+    // Confirmation depuis la carte : le retour visuel est gere par la banniere
+    // d'itineraire (bouton -> "Confirme"), pas par l'ecran de scan.
   }else if(ctx.drinkId!=null){renderPriceAfterTag(s,ctx.drinkId);}
   else{renderWhereFound(null);}
 }
@@ -6483,14 +6486,14 @@ function ensureMissionFab(){
   fab.setAttribute("role","button");
   fab.setAttribute("tabindex","0");
   fab.setAttribute("aria-label","Voir mes missions et chasses");
-  fab.style.cssText="position:fixed;z-index:900;width:"+W+"px;height:"+W+"px;border-radius:50%;background:radial-gradient(120% 120% at 30% 25%,#22c07f,#0e7a4d 55%,#0b5c39);box-shadow:0 8px 22px rgba(14,122,77,.5),inset 0 1.5px 0 rgba(255,255,255,.35),inset 0 -3px 8px rgba(0,0,0,.2);display:none;align-items:center;justify-content:center;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none;opacity:1;transition:opacity .3s ease";
+  fab.style.cssText="position:fixed;z-index:900;width:"+W+"px;height:"+W+"px;border-radius:50%;background:radial-gradient(130% 130% at 32% 24%,#2c2824,#191512 60%,#0e0c0a);box-shadow:0 10px 26px rgba(0,0,0,.42),0 2px 12px rgba(16,138,67,.30),inset 0 1.5px 0 rgba(255,255,255,.14),inset 0 -4px 10px rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none;opacity:1;transition:opacity .3s ease";
   var vw=window.innerWidth||390,vh=window.innerHeight||700;
   var savedTop=parseInt(localStorage.getItem("magoFabTop")||"",10);
   var savedSide=localStorage.getItem("magoFabSide")||"right";
   var top=(savedTop&&savedTop>60)?Math.min(savedTop,vh-140):Math.round(vh*0.6);
   fab.style.top=top+"px";
   fab.style.left=(savedSide==="left"?12:(vw-W-12))+"px";
-  fab.innerHTML='<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 1.5px 1.5px rgba(0,0,0,.3))"><path d="M6 21.5V3"/><path d="M6 4h11.5l-2.4 3.9 2.4 3.9H6z" fill="#fff" stroke="none"/></svg>'+
+  fab.innerHTML='<svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 1.5px 1.5px rgba(0,0,0,.35))"><circle cx="12" cy="12" r="7.2" stroke="#fff" stroke-width="2"/><path d="M12 1.8v3.4M12 18.8v3.4M1.8 12h3.4M18.8 12h3.4" stroke="#fff" stroke-width="2"/><circle cx="12" cy="12" r="2.6" fill="#37d98c"/></svg>'+
     '<span id="mission-fab-badge" style="position:absolute;top:-4px;right:-4px;min-width:21px;height:21px;padding:0 5px;border-radius:11px;background:#e67e22;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2.5px solid var(--app-bg);box-shadow:0 2px 6px rgba(0,0,0,.25)">0</span>';
   document.body.appendChild(fab);
   var sx=0,sy=0,ox=0,oy=0,moved=false,dragging=false,idleT=null;
@@ -6825,11 +6828,64 @@ function setSearchMode(mode){
   playSound("pop");
 }
 var _listLimit=120,_listSig=" ";
+/* Ecran de recherche au repos (categorie "Tous" + champ vide) : plutot que de
+   deverser les ~600 boissons du catalogue d'un coup (mur illisible), on montre
+   un etat d'accueil utile — les recherches recentes + les boissons qui montent.
+   C'est ce que l'utilisateur voit en ouvrant l'onglet Chercher. */
+function renderSearchDefault(el){
+  el.innerHTML="";
+  // 1) Recherches recentes, en pastilles cliquables
+  if(searchHistory.length){
+    var recWrap=document.createElement("div");
+    recWrap.style.cssText="margin-bottom:20px";
+    var rh=document.createElement("div");
+    rh.style.cssText="display:flex;align-items:center;justify-content:space-between;margin-bottom:11px";
+    rh.innerHTML='<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3)">Recherches récentes</span>'+
+      '<span class="sd-clr" style="font-size:11px;font-weight:600;color:var(--s3);cursor:pointer;padding:2px 4px">Effacer</span>';
+    recWrap.appendChild(rh);
+    var chips=document.createElement("div");
+    chips.style.cssText="display:flex;flex-wrap:wrap;gap:8px";
+    searchHistory.forEach(function(h){
+      var c=document.createElement("button");
+      c.style.cssText="display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border-radius:999px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit";
+      c.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" style="opacity:.45;flex-shrink:0"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'+sanitize(h);
+      c.onclick=function(){var qi=document.getElementById("q");if(qi)qi.value=h;renderList();playSound("pop");};
+      chips.appendChild(c);
+    });
+    recWrap.appendChild(chips);
+    el.appendChild(recWrap);
+    var clr=rh.querySelector(".sd-clr");
+    if(clr)clr.onclick=function(){searchHistory=[];try{localStorage.removeItem("magosearchhist");}catch(e){}renderList();playSound("pop");};
+  }
+  // 2) Boissons qui montent : classees par scans reels, puis par note en repli
+  var pop=DRINKS.slice().sort(function(a,b){
+    var sa=scanCounts[a.id]||0,sb=scanCounts[b.id]||0;
+    if(sb!==sa)return sb-sa;
+    return(b.stars||0)-(a.stars||0);
+  }).slice(0,12);
+  var anyScanned=pop.some(function(d){return scanCounts[d.id];});
+  var th=document.createElement("div");
+  th.style.cssText="display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:11px";
+  th.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/></svg><span>'+(anyScanned?"Ce qui monte près de toi":"Populaires en ce moment")+'</span>';
+  el.appendChild(th);
+  pop.forEach(function(d,i){
+    queueImageFetch(d);
+    var isFav=favorites.indexOf(d.id)!==-1;
+    var div=document.createElement("div");div.className="ritem";
+    var rank=i<3?'<span style="flex-shrink:0;width:20px;text-align:center;font-size:13px;font-weight:800;color:var(--s3)">'+(i+1)+'</span>':'<span style="flex-shrink:0;width:20px"></span>';
+    div.innerHTML=rank+'<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
+      '<div style="flex:1;min-width:0"><div class="rname">'+d.name+'</div><div class="rsub">'+d.brand+' · '+d.cat+' · ★ '+d.stars+'</div></div>'+
+      '<span class="rfav" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();toggleFav('+d.id+',this);}" style="display:flex;align-items:center;padding:6px 4px;cursor:pointer">'+heartSVG(isFav,20)+'</span>';
+    div.onclick=function(){pick(d);};a11yCard(div,d.name+", "+d.brand);el.appendChild(div);
+  });
+}
 function renderList(){
   if(searchMode==="stores"){renderStoreSearchList();return;}
   if(searchMode==="users"){renderUserSearchList();return;}
   var qEl=document.getElementById("q"),el=document.getElementById("search-list");if(!el)return;
   var q=qEl?qEl.value.toLowerCase():"";el.innerHTML="";
+  // Etat d'accueil : categorie "Tous", pas de filtre marque, champ vide -> vue curatee.
+  if(!q&&curCat==="Tous"&&!curBrandFilter){renderSearchDefault(el);return;}
   var base=curBrandFilter?DRINKS.filter(function(d){return d.brand===curBrandFilter;}):DRINKS;
   var f=base.filter(function(d){return(curCat==="Tous"||d.cat===curCat)&&(!q||fuzzyHit(d.name,normTxt(q))||fuzzyHit(d.brand,normTxt(q)));});
   // Repli tolerant aux fautes de frappe : uniquement si la recherche exacte ne donne rien,
@@ -8669,6 +8725,25 @@ function foundHere(storeId){
   if(!s||!curSel)return;
   lastScanContext={drinkId:curSel.id,from:"fiche"};
   tagScanToStore(s);
+}
+/* "Je l'ai vu ici" depuis la carte : en itinerant vers un magasin, l'utilisateur
+   confirme que la boisson chassee y est bien presente. On rattache la boisson au
+   magasin (meme mecanique communautaire que la fiche/scan), sans repasser par le
+   scanner. Repond au manque : avant, choisir un magasin ne montrait QUE le chemin,
+   jamais de quoi confirmer le stock. */
+function confirmStoreHasDrink(storeId){
+  if(!exploreFilter||exploreFilter.drinkId==null){toast("Choisis d'abord une boisson à chercher");playSound("err");return;}
+  var s=(STORES||[]).find(function(x){return String(x.id)===String(storeId)||String(x.fbId)===String(storeId);});
+  if(!s)return;
+  lastScanContext={drinkId:exploreFilter.drinkId,from:"map"};
+  tagScanToStore(s);
+  var btn=document.getElementById("route-confirm-btn");
+  if(btn){
+    btn.innerHTML='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Confirmé · merci !';
+    btn.style.background="#0f8a43";btn.style.borderColor="#0f8a43";btn.style.color="#fff";
+    btn.onclick=null;btn.style.cursor="default";btn.disabled=true;
+  }
+  try{if(exploreMap)exploreLoadStores(true);}catch(e){}
 }
 /* SUGGESTIONS INTELLIGENTES : quelle boutique a le plus de chances d'avoir cette
    boisson ? Heuristique (pas une garantie de stock) : produit de niche/import ->
@@ -11002,15 +11077,24 @@ function showRouteToStore(lat,lng,store){
       var _sid=String((window._navDest&&window._navDest.id)||"").replace(/'/g,"\\'");
       var host=document.getElementById("explore-map-host");
       if(host){
+        var _hunt=!!(exploreFilter&&exploreFilter.drinkId!=null);
+        var _huntName=_hunt?sanitize(exploreFilter.name||"cette boisson"):"";
         var b=document.createElement("div");
         b.id="route-banner";
-        b.style.cssText="position:absolute;left:12px;right:12px;bottom:14px;z-index:1000;background:var(--app-bg);border:1.5px solid var(--border);border-radius:18px;padding:13px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 24px rgba(0,0,0,.18);font-family:'Space Grotesk',sans-serif";
-        b.innerHTML='<div style="flex:1;min-width:0">'+
-          '<div style="font-size:13px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(window._navDest?sanitize(window._navDest.name):"Itin\u00E9raire")+'</div>'+
-          '<div style="font-size:12.5px;color:var(--s2);margin-top:2px">'+(km<1?Math.round(km*1000)+" m":km.toFixed(1)+" km")+' \u00b7 ~'+mins+' min \u00e0 pied'+_bpTxt+'</div></div>'+
-          '<div onclick="clearRoute();var h=document.getElementById(\'explore-map-host\');if(h){h.classList.remove(\'in\');h.style.display=\'none\';}if(typeof openStoreDetail===\'function\')openStoreDetail(\''+_sid+'\')" role="button" tabindex="0" aria-label="Voir ce qu\'il y a dans ce magasin" style="padding:9px 12px;border-radius:12px;background:var(--s1);color:var(--app-bg);font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap">D\u00e9tails</div>'+
-          '<div onclick="window.open(\'https://www.google.com/maps/dir/?api=1&travelmode=walking&destination='+lat+','+lng+'\',\'_blank\')" role="button" tabindex="0" style="padding:9px 11px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:11.5px;font-weight:800;color:var(--s1);cursor:pointer;white-space:nowrap">GPS \u2197</div>'+
-          '<div onclick="clearRoute()" role="button" tabindex="0" aria-label="Fermer l\'itin\u00e9raire" style="width:32px;height:32px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--s2);cursor:pointer">\u2715</div>';
+        b.style.cssText="position:absolute;left:12px;right:12px;bottom:14px;z-index:1000;background:var(--app-bg);border:1.5px solid var(--border);border-radius:18px;padding:13px 15px;display:flex;flex-direction:column;gap:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);font-family:'Space Grotesk',sans-serif";
+        b.innerHTML=
+          '<div style="display:flex;align-items:center;gap:12px;width:100%">'+
+            '<div style="flex:1;min-width:0">'+
+              '<div style="font-size:13.5px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(window._navDest?sanitize(window._navDest.name):"Itin\u00e9raire")+'</div>'+
+              '<div style="font-size:12.5px;color:var(--s2);margin-top:2px">'+(km<1?Math.round(km*1000)+" m":km.toFixed(1)+" km")+' \u00b7 ~'+mins+' min \u00e0 pied'+_bpTxt+'</div>'+
+            '</div>'+
+            '<div onclick="clearRoute()" role="button" tabindex="0" aria-label="Fermer l\'itin\u00e9raire" style="flex-shrink:0;width:32px;height:32px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--s2);cursor:pointer">\u2715</div>'+
+          '</div>'+
+          (_hunt?'<button id="route-confirm-btn" onclick="confirmStoreHasDrink(\''+_sid+'\')" aria-label="Confirmer que '+_huntName+' est disponible ici" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border-radius:13px;border:1.5px solid #16a34a;background:#16a34a;color:#fff;font-size:13.5px;font-weight:800;cursor:pointer;font-family:inherit"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Je l\u2019ai vu ici</button>':'')+
+          '<div style="display:flex;gap:8px;width:100%">'+
+            '<div onclick="clearRoute();var h=document.getElementById(\'explore-map-host\');if(h){h.classList.remove(\'in\');h.style.display=\'none\';}if(typeof openStoreDetail===\'function\')openStoreDetail(\''+_sid+'\')" role="button" tabindex="0" aria-label="Voir ce qu\'il y a dans ce magasin" style="flex:1;text-align:center;padding:10px;border-radius:12px;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap">D\u00e9tails</div>'+
+            '<div onclick="window.open(\'https://www.google.com/maps/dir/?api=1&travelmode=walking&destination='+lat+','+lng+'\',\'_blank\')" role="button" tabindex="0" style="flex:1;text-align:center;padding:10px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:12px;font-weight:800;color:var(--s1);cursor:pointer;white-space:nowrap">GPS \u2197</div>'+
+          '</div>';
         host.appendChild(b);
       }
       if(typeof setExploreFab==="function")setExploreFab(false);
@@ -12148,7 +12232,7 @@ function removeHistory(term){searchHistory=searchHistory.filter(function(h){retu
 /* ================================
    BINDINGS
 ================================ */
-document.getElementById("q").addEventListener("input",function(){onSearchInput();if(!document.getElementById("q").value)renderSearchHistory();});
+document.getElementById("q").addEventListener("input",function(){onSearchInput();});
 document.getElementById("q").addEventListener("blur",function(){var v=document.getElementById("q").value;if(v)addToHistory(v);});
 
 /* ================================
