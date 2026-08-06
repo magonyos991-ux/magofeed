@@ -25,12 +25,14 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
 <meta property="og:site_name" content="Magofeed">
 <meta property="og:title" content="Magofeed — Trouve ta boisson dans les magasins proches">
 <meta property="og:description" content="Localise en un instant les sodas, ice tea, energy drinks et jus disponibles dans les magasins autour de toi, grâce à une communauté qui confirme le stock en temps réel.">
-<meta property="og:image" content="https://magonyos991-ux.github.io/magofeed/icons/icon-512.png">
+<meta property="og:image" content="https://magonyos991-ux.github.io/magofeed/icons/og-share.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
 <meta property="og:url" content="https://magonyos991-ux.github.io/magofeed/">
-<meta name="twitter:card" content="summary">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Magofeed — Trouve ta boisson dans les magasins proches">
 <meta name="twitter:description" content="Localise en un instant les sodas, ice tea, energy drinks et jus disponibles dans les magasins autour de toi.">
-<meta name="twitter:image" content="https://magonyos991-ux.github.io/magofeed/icons/icon-512.png">
+<meta name="twitter:image" content="https://magonyos991-ux.github.io/magofeed/icons/og-share.jpg">
 
 <!-- PWA -->
 <link rel="manifest" href="manifest.json">
@@ -10946,13 +10948,29 @@ function exploreGoCity(){
 }
 /* Partage d'une fiche : lien direct #drink=ID (Web Share natif, sinon copie).
    C'est le canal de croissance : chaque trouvaille devient un lien TikTok/WhatsApp. */
+/* Base publique (sans le fichier terminal), pour construire les liens de partage.
+   Ex : .../magofeed/index.html -> .../magofeed/  ;  .../magofeed/ -> inchang\u00e9. */
+function shareBaseURL(){
+  var p=location.pathname.replace(/[^/]*\.html?$/i,"");
+  if(!/\/$/.test(p))p+="/";
+  return location.origin+p;
+}
+/* URL de partage d'une boisson. Boisson NATIVE (du catalogue du fichier) : on
+   pointe vers sa page /f/<id>.html \u2014 pr\u00e9-g\u00e9n\u00e9r\u00e9e avec un vrai aper\u00e7u "O\u00f9 trouver
+   X" (titre + photo) que WhatsApp/TikTok/insta savent afficher. Boisson
+   COMMUNAUTAIRE (ajout\u00e9e via Firestore, d.community) : pas de page pr\u00e9-g\u00e9n\u00e9r\u00e9e,
+   on retombe proprement sur le lien profond #drink=<id> (aper\u00e7u g\u00e9n\u00e9rique). */
+function drinkShareURL(d){
+  if(d&&!d.community)return shareBaseURL()+"f/"+d.id+".html";
+  return location.origin+location.pathname+"#drink="+d.id;
+}
 function shareDrink(d){
   // Robuste aux deux appels du code : shareDrink(curSel) ET shareDrink() (bouton
   // d'en-tete). Sans ce repli, le bouton partage de l'en-tete ne faisait RIEN
   // (d indefini) \u2014 le principal canal de croissance etait muet.
   d=d||curSel;
   if(!d)return;
-  var url=location.origin+location.pathname+"#drink="+d.id;
+  var url=drinkShareURL(d);
   // Accroche "ou trouver" : formulee comme une question a laquelle le lien repond,
   // c'est ce qui donne envie de cliquer depuis TikTok/insta/WhatsApp.
   var text="O\u00f9 trouver \u00ab "+d.name+" \u00bb pr\u00e8s de chez toi ? \ud83e\udd64 Magofeed te montre les magasins qui l'ont \u2014 gratuit :";
