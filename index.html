@@ -10947,24 +10947,70 @@ function exploreGoCity(){
 /* Partage d'une fiche : lien direct #drink=ID (Web Share natif, sinon copie).
    C'est le canal de croissance : chaque trouvaille devient un lien TikTok/WhatsApp. */
 function shareDrink(d){
+  // Robuste aux deux appels du code : shareDrink(curSel) ET shareDrink() (bouton
+  // d'en-tete). Sans ce repli, le bouton partage de l'en-tete ne faisait RIEN
+  // (d indefini) \u2014 le principal canal de croissance etait muet.
+  d=d||curSel;
   if(!d)return;
   var url=location.origin+location.pathname+"#drink="+d.id;
-  var text="J'ai trouv\u00e9 \u00ab "+d.name+" \u00bb sur Magofeed \u2014 regarde o\u00f9 l'acheter pr\u00e8s de chez toi :";
+  // Accroche "ou trouver" : formulee comme une question a laquelle le lien repond,
+  // c'est ce qui donne envie de cliquer depuis TikTok/insta/WhatsApp.
+  var text="O\u00f9 trouver \u00ab "+d.name+" \u00bb pr\u00e8s de chez toi ? \ud83e\udd64 Magofeed te montre les magasins qui l'ont \u2014 gratuit :";
   if(navigator.share){
-    navigator.share({title:"Magofeed \u00b7 "+d.name,text:text,url:url}).then(function(){
-      if(awardOnce("share:"+d.id,24)){userStats.pts+=2;flyPts(2);updateProfileStats();toast("Partag\u00e9 \u00b7 +2 pts");}
+    navigator.share({title:"O\u00f9 trouver "+d.name+" \u00b7 Magofeed",text:text,url:url}).then(function(){
+      if(awardOnce("share:"+d.id,24)){userStats.pts+=2;flyPts(2);updateProfileStats();toast("Partag\u00e9 \u00b7 +2 pts");if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);}
     }).catch(function(){});
   }else{
-    var copy=navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(url):Promise.reject();
-    Promise.resolve(copy).then(function(){toast("Lien copi\u00e9 !");playSound("pop");})
-      .catch(function(){prompt("Copie ce lien :",url);});
+    // Repli desktop : on copie le lien ET le texte d'accroche, pret a coller.
+    var payload=text+" "+url;
+    var copy=navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(payload):Promise.reject();
+    Promise.resolve(copy).then(function(){toast("Lien copi\u00e9 \u2014 colle-le o\u00f9 tu veux !");playSound("pop");
+      if(awardOnce("share:"+d.id,24)){userStats.pts+=2;flyPts(2);updateProfileStats();if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);}
+    }).catch(function(){prompt("Copie ce lien :",url);});
   }
+}
+/* Bannière d'atterrissage pour un visiteur arrivé par un lien partagé "où
+   trouver X". Transforme la page en mini-landing : ce qu'il cherche + preuve
+   sociale + installation en un tap. Ne s'affiche qu'aux nouveaux (jamais
+   onboardés) et jamais dans l'app déjà installée. Non bloquante, refermable. */
+function showFindLanding(d){
+  try{
+    if(!d)return;
+    if(typeof isStandaloneMode==="function"&&isStandaloneMode())return; // deja installee
+    if(localStorage.getItem("magoOnboard")==="1")return;                // utilisateur deja connu
+    if(document.getElementById("find-landing"))return;                  // deja affichee
+    var ios=(typeof isIOSDevice==="function"&&isIOSDevice())&&!deferredInstallPrompt;
+    var bar=document.createElement("div");
+    bar.id="find-landing";
+    bar.style.cssText="position:fixed;left:0;right:0;top:0;z-index:8000;padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 12px;background:var(--s1);color:var(--app-bg);box-shadow:0 6px 22px rgba(0,0,0,.28);transform:translateY(-115%);transition:transform .45s cubic-bezier(.22,1,.36,1);font-family:'Space Grotesk',sans-serif";
+    bar.innerHTML=
+      '<div style="display:flex;align-items:center;gap:11px;max-width:520px;margin:0 auto">'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:11px;font-weight:800;letter-spacing:.08em;opacity:.65;text-transform:uppercase;margin-bottom:2px">Magofeed</div>'+
+          '<div style="font-size:14.5px;font-weight:800;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Voici où trouver '+sanitize(d.name)+'</div>'+
+          '<div style="font-size:11.5px;opacity:.72;margin-top:1px">Repéré par la communauté · près de toi</div>'+
+        '</div>'+
+        '<button id="find-landing-cta" style="flex-shrink:0;padding:10px 14px;border-radius:12px;border:none;background:var(--app-bg);color:var(--s1);font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit">'+(ios?"Ajouter":"Installer")+'</button>'+
+        '<span id="find-landing-x" role="button" tabindex="0" aria-label="Fermer" style="flex-shrink:0;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:17px;opacity:.7;cursor:pointer">✕</span>'+
+      '</div>';
+    document.body.appendChild(bar);
+    requestAnimationFrame(function(){bar.style.transform="translateY(0)";});
+    var closed=false;
+    function close(){if(closed)return;closed=true;bar.style.transform="translateY(-115%)";setTimeout(function(){if(bar.parentNode)bar.parentNode.removeChild(bar);},450);}
+    var cta=document.getElementById("find-landing-cta");
+    if(cta)cta.onclick=function(){try{playSound("pop");installApp();}catch(e){}};
+    var x=document.getElementById("find-landing-x");
+    if(x){x.onclick=close;x.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();close();}};}
+    // Se referme seule au bout d'un moment pour ne pas gêner la navigation.
+    setTimeout(close,14000);
+  }catch(e){}
 }
 function handleDeepLink(){
   var m=(location.hash||"").match(/#drink=(\d+)/);
   if(m){
     var d=DRINKS.find(function(x){return Number(x.id)===Number(m[1]);});
-    if(d){try{pick(d);}catch(e){setTimeout(function(){try{pick(d);}catch(e2){}},600);}}
+    if(d){try{pick(d);}catch(e){setTimeout(function(){try{pick(d);}catch(e2){}},600);}
+      setTimeout(function(){showFindLanding(d);},1000);}
     return;
   }
   // Lien de MAGASIN (#store=ID) : le kit partenaire — un QR sur le frigo d'un
@@ -11020,6 +11066,12 @@ function settingsEnablePush(){
 setInterval(function(){var el=document.getElementById("notif-state");if(el&&el.textContent==="V\u00e9rification\u2026")refreshNotifState();},1500);
 function showOnboarding(){
   if(localStorage.getItem("magoOnboard")==="1")return;
+  // Visiteur arrivé par un lien partagé (#drink=/#store=) : il vient voir OÙ
+  // trouver une boisson précise. Lui imposer les 3 slides génériques, c'est
+  // enterrer ce pour quoi il a cliqué — le pire tue-conversion. On le laisse
+  // atterrir direct sur la carte de la boisson ; l'onboarding se montrera plus
+  // tard (le drapeau n'est pas posé ici).
+  if(/^#(drink|store)=/.test(location.hash||""))return;
   var slides=[
     {t:"Trouve l'introuvable",s:"Mogu Mogu, Inca Kola, Uludag, Supermalt\u2026 Magofeed te dit quels magasins autour de toi vendent les boissons du monde entier."},
     {t:"Scanne et contribue",s:"Scanne un code-barre, confirme un stock, ajoute un prix : chaque contribution aide toute la communaut\u00e9 et te rapporte des points."},
