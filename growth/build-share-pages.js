@@ -131,9 +131,13 @@ function drinkPageHTML(d) {
 }
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: process.env.PW_CHROMIUM || "/opt/pw-browsers/chromium",
-  });
+  // Chromium : on utilise le binaire du bac à sable s'il existe (dev local),
+  // sinon on laisse Playwright trouver le sien (installé par `playwright install`
+  // en CI). Rend le script portable local ↔ GitHub Actions.
+  const launchOpts = {};
+  const cand = process.env.PW_CHROMIUM || "/opt/pw-browsers/chromium";
+  if (fs.existsSync(cand)) launchOpts.executablePath = cand;
+  const browser = await chromium.launch(launchOpts);
   const ctx = await browser.newContext({ viewport: { width: 1200, height: 630 } });
   const page = await ctx.newPage();
 
