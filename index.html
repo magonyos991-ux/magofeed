@@ -8781,6 +8781,30 @@ function mapStockReport(storeId,inStock){
   }
   try{if(exploreMap)exploreLoadStores(true);}catch(e){}
 }
+/* "Ce magasin n'existe pas ?" depuis la bannière d'itinéraire. Certains lieux
+   importés d'OpenStreetMap ne sont pas de vrais magasins (producteurs, adresses
+   d'habitation…). L'admin le retire pour tout le monde d'un tap ; un joueur le
+   signale (l'admin le voit dans "Dernières contributions"). */
+function bannerReportStore(storeId){
+  var s=(STORES||[]).find(function(x){return String(x.id)===String(storeId)||String(x.fbId)===String(storeId);});
+  if(!s)return;
+  if(isAdmin){
+    if(!confirm("Supprimer « "+s.name+" » de la carte pour tout le monde ?\n(n'existe pas / pas un vrai magasin / doublon)"))return;
+    var idx=STORES.findIndex(function(x){return String(x.id)===String(s.id);});
+    if(idx!==-1)STORES.splice(idx,1);
+    if(window.fbTouchCache)window.fbTouchCache();
+    if(window.fbDeleteStore)window.fbDeleteStore(s.fbId||s.id).catch(function(e){console.warn(e);toast("Suppression distante échouée");});
+    playSound("pop");toast("« "+s.name+" » supprimé de la carte");
+  }else{
+    if(!awardFree("badstore:"+String(s.id),168)){toast("Déjà signalé, merci !");clearRoute();return;}
+    if(window.fbAddReport)window.fbAddReport(s.fbId||s.id,(exploreFilter&&exploreFilter.drinkId)||0,"badstore");
+    userStats.pts+=2;flyPts(2);updateProfileStats();
+    if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+    playSound("pop");toast("Merci — signalé, on vérifie ce lieu · +2 pts");
+  }
+  clearRoute();
+  try{var h=document.getElementById("explore-map-host");if(h&&exploreMap&&getComputedStyle(h).display!=="none")exploreLoadStores(true);}catch(e){}
+}
 /* SUGGESTIONS INTELLIGENTES : quelle boutique a le plus de chances d'avoir cette
    boisson ? Heuristique (pas une garantie de stock) : produit de niche/import ->
    epiceries asiatiques / import / night shops ; produit mainstream -> grandes
@@ -9733,6 +9757,17 @@ function guessStoreCat(name){
 window.addEventListener("fbZoneSparse",function(e){
   try{autoImportZone(e.detail.lat,e.detail.lng);}catch(err){console.warn("autoImport:",err);}
 });
+// Lieux qui portent bien un tag shop dans OSM mais ne sont PAS des boutiques où
+// l'on entre acheter : producteurs, artisans, ateliers, entrepôts, souvent à une
+// adresse d'habitation (ex : "Nomad Ferments", un producteur de kombucha). On ne
+// les importe pas — un faux magasin est pire que pas de magasin.
+var NON_SHOP_KW=/ferment|brew|brasserie|distiller|distillerie|roaster|roaster?y|torref|winery|vineyard|cannery|wholesale|grossist|warehouse|entrepot|entrepôt|\busine\b|factory|manufacture|atelier|workshop|production|logistic/i;
+function looksLikeProducer(el){
+  if(!el||!el.tags)return false;
+  if(el.tags.craft)return true; // tag OSM d'artisan/producteur
+  var nm=el.tags.name||el.tags["name:fr"]||el.tags.brand||"";
+  return NON_SHOP_KW.test(nm);
+}
 var _autoImportBusy=false;
 function autoImportZone(cLat,cLng){
   if(_autoImportBusy||typeof cLat!=="number"||!cLat)return;
@@ -9759,6 +9794,7 @@ function autoImportZone(cLat,cLng){
         var lng=el.lon!=null?el.lon:(el.center&&el.center.lon);
         var name=el.tags&&(el.tags.name||el.tags["name:fr"]||el.tags.brand);
         if(lat==null||lng==null||!name)return null;
+        if(looksLikeProducer(el))return null; // producteur/atelier, pas une boutique
         var gcat=guessStoreCat(name+" "+(el.tags.brand||""));
         // Enseigne connue -> rayon VERIFIE d'office ; categorie detectee ->
         // probables ; sinon superette/night shop -> le socle mainstream en
@@ -11155,7 +11191,8 @@ function showRouteToStore(lat,lng,store){
           '<div style="display:flex;gap:9px;width:100%">'+
             '<div onclick="clearRoute();var h=document.getElementById(\'explore-map-host\');if(h){h.classList.remove(\'in\');h.style.display=\'none\';}if(typeof openStoreDetail===\'function\')openStoreDetail(\''+_sid+'\')" role="button" tabindex="0" aria-label="Voir ce qu\'il y a dans ce magasin" style="flex:1;text-align:center;padding:9px;border-radius:12px;background:'+(_hunt?"var(--bg2)":"var(--s1)")+';border:1.5px solid '+(_hunt?"var(--border)":"var(--s1)")+';color:'+(_hunt?"var(--s1)":"var(--app-bg)")+';font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap">D\u00e9tails du magasin</div>'+
             '<div onclick="window.open(\'https://www.google.com/maps/dir/?api=1&travelmode=walking&destination='+lat+','+lng+'\',\'_blank\')" role="button" tabindex="0" style="flex-shrink:0;text-align:center;padding:9px 15px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:11.5px;font-weight:800;color:var(--s1);cursor:pointer;white-space:nowrap">GPS \u2197</div>'+
-          '</div>';
+          '</div>'+
+          '<div onclick="bannerReportStore(\''+_sid+'\')" role="button" tabindex="0" aria-label="'+(isAdmin?"Supprimer ce magasin":"Signaler : ce magasin n\'existe pas")+'" style="text-align:center;padding:4px 8px 0;font-size:11px;font-weight:600;color:var(--s3);cursor:pointer">'+(isAdmin?"Supprimer ce magasin de la carte":"Ce magasin n\u2019existe pas ?")+'</div>';
         host.appendChild(b);
       }
       if(typeof setExploreFab==="function")setExploreFab(false);
@@ -11806,8 +11843,8 @@ function maybeFounderRecap(){
    joueurs, AVEC leur pseudo, pour distinguer d'un coup d'œil ses propres actions
    de celles de la communauté. Répond à : "être notifié avec le pseudo pour savoir
    que ce n'était pas moi." */
-function _contribTypeLabel(t){return {stock:"En stock",rupture:"Rupture",contrefacon:"Contrefaçon",nouveau:"Nouveau"}[t]||t;}
-function _contribTypeColor(t){return {stock:"#16a34a",rupture:"#dc2626",contrefacon:"#b45309",nouveau:"#2563eb"}[t]||"#6b6560";}
+function _contribTypeLabel(t){return {stock:"En stock",rupture:"Rupture",contrefacon:"Contrefaçon",nouveau:"Nouveau",badstore:"Faux magasin"}[t]||t;}
+function _contribTypeColor(t){return {stock:"#16a34a",rupture:"#dc2626",contrefacon:"#b45309",nouveau:"#2563eb",badstore:"#b45309"}[t]||"#6b6560";}
 function renderContribFeed(){
   var host=document.getElementById("admin-contribs");
   if(!host){
@@ -11840,7 +11877,7 @@ function renderContribFeed(){
         '<span style="font-size:10.5px;font-weight:800;color:#fff;background:'+col+';padding:2px 8px;border-radius:999px">'+_contribTypeLabel(r.type)+'</span>'+
         (when?'<span style="font-size:11px;color:var(--s3);margin-left:auto">'+when+'</span>':'')+
       '</div>'+
-      '<div style="font-size:12px;color:var(--s2);margin-top:5px">'+(d?sanitize(d.name):"Boisson #"+sanitize(String(r.drinkId||"?")))+(s?' · '+sanitize(s.name):'')+'</div>';
+      '<div style="font-size:12px;color:var(--s2);margin-top:5px">'+(r.type==="badstore"?(s?sanitize(s.name):"Lieu signalé")+" — signalé comme faux magasin":((d?sanitize(d.name):"Boisson #"+sanitize(String(r.drinkId||"?")))+(s?' · '+sanitize(s.name):'')))+'</div>';
       host.appendChild(card);
     });
     var sep=document.createElement("div");sep.style.cssText="height:1px;background:var(--border);margin:6px 0 14px";host.appendChild(sep);
