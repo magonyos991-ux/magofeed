@@ -129,6 +129,8 @@ body{
 /* ── Skeleton loaders ── */
 .skel{background:linear-gradient(90deg,var(--bg2) 25%,var(--bg3) 37%,var(--bg2) 63%);background-size:400% 100%;animation:skel-shimmer 1.4s ease infinite;border-radius:8px}
 @keyframes skel-shimmer{0%{background-position:100% 50%}100%{background-position:0% 50%}}
+.mago-live-dot{animation:magoLivePulse 2s ease-out infinite}
+@keyframes magoLivePulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}70%{box-shadow:0 0 0 6px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
 .skel-circle{width:42px;height:42px;border-radius:13px;flex-shrink:0}
 .skel-line{height:11px}
 .skel-btn{width:64px;height:32px;border-radius:12px;flex-shrink:0}
@@ -986,6 +988,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
     </div>
     <div class="scroll" style="padding-top:14px">
       <div class="chips" id="cats-home"></div>
+      <div id="nearby-card" style="margin-bottom:16px"></div>
       <div class="sec-hd">
         <div class="t-section" id="t-trends">Boissons populaires</div>
         <div class="sec-count" id="trends-count"></div>
@@ -3981,6 +3984,7 @@ function initGPS(){
     STORES.sort(function(a,b){return(a.dist||0)-(b.dist||0);});
     if(curSel)renderStoreList();
     try{renderDeals();}catch(e){}
+    try{renderNearby();}catch(e){}
     var dot=document.getElementById("gps-dot");if(dot)dot.style.background="#22c55e";
     // Recharge Firestore avec un rayon de 10km centré sur la vraie position (remplace le lot "Bruxelles par défaut")
     if(window.fbLoadNearbyStores)window.fbLoadNearbyStores(userLat,userLng,10);
@@ -4032,6 +4036,7 @@ function refreshLocation(cb){
     // Maintenant qu'on a une vraie position, on redessine les chasses avec les
     // bonnes distances (sinon la liste chargée sans GPS restait figée).
     try{var hp=document.getElementById("s-home");if(hp&&hp.classList.contains("on"))renderHunts();}catch(e){}
+    try{renderNearby();}catch(e){}
     cb&&cb(true);
   },function(){_gpsRefreshing=false;cb&&cb(false);},{enableHighAccuracy:true,timeout:8000,maximumAge:15000});
 }
@@ -6475,6 +6480,118 @@ function renderMissions(){
     '</div>'+rows+'</div>';
   try{updateMissionFab();}catch(e){}
 }
+/* \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+   "AUTOUR DE TOI" \u2014 le pouls local, tout en haut de l'accueil.
+   La PREMIERE chose qu'on voit en ouvrant l'app : la preuve que la carte
+   autour de soi est VIVANTE (vrais magasins importes d'OpenStreetMap),
+   meme si personne d'autre n'est connecte. Une raison d'ouvrir l'app sans
+   rien chercher. 100% donnees reelles \u2014 aucun faux magasin, aucun chiffre
+   gonfle : on n'affiche que ce qui existe vraiment autour de toi.
+\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
+function nearbyDistLabel(m){
+  return m<1000?Math.round(m)+" m":(m/1000).toFixed(m<10000?1:0)+" km";
+}
+function renderNearby(){
+  var host=document.getElementById("nearby-card");if(!host)return;
+  // Masque en mode filtre categorie (comme les autres sections "parcourir").
+  if(curCat&&curCat!=="Tous"){host.style.display="none";host.innerHTML="";return;}
+  host.style.display="";
+  var hasLoc=(typeof userLat==="number"&&!!userLat);
+  var all=(STORES||[]).filter(function(s){return typeof s.lat==="number"&&s.name;});
+  // Magasins reellement proches (<=5 km) quand on a la position, sinon le lot charge.
+  var near=hasLoc
+    ? all.filter(function(s){return typeof s.dist==="number"&&s.dist<=5000;}).sort(function(a,b){return a.dist-b.dist;})
+    : all.slice();
+
+  var card=document.createElement("div");
+  card.style.cssText="background:var(--bg2);border:1.5px solid var(--border);border-radius:18px;padding:14px 16px 12px";
+
+  // En-tete commun : point vert vivant + titre + raccourci carte.
+  var head=document.createElement("div");
+  head.style.cssText="display:flex;align-items:center;gap:8px;margin-bottom:10px";
+  head.innerHTML='<span class="mago-live-dot" style="width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;box-shadow:0 0 0 0 rgba(34,197,94,.5)"></span>'+
+    '<span style="flex:1;font-size:13px;font-weight:800;color:var(--s1)">Autour de toi</span>';
+  var mapLink=document.createElement("span");
+  mapLink.setAttribute("role","button");mapLink.setAttribute("tabindex","0");
+  mapLink.setAttribute("aria-label","Explorer la carte des magasins");
+  mapLink.style.cssText="font-size:12px;font-weight:800;color:var(--s2);cursor:pointer;flex-shrink:0";
+  mapLink.innerHTML='Carte <span style="font-size:13px">\u203a</span>';
+  mapLink.onclick=function(){playSound("pop");openExploreMap();};
+  mapLink.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();openExploreMap();}};
+  head.appendChild(mapLink);
+  card.appendChild(head);
+
+  // \u2500\u2500 ETAT C : pas de position \u2500\u2500 on invite a l'activer (ou explorer une ville).
+  if(!hasLoc){
+    var c=document.createElement("div");
+    c.innerHTML='<div style="font-size:13.5px;font-weight:700;color:var(--s1);line-height:1.35;margin-bottom:4px">Active ta position</div>'+
+      '<div style="font-size:12px;color:var(--s2);line-height:1.4;margin-bottom:12px">Pour voir d\'un coup tous les magasins autour de toi.</div>';
+    var row=document.createElement("div");row.style.cssText="display:flex;gap:8px";
+    var b1=document.createElement("div");
+    b1.setAttribute("role","button");b1.setAttribute("tabindex","0");b1.setAttribute("aria-label","Activer ma position");
+    b1.style.cssText="flex:1;text-align:center;padding:11px;border-radius:13px;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;cursor:pointer";
+    b1.textContent="Activer ma position";
+    b1.onclick=function(){playSound("pop");try{initGPS();}catch(e){}toast("Recherche de ta position\u2026");};
+    b1.onkeydown=function(ev){if(ev.key==="Enter"){b1.onclick();}};
+    var b2=document.createElement("div");
+    b2.setAttribute("role","button");b2.setAttribute("tabindex","0");b2.setAttribute("aria-label","Explorer une ville sur la carte");
+    b2.style.cssText="flex-shrink:0;padding:11px 14px;border-radius:13px;border:1.5px solid var(--border);color:var(--s1);font-size:13px;font-weight:800;cursor:pointer";
+    b2.textContent="Explorer une ville";
+    b2.onclick=function(){playSound("pop");openExploreMap();};
+    b2.onkeydown=function(ev){if(ev.key==="Enter"){b2.onclick();}};
+    row.appendChild(b1);row.appendChild(b2);c.appendChild(row);
+    card.appendChild(c);
+    host.innerHTML="";host.appendChild(card);
+    return;
+  }
+
+  // \u2500\u2500 ETAT B : position OK mais zone quasi vide \u2014 l'auto-import OSM la remplit.
+  if(near.length<3){
+    var b=document.createElement("div");
+    b.innerHTML='<div style="font-size:13.5px;font-weight:700;color:var(--s1);line-height:1.35;margin-bottom:4px">On explore ta zone\u2026</div>'+
+      '<div style="font-size:12px;color:var(--s2);line-height:1.4;margin-bottom:12px">Magofeed recense les magasins autour de toi. Reviens dans un instant \u2014 ou pars explorer la carte.</div>';
+    var eb=document.createElement("div");
+    eb.setAttribute("role","button");eb.setAttribute("tabindex","0");eb.setAttribute("aria-label","Explorer la carte des magasins");
+    eb.style.cssText="text-align:center;padding:11px;border-radius:13px;border:1.5px solid var(--border);color:var(--s1);font-size:13px;font-weight:800;cursor:pointer";
+    eb.textContent="Explorer la carte";
+    eb.onclick=function(){playSound("pop");openExploreMap();};
+    eb.onkeydown=function(ev){if(ev.key==="Enter"){eb.onclick();}};
+    b.appendChild(eb);card.appendChild(b);
+    host.innerHTML="";host.appendChild(card);
+    return;
+  }
+
+  // \u2500\u2500 ETAT A : la zone est vivante \u2014 compteur reel + rail des plus proches.
+  var count=near.length;
+  var closest=near[0];
+  var countLine=document.createElement("div");
+  countLine.style.cssText="display:flex;align-items:baseline;gap:7px;margin-bottom:11px";
+  countLine.innerHTML='<span style="font-size:24px;font-weight:800;color:var(--s1);line-height:1">'+count+'</span>'+
+    '<span style="font-size:12.5px;font-weight:600;color:var(--s2)">magasin'+(count>1?"s":"")+' \u00e0 moins de 5 km'+
+    (closest&&typeof closest.dist==="number"?' \u00b7 le plus proche \u00e0 '+nearbyDistLabel(closest.dist):"")+'</span>';
+  card.appendChild(countLine);
+
+  var rail=document.createElement("div");
+  rail.style.cssText="display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;margin:0 -2px;scrollbar-width:none;-webkit-overflow-scrolling:touch";
+  rail.setAttribute("aria-label","Magasins les plus proches");
+  near.slice(0,10).forEach(function(s){
+    var init=((s.brand||s.name||"?").trim().charAt(0)||"?").toUpperCase();
+    var pill=document.createElement("div");
+    pill.setAttribute("role","button");pill.setAttribute("tabindex","0");
+    pill.setAttribute("aria-label",s.name+(typeof s.dist==="number"?", \u00e0 "+nearbyDistLabel(s.dist):"")+" \u2014 voir sur la carte");
+    pill.style.cssText="flex-shrink:0;width:118px;padding:11px 11px 12px;border-radius:14px;border:1.5px solid var(--border);background:var(--app-bg);cursor:pointer";
+    var badge='<span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:9px;background:'+brandColor(s.brand)+';color:#fff;font-size:12.5px;font-weight:800;flex-shrink:0">'+sanitize(init)+'</span>';
+    pill.innerHTML='<div style="margin-bottom:7px">'+badge+'</div>'+
+      '<div style="font-size:12px;font-weight:700;color:var(--s1);line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(s.name)+'</div>'+
+      (typeof s.dist==="number"?'<div style="font-size:11px;font-weight:600;color:var(--s2);margin-top:2px">'+nearbyDistLabel(s.dist)+'</div>':'');
+    var go=function(){playSound("pop");openExploreMap({center:{lat:s.lat,lng:s.lng}});};
+    pill.onclick=go;
+    pill.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();go();}};
+    rail.appendChild(pill);
+  });
+  card.appendChild(rail);
+  host.innerHTML="";host.appendChild(card);
+}
 /* \u2500\u2500 Inviter un ami : LE levier viral. Partage natif du telephone si dispo,
    sinon copie du lien. Message tout pret pour donner envie de cliquer. */
 function inviteFriend(){
@@ -6722,6 +6839,7 @@ function applyHomeFilter(){
 function renderTrends(){
   renderTopRail();
   try{renderMissions();}catch(e){}
+  try{renderNearby();}catch(e){}
   try{applyHomeFilter();}catch(e){}
   var el=document.getElementById("trends");if(!el)return;el.innerHTML="";
   var all=DRINKS.filter(function(d){return curCat==="Tous"||d.cat===curCat;});
@@ -9835,6 +9953,7 @@ function autoImportZone(cLat,cLng){
           toast("+"+done+" magasins d\u00e9couverts dans cette zone");
           playSound("pop");
           try{if(curSel)renderStoreList();}catch(e2){}
+          try{renderNearby();}catch(e4){}
           try{if(exploreMap)exploreMap.fire("moveend");}catch(e3){} // la carte explore se remplit sous les yeux
         });
       });
@@ -12426,6 +12545,7 @@ try{
     STORES = e.detail;
     if(curSel) renderStoreList();
     try{renderDeals();}catch(err){}
+    try{renderNearby();}catch(err){}
   });
   // Compte + points persistants Firebase
   window.addEventListener("fbUserStatsLoaded", function(e) {
