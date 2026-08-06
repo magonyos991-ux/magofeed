@@ -2337,15 +2337,30 @@ window.fbLoadLeaderboard = async function() {
 // Ajouter un signalement dans Firebase
 window.fbAddReport = async function(storeId, drinkId, type) {
   try {
+    var uid = null;
+    try { var u = await ensureAuthed(); uid = u && u.uid; } catch(e) {}
     await window.fbAddDoc(window.fbCollection(window.db, "reports"), {
       storeId: storeId,
       drinkId: drinkId,
       type: type,
+      by: uid || null,
+      byPseudo: (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
       createdAt: window.fbServerTimestamp()
     });
   } catch(e) {
     console.warn("Firebase report error:", e);
   }
+};
+/* Dernières contributions de la communauté, pour l'admin : qui a signalé quoi
+   (stock, rupture, découverte…) — afin de distinguer ses propres actions de
+   celles des autres joueurs. Lecture réservée à l'admin par les règles. */
+window.fbRecentReports = async function(n) {
+  try {
+    var snap = await getDocs(query(collection(db, "reports"), orderBy("createdAt", "desc"), limit(n || 25)));
+    var rows = [];
+    snap.forEach(function(d) { var x = d.data(); x.id = d.id; rows.push(x); });
+    return rows;
+  } catch (e) { console.warn("recent reports:", e); return []; }
 };
 
 /* ── Données communautaires partagées : découvertes, tendances, notes ──
@@ -2970,7 +2985,7 @@ window.fbAddDiscovery = async function(barcode, name, brand, cat, extra) {
       await batch.commit();
       return { isNew: false, data: Object.assign({}, existing, updates) };
     }
-    var data = { name: name, brand: brand || "", votes: 1, barcode: String(barcode), by: user.uid, createdAt: serverTimestamp() };
+    var data = { name: name, brand: brand || "", votes: 1, barcode: String(barcode), by: user.uid, byPseudo: (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24), createdAt: serverTimestamp() };
     if (cat) data.cat = cat;
     if (extra) Object.assign(data, extra); // ex : hasPhoto/manualProposal des propositions photo
     batch.set(ref, data);
@@ -6866,7 +6881,7 @@ function renderSearchDefault(el){
   var anyScanned=pop.some(function(d){return scanCounts[d.id];});
   var th=document.createElement("div");
   th.style.cssText="display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:11px";
-  th.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/></svg><span>'+(anyScanned?"Ce qui monte près de toi":"Populaires en ce moment")+'</span>';
+  th.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/></svg><span>'+(anyScanned?"Ce qui monte en ce moment":"Populaires en ce moment")+'</span>';
   el.appendChild(th);
   pop.forEach(function(d,i){
     queueImageFetch(d);
@@ -7130,7 +7145,8 @@ var BRAND_COLORS={
   "Carrefour":"#004e9e","Carrefour Express":"#004e9e","Carrefour Market":"#004e9e","Carrefour Contact":"#004e9e",
   "Delhaize":"#e30613","Proxy Delhaize":"#e30613","AD Delhaize":"#e30613","Shop&6Go":"#e30613",
   "Lidl":"#0050aa","Aldi":"#00539f","Colruyt":"#e2001a","Okay":"#00838a","Spar":"#00843d",
-  "Intermarché":"#e2001a","Cora":"#0055a4","Match":"#0055a4","Louis Delhaize":"#e30613"
+  "Intermarché":"#e2001a","Cora":"#0055a4","Match":"#0055a4","Louis Delhaize":"#e30613",
+  "Action":"#e30613","Zeeman":"#004b93","Wibra":"#e2001a","Kruidvat":"#e30613","Trafic":"#e2001a","Blokker":"#f39200"
 };
 function brandColor(brand){
   if(!brand)return "#6b6560";
@@ -8742,8 +8758,10 @@ function mapStockReport(storeId,inStock){
   if(inStock){
     lastScanContext={drinkId:did,from:"map"};
     tagScanToStore(s); // ajoute la boisson + confirmations++ + points + son "win"
+    if(window.fbAddReport)window.fbAddReport(s.fbId||sid,did,"stock"); // trace admin (pseudo)
   }else{
     if(!awardFree("mapstk:"+sid+":"+did,24)){toast("Déjà signalé aujourd'hui");playSound("err");return;}
+    if(window.fbAddReport)window.fbAddReport(s.fbId||sid,did,"rupture"); // trace admin (pseudo)
     if(!s.confirmations)s.confirmations={};
     s.confirmations[did]=(s.confirmations[did]||0)-1;
     userStats.signals=(userStats.signals||0)+1;userStats.pts+=5;flyPts(5);
@@ -9526,7 +9544,7 @@ var AVATAR_EMOJIS=["","","","","","","","","","","",""];
    les nouveaux. Ville par ville : le meme bouton remplira Paris un jour.
 ================================ */
 var osmCenter=null; // null = ma position ; sinon {lat,lng,label} d'une ville
-var OSM_SHOP_TYPES="convenience|supermarket|kiosk|beverages|greengrocer|deli|newsagent|frozen_food|health_food|farm|general|food|pastry|confectionery";
+var OSM_SHOP_TYPES="convenience|supermarket|kiosk|beverages|greengrocer|deli|newsagent|frozen_food|health_food|farm|general|food|pastry|confectionery|variety_store|department_store|discount";
 var osmCandidates=null;
 function osmShopEmoji(t){
   if(t==="supermarket")return "";
@@ -9718,7 +9736,9 @@ window.addEventListener("fbZoneSparse",function(e){
 var _autoImportBusy=false;
 function autoImportZone(cLat,cLng){
   if(_autoImportBusy||typeof cLat!=="number"||!cLat)return;
-  var cell=Math.round(cLat*20)+"_"+Math.round(cLng*20);
+  // Le suffixe de version force un nouvel import des zones déjà visitées quand on
+  // élargit la liste des commerces (ex : ajout d'Action / bazars = variety_store).
+  var cell="v2_"+Math.round(cLat*20)+"_"+Math.round(cLng*20);
   var zones={};
   try{zones=JSON.parse(localStorage.getItem("magoAutoZones")||"{}");}catch(e){}
   if(zones[cell]&&Date.now()-zones[cell]<7*86400000)return; // deja tente cette semaine
@@ -10916,7 +10936,7 @@ function renderDiscoveries(){
     return;
   }
   pending.forEach(function(d){
-    var desc=d.desc||((d.brand?d.brand+" · ":"")+"Suggéré par la communauté");
+    var desc=d.desc||((d.brand?d.brand+" · ":"")+(d.byPseudo?"Proposé par "+sanitize(d.byPseudo):"Suggéré par la communauté"));
     var voted=hasVotedDiscovery(d.id);
     var votes=d.votes||0;
     var ready=votes>=ADMIN_VOTE_THRESHOLD;
@@ -11539,6 +11559,7 @@ function renderAdmin(){
   var el=document.getElementById("admin-list");if(!el)return;
   el.innerHTML="";
   renderFounderDash();
+  renderContribFeed();
   renderFeedbackAdmin();
   renderPhotoSuggestions();
   renderFormatSuggestions();
@@ -11562,7 +11583,8 @@ function renderAdmin(){
     card.innerHTML=
       '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'+
         '<div style="flex:1;min-width:0"><div style="font-size:14.5px;font-weight:800;color:var(--s1)">'+sanitize(d.name)+'</div>'+
-        '<div style="font-size:11.5px;color:var(--s2);margin-top:2px">'+(d.brand?sanitize(d.brand)+" \u00B7 ":"")+(d.barcode?"Code "+sanitize(String(d.barcode))+" \u00B7 ":"")+(d.votes||0)+' vote'+((d.votes||0)>1?"s":"")+'</div></div>'+
+        '<div style="font-size:11.5px;color:var(--s2);margin-top:2px">'+(d.brand?sanitize(d.brand)+" \u00B7 ":"")+(d.barcode?"Code "+sanitize(String(d.barcode))+" \u00B7 ":"")+(d.votes||0)+' vote'+((d.votes||0)>1?"s":"")+'</div>'+
+        (d.byPseudo?'<div style="font-size:11px;font-weight:700;color:var(--s3);margin-top:3px">Propos\u00E9 par '+sanitize(d.byPseudo)+'</div>':'')+'</div>'+
         (ready?'<span style="font-size:10.5px;font-weight:800;background:#dcfce7;color:#166534;padding:4px 8px;border-radius:999px;flex-shrink:0">PR\u00CATE</span>':'<span style="font-size:10.5px;font-weight:700;color:var(--s3);flex-shrink:0">'+(ADMIN_VOTE_THRESHOLD-(d.votes||0))+' vote(s) manquant(s)</span>')+
       '</div>'+
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+chipsHtml+'</div>'+
@@ -11778,6 +11800,51 @@ function maybeFounderRecap(){
       showFounderRecap(s);
     }).catch(function(){});
   }catch(e){}
+}
+/* ── Dernières contributions (admin) ────────────────────────────────────────
+   Le fil "qui a fait quoi" : signalements de stock / rupture (et autres) des
+   joueurs, AVEC leur pseudo, pour distinguer d'un coup d'œil ses propres actions
+   de celles de la communauté. Répond à : "être notifié avec le pseudo pour savoir
+   que ce n'était pas moi." */
+function _contribTypeLabel(t){return {stock:"En stock",rupture:"Rupture",contrefacon:"Contrefaçon",nouveau:"Nouveau"}[t]||t;}
+function _contribTypeColor(t){return {stock:"#16a34a",rupture:"#dc2626",contrefacon:"#b45309",nouveau:"#2563eb"}[t]||"#6b6560";}
+function renderContribFeed(){
+  var host=document.getElementById("admin-contribs");
+  if(!host){
+    host=document.createElement("div");
+    host.id="admin-contribs";
+    var list=document.getElementById("admin-list");
+    if(list&&list.parentNode)list.parentNode.insertBefore(host,list);
+  }
+  host.innerHTML="";
+  if(!window.fbRecentReports)return;
+  window.fbRecentReports(25).then(function(rows){
+    if(!rows||!rows.length)return;
+    var myPseudo=(localStorage.getItem("magopseudo")||"").slice(0,24);
+    var hd=document.createElement("div");
+    hd.style.cssText="font-size:13px;font-weight:800;color:var(--s1);margin:2px 0 10px";
+    hd.textContent="Dernières contributions ("+rows.length+")";
+    host.appendChild(hd);
+    rows.slice(0,20).forEach(function(r){
+      var d=DRINKS.find(function(x){return Number(x.id)===Number(r.drinkId);});
+      var s=(STORES||[]).find(function(x){return String(x.id)===String(r.storeId)||String(x.fbId)===String(r.storeId);});
+      var who=r.byPseudo||"Anonyme";
+      var mine=myPseudo&&who===myPseudo;
+      var when="";
+      try{var sec=r.createdAt&&r.createdAt.seconds;if(sec){var dt=new Date(sec*1000);when=dt.toLocaleDateString("fr-BE",{day:"numeric",month:"short"})+" "+dt.getHours()+"h"+String(dt.getMinutes()).padStart(2,"0");}}catch(e){}
+      var col=_contribTypeColor(r.type);
+      var card=document.createElement("div");
+      card.style.cssText="background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;padding:10px 13px;margin-bottom:8px";
+      card.innerHTML='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+
+        '<span style="font-size:12.5px;font-weight:800;color:var(--s1)">'+sanitize(who)+(mine?' <span style="font-weight:700;color:var(--s3)">(toi)</span>':'')+'</span>'+
+        '<span style="font-size:10.5px;font-weight:800;color:#fff;background:'+col+';padding:2px 8px;border-radius:999px">'+_contribTypeLabel(r.type)+'</span>'+
+        (when?'<span style="font-size:11px;color:var(--s3);margin-left:auto">'+when+'</span>':'')+
+      '</div>'+
+      '<div style="font-size:12px;color:var(--s2);margin-top:5px">'+(d?sanitize(d.name):"Boisson #"+sanitize(String(r.drinkId||"?")))+(s?' · '+sanitize(s.name):'')+'</div>';
+      host.appendChild(card);
+    });
+    var sep=document.createElement("div");sep.style.cssText="height:1px;background:var(--border);margin:6px 0 14px";host.appendChild(sep);
+  }).catch(function(e){console.warn("contrib feed:",e);});
 }
 /* Avis des utilisateurs côté admin : note moyenne + derniers retours écrits.
    C'est le canal direct pour savoir quoi améliorer/retirer. */
