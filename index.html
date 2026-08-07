@@ -1529,6 +1529,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div class="extbtn" id="sd-share" onclick="shareStore()" role="button" tabindex="0" aria-label="Partager ce magasin" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();shareStore();}"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Partager</div>
       </div>
       <div id="sd-mission" class="sd-mission"></div>
+      <div id="sd-merchant" style="padding:0 20px"></div>
       <div style="padding:16px 20px 0">
         <div class="searchbox" style="cursor:text;margin-bottom:12px">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--s3)" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="var(--s3)" stroke-width="2" stroke-linecap="round"/></svg>
@@ -4070,6 +4071,8 @@ function _showRaw(s){
     try{var _q=document.getElementById("q");if(_q)_q.value="";var _sl=document.getElementById("search-list");if(_sl)_sl.innerHTML="";exploreFilter=null;window._exploreFromDrink=false;}catch(e){}
   }
   try{updateMissionFab();}catch(e){}
+  // Quitter l'écran scan met fin au remplissage rafale (nettoie HUD + état).
+  if(s!=="scan"&&window._rafaleStore)try{endRafale(true);}catch(e){}
   if(s!=="scan"&&scanActive)stopScan();
   var target=document.getElementById("s-"+s);
   var current=document.querySelector(".screen.on");
@@ -5589,6 +5592,10 @@ function onBarcodeDetected(r){
   var f2=document.querySelector(".scan-frame");
   if(f2)f2.classList.remove("reading");
   _scanVotes={code:null,count:0};
+  // MODE COMMERÇANT (rafale) : on ajoute au magasin et on CONTINUE de scanner,
+  // sans stopper la caméra ni afficher la fiche produit. C'est ce qui permet de
+  // remplir un frigo entier en 2 minutes.
+  if(window._rafaleStore){ rafaleAddCode(rawCode); return; }
   var code=rawCode;stopScan();playSound("beep");
   document.getElementById("scan-hint").textContent="✓ Code : "+code;
   var btn=document.getElementById("scan-btn"),res=document.getElementById("scan-result");
@@ -9322,6 +9329,7 @@ function renderStoreDetail(){
   var gmaps=document.getElementById("sd-gmaps");if(gmaps)gmaps.onclick=function(){goToStore(s.lat,s.lng);};
   var waze=document.getElementById("sd-waze");if(waze)waze.onclick=function(){window.open("https://waze.com/ul?ll="+s.lat+","+s.lng+"&navigate=yes","_blank");};
   try{renderStoreMission();}catch(e){}
+  try{renderMerchantCard(s);}catch(e){}
 
   var drinkIds=(s.drinks||[]).map(Number);
   var allDrinks=DRINKS.filter(function(d){return drinkIds.indexOf(d.id)!==-1;});
@@ -9359,6 +9367,115 @@ function renderStoreDetail(){
   });
 }
 
+/* ================================
+   MODE COMMERÇANT — remplissage RAFALE
+   Le chaînon manquant de la base : au lieu d'attendre que des clients signalent
+   le stock au compte-goutte, le commerçant (ou toi sur le terrain) scanne son
+   rayon à la chaîne. Chaque code reconnu est ajouté au magasin ET on continue
+   de scanner sans interruption -> un frigo rempli en 2 minutes.
+================================ */
+function myShops(){ try{return JSON.parse(localStorage.getItem("magoMyShops")||"[]");}catch(e){return [];} }
+function isMyShop(id){ return myShops().indexOf(String(id))!==-1; }
+function toggleMyShop(id){
+  var arr=myShops(); id=String(id); var i=arr.indexOf(id);
+  if(i===-1){arr.push(id);toast("Marqué comme ton magasin");}else{arr.splice(i,1);toast("Retiré de tes magasins");}
+  try{localStorage.setItem("magoMyShops",JSON.stringify(arr));}catch(e){}
+  playSound("pop");
+  if(curStoreDetail)try{renderMerchantCard(curStoreDetail);}catch(e){}
+}
+function renderMerchantCard(s){
+  var host=document.getElementById("sd-merchant"); if(!host||!s)return;
+  var mine=isMyShop(s.id);
+  host.innerHTML=
+    '<div style="background:linear-gradient(135deg,#221d18,#2f2820);border-radius:18px;padding:15px 16px;color:#f6f1e9;margin-top:6px">'+
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">'+
+        '<span style="font-size:11.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#d4a960">Mode commerçant</span>'+
+        (mine?'<span style="font-size:10.5px;font-weight:800;background:rgba(34,197,94,.22);color:#4ade80;padding:2px 8px;border-radius:999px">✓ Ton magasin</span>':'')+
+      '</div>'+
+      '<div style="font-size:12.5px;color:#c9bfb2;line-height:1.45;margin-bottom:12px">Scanne ton rayon à la chaîne : chaque boisson apparaît aussitôt pour les clients qui la cherchent autour de toi.</div>'+
+      '<button onclick="startRafale()" aria-label="Remplir ce magasin en rafale" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px;border-radius:14px;border:none;background:#f6f1e9;color:#1a1714;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">⚡ Remplir en rafale</button>'+
+      '<div onclick="toggleMyShop(\''+String(s.id).replace(/[^A-Za-z0-9_-]/g,"")+'\')" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')this.click()" style="text-align:center;margin-top:10px;font-size:12px;font-weight:700;color:#9a9088;cursor:pointer">'+(mine?"Retirer « c'est mon magasin »":"C'est mon magasin")+'</div>'+
+    '</div>';
+}
+function startRafale(){
+  var s=curStoreDetail; if(!s){toast("Ouvre d'abord un magasin");return;}
+  window._rafaleStore=s; window._rafaleCount=0; window._rafaleLast=null;
+  show("scan");
+  try{startScan();}catch(e){}
+  buildRafaleHUD(s);
+  playSound("pop");
+}
+function buildRafaleHUD(s){
+  var ex=document.getElementById("rafale-hud"); if(ex)ex.remove();
+  var hud=document.createElement("div");
+  hud.id="rafale-hud";
+  hud.style.cssText="position:fixed;left:0;right:0;top:0;z-index:7000;padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 12px;background:linear-gradient(180deg,#1a1714,rgba(26,23,20,.96));color:#f6f1e9;box-shadow:0 6px 22px rgba(0,0,0,.35);font-family:'Space Grotesk',sans-serif";
+  hud.innerHTML=
+    '<div style="display:flex;align-items:center;gap:10px;max-width:520px;margin:0 auto">'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:11px;font-weight:800;letter-spacing:.05em;color:#d4a960;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🏪 '+sanitize(s.name)+'</div>'+
+        '<div style="font-size:13px;font-weight:700;margin-top:2px"><span id="rafale-count">0</span> ajoutée<span id="rafale-s"></span> · <span id="rafale-last" style="color:#c9bfb2;font-weight:600">scanne à la chaîne…</span></div>'+
+      '</div>'+
+      '<button onclick="endRafale(false)" aria-label="Terminer le remplissage" style="flex-shrink:0;padding:9px 15px;border-radius:12px;border:none;background:#f6f1e9;color:#1a1714;font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit">Terminer</button>'+
+    '</div>';
+  document.body.appendChild(hud);
+}
+function updateRafaleHUD(){
+  var c=document.getElementById("rafale-count"); if(c)c.textContent=window._rafaleCount||0;
+  var sp=document.getElementById("rafale-s"); if(sp)sp.textContent=((window._rafaleCount||0)>1)?"s":"";
+}
+function rafaleNote(txt,color){
+  var l=document.getElementById("rafale-last"); if(l){l.textContent=txt; l.style.color=color||"#c9bfb2";}
+}
+function rafaleFlash(color){
+  var f=document.getElementById("rafale-flash");
+  if(!f){f=document.createElement("div");f.id="rafale-flash";f.style.cssText="position:fixed;inset:0;z-index:6999;pointer-events:none;opacity:0;transition:opacity .18s ease";document.body.appendChild(f);}
+  f.style.background="radial-gradient(circle at 50% 46%,"+color+"55,transparent 62%)";
+  f.style.opacity="1";
+  setTimeout(function(){if(f)f.style.opacity="0";},170);
+}
+function rafaleAddCode(code){
+  var s=window._rafaleStore; if(!s)return;
+  var now=Date.now();
+  // Anti-rebond : le même code tenu en main déclenche plusieurs lectures.
+  if(window._rafaleLast&&window._rafaleLast.code===code&&(now-window._rafaleLast.ts)<3000){window._rafaleLast.ts=now;return;}
+  window._rafaleLast={code:code,ts:now};
+  var d=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(code)!==-1;});
+  if(!d){
+    rafaleFlash("#f59e0b");playSound("err");rafaleNote("Pas au catalogue — au suivant","#fbbf24");
+    if(navigator.vibrate)try{navigator.vibrate(30);}catch(e){}
+    return;
+  }
+  var did=d.id;
+  if((s.drinks||[]).some(function(x){return Number(x)===Number(did);})){
+    rafaleFlash("#3b82f6");playSound("beep");rafaleNote("Déjà dans ton rayon : "+d.name,"#93c5fd");
+    return;
+  }
+  if(!s.drinks)s.drinks=[];
+  s.drinks.push(did);
+  if(!s.confirmations)s.confirmations={};
+  s.confirmations[did]=(s.confirmations[did]||0)+1;
+  if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(function(e){console.warn(e);});
+  if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
+  window._rafaleCount=(window._rafaleCount||0)+1;
+  try{if(awardOnce("tag:"+did+":"+String(s.id),FOREVER)){userStats.pts+=2;if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);}}catch(e){}
+  rafaleFlash("#22c55e");playSound("win");
+  if(navigator.vibrate)try{navigator.vibrate(15);}catch(e){}
+  rafaleNote("+1 "+d.name,"#86efac");
+  updateRafaleHUD();
+}
+function endRafale(silent){
+  var s=window._rafaleStore, n=window._rafaleCount||0;
+  window._rafaleStore=null; window._rafaleLast=null;
+  var hud=document.getElementById("rafale-hud"); if(hud)hud.remove();
+  var fl=document.getElementById("rafale-flash"); if(fl)fl.remove();
+  if(scanActive)try{stopScan();}catch(e){}
+  if(silent)return;
+  if(s)curStoreDetail=s;
+  if(n>0){playSound("win");toast(n+" boisson"+(n>1?"s":"")+" ajoutée"+(n>1?"s":"")+" à "+sanitize(s?s.name:"")+" !");}
+  else toast("Rafale terminée");
+  if(s)openStoreDetail(s.id); else show("home");
+}
 /* ================================
    AJOUTER UNE BOISSON À CE MAGASIN (depuis sa fiche)
    Avant : on ne pouvait rattacher une boisson à un magasin qu'en la scannant
