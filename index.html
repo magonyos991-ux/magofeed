@@ -3284,7 +3284,6 @@ var DRINKS=[
   {id:10061,name:"Pepsi Max",brand:"Pepsi",emoji:"",color:"#17202a",light:"#eaecee",cat:"Soda",tag:"PEPSI MAX",stars:4.4,formats:[{type:"canette",cl:33},{type:"bouteille",cl:150}]},
   {id:10062,name:"Pepsi Max Cherry",brand:"Pepsi",emoji:"",color:"#922b21",light:"#fdedec",cat:"Soda",tag:"PEPSI MAX CHERRY",stars:4.2,formats:[{type:"canette",cl:33},{type:"bouteille",cl:150}]},
   {id:10063,name:"7UP Free",brand:"7UP",emoji:"",color:"#2ecc71",light:"#e9f7ef",cat:"Soda",tag:"7UP FREE",stars:4.0,formats:[{type:"canette",cl:33},{type:"bouteille",cl:150}]},
-  {id:10064,name:"7UP Mojito",brand:"7UP",emoji:"",color:"#27ae60",light:"#e9f7ef",cat:"Soda",tag:"7UP MOJITO",stars:4.2,formats:[{type:"canette",cl:33},{type:"bouteille",cl:150}]},
   {id:10065,name:"Orangina",brand:"Orangina",emoji:"",color:"#e67e22",light:"#fef3e2",cat:"Soda",tag:"ORANGINA",stars:4.4},
   {id:10066,name:"Canada Dry Ginger Ale",brand:"Canada Dry",emoji:"",color:"#d4ac0d",light:"#fcf8e3",cat:"Soda",tag:"CANADA DRY GINGER",stars:4.1,formats:[{type:"canette",cl:33},{type:"bouteille",cl:150}]},
   {id:10067,name:"Gini Lemon",brand:"Gini",emoji:"",color:"#f4d03f",light:"#fef9e7",cat:"Soda",tag:"GINI LEMON",stars:4.0,formats:[{type:"canette",cl:33},{type:"bouteille",cl:150}]},
@@ -3490,11 +3489,8 @@ var DRINKS=[
   {id:11422,name:"Fanta Peach",brand:"Fanta",emoji:"",color:"#f8b88b",light:"#fef3e2",cat:"Soda",tag:"FANTA",stars:4.3,formats:[{type:"canette",cl:33}],imp:1},
   {id:11423,name:"Lipton Ice Tea Framboise",brand:"Lipton",emoji:"",color:"#c0392b",light:"#fdecea",cat:"Ice Tea",tag:"LIPTON",stars:4.2,formats:[{type:"canette",cl:33},{type:"bouteille",cl:50}]},
   {id:11424,name:"Lipton Ice Tea Past\u00e8que Menthe",brand:"Lipton",emoji:"",color:"#e74c3c",light:"#fdecea",cat:"Ice Tea",tag:"LIPTON",stars:4.2,formats:[{type:"canette",cl:33},{type:"bouteille",cl:50}]},
-  {id:11425,name:"Pales Mojito Myrtille Fraise",brand:"Pales",emoji:"",color:"#48c9b0",light:"#e8f8f5",cat:"Soda",tag:"PALES",stars:4.2,formats:[{type:"canette",cl:33}]},
-  {id:11426,name:"Pales Mojito P\u00eache Blanche",brand:"Pales",emoji:"",color:"#f5cba7",light:"#fdf2e9",cat:"Soda",tag:"PALES",stars:4.2,formats:[{type:"canette",cl:33}]},
   {id:11427,name:"San Pellegrino Ciao! Lime",brand:"San Pellegrino",emoji:"",color:"#82e0aa",light:"#eafaf1",cat:"Soda",tag:"SAN PELLEGRINO",stars:4.2,formats:[{type:"canette",cl:33}]},
   {id:11428,name:"San Pellegrino Ciao! Pesca",brand:"San Pellegrino",emoji:"",color:"#f8b88b",light:"#fef3e2",cat:"Soda",tag:"SAN PELLEGRINO",stars:4.2,formats:[{type:"canette",cl:33}]},
-  {id:11429,name:"Schweppes Mojito",brand:"Schweppes",emoji:"",color:"#a3e4d7",light:"#e8f8f5",cat:"Soda",tag:"SCHWEPPES",stars:4.3,formats:[{type:"canette",cl:33}],imp:1},
   {id:11430,name:"Cecemel",brand:"Cecemel",emoji:"",color:"#6e2c00",light:"#fdf2e9",cat:"Autre",tag:"CECEMEL",stars:4.5,formats:[{type:"canette",cl:25}]},
   {id:11431,name:"Vitamin Well Awake",brand:"Vitamin Well",emoji:"",color:"#d98880",light:"#fdedec",cat:"Sport",tag:"VITAMIN WELL",stars:4.1,formats:[{type:"bouteille",cl:50}]},
   {id:11432,name:"Vitamin Well Refresh",brand:"Vitamin Well",emoji:"",color:"#a9dfbf",light:"#eafaf1",cat:"Sport",tag:"VITAMIN WELL",stars:4.1,formats:[{type:"bouteille",cl:50}]},
@@ -9354,17 +9350,57 @@ function renderStoreDetail(){
     var confs=s.confirmations[d.id]||0;
     var stat=confs>0
       ? '<span class="sd-stat ok">● En stock</span>'
-      : '<span class="sd-stat todo">● À confirmer</span>';
+      : (confs<0
+        ? '<span class="sd-stat" style="color:#dc2626">● Rupture</span>'
+        : '<span class="sd-stat todo">● À confirmer</span>');
     var div=document.createElement("div");div.className="store-card";
     div.style.animation="sdRowIn .34s ease both";div.style.animationDelay=(Math.min(_i,9)*0.035)+"s";
+    // Maintien du stock en 1 tap (surtout pour le commerçant) : ✓ en stock / ✕ rupture.
+    // Meme modele communautaire que le reste (fbConfirmStock ±1), etat autoritaire
+    // en local pour un retour immediat et clair.
+    var inStock=confs>0, isRupture=confs<0;
+    var toggles=
+      '<div style="display:flex;gap:6px;flex-shrink:0" onclick="event.stopPropagation()">'+
+        '<button aria-label="Marquer en stock" onclick="sdSetStock('+d.id+',true)" style="width:34px;height:34px;border-radius:10px;border:1.5px solid '+(inStock?"#16a34a":"var(--border)")+';background:'+(inStock?"rgba(22,163,74,.14)":"var(--bg2)")+';color:'+(inStock?"#16a34a":"var(--s2)")+';font-size:15px;font-weight:800;cursor:pointer;line-height:1">✓</button>'+
+        '<button aria-label="Marquer en rupture" onclick="sdSetStock('+d.id+',false)" style="width:34px;height:34px;border-radius:10px;border:1.5px solid '+(isRupture?"#dc2626":"var(--border)")+';background:'+(isRupture?"rgba(220,38,38,.12)":"var(--bg2)")+';color:'+(isRupture?"#dc2626":"var(--s2)")+';font-size:15px;font-weight:800;cursor:pointer;line-height:1">✕</button>'+
+      '</div>';
     div.innerHTML=
       '<div class="sd-row" onclick="pick(DRINKS.find(function(x){return x.id==='+d.id+'}))">'+
         '<div class="store-ico" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
         '<div class="sd-txt"><div class="store-name">'+d.name+'</div><div class="store-meta">'+d.cat+' · ★ '+d.stars+stat+'</div></div>'+
-        '<span class="sd-chev">›</span>'+
+        toggles+
       '</div>';
     listEl.appendChild(div);
   });
+}
+/* Maintien du stock depuis la fiche magasin (le commerçant garde son rayon vrai
+   après l'avoir rempli en rafale). Même mécanique communautaire que mapStockReport :
+   fbConfirmStock ±1 côté partagé ; en local on force l'état pour un retour clair.
+   Action seulement si l'état change (anti-spam), sans points (pas de farm). */
+function sdSetStock(did,wantStock){
+  var s=curStoreDetail; if(!s)return;
+  var sid=s.fbId||String(s.id);
+  if(!s.confirmations)s.confirmations={};
+  var cur=s.confirmations[did]||0;
+  var inStock=cur>0, isRupture=cur<0;
+  if(wantStock&&inStock)return;        // déjà en stock
+  if(!wantStock&&isRupture)return;     // déjà en rupture
+  if(wantStock){
+    if(!s.drinks)s.drinks=[];
+    if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
+    s.confirmations[did]=Math.max(1,cur+1);
+    if(window.fbConfirmStock)window.fbConfirmStock(sid,did,1);
+    if(window.fbAddReport)try{window.fbAddReport(sid,did,"stock");}catch(e){}
+    playSound("win");toast("Marqué en stock");
+  }else{
+    s.confirmations[did]=Math.min(-1,cur-1);
+    if(window.fbConfirmStock)window.fbConfirmStock(sid,did,-1);
+    if(window.fbAddReport)try{window.fbAddReport(sid,did,"rupture");}catch(e){}
+    if(typeof resetWatchTrigger==="function")try{resetWatchTrigger(did,sid);}catch(e){}
+    playSound("err");toast("Marqué en rupture");
+  }
+  if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
+  renderStoreDetail();
 }
 
 /* ================================
