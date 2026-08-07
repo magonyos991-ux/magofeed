@@ -7226,7 +7226,7 @@ function renderMap(){
   box.innerHTML='<div id="leaflet-map" style="width:100%;height:100%"></div>'+
     '<div style="position:absolute;top:8px;left:8px;z-index:900;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);border-radius:999px">'+mapLegendHTML()+'</div>'+
     '<div id="map-instock-btn" onclick="toggleInStockOnly()" role="button" tabindex="0" aria-pressed="'+(window._mapInStockOnly?"true":"false")+'" aria-label="N\'afficher que les magasins qui l\'ont en stock" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleInStockOnly();}" class="'+(window._mapInStockOnly?"on":"")+'" style="position:absolute;top:50px;left:8px;z-index:901;padding:7px 12px;border-radius:999px;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);font-size:11px;font-weight:800;color:var(--s1);cursor:pointer;display:flex;align-items:center;gap:6px"><span style="width:9px;height:9px;border-radius:50%;background:#16a34a;display:inline-block;flex-shrink:0"></span>En stock seulement</div>'+
-    '<div id="map-full-btn" onclick="toggleDrinkMapFull()" role="button" tabindex="0" aria-label="Carte en plein \u00e9cran" style="position:absolute;top:8px;right:8px;z-index:900;width:36px;height:36px;border-radius:12px;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--s1);cursor:pointer">\u26f6</div>'+
+    '<div id="map-full-btn" onclick="if(window.curSel)openExploreMap({drinkId:curSel.id,name:curSel.name});else toggleDrinkMapFull();" role="button" tabindex="0" aria-label="Ouvrir la carte des magasins" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();if(window.curSel)openExploreMap({drinkId:curSel.id,name:curSel.name});}" style="position:absolute;top:8px;right:8px;z-index:900;width:36px;height:36px;border-radius:12px;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--s1);cursor:pointer">\u26f6</div>'+
     '<div class="map-locate-btn" onclick="centerMapOnUser()" title="Centrer sur moi" role="button" tabindex="0" aria-label="Centrer la carte sur ma position" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();centerMapOnUser();}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="var(--s1)" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="var(--s1)" stroke-width="2" stroke-linecap="round"/></svg></div>';
   if(window._leafletMap){window._leafletMap.remove();window._leafletMap=null;}
   if(!window.L){
@@ -9220,8 +9220,15 @@ function closeStoreSheet(){document.getElementById("map-sheet-modal").style.disp
 function openStoreDetail(storeId){
   var s=STORES.find(function(x){return x.id===storeId||x.fbId===storeId;});
   if(!s)return;
+  // Ouvert depuis la carte Explorer : le "retour" doit REVENIR sur la carte, pas
+  // sauter à l'accueil (l'écran sous l'overlay). On mémorise ce contexte et on
+  // masque proprement la carte le temps de la fiche.
+  var exHost=document.getElementById("explore-map-host");
+  var fromExplore=!!window._cameFromExplore||!!(exHost&&exHost.style.display!=="none"&&exHost.classList.contains("in"));
+  window._cameFromExplore=false;
+  if(fromExplore&&exHost){exHost.classList.remove("in");exHost.style.display="none";}
   var current=document.querySelector(".screen.on");
-  storeDetailReturn=current?current.id.replace("s-",""):"search";
+  storeDetailReturn=fromExplore?"__explore__":(current?current.id.replace("s-",""):"search");
   curStoreDetail=s;
   curStoreDetailQuery="";curStoreDetailCat="Tous";
   var btS=document.getElementById("sd-batch");
@@ -9233,7 +9240,24 @@ function openStoreDetail(storeId){
   show("storedetail");
   playSound("pop");
 }
-function closeStoreDetail(){show(storeDetailReturn||"search");}
+function closeStoreDetail(){
+  // Retour vers la carte Explorer si la fiche a été ouverte depuis elle.
+  if(storeDetailReturn==="__explore__"){
+    var h=document.getElementById("explore-map-host");
+    if(h&&typeof exploreMap!=="undefined"&&exploreMap){
+      show("home"); // écran de base sous l'overlay (masqué par la carte)
+      h.style.display="";
+      requestAnimationFrame(function(){h.classList.add("in");});
+      setTimeout(function(){try{exploreMap.invalidateSize();}catch(e){}},80);
+      return;
+    }
+    if(typeof openExploreMap==="function"){
+      openExploreMap(exploreFilter?{drinkId:exploreFilter.drinkId,name:exploreFilter.name}:{});
+      return;
+    }
+  }
+  show(storeDetailReturn||"search");
+}
 function renderStoreDetailCats(allDrinks){
   var el=document.getElementById("sd-cats");if(!el)return;
   var presentCats=Array.from(new Set(allDrinks.map(function(d){return d.cat;})));
@@ -11466,7 +11490,7 @@ function showRouteToStore(lat,lng,store){
       var _distStr=rt.distance<1000?Math.round(rt.distance)+" m":(rt.distance/1000).toFixed(1)+" km";
       var _destMk=L.marker([lat,lng],{icon:L.divIcon({className:"",html:'<div class="mago-pin sure" style="--pc:'+_destC+';width:34px;height:44px"><div class="mago-pin-head" style="width:34px;height:34px;font-size:13px">'+_destIni+'</div><div class="mago-pin-tip"></div></div>',iconSize:[34,44],iconAnchor:[17,44]}),zIndexOffset:2000});
       // Etiquette au-dessus du pin : nom du magasin + petite croix pour annuler.
-      _destMk.bindTooltip('<span class="mago-dest-name" role="button" tabindex="0" aria-label="Voir les détails du magasin" onclick="event.stopPropagation();var _id=window._navDest&&window._navDest.id;clearRoute();var h=document.getElementById(\'explore-map-host\');if(h){h.classList.remove(\'in\');h.style.display=\'none\';}if(_id&&typeof openStoreDetail===\'function\')openStoreDetail(String(_id));" style="cursor:pointer;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px">'+sanitize(_destName)+'</span><span class="mago-dest-dist">'+_distStr+'</span><span class="mago-dest-x" role="button" tabindex="0" aria-label="Annuler l\'itinéraire" onclick="event.stopPropagation();clearRoute();playSound(\'pop\')">✕</span>',{permanent:true,direction:"top",offset:[0,-46],interactive:true,className:"mago-dest-tip"});
+      _destMk.bindTooltip('<span class="mago-dest-name" role="button" tabindex="0" aria-label="Voir les détails du magasin" onclick="event.stopPropagation();var _id=window._navDest&&window._navDest.id;clearRoute();var h=document.getElementById(\'explore-map-host\');if(h){h.classList.remove(\'in\');h.style.display=\'none\';}window._cameFromExplore=true;if(_id&&typeof openStoreDetail===\'function\')openStoreDetail(String(_id));" style="cursor:pointer;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px">'+sanitize(_destName)+'</span><span class="mago-dest-dist">'+_distStr+'</span><span class="mago-dest-x" role="button" tabindex="0" aria-label="Annuler l\'itinéraire" onclick="event.stopPropagation();clearRoute();playSound(\'pop\')">✕</span>',{permanent:true,direction:"top",offset:[0,-46],interactive:true,className:"mago-dest-tip"});
       try{if(window._navDestMarker&&exploreMap)exploreMap.removeLayer(window._navDestMarker);}catch(e){}
       _destMk.addTo(exploreMap);
       window._navDestMarker=_destMk;
@@ -11517,7 +11541,7 @@ function showRouteToStore(lat,lng,store){
             '</div>'
           :'')+
           '<div style="display:flex;gap:9px;width:100%">'+
-            '<div onclick="clearRoute();var h=document.getElementById(\'explore-map-host\');if(h){h.classList.remove(\'in\');h.style.display=\'none\';}if(typeof openStoreDetail===\'function\')openStoreDetail(\''+_sid+'\')" role="button" tabindex="0" aria-label="Voir ce qu\'il y a dans ce magasin" style="flex:1;text-align:center;padding:9px;border-radius:12px;background:'+(_hunt?"var(--bg2)":"var(--s1)")+';border:1.5px solid '+(_hunt?"var(--border)":"var(--s1)")+';color:'+(_hunt?"var(--s1)":"var(--app-bg)")+';font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap">D\u00e9tails du magasin</div>'+
+            '<div onclick="clearRoute();var h=document.getElementById(\'explore-map-host\');if(h){h.classList.remove(\'in\');h.style.display=\'none\';}window._cameFromExplore=true;if(typeof openStoreDetail===\'function\')openStoreDetail(\''+_sid+'\')" role="button" tabindex="0" aria-label="Voir ce qu\'il y a dans ce magasin" style="flex:1;text-align:center;padding:9px;border-radius:12px;background:'+(_hunt?"var(--bg2)":"var(--s1)")+';border:1.5px solid '+(_hunt?"var(--border)":"var(--s1)")+';color:'+(_hunt?"var(--s1)":"var(--app-bg)")+';font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap">D\u00e9tails du magasin</div>'+
             '<div onclick="window.open(\'https://www.google.com/maps/dir/?api=1&travelmode=walking&destination='+lat+','+lng+'\',\'_blank\')" role="button" tabindex="0" style="flex-shrink:0;text-align:center;padding:9px 15px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:11.5px;font-weight:800;color:var(--s1);cursor:pointer;white-space:nowrap">GPS \u2197</div>'+
           '</div>'+
           '<div onclick="bannerReportStore(\''+_sid+'\')" role="button" tabindex="0" aria-label="'+(isAdmin?"Supprimer ce magasin":"Signaler : ce magasin n\'existe pas")+'" style="text-align:center;padding:4px 8px 0;font-size:11px;font-weight:600;color:var(--s3);cursor:pointer">'+(isAdmin?"Supprimer ce magasin de la carte":"Ce magasin n\u2019existe pas ?")+'</div>';
