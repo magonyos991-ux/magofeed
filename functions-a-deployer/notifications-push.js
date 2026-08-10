@@ -18,6 +18,7 @@
  * Firebase Functions v2 (Node 18+). Déploiement : voir README.md.
  */
 const { onDocumentUpdated, onDocumentWritten } = require("firebase-functions/v2/firestore");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
@@ -57,6 +58,41 @@ async function pushToUser(uid, title, body, data, link) {
     }
   }
 }
+
+/* TEST — l'utilisateur appuie sur "Tester la notification" dans les réglages.
+   On lui envoie un VRAI push FCM sur son propre téléphone : s'il ferme l'app
+   juste après et voit quand même la notif, il a la preuve que tout marche
+   (app fermée incluse). N'envoie qu'à SON propre token (req.auth.uid) : aucun
+   risque d'abus. Renvoie une raison claire si le token manque, pour guider. */
+exports.sendTestPush = onCall({ region: REGION }, async (req) => {
+  const uid = req.auth && req.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi d'abord.");
+  const snap = await db.collection("pushTokens").doc(String(uid)).get();
+  const token = snap.exists && snap.data().token;
+  if (!token) return { ok: false, reason: "no-token" };
+  try {
+    await getMessaging().send({
+      token: token,
+      notification: {
+        title: "🎉 Ça marche !",
+        body: "Tu reçois bien les notifications Magofeed, même app fermée. Bonne chasse 🎯"
+      },
+      data: { type: "test" },
+      webpush: {
+        notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png" },
+        fcmOptions: { link: APP_URL }
+      }
+    });
+    return { ok: true };
+  } catch (e) {
+    if (e && (e.code === "messaging/registration-token-not-registered" ||
+              e.code === "messaging/invalid-registration-token")) {
+      try { await db.collection("pushTokens").doc(String(uid)).delete(); } catch (_) {}
+      return { ok: false, reason: "stale-token" };
+    }
+    throw new HttpsError("internal", (e && e.message) || "push failed");
+  }
+});
 
 /* Découverte promue au catalogue -> push "🎉 Ta découverte est dans Magofeed".
    Se déclenche quand le champ `promoted` passe à true. On lit l'auteur dans

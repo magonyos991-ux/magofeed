@@ -1293,6 +1293,11 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
           <div class="set-txt"><div class="set-title" data-i18n="notifsSec">Notifications</div><div class="set-sub"><span data-i18n="notifsSub">Sois prévenu quand une boisson que tu suis est trouvée près de toi, même application fermée</span><br><span id="notif-state" style="font-weight:800;color:var(--s1)">Vérification…</span></div></div>
           <span class="set-chev">›</span>
         </div>
+        <div id="notif-test-row" class="set-row" style="display:none" onclick="settingsTestPush()" role="button" tabindex="0" aria-label="Tester la notification" onkeydown="if(event.key==='Enter'){settingsTestPush();}">
+          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg></div>
+          <div class="set-txt"><div class="set-title">Tester la notification</div><div class="set-sub">Envoie-toi une notif de test — ferme l'app juste après pour vérifier</div></div>
+          <span class="set-chev">›</span>
+        </div>
       </div>
       <div class="set-sec" data-i18n="privacySec">Confidentialité</div>
       <div class="set-group">
@@ -1654,6 +1659,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion, arrayRemove, deleteDoc, startAt, endAt, startAfter, documentId, getCountFromServer, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, linkWithPopup, signInWithPopup, signInWithCredential, deleteUser, reauthenticateWithPopup } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getMessaging, getToken, onMessage, isSupported } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 
 /* ── Firebase Config ── */
 const firebaseConfig = {
@@ -2656,6 +2662,24 @@ window.fbEnablePush = async function(lat, lng) {
     window._pushToken = token;
     return { ok: true };
   } catch (e) { console.warn("Push setup:", e); return { ok: false, reason: String(e && e.message || e) }; }
+};
+/* Bouton "Tester la notification" : appelle la Cloud Function sendTestPush qui
+   renvoie un vrai push FCM sur CE téléphone. Preuve app-fermée pour l'utilisateur.
+   Region europe-west1 (doit matcher le déploiement des fonctions). */
+window.fbTestPush = async function() {
+  try {
+    if (!window._pushToken) return { ok: false, reason: "no-token" };
+    var fns = getFunctions(app, "europe-west1");
+    var call = httpsCallable(fns, "sendTestPush");
+    var res = await call({});
+    return (res && res.data) || { ok: false, reason: "no-response" };
+  } catch (e) {
+    var code = (e && e.code) || "";
+    // Fonction pas encore (re)déployée -> message clair au lieu d'une erreur brute
+    if (/not-found|functions\/not-found|internal/.test(String(code)))
+      return { ok: false, reason: "not-deployed" };
+    return { ok: false, reason: String((e && e.message) || e) };
+  }
 };
 window.fbSyncWatch = async function(add, drinkId, drinkName, lat, lng) {
   try {
@@ -11293,6 +11317,21 @@ function refreshNotifState(){
   else if(p==="granted")el.textContent="Autorisées — appuie pour finaliser";
   else if(p==="denied")el.textContent="Refusées — réactive-les dans les réglages du téléphone";
   else el.textContent="Appuie pour activer (veilles, alertes)";
+  // La ligne "Tester la notification" n'a de sens qu'une fois le push actif.
+  var tr=document.getElementById("notif-test-row");
+  if(tr)tr.style.display=(p==="granted"&&window._pushToken)?"":"none";
+}
+function settingsTestPush(){
+  if(!window._pushToken){toast("Active d'abord les notifications");playSound("err");return;}
+  if(!window.fbTestPush){toast("Indisponible ici");playSound("err");return;}
+  toast("Envoi du test…");
+  window.fbTestPush().then(function(r){
+    if(r&&r.ok){playSound("win");toast("Test envoyé ! Ferme l'app : la notif doit arriver dans quelques secondes");}
+    else if(r&&r.reason==="no-token"){toast("Active d'abord les notifications");playSound("err");}
+    else if(r&&r.reason==="stale-token"){toast("Jeton expiré — réactive les notifications");playSound("err");}
+    else if(r&&r.reason==="not-deployed"){toast("Fonction de test pas encore déployée côté serveur");playSound("err");}
+    else{toast("Échec du test — réessaie");playSound("err");}
+  });
 }
 function settingsEnablePush(){
   if(!("Notification" in window)){toast("Non support\u00e9es ici");playSound("err");return;}
@@ -11310,7 +11349,7 @@ function settingsEnablePush(){
     else{toast("R\u00e9essaie dans un instant");playSound("err");}
   });
 }
-setInterval(function(){var el=document.getElementById("notif-state");if(el&&el.textContent==="V\u00e9rification\u2026")refreshNotifState();},1500);
+setInterval(function(){var el=document.getElementById("notif-state");if(el)refreshNotifState();},1500);
 function showOnboarding(){
   if(localStorage.getItem("magoOnboard")==="1")return;
   // Visiteur arrivé par un lien partagé (#drink=/#store=) : il vient voir OÙ
