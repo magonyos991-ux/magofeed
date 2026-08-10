@@ -1552,6 +1552,9 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div id="sd-add-drink" onclick="openAddDrinkToStore()" role="button" tabindex="0" aria-label="Ajouter une boisson à ce magasin" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openAddDrinkToStore();}" style="flex-shrink:0;display:inline-flex;align-items:center;gap:5px;padding:0 13px;height:34px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> Ajouter</div>
       </div>
       <div id="sd-drink-list"></div>
+      <div style="padding:20px 20px calc(28px + env(safe-area-inset-bottom));text-align:center">
+        <span onclick="sdReportStore()" role="button" tabindex="0" aria-label="Signaler que ce magasin n'existe pas" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();sdReportStore();}" style="font-size:12px;color:var(--s3);cursor:pointer">Ce magasin n'existe pas / a fermé ? <span style="text-decoration:underline;text-underline-offset:2px;color:var(--s2);font-weight:700">Signale-le</span></span>
+      </div>
     </div>
   </div>
 
@@ -8927,6 +8930,15 @@ function bannerReportStore(storeId){
   }
   clearRoute();
   try{var h=document.getElementById("explore-map-host");if(h&&exploreMap&&getComputedStyle(h).display!=="none")exploreLoadStores(true);}catch(e){}
+}
+/* Signaler un faux magasin DEPUIS SA FICHE (réutilise bannerReportStore).
+   Répond au vrai souci : des lieux OSM erronés (ex : un Carrefour fantôme).
+   Joueur -> signalement (+2 pts, l'admin vérifie) ; admin -> suppression. */
+function sdReportStore(){
+  var s=curStoreDetail; if(!s)return;
+  bannerReportStore(s.id);
+  var gone=!(STORES||[]).some(function(x){return String(x.id)===String(s.id);});
+  if(gone){try{closeStoreDetail();}catch(e){}}
 }
 /* SUGGESTIONS INTELLIGENTES : quelle boutique a le plus de chances d'avoir cette
    boisson ? Heuristique (pas une garantie de stock) : produit de niche/import ->
