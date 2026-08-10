@@ -114,14 +114,14 @@ body{
   flex:1;
   min-height:0;
   background:var(--app-bg);
-  transition:background .25s,opacity .2s ease,transform .2s ease;
+  transition:background .25s,opacity .28s cubic-bezier(.22,1,.36,1),transform .34s cubic-bezier(.22,1,.36,1);
   overflow:hidden;
   opacity:1;
   transform:translateY(0);
 }
 .screen.on{display:flex}
-.screen.s-enter{opacity:0;transform:translateY(10px)}
-.screen.s-leave{opacity:0;transform:translateY(-6px)}
+.screen.s-enter{opacity:0;transform:translateY(12px)}
+.screen.s-leave{opacity:0;transform:translateY(-7px)}
 .scroll{flex:1;overflow-y:auto;overflow-x:hidden;padding:56px 20px calc(92px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
 /* Les defilements des ecrans passent SOUS la barre translucide : chaque
    conteneur garde une respiration en bas pour que le dernier element
@@ -10813,6 +10813,25 @@ function exploreSetHeader(shown,sure){
   // Reflete le badge de la cloche (activite non lue) dans l'en-tete carte.
   try{var topB=document.getElementById("bell-badge"),exB=document.getElementById("explore-bell-badge");
     if(exB&&topB){exB.textContent=topB.textContent;exB.style.display=(getComputedStyle(topB).display!=="none")?"flex":"none";}}catch(e){}
+  try{updateExploreHuntBtn();}catch(e){}
+}
+/* Bouton CHASSE sur la carte (remplace l'ancienne cloche qui prêtait à confusion).
+   Tap = lance/retire la chasse pour la boisson affichée (jamais la boîte de
+   notifs). Icône cible = "chasse". Actif (orange) quand la veille est en cours. */
+function updateExploreHuntBtn(){
+  var btn=document.getElementById("explore-hunt-btn");if(!btn)return;
+  if(!exploreFilter||!curSel){btn.style.display="none";return;}
+  btn.style.display="flex";
+  var on=(typeof isWatched==="function")&&isWatched(curSel.id);
+  btn.style.background=on?"#e67e22":"var(--bg2)";
+  btn.style.color=on?"#fff":"var(--s1)";
+  btn.style.borderColor=on?"#e67e22":"var(--border)";
+  btn.setAttribute("aria-label",on?"Retirer la chasse":"Lancer la chasse");
+}
+function exploreToggleHunt(){
+  if(!curSel){toast("Ouvre une boisson pour lancer une chasse");try{playSound("err");}catch(e){}return;}
+  toggleWatch(curSel);
+  try{updateExploreHuntBtn();}catch(e){}
 }
 // Saisie rapide d'un prix depuis la carte (tap sur "+ prix" ou sur le prix).
 function quickPrice(storeId,drinkId){
@@ -10910,7 +10929,7 @@ function openExploreMap(opts){
           '<div onclick="closeExploreMap()" role="button" tabindex="0" aria-label="Retour" onkeydown="if(event.key===\'Enter\'){closeExploreMap();}" style="width:40px;height:40px;border-radius:13px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:19px;color:var(--s1);cursor:pointer;flex-shrink:0">←</div>'+
           '<div id="explore-thumb" onclick="if(typeof openDrinkZoom===\'function\'&&curSel)openDrinkZoom();" role="button" tabindex="0" aria-label="Agrandir la photo" onkeydown="if(event.key===\'Enter\'){if(typeof openDrinkZoom===\'function\'&&curSel)openDrinkZoom();}" style="display:none;width:44px;height:44px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid var(--border);align-items:center;justify-content:center;flex-shrink:0;cursor:pointer"></div>'+
           '<div id="explore-titlebtn" onclick="openDrinkInfoFromMap()" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){openDrinkInfoFromMap();}" style="flex:1;min-width:0;cursor:pointer;display:flex;align-items:center;gap:6px;padding:6px 9px;border-radius:13px;border:1px solid transparent;transition:background .15s"><div style="flex:1;min-width:0"><div id="explore-title" style="font-size:15px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Magasins</div><div id="explore-subtitle" style="font-size:11px;color:var(--s2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">autour de toi</div></div><span id="explore-chevron" style="display:none;color:var(--s2);flex-shrink:0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M9 6l6 6-6 6"/></svg></span></div>'+
-          '<div onclick="openActivity()" role="button" tabindex="0" aria-label="Mes activités" onkeydown="if(event.key===\'Enter\'){openActivity();}" style="position:relative;width:40px;height:40px;border-radius:13px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--s1);cursor:pointer;flex-shrink:0"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span id="explore-bell-badge" style="display:none;position:absolute;top:-5px;right:-5px;min-width:15px;height:15px;padding:0 3px;box-sizing:border-box;border-radius:8px;background:#e6462e;color:#fff;font-size:9px;font-weight:800;align-items:center;justify-content:center;line-height:1;border:2px solid var(--app-bg)"></span></div>'+
+          '<div id="explore-hunt-btn" onclick="exploreToggleHunt()" role="button" tabindex="0" aria-label="Lancer la chasse" onkeydown="if(event.key===\'Enter\'){exploreToggleHunt();}" style="display:none;position:relative;width:40px;height:40px;border-radius:13px;background:var(--bg2);border:1px solid var(--border);align-items:center;justify-content:center;color:var(--s1);cursor:pointer;flex-shrink:0;transition:background .22s ease,color .22s ease,border-color .22s ease,transform .16s ease"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 1.6v3M12 19.4v3M1.6 12h3M19.4 12h3"/></svg></div>'+
           '<div onclick="exploreCenterUser()" role="button" tabindex="0" aria-label="Ma position" style="width:40px;height:40px;border-radius:13px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.2" stroke="var(--s1)" stroke-width="2"/><path d="M12 2v3.5M12 18.5V22M2 12h3.5M18.5 12H22" stroke="var(--s1)" stroke-width="2" stroke-linecap="round"/></svg></div>'+
         '</div>'+
         '<div id="explore-search-row" style="display:none;margin-top:9px;gap:8px">'+
