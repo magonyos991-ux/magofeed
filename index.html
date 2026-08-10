@@ -8561,6 +8561,11 @@ function toggleWatch(d){
         if(r&&r.ok)toast("Notifications activ\u00e9es \u2014 m\u00eame app ferm\u00e9e !");
       });
     }
+    // Moment a fort enjeu : l'utilisateur veut etre alerte. Sur iPhone, une push
+    // n'arrive QUE si l'app est ajoutee a l'ecran d'accueil (limite iOS). Si ce
+    // n'est pas le cas, on lui montre le guide d'installation UNE seule fois,
+    // apres un court delai pour ne pas couper son geste en cours.
+    try{maybePromptIOSInstall();}catch(e){}
   }
   if(window.fbSyncWatch)window.fbSyncWatch(i===-1,d.id,d.name,userLat,userLng);
   saveWatches();
@@ -12597,8 +12602,55 @@ function installApp(){
     playSound("pop");
     return;
   }
-  if(isIOSDevice()){toast("Appuie sur Partager puis \"Sur l'écran d'accueil\"");return;}
+  if(isIOSDevice()){showIOSInstallSheet();return;}
   toast("Installation non disponible sur ce navigateur");
+}
+/* Guide visuel iOS : Safari ne propose pas de bouton d'installation automatique
+   (pas de beforeinstallprompt). On explique donc les 3 gestes, en gros et en
+   clair, pour que n'importe qui (même le père d'Ilias) ajoute l'app a l'ecran
+   d'accueil — condition INDISPENSABLE pour recevoir les notifications de chasse. */
+function showIOSInstallSheet(){
+  if(document.getElementById("ios-install-sheet"))return;
+  try{playSound("pop");}catch(e){}
+  var shareIco='<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#0a84ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M12 3v13"/><path d="m8 7 4-4 4 4"/><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg>';
+  var plusIco='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#0a84ff" stroke-width="2.2" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/></svg>';
+  var ov=document.createElement("div");
+  ov.id="ios-install-sheet";
+  ov.style.cssText="position:fixed;inset:0;z-index:100000;background:rgba(12,10,8,.55);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);display:flex;align-items:flex-end;justify-content:center;animation:iosFadeIn .25s ease";
+  function step(n,txt){return '<div style="display:flex;align-items:center;gap:12px;margin:0 0 13px">'+
+    '<span style="flex-shrink:0;width:26px;height:26px;border-radius:50%;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center">'+n+'</span>'+
+    '<span style="font-size:14px;line-height:1.4;color:var(--s1);font-weight:600">'+txt+'</span></div>';}
+  ov.innerHTML='<div style="width:100%;max-width:460px;background:var(--bg2);border-radius:26px 26px 0 0;padding:22px 22px calc(26px + env(safe-area-inset-bottom));box-shadow:0 -12px 40px rgba(0,0,0,.3);animation:iosSlideUp .32s cubic-bezier(.22,1,.36,1)">'+
+    '<div style="width:38px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 16px"></div>'+
+    '<div style="font-size:19px;font-weight:800;color:var(--s1);text-align:center;margin-bottom:4px">Installe Magofeed</div>'+
+    '<div style="font-size:13px;color:var(--s2);text-align:center;line-height:1.4;margin-bottom:20px">En 3 gestes, comme une vraie app — et tu pourras recevoir les alertes de chasse 🎯</div>'+
+    step(1,'Appuie sur '+shareIco+' <b>Partager</b> (en bas de Safari)')+
+    step(2,'Fais défiler puis choisis '+plusIco+' <b>« Sur l\'écran d\'accueil »</b>')+
+    step(3,'Appuie sur <b>« Ajouter »</b> en haut à droite')+
+    '<div onclick="closeIOSInstallSheet()" role="button" tabindex="0" aria-label="J\'ai compris" style="margin-top:8px;text-align:center;padding:14px;border-radius:15px;background:var(--s1);color:var(--app-bg);font-size:15px;font-weight:800;cursor:pointer">J\'ai compris</div>'+
+    '</div>';
+  ov.addEventListener("click",function(e){if(e.target===ov)closeIOSInstallSheet();});
+  if(!document.getElementById("ios-install-anim")){
+    var st=document.createElement("style");st.id="ios-install-anim";
+    st.textContent="@keyframes iosFadeIn{from{opacity:0}to{opacity:1}}@keyframes iosSlideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}";
+    document.head.appendChild(st);
+  }
+  document.body.appendChild(ov);
+}
+function closeIOSInstallSheet(){
+  var ov=document.getElementById("ios-install-sheet");if(!ov)return;
+  ov.style.animation="iosFadeIn .2s ease reverse";
+  setTimeout(function(){try{ov.remove();}catch(e){}},180);
+}
+/* Nudge contextuel : appele quand l'utilisateur active une alerte / lance une
+   chasse. Ne montre le guide que sur iPhone hors ecran d'accueil, et une seule
+   fois dans la vie de l'app (drapeau localStorage) — jamais spammant. */
+function maybePromptIOSInstall(){
+  if(!isIOSDevice()||isStandaloneMode())return;
+  var seen=false;try{seen=localStorage.getItem("magoIosInstallPrompted")==="1";}catch(e){}
+  if(seen)return;
+  try{localStorage.setItem("magoIosInstallPrompted","1");}catch(e){}
+  setTimeout(function(){try{if(!isStandaloneMode())showIOSInstallSheet();}catch(e){}},1400);
 }
 function registerServiceWorker(){
   if(!("serviceWorker" in navigator))return;
