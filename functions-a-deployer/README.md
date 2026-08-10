@@ -40,14 +40,22 @@ C'est la pièce que l'app ne peut pas faire seule : notifier le téléphone mêm
 app fermée. L'app écrit déjà le message in-app et crédite les points ; ces
 fonctions **ajoutent seulement le push** (aucun point → zéro risque de doublon).
 
-1. Copie les deux `exports` de `notifications-push.js` dans ton `functions/index.js`
+1. Copie **tous** les `exports` de `notifications-push.js` dans ton `functions/index.js`
    (ou importe le fichier). Garde tes autres fonctions.
 2. `package.json` : Node 18+, `firebase-admin` et `firebase-functions` **v2**.
 3. Vérifie que **Cloud Messaging** est activé et que la clé VAPID est bien celle
    déjà dans l'app (`window.MAGO_VAPID_KEY`). Les utilisateurs doivent avoir
    activé les notifications (l'app enregistre alors leur token dans `pushTokens`).
-4. Déploie : `firebase deploy --only functions:notifyDiscoveryPromoted,functions:notifyPhotoRejected,functions:notifyHuntNearby,functions:notifyStockToWatchers`
+4. Déploie : `firebase deploy --only functions:notifyDiscoveryPromoted,functions:notifyPhotoRejected,functions:notifyHuntNearby,functions:notifyStockToWatchers,functions:sendTestPush`
+   (ou plus simplement `firebase deploy --only functions` pour tout redéployer.)
 5. Teste : promeus une découverte de test → l'auteur doit recevoir le push.
+
+> 🧪 **sendTestPush** (nouveau) : fonction *callable* déclenchée par le bouton
+> « Tester la notification » dans **Réglages → Notifications** de l'app. Elle
+> renvoie un vrai push FCM sur le téléphone de l'utilisateur (uniquement son
+> propre token). Idéal pour prouver, en 1 tap, que les notifs arrivent **même
+> app fermée** : tape le bouton, ferme l'app, la notif « 🎉 Ça marche ! » arrive.
+> Tant qu'elle n'est pas déployée, le bouton l'indique poliment sans planter.
 
 > 🎯 **notifyHuntNearby** : quand quelqu'un met une boisson en veille (= lance une
 > « chasse »), les gens à moins de ~15 km reçoivent « Chasse près de toi ». Le
