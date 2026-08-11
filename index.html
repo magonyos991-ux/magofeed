@@ -11325,7 +11325,18 @@ function exploreLoadStores(useCache){
       var cls="mago-pin"+(closed?" closed":"")+(sure?" sure":"");
       var badge=sure?'<span class="pin-check">✓</span>':"";
       var ctx=(exploreFilter&&!hasDrink)?"opacity:.4;filter:grayscale(1)":"";
-      var mk=L.marker([s.lat,s.lng],{icon:L.divIcon({className:"",html:'<div class="'+cls+'" style="--pc:'+pc+';width:30px;height:39px;'+ctx+'"><div class="mago-pin-head" style="width:30px;height:30px;font-size:12px">'+ini+badge+'</div><div class="mago-pin-tip" style="width:11px;height:11px;bottom:2px"></div></div>',iconSize:[30,39],iconAnchor:[15,39]}),zIndexOffset:sure?600:(hasDrink?300:0)});
+      // Vignette PRIX : au-dessus des magasins qui vendent la boisson regardée,
+      // uniquement quand on a zoomé (sinon la carte serait noyée de bulles).
+      var priceTag="";
+      if(exploreFilter&&hasDrink&&did){
+        var _pv=(typeof getStorePrice==="function")?getStorePrice(s,did):null;
+        var _zoomOK=false;try{_zoomOK=exploreMap.getZoom()>=15;}catch(ez){}
+        if(_pv!=null&&_zoomOK){
+          var _ptxt=(_pv.toFixed(2).replace(/\.?0+$/,""))+"€";
+          priceTag='<div style="position:absolute;left:50%;top:-15px;transform:translateX(-50%);background:#fff;color:#12100e;font-size:10.5px;font-weight:800;line-height:1;padding:3px 7px;border-radius:999px;white-space:nowrap;box-shadow:0 2px 7px rgba(0,0,0,.32);border:1px solid rgba(0,0,0,.08);z-index:5">'+_ptxt+'</div>';
+        }
+      }
+      var mk=L.marker([s.lat,s.lng],{icon:L.divIcon({className:"",html:'<div class="'+cls+'" style="position:relative;--pc:'+pc+';width:30px;height:39px;'+ctx+'">'+priceTag+'<div class="mago-pin-head" style="width:30px;height:30px;font-size:12px">'+ini+badge+'</div><div class="mago-pin-tip" style="width:11px;height:11px;bottom:2px"></div></div>',iconSize:[30,39],iconAnchor:[15,39]}),zIndexOffset:sure?600:(hasDrink?300:0)});
       mk.on("click",function(e){
         if(e&&e.originalEvent&&window.L&&L.DomEvent){try{L.DomEvent.stopPropagation(e.originalEvent);}catch(_e){}}
         try{if(exploreMap.panTo)exploreMap.panTo([s.lat,s.lng]);}catch(_e){}
