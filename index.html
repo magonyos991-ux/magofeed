@@ -1761,6 +1761,23 @@ window.fbCountOnline = async function() {
    communauté pour localiser une boisson rare. Données agrégées et localisation
    volontairement arrondie (~1 km) — aucun nom, aucune position précise. */
 function _coarse(x){ return Math.round(x * 100) / 100; }
+/* TEST SOLO : simule une chasse lancée par un VOISIN (uid factice) à ta position.
+   Déclenche notifyHuntNearby côté serveur, qui doit alors t'envoyer la notif à
+   TOI (tu n'es pas le chercheur). Permet de tester toute la chaîne sans 2e tel. */
+window.fbSimulateHunt = async function(lat, lng, drinkId, drinkName) {
+  try {
+    await ensureAuthed();
+    var simUid = "simtest_" + Date.now();
+    var seeker = {}; seeker["seekers." + simUid] = {
+      lat: lat != null ? _coarse(lat) : null, lng: lng != null ? _coarse(lng) : null, at: Date.now()
+    };
+    await setDoc(doc(db, "hunts", String(drinkId)), Object.assign({
+      drinkId: Number(drinkId) || drinkId, drinkName: String(drinkName || "Boisson test").slice(0, 60),
+      emoji: "", updatedAt: serverTimestamp()
+    }, seeker), { merge: true });
+    return { ok: true };
+  } catch (e) { return { ok: false, reason: String(e && (e.code || e.message) || e) }; }
+};
 window.fbJoinHunt = async function(drinkId, drinkName, emoji, lat, lng) {
   try {
     var user = await ensureAuthed();
@@ -10153,7 +10170,9 @@ async function runNotifDiagnostic(){
     rows+
     '<div style="margin-top:14px;padding:12px 14px;border-radius:14px;background:'+(vcol==="#15803d"?"rgba(21,128,61,.10)":"rgba(180,83,9,.10)")+';border:1px solid '+(vcol==="#15803d"?"rgba(21,128,61,.3)":"rgba(180,83,9,.3)")+';font-size:12.5px;font-weight:700;line-height:1.5;color:'+vcol+'">'+verdict+'</div>'+
     '<div onclick="diagFixPosition()" role="button" tabindex="0" style="margin-top:12px;text-align:center;padding:13px;border-radius:14px;background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer">Enregistrer ma position</div>'+
-    '<div onclick="var p=document.getElementById(\'notif-diag\');if(p)p.remove();" role="button" tabindex="0" style="margin-top:8px;text-align:center;padding:11px;font-size:13px;font-weight:700;color:var(--s2);cursor:pointer">Fermer</div>'+
+    '<div onclick="simulateNeighborHunt()" role="button" tabindex="0" style="margin-top:8px;text-align:center;padding:13px;border-radius:14px;background:#e67e22;color:#fff;font-size:14px;font-weight:800;cursor:pointer">🧪 Tester : simuler une chasse voisine</div>'+
+    '<div style="margin-top:6px;font-size:10.5px;color:var(--s3);text-align:center;line-height:1.4">Simule quelqu\'un qui lance une chasse près de toi. Ferme l\'app après : tu dois recevoir la notif. Test seul, sans 2e téléphone.</div>'+
+    '<div onclick="var p=document.getElementById(\'notif-diag\');if(p)p.remove();" role="button" tabindex="0" style="margin-top:10px;text-align:center;padding:11px;font-size:13px;font-weight:700;color:var(--s2);cursor:pointer">Fermer</div>'+
   '</div>';
   document.body.appendChild(ov);
 }
@@ -10171,6 +10190,26 @@ function diagFixPosition(){
   };
   if(typeof refreshLocation==="function")refreshLocation(function(){setTimeout(done,300);});
   else done();
+}
+/* Test SOLO de la boucle chasse : simule une chasse voisine -> tu dois recevoir
+   la notif. Prouve toute la chaîne (fonction serveur + push) sans 2e téléphone. */
+function simulateNeighborHunt(){
+  if(!(typeof userLat==="number"&&userLat)){toast("Active d'abord ta position");playSound("err");return;}
+  if(!window._pushToken){toast("Réactive les notifications d'abord (bouton Notifications)");playSound("err");return;}
+  if(!window.fbSimulateHunt){toast("Indisponible ici");playSound("err");return;}
+  // Boisson au hasard PAS dans tes veilles (évite l'anti-spam 6h de la fonction).
+  var pool=DRINKS.filter(function(d){return !(drinkWatches||[]).some(function(w){return Number(w.id)===Number(d.id);});});
+  var d=pool[Math.floor(Math.random()*pool.length)]||DRINKS[0];
+  toast("Simulation d'une chasse voisine sur "+d.name+"…");
+  window.fbSimulateHunt(userLat,userLng,d.id,d.name).then(function(r){
+    if(r&&r.ok){playSound("win");toast("Chasse voisine simulée ! FERME l'app — la notif « 🎯 Chasse près de toi » doit arriver dans ~10 s");}
+    else{
+      var why=String(r&&r.reason||"?");
+      if(why.indexOf("permission")>=0||why.indexOf("PERMISSION")>=0)toast("Bloqué par les règles Firestore — envoie-moi une capture, on ajustera");
+      else toast("Échec : "+why);
+      playSound("err");
+    }
+  });
 }
 function settingsEnablePush(){
   if(!("Notification" in window)){toast("Non support\u00e9es ici");playSound("err");return;}
