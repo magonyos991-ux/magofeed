@@ -995,6 +995,14 @@ onAuthStateChanged(auth, async function(user) {
     return;
   }
   window._fbUser = user;
+  // Notifs déjà autorisées mais jeton local non chargé (nouvelle session) :
+  // on RESTAURE le jeton push en silence (getToken ne redemande pas la
+  // permission si déjà accordée) -> "Jeton push local: oui" + serveur à jour.
+  try {
+    if (("Notification" in window) && Notification.permission === "granted" && !window._pushToken && window.fbEnablePush) {
+      window.fbEnablePush(window.userLat, window.userLng);
+    }
+  } catch (e) {}
   window.fbCheckAdmin();
   window.fbLoadCatalog();
   window.fbLoadDrinkMerges();
@@ -1876,9 +1884,24 @@ window.fbEnablePush = async function(lat, lng) {
    que le GPS répond, si les notifs sont activées. */
 window.fbUpdatePushPosition = async function(lat, lng) {
   try {
-    if (!window._pushToken || lat == null) return;
+    if (lat == null) return;
     var user = auth.currentUser; if (!user) return;
+    // On écrit la position même si le jeton local n'est pas (re)chargé : le
+    // serveur a déjà un jeton, on garde juste sa position à jour.
     await setDoc(doc(db, "pushTokens", user.uid), { lat: lat, lng: lng, updatedAt: serverTimestamp() }, { merge: true });
+  } catch (e) { /* silencieux */ }
+};
+/* Réécrit la position de TES chasses actives dès que le GPS répond. Sans ça,
+   une chasse lancée avant que le GPS soit prêt reste sans position -> la Cloud
+   Function sort en avance et n'envoie AUCUNE notif. En les repositionnant, on
+   relance la fonction avec une vraie position -> elle notifie les gens autour. */
+window.fbRepositionMyHunts = async function(lat, lng, watches) {
+  try {
+    if (lat == null || !watches || !watches.length) return;
+    for (var i = 0; i < watches.length; i++) {
+      var w = watches[i];
+      if (window.fbJoinHunt) await window.fbJoinHunt(w.id, w.name, w.emoji, lat, lng);
+    }
   } catch (e) { /* silencieux */ }
 };
 /* Diagnostic : lit le document push de l'utilisateur (jeton + position enregistrée)
@@ -2455,6 +2478,7 @@ function initGPS(){
   navigator.geolocation.getCurrentPosition(function(pos){
     userLat=pos.coords.latitude;userLng=pos.coords.longitude;
     if(window.fbUpdatePushPosition)window.fbUpdatePushPosition(userLat,userLng); // serveur = ta vraie position
+    if(window.fbRepositionMyHunts&&!window._huntsRepositioned&&(drinkWatches||[]).length){window._huntsRepositioned=true;window.fbRepositionMyHunts(userLat,userLng,drinkWatches);}
     // Recalcule immédiatement les distances des magasins déjà en mémoire (chargés autour du centre par défaut)
     STORES.forEach(function(s){s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));});
     STORES.sort(function(a,b){return(a.dist||0)-(b.dist||0);});
@@ -2504,6 +2528,7 @@ function refreshLocation(cb){
     userLat=pos.coords.latitude;userLng=pos.coords.longitude;
     _lastGpsRefresh=Date.now();
     if(window.fbUpdatePushPosition)window.fbUpdatePushPosition(userLat,userLng); // serveur = ta vraie position
+    if(window.fbRepositionMyHunts&&!window._huntsRepositioned&&(drinkWatches||[]).length){window._huntsRepositioned=true;window.fbRepositionMyHunts(userLat,userLng,drinkWatches);}
     STORES.forEach(function(s){if(typeof s.lat==="number")s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));});
     STORES.sort(function(a,b){return(a.dist||0)-(b.dist||0);});
     var dot=document.getElementById("gps-dot");if(dot)dot.style.background="#22c55e";
@@ -10133,15 +10158,18 @@ async function runNotifDiagnostic(){
   document.body.appendChild(ov);
 }
 function diagFixPosition(){
-  toast("Récupération de ta position…");
+  toast("Réparation en cours…");
+  // Restaure le jeton push si besoin (permission déjà accordée, pas de re-prompt)
+  try{ if(("Notification" in window)&&Notification.permission==="granted"&&!window._pushToken&&window.fbEnablePush){window.fbEnablePush(userLat,userLng);} }catch(e){}
   var done=function(){
-    if(window.fbUpdatePushPosition&&typeof userLat==="number"&&userLat){
-      window.fbUpdatePushPosition(userLat,userLng);
-      toast("Position enregistrée ! Relance le diagnostic dans 3 s");
+    if(typeof userLat==="number"&&userLat){
+      if(window.fbUpdatePushPosition)window.fbUpdatePushPosition(userLat,userLng);
+      if(window.fbRepositionMyHunts&&(drinkWatches||[]).length)window.fbRepositionMyHunts(userLat,userLng,drinkWatches);
+      toast("Réparé ! Position + chasses mises à jour. Relance le diagnostic.");
       playSound("win");
-    }else{toast("Position introuvable — autorise la localisation");playSound("err");}
+    }else{toast("Position introuvable — autorise la localisation (Réglages iPhone)");playSound("err");}
   };
-  if(typeof refreshLocation==="function")refreshLocation(function(){done();});
+  if(typeof refreshLocation==="function")refreshLocation(function(){setTimeout(done,300);});
   else done();
 }
 function settingsEnablePush(){
