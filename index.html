@@ -10845,6 +10845,24 @@ function exploreCenterUser(){
   if(typeof userLat==="number"&&userLat){try{exploreMap.setView([userLat,userLng],16);}catch(e){}}
   else toast("Active ta position d'abord");
 }
+// Distance exacte en mètres (haversine) — pour un filtre distance fiable, sans
+// dépendre d'un s.dist parfois périmé.
+function _distM(aLat,aLng,bLat,bLng){
+  if(typeof aLat!=="number"||typeof bLat!=="number")return Infinity;
+  var R=6371000,dLa=(bLat-aLat)*Math.PI/180,dLo=(bLng-aLng)*Math.PI/180;
+  var s=Math.sin(dLa/2)*Math.sin(dLa/2)+Math.cos(aLat*Math.PI/180)*Math.cos(bLat*Math.PI/180)*Math.sin(dLo/2)*Math.sin(dLo/2);
+  return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));
+}
+// Filtre distance réglable : chaque tap change le rayon (Off → 1 → 2 → 5 → 10 km).
+function exploreCycleNear(){
+  var steps=[0,1,2,5,10];
+  var cur=Number(window._exploreChips.near)||0;
+  var idx=steps.indexOf(cur);if(idx<0)idx=0;
+  window._exploreChips.near=steps[(idx+1)%steps.length];
+  renderExploreChips();
+  if(exploreMap)exploreLoadStores(true);
+  playSound("pop");
+}
 function exploreAddStore(){
   if(exploreFilter&&typeof drinkLocate==="function"){drinkLocate();return;}
   // Ancien bug : openAddStoreForm() écrivait dans le panneau du sélecteur qui
@@ -10874,7 +10892,12 @@ function renderExploreChips(){
   }
   var html="";
   if(exploreFilter)html+=chip("instock","En stock",c.instock,true);
-  html+=chip("open","Ouvert",c.open,false)+chip("near","< 1 km",c.near,false);
+  html+=chip("open","Ouvert",c.open,false);
+  // Chip distance réglable : Off → 1 → 2 → 5 → 10 km (tap pour changer).
+  var nearKm=Number(c.near)||0;
+  var nearOn=nearKm>0;
+  var nearSt=nearOn?"background:var(--s1);color:var(--app-bg);border:1px solid var(--s1)":"background:var(--bg2);color:var(--s2);border:1px solid var(--border)";
+  html+='<div onclick="exploreCycleNear()" role="button" tabindex="0" aria-label="Filtrer par distance" onkeydown="if(event.key===\'Enter\'){exploreCycleNear();}" style="flex-shrink:0;display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:999px;font-size:12px;font-weight:700;cursor:pointer;'+nearSt+'">'+(nearOn?("≤ "+nearKm+" km"):"Distance")+' ▾</div>';
   // Filtre enseigne : ouvre un selecteur des enseignes presentes autour.
   var brand=window._exploreBrand;
   var bst=brand?"background:var(--s1);color:var(--app-bg);border:1px solid var(--s1)":"background:var(--bg2);color:var(--s2);border:1px solid var(--border)";
@@ -10971,7 +10994,15 @@ function renderInStockArrows(){
 function exploreApplyChips(list){
   var c=window._exploreChips,arr=list;
   if(c.open)arr=arr.filter(function(s){return storeOpenState(s)===true;});
-  if(c.near)arr=arr.filter(function(s){return typeof s.dist==="number"&&s.dist<=1000;});
+  // Distance réglable, mesurée à CHAUD depuis ta position (fiable, jamais périmée).
+  var nearKm=Number(c.near)||0;
+  if(nearKm>0){
+    arr=arr.filter(function(s){
+      if(typeof userLat!=="number"||!userLat)return true; // pas de GPS : on ne masque rien
+      if(typeof s.lat!=="number")return false;
+      return _distM(userLat,userLng,s.lat,s.lng)<=nearKm*1000+120; // +120 m de marge GPS
+    });
+  }
   // "En stock" : ne garder que les magasins qui ONT la boisson (on masque le
   // contexte gris alentour). Utile maintenant que la carte montre aussi les autres.
   if(c.instock&&exploreFilter)arr=arr.filter(function(s){return s._hasDrink||(s.drinks||[]).some(function(id){return Number(id)===Number(exploreFilter.drinkId);});});
@@ -11098,7 +11129,7 @@ function showStoreOnMap(lat,lng){
 }
 function openExploreMap(opts){
   exploreFilter=(opts&&opts.drinkId!=null)?{drinkId:opts.drinkId,name:opts.name||""}:null;
-  window._exploreChips={instock:false,open:false,near:false};
+  window._exploreChips={instock:false,open:false,near:0};
   window._exploreBrand=null;
   window._exploreFocus=(opts&&opts.center)?{lat:Number(opts.center.lat),lng:Number(opts.center.lng)}:null;
   setTimeout(function(){try{renderExploreChips();exploreSetHeader(0,exploreFilter?0:undefined);}catch(e){}},60);
