@@ -1014,7 +1014,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div class="chips" id="cats-home"></div>
       <div id="nearby-card" style="margin-bottom:16px"></div>
       <div class="sec-hd">
-        <div class="t-section" id="t-trends">Boissons populaires</div>
+        <div class="t-section" id="t-trends">À découvrir</div>
         <div class="sec-count" id="trends-count"></div>
       </div>
       <div class="grid" id="trends"></div>
@@ -1130,6 +1130,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         <div class="scan-overlay">
           <div class="scan-frame"><span class="scan-corners"></span></div>
         </div>
+        <div id="scan-torch" onclick="toggleTorch()" role="button" tabindex="0" aria-label="Lampe torche" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleTorch();}" style="display:none;position:absolute;top:12px;right:12px;z-index:6;width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);align-items:center;justify-content:center;cursor:pointer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2h6l-1 7H10L9 2z"/><path d="M10 9h4v4l-2 9-2-9V9z"/></svg></div>
         <div class="scan-idle">
           <div class="si-ico"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></svg></div>
           <div class="si-t">Prêt à scanner</div>
@@ -1144,6 +1145,13 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
       <div id="scan-tips" style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding:2px 20px 8px">
         <span style="font-size:11px;font-weight:600;color:var(--s3);background:var(--bg2);border:1px solid var(--border);padding:5px 11px;border-radius:999px">Garde le code bien à plat</span>
         <span style="font-size:11px;font-weight:600;color:var(--s3);background:var(--bg2);border:1px solid var(--border);padding:5px 11px;border-radius:999px">Assez de lumière</span>
+      </div>
+      <div style="padding:2px 20px 12px;text-align:center">
+        <span id="scan-manual-toggle" onclick="toggleManualCode()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'){toggleManualCode();}" style="font-size:12.5px;font-weight:700;color:var(--s2);cursor:pointer;text-decoration:underline;text-underline-offset:2px">Le code ne scanne pas ? Saisis-le à la main</span>
+        <div id="scan-manual-row" style="display:none;margin-top:11px;gap:8px;justify-content:center;align-items:center">
+          <input id="scan-manual-input" type="tel" inputmode="numeric" maxlength="14" placeholder="Ex : 5449000000996" onkeydown="if(event.key==='Enter'){submitManualCodeFromInput();}" style="flex:1;max-width:230px;box-sizing:border-box;padding:12px 14px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:15px;font-weight:700;letter-spacing:.5px;font-family:'Space Grotesk',sans-serif;outline:none">
+          <button onclick="submitManualCodeFromInput()" style="flex-shrink:0;padding:12px 18px;border-radius:13px;border:none;background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">OK</button>
+        </div>
       </div>
       <div id="scan-history-wrap" style="display:none;padding:6px 20px 24px">
         <div class="t-section" style="margin-bottom:4px" data-i18n="lastScans">Derniers scans</div>
@@ -4880,6 +4888,15 @@ function startScan(){
   navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
     .then(function(stream){
       video.srcObject=stream;scanActive=true;
+      window._scanStream=stream;window._torchOn=false;
+      // Flash : on n'affiche le bouton QUE si l'appareil le supporte réellement
+      // (Android surtout ; iOS/Safari ne le permet pas -> pas de bouton cassé).
+      try{
+        var _tr=stream.getVideoTracks()[0];
+        var _caps=(_tr&&_tr.getCapabilities)?_tr.getCapabilities():{};
+        var _tb=document.getElementById("scan-torch");
+        if(_tb)_tb.style.display=(_caps&&_caps.torch)?"flex":"none";
+      }catch(e){}
       hint.textContent="Approche le code-barre…";
       btn.style.display="none";
       document.getElementById("scan-result").style.display="none";
@@ -4896,11 +4913,47 @@ function startScan(){
 }
 function stopScan(){
   var sa=document.querySelector("#s-scan .scan-area");if(sa)sa.classList.remove("live");
+  var tb=document.getElementById("scan-torch");if(tb)tb.style.display="none";
+  window._torchOn=false;window._scanStream=null;
   if(!scanActive)return;
   try{Quagga.stop();quaggaRunning=false;Quagga.offDetected(onBarcodeDetected);}catch(e){}
   var v=document.getElementById("scan-video");
   if(v&&v.srcObject)v.srcObject.getTracks().forEach(function(t){t.stop();});
   scanActive=false;
+}
+// Flash / torche : marche là où le navigateur l'autorise (Android). Sur iPhone,
+// Apple bloque le contrôle du flash en web -> le bouton n'apparaît même pas.
+function toggleTorch(){
+  var stream=window._scanStream;
+  var tr=stream&&stream.getVideoTracks&&stream.getVideoTracks()[0];
+  if(!tr){toast("Active d'abord la caméra");playSound("err");return;}
+  var caps=tr.getCapabilities?tr.getCapabilities():{};
+  if(!caps||!caps.torch){toast("Flash non disponible sur cet appareil");playSound("err");return;}
+  window._torchOn=!window._torchOn;
+  tr.applyConstraints({advanced:[{torch:window._torchOn}]}).then(function(){
+    var tb=document.getElementById("scan-torch");if(tb)tb.style.background=window._torchOn?"rgba(198,154,87,.95)":"rgba(0,0,0,.5)";
+    try{playSound("pop");}catch(e){}
+  }).catch(function(){window._torchOn=false;toast("Impossible d'allumer le flash");playSound("err");});
+}
+// Saisie manuelle du code-barre : quand le scan ne veut pas, on tape les chiffres.
+// Réutilise EXACTEMENT la résolution du scan (catalogue / découverte / inconnu).
+function toggleManualCode(){
+  var row=document.getElementById("scan-manual-row");if(!row)return;
+  var open=row.style.display!=="flex";
+  row.style.display=open?"flex":"none";
+  if(open){var i=document.getElementById("scan-manual-input");if(i){i.value="";setTimeout(function(){try{i.focus();}catch(e){}},60);}}
+  try{playSound("pop");}catch(e){}
+}
+function submitManualCode(code){
+  code=String(code||"").replace(/\D/g,"");
+  if(!validGTIN(code)){toast("Code-barre invalide (8 à 13 chiffres)");playSound("err");return;}
+  var row=document.getElementById("scan-manual-row");if(row)row.style.display="none";
+  _scanVotes={code:code,count:1};                 // pré-charge un vote
+  try{onBarcodeDetected({codeResult:{code:code}});}catch(e){} // 2e "lecture" -> résolution
+}
+function submitManualCodeFromInput(){
+  var i=document.getElementById("scan-manual-input");if(!i)return;
+  submitManualCode(i.value);
 }
 function resetScanUI(){
   renderWhereFound(null);
@@ -6934,7 +6987,7 @@ function applyHomeFilter(){
   var ex=document.getElementById("home-extras");if(ex)ex.style.display=filtering?"none":"";
   var rc=document.getElementById("home-recents");if(rc)rc.style.display=filtering?"none":"";
   var tt=document.getElementById("t-trends");
-  if(tt)tt.textContent=filtering?curCat:"Boissons populaires";
+  if(tt)tt.textContent=filtering?curCat:"À découvrir";
 }
 function renderTrends(){
   renderTopRail();
@@ -9555,7 +9608,17 @@ function renderStoreDetail(){
   document.getElementById("sd-badges").innerHTML=
     (openLabel(s)?'<span class="rbadge" style="background:'+(storeOpenState(s)?"rgba(34,197,94,.3)":"rgba(239,68,68,.3)")+'">'+openLabel(s)+(s.hours?" · "+s.hours:"")+'</span>':"")+
     (dist?'<span class="rbadge">'+dist+'</span>':"");
-  var mmap=document.getElementById("sd-mago-map");if(mmap)mmap.onclick=function(){try{playSound("pop");}catch(e){}try{closeStoreDetail();}catch(e){}try{openExploreMap({center:{lat:s.lat,lng:s.lng}});}catch(e){}};
+  var mmap=document.getElementById("sd-mago-map");if(mmap)mmap.onclick=function(){
+    var la=Number(s.lat),ln=Number(s.lng);
+    try{playSound("pop");}catch(e){}
+    try{closeStoreDetail();}catch(e){}
+    setTimeout(function(){
+      try{openExploreMap({center:{lat:la,lng:ln}});}catch(e){}
+      // Filet : on force le recentrage sur le magasin après le rendu de la carte
+      // (avant, elle retombait sur "Magasins autour de toi" sans centrer).
+      [250,650,1100].forEach(function(t){setTimeout(function(){try{if(window.exploreMap&&!isNaN(la))exploreMap.setView([la,ln],17);}catch(e){}},t);});
+    },60);
+  };
   var gmaps=document.getElementById("sd-gmaps");if(gmaps)gmaps.onclick=function(){goToStore(s.lat,s.lng);};
   var waze=document.getElementById("sd-waze");if(waze)waze.onclick=function(){window.open("https://waze.com/ul?ll="+s.lat+","+s.lng+"&navigate=yes","_blank");};
   try{renderStoreMission();}catch(e){}
