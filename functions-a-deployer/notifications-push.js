@@ -157,10 +157,11 @@ exports.notifyHuntNearby = onDocumentWritten(
     // Nouveaux chercheurs (uid présent maintenant, absent ou nul avant)
     const newSeekers = Object.keys(aSeek).filter(function(u){ return aSeek[u] && !bSeek[u]; });
     if (!newSeekers.length) return;
-    // Centre = position (arrondie) du nouveau chercheur le plus récent
+    // Centre = position (arrondie) du nouveau chercheur le plus récent.
+    // Peut rester null si le chercheur n'avait pas de GPS -> on notifie alors
+    // TOUT LE MONDE (petite base : mieux vaut prévenir que rater la chasse).
     let center = null;
     newSeekers.forEach(function(u){ const s = aSeek[u]; if (s && s.lat != null && (!center || s.at > center.at)) center = s; });
-    if (!center) return;
     const seekerUids = new Set(Object.keys(aSeek).filter(function(u){ return aSeek[u]; }));
     const name = String(after.drinkName || "une boisson").slice(0, 40);
     // Anti-spam : au plus un push "chasse" par tranche de 6 h par boisson
@@ -174,7 +175,10 @@ exports.notifyHuntNearby = onDocumentWritten(
       if (seekerUids.has(d.id)) return;         // pas le(s) chercheur(s)
       const t = d.data();
       if (!t.token) return;
-      if (_dist(center.lat, center.lng, t.lat, t.lng) > 15) return; // hors zone
+      // On EXCLUT seulement quand on est SÛR que c'est trop loin (centre connu ET
+      // position du destinataire connue ET distance > 15 km). Sinon on notifie
+      // quand même (position manquante d'un côté = on ne cache pas la chasse).
+      if (center && t.lat != null && _dist(center.lat, center.lng, t.lat, t.lng) > 15) return;
       msgs.push({
         token: t.token,
         notification: { title: "🎯 Chasse près de toi", body: "Quelqu'un cherche « " + name + " ». Si tu la vois en magasin, signale-la et gagne des points !" },
