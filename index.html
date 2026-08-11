@@ -10899,7 +10899,7 @@ function renderExploreChips(){
   var nearSt=nearOn?"background:var(--s1);color:var(--app-bg);border:1px solid var(--s1)":"background:var(--bg2);color:var(--s2);border:1px solid var(--border)";
   html+='<div onclick="exploreCycleNear()" role="button" tabindex="0" aria-label="Filtrer par distance" onkeydown="if(event.key===\'Enter\'){exploreCycleNear();}" style="flex-shrink:0;display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:999px;font-size:12px;font-weight:700;cursor:pointer;'+nearSt+'">'+(nearOn?("≤ "+nearKm+" km"):"Distance")+' ▾</div>';
   // Filtre enseigne : ouvre un selecteur des enseignes presentes autour.
-  var brand=window._exploreBrand;
+  var brand=window._exploreBrand||window._exploreBrandQuery||"";
   var bst=brand?"background:var(--s1);color:var(--app-bg);border:1px solid var(--s1)":"background:var(--bg2);color:var(--s2);border:1px solid var(--border)";
   html+='<div onclick="openExploreBrandPicker()" role="button" tabindex="0" aria-label="Filtrer par enseigne" onkeydown="if(event.key===\'Enter\'){openExploreBrandPicker();}" style="flex-shrink:0;display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:999px;font-size:12px;font-weight:700;cursor:pointer;'+bst+'">'+(brand?sanitize(brand):"Enseigne")+' ▾</div>';
   if(exploreFilter){
@@ -10941,7 +10941,7 @@ function openExploreBrandPicker(){
   ov.onclick=function(e){if(e.target===ov)ov.remove();};
   ov.innerHTML='<div style="width:100%;max-width:440px;background:var(--app-bg);border-radius:20px 20px 0 0;padding:16px 18px calc(18px + env(safe-area-inset-bottom,0px));max-height:80vh;display:flex;flex-direction:column;box-shadow:0 -8px 30px rgba(0,0,0,.3)">'+
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-size:16px;font-weight:800;color:var(--s1)">Choisir une enseigne</div><div onclick="var p=document.getElementById(\'explore-brand-picker\');if(p)p.remove();" role="button" tabindex="0" aria-label="Fermer" style="font-size:22px;color:var(--s3);cursor:pointer;padding:2px 6px">✕</div></div>'+
-    '<input id="brand-picker-q" placeholder="Tape une enseigne — Carrefour, Lidl…" oninput="renderBrandPickerList(this.value)" style="width:100%;padding:12px 14px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-family:inherit;margin-bottom:8px;outline:none">'+
+    '<input id="brand-picker-q" placeholder="Tape une enseigne — Carrefour, Lidl…" autocomplete="off" oninput="renderBrandPickerList(this.value);exploreBrandLivePreview(this.value)" onkeydown="if(event.key===\'Enter\'){exploreBrandApplyQuery(this.value);}" style="width:100%;padding:13px 14px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:15px;font-weight:700;font-family:inherit;margin-bottom:8px;outline:none">'+
     '<div id="brand-picker-list" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>'+
   '</div>';
   document.body.appendChild(ov);
@@ -10951,8 +10951,29 @@ function openExploreBrandPicker(){
 }
 function setExploreBrand(b){
   window._exploreBrand=b;
+  window._exploreBrandQuery="";                 // choix précis -> on efface la recherche libre
   var p=document.getElementById("explore-brand-picker");if(p)p.remove();
   renderExploreChips();
+  if(exploreMap)exploreLoadStores(true);
+  playSound("pop");
+}
+// Aperçu LIVE : pendant qu'on tape une enseigne, la carte se filtre en direct
+// (débounce léger) — plus besoin de choisir une ligne pour voir les Lidl.
+function exploreBrandLivePreview(q){
+  window._exploreBrand=null;
+  window._exploreBrandQuery=(q||"").trim();
+  clearTimeout(window._brandPreviewTimer);
+  window._brandPreviewTimer=setTimeout(function(){
+    try{renderExploreChips();}catch(e){}
+    if(exploreMap)exploreLoadStores(true);
+  },220);
+}
+// Entrée : valide la recherche telle quelle (garde le filtre live) et ferme le sélecteur.
+function exploreBrandApplyQuery(q){
+  window._exploreBrand=null;
+  window._exploreBrandQuery=(q||"").trim();
+  var p=document.getElementById("explore-brand-picker");if(p)p.remove();
+  try{renderExploreChips();}catch(e){}
   if(exploreMap)exploreLoadStores(true);
   playSound("pop");
 }
@@ -11006,7 +11027,14 @@ function exploreApplyChips(list){
   // "En stock" : ne garder que les magasins qui ONT la boisson (on masque le
   // contexte gris alentour). Utile maintenant que la carte montre aussi les autres.
   if(c.instock&&exploreFilter)arr=arr.filter(function(s){return s._hasDrink||(s.drinks||[]).some(function(id){return Number(id)===Number(exploreFilter.drinkId);});});
-  if(window._exploreBrand)arr=arr.filter(function(s){return s.brand===window._exploreBrand;});
+  if(window._exploreBrand){
+    arr=arr.filter(function(s){return s.brand===window._exploreBrand;});
+  }else if(window._exploreBrandQuery){
+    // Filtre LIVE pendant qu'on tape une enseigne : on garde les magasins dont
+    // le nom/l'enseigne contient le texte (ex: "lid" -> tous les Lidl).
+    var qq=normTxt(window._exploreBrandQuery);
+    arr=arr.filter(function(s){return normTxt((s.brand||"")+" "+(s.name||"")).indexOf(qq)!==-1;});
+  }
   return arr;
 }
 function exploreSetHeader(shown,sure){
@@ -11131,6 +11159,7 @@ function openExploreMap(opts){
   exploreFilter=(opts&&opts.drinkId!=null)?{drinkId:opts.drinkId,name:opts.name||""}:null;
   window._exploreChips={instock:false,open:false,near:0};
   window._exploreBrand=null;
+  window._exploreBrandQuery="";
   window._exploreFocus=(opts&&opts.center)?{lat:Number(opts.center.lat),lng:Number(opts.center.lng)}:null;
   setTimeout(function(){try{renderExploreChips();exploreSetHeader(0,exploreFilter?0:undefined);}catch(e){}},60);
   [420,950].forEach(function(t){setTimeout(function(){try{if(exploreMap)exploreMap.invalidateSize();}catch(e){}},t);});
