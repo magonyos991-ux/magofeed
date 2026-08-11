@@ -1767,15 +1767,14 @@ function _coarse(x){ return Math.round(x * 100) / 100; }
 window.fbSimulateHunt = async function(lat, lng, drinkId, drinkName) {
   try {
     await ensureAuthed();
-    var simUid = "simtest_" + Date.now();
-    var seeker = {}; seeker["seekers." + simUid] = {
-      lat: lat != null ? _coarse(lat) : null, lng: lng != null ? _coarse(lng) : null, at: Date.now()
-    };
-    await setDoc(doc(db, "hunts", String(drinkId)), Object.assign({
+    var docId = "simtest_" + Date.now();          // doc UNIQUE -> pas d'anti-spam 6h
+    var simUid = "simseeker_" + Date.now();        // chercheur factice (pas toi)
+    var seekers = {}; seekers[simUid] = { lat: lat != null ? _coarse(lat) : null, lng: lng != null ? _coarse(lng) : null, at: Date.now() };
+    await setDoc(doc(db, "hunts", docId), {
       drinkId: Number(drinkId) || drinkId, drinkName: String(drinkName || "Boisson test").slice(0, 60),
-      emoji: "", updatedAt: serverTimestamp()
-    }, seeker), { merge: true });
-    return { ok: true };
+      emoji: "", updatedAt: serverTimestamp(), seekers: seekers
+    });
+    return { ok: true, docId: docId };
   } catch (e) { return { ok: false, reason: String(e && (e.code || e.message) || e) }; }
 };
 window.fbJoinHunt = async function(drinkId, drinkName, emoji, lat, lng) {
@@ -1813,17 +1812,17 @@ window.fbLoadNearbyHunts = async function(lat, lng, radiusKm) {
   try {
     var snap = await getDocs(query(collection(db, "hunts"), limit(200)));
     var out = [], myUid = auth.currentUser ? auth.currentUser.uid : null;
-    var R = radiusKm || 15, fresh = Date.now() - 30 * 86400000;
+    // PETITE BASE : on montre TOUTES les chasses actives. On n'exclut qu'un
+    // chercheur VRAIMENT trop loin (>100 km, positions connues) ou parti (null).
+    // Plus de filtre de fraîcheur strict (on garde jusqu'à 1 an). C'était ça qui
+    // t'empêchait de voir la chasse de quelqu'un d'autre.
+    var R = radiusKm && radiusKm > 15 ? radiusKm : 100, fresh = Date.now() - 365 * 86400000;
     snap.forEach(function(d) {
       var h = d.data(); var seekers = h.seekers || {};
       var near = 0, mine = false;
       Object.keys(seekers).forEach(function(uid) {
-        var s = seekers[uid]; if (!s || !s.at || s.at < fresh) return;
-        // On EXCLUT seulement quand on est SÛR que c'est trop loin (les deux
-        // positions connues ET distance > R). Si une position manque (GPS pas
-        // prêt côté viewer OU côté chercheur), on INCLUT quand même : mieux vaut
-        // montrer une vraie chasse que la cacher — c'était LE bug qui empêchait
-        // de voir la chasse lancée par quelqu'un d'autre (ex: ton père).
+        var s = seekers[uid]; if (!s) return;                 // chercheur parti
+        if (s.at && s.at < fresh) return;                     // vraiment très ancien
         if (lat != null && s.lat != null) {
           var dLa = (lat - s.lat) * 111, dLo = (lng - s.lng) * 111 * Math.cos(lat * Math.PI / 180);
           if (Math.sqrt(dLa * dLa + dLo * dLo) > R) return;
@@ -7449,7 +7448,8 @@ function _drawHunts(map,noReflow){
   window._huntCount=list.length;window._huntList=list;window._huntMap=map;try{updateMissionFab();}catch(e){}
   if(!list.length){host.innerHTML="";return;}
   var needPhoto=false;
-  var rows=list.slice(0,6).map(function(h){
+  var LIMIT=window._huntsExpanded?999:4;   // liste courte + "voir plus" (pas d'infini)
+  var rows=list.slice(0,LIMIT).map(function(h){
     var who=h.seekers>1?(h.seekers+" personnes cherchent"):(h.mine?"Tu cherches":"1 personne cherche");
     var hd=DRINKS.find(function(x){return Number(x.id)===Number(h.drinkId);});
     // Vraie photo du produit (OpenFoodFacts verifie) si connue, sinon canette
@@ -7464,9 +7464,17 @@ function _drawHunts(map,noReflow){
       '<span style="font-size:11px;font-weight:800;color:#e67e22;flex-shrink:0">Je l\'ai vue →</span>'+
     '</div>';
   }).join("");
+  var moreRow="";
+  if(list.length>4){
+    moreRow=window._huntsExpanded
+      ?'<div id="hunts-more" role="button" tabindex="0" style="text-align:center;padding:10px 0 4px;font-size:12px;font-weight:800;color:#b45309;cursor:pointer">Voir moins ▲</div>'
+      :'<div id="hunts-more" role="button" tabindex="0" style="text-align:center;padding:10px 0 4px;font-size:12px;font-weight:800;color:#b45309;cursor:pointer">Voir plus (+'+(list.length-4)+') ▼</div>';
+  }
   host.innerHTML='<div style="background:linear-gradient(135deg,#fff3e0,#ffe8cc);border:1.5px solid #f0b840;border-radius:18px;padding:13px 16px 6px;margin-bottom:14px">'+
     '<div style="font-size:13px;font-weight:800;color:#7a4a10;margin-bottom:1px">Chasses près de toi</div>'+
-    '<div style="font-size:11px;font-weight:600;color:#9a6a2a;margin-bottom:4px">Tu croises une de ces boissons en magasin ? Signale-la — tu gagnes des points en aidant.</div>'+rows+'</div>';
+    '<div style="font-size:11px;font-weight:600;color:#9a6a2a;margin-bottom:4px">Tu croises une de ces boissons en magasin ? Signale-la — tu gagnes des points en aidant.</div>'+rows+moreRow+'</div>';
+  var moreEl=document.getElementById("hunts-more");
+  if(moreEl)moreEl.onclick=function(){window._huntsExpanded=!window._huntsExpanded;try{playSound("pop");}catch(e){}_drawHunts(window._huntMap,true);};
   host.querySelectorAll(".hunt-row").forEach(function(row){
     row.onclick=function(){
       var did=Number(row.getAttribute("data-did"));
@@ -10195,7 +10203,10 @@ function diagFixPosition(){
    la notif. Prouve toute la chaîne (fonction serveur + push) sans 2e téléphone. */
 function simulateNeighborHunt(){
   if(!(typeof userLat==="number"&&userLat)){toast("Active d'abord ta position");playSound("err");return;}
-  if(!window._pushToken){toast("Réactive les notifications d'abord (bouton Notifications)");playSound("err");return;}
+  // Pas besoin du jeton LOCAL : le serveur a déjà ton jeton (serveur: oui) et
+  // c'est lui qui t'enverra la notif. On tente aussi de restaurer le jeton local
+  // en silence, mais ça ne bloque pas le test.
+  try{ if(("Notification" in window)&&Notification.permission==="granted"&&!window._pushToken&&window.fbEnablePush){window.fbEnablePush(userLat,userLng);} }catch(e){}
   if(!window.fbSimulateHunt){toast("Indisponible ici");playSound("err");return;}
   // Boisson au hasard PAS dans tes veilles (évite l'anti-spam 6h de la fonction).
   var pool=DRINKS.filter(function(d){return !(drinkWatches||[]).some(function(w){return Number(w.id)===Number(d.id);});});
