@@ -1564,6 +1564,7 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
         </div>
       </div>
       <div class="extrow">
+        <div class="extbtn" id="sd-mago-map" role="button" tabindex="0" aria-label="Voir sur la carte de l'application" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14"/><path d="M15 6v14"/></svg> Carte</div>
         <div class="extbtn" id="sd-gmaps">Google Maps</div>
         <div class="extbtn" id="sd-waze">Waze</div>
         <div class="extbtn" id="sd-share" onclick="shareStore()" role="button" tabindex="0" aria-label="Partager ce magasin" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();shareStore();}"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Partager</div>
@@ -5201,6 +5202,7 @@ function openAddStoreForm(){
   el.innerHTML='<div style="padding:4px 2px">'+
     '<div style="font-size:13px;font-weight:800;color:var(--s1);margin-bottom:10px">Nouveau magasin</div>'+
     '<input id="add-store-name" type="text" maxlength="60" placeholder="Nom (ex : ARARAT Night Shop)" value="'+sanitize(q)+'" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none;margin-bottom:10px">'+
+    '<input id="add-store-address" type="text" maxlength="90" placeholder="Adresse + n° (ex : Rue du Midi 12) — auto si trouvée" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none;margin-bottom:10px">'+
     '<div id="add-store-types" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>'+
     '<div id="add-store-pos" style="font-size:12px;font-weight:600;color:var(--s2);background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:10px"></div>'+
     '<div style="display:flex;gap:8px">'+
@@ -5239,12 +5241,15 @@ function renderAddStorePos(){
   if(addStorePos){
     html="Position : "+(addStorePos.src==="gps"?"ta position GPS actuelle":"choisie sur la carte")+" \u2713";
     // Adresse + numero recuperes AUTOMATIQUEMENT (une seule fois par position).
+    var addrInput=document.getElementById("add-store-address");
     if(addStorePos.address){
       html+='<br><span style="color:var(--s1);font-weight:800">\uD83D\uDCCD '+sanitize(addStorePos.address)+'</span>';
+      // On pr\u00E9remplit le champ adresse (sans \u00E9craser ce que l'utilisateur a tap\u00E9).
+      if(addrInput&&!addrInput.value.trim())addrInput.value=addStorePos.address;
     }else if(addStorePos._geoTried){
-      html+='<br><span style="color:var(--s3)">Adresse non trouv\u00E9e \u2014 la position suffit</span>';
+      html+='<br><span style="color:var(--s3)">Adresse non trouv\u00E9e \u2014 \u00E9cris-la dans le champ ci-dessus (facultatif)</span>';
     }else{
-      html+='<br><span style="color:var(--s3)">Recherche de l\'adresse\u2026</span>';
+      html+='<br><span style="color:var(--s3)">Recherche de l\'adresse\u2026 <span style="color:var(--s2);font-weight:700">(ou \u00E9cris-la toi-m\u00EAme)</span></span>';
       (function(pos){
         reverseGeocodeAddr(pos.lat,pos.lng,function(addr){
           if(addStorePos!==pos)return;
@@ -5296,9 +5301,11 @@ function saveNewStore(){
     lat:addStorePos.lat,lng:addStorePos.lng,
     drinks:[],confirmations:{},community:true
   };
-  // Adresse + numero detectes automatiquement (geocodage inverse) : on les
-  // enregistre avec le magasin pour toute la communaute.
-  if(addStorePos.address)s.address=addStorePos.address;
+  // Adresse : ce que l'utilisateur a tapé prime (repli si le géocodage a échoué),
+  // sinon l'adresse détectée automatiquement. Enregistrée pour toute la communauté.
+  var addrManual=((document.getElementById("add-store-address")||{}).value||"").trim();
+  if(addrManual)s.address=addrManual;
+  else if(addStorePos.address)s.address=addStorePos.address;
   s.fbId=s.id;
   // Distance calculee localement (haversineKm vit dans le module Firebase,
   // inaccessible depuis ce script — reference directe = ReferenceError)
@@ -9491,16 +9498,21 @@ function reverseGeocodeAddr(lat,lng,cb){
   if(typeof lat!=="number"||typeof lng!=="number"){cb&&cb("");return;}
   var key=lat.toFixed(4)+","+lng.toFixed(4);
   if(geocodeCache[key]){cb&&cb(geocodeCache[key]);return;}
+  // Garde-fou : si Nominatim ne répond pas en 8 s, on rend la main (repli manuel)
+  // au lieu de rester bloqué sur « Recherche de l'adresse… » indéfiniment.
+  var done=false;
+  var to=setTimeout(function(){if(!done){done=true;cb&&cb("");}},8000);
   fetch("https://nominatim.openstreetmap.org/reverse?lat="+lat+"&lon="+lng+"&format=json")
     .then(function(r){return r.json();})
     .then(function(d){
+      if(done)return;done=true;clearTimeout(to);
       var a=(d&&d.address)||{};
       var street=(a.house_number?a.house_number+" ":"")+(a.road||a.street||a.pedestrian||"");
       var city=a.city||a.town||a.village||a.municipality||"";
       var full=[street,city].filter(Boolean).join(", ");
       if(full){geocodeCache[key]=full;try{localStorage.setItem("magoGeocodeCache",JSON.stringify(geocodeCache));}catch(e){}}
       cb&&cb(full||"");
-    }).catch(function(){cb&&cb("");});
+    }).catch(function(){if(!done){done=true;clearTimeout(to);cb&&cb("");}});
 }
 function storeIsPartner(s){
   return !!(s&&s.verifiedSource&&String(s.verifiedSource).indexOf("photos")!==-1);
@@ -9543,6 +9555,7 @@ function renderStoreDetail(){
   document.getElementById("sd-badges").innerHTML=
     (openLabel(s)?'<span class="rbadge" style="background:'+(storeOpenState(s)?"rgba(34,197,94,.3)":"rgba(239,68,68,.3)")+'">'+openLabel(s)+(s.hours?" · "+s.hours:"")+'</span>':"")+
     (dist?'<span class="rbadge">'+dist+'</span>':"");
+  var mmap=document.getElementById("sd-mago-map");if(mmap)mmap.onclick=function(){try{playSound("pop");}catch(e){}try{closeStoreDetail();}catch(e){}try{openExploreMap({center:{lat:s.lat,lng:s.lng}});}catch(e){}};
   var gmaps=document.getElementById("sd-gmaps");if(gmaps)gmaps.onclick=function(){goToStore(s.lat,s.lng);};
   var waze=document.getElementById("sd-waze");if(waze)waze.onclick=function(){window.open("https://waze.com/ul?ll="+s.lat+","+s.lng+"&navigate=yes","_blank");};
   try{renderStoreMission();}catch(e){}
@@ -10784,6 +10797,7 @@ function setExploreSheet(state,silent){
   var status=document.getElementById("explore-status");
   if(status)status.style.display=opened?"none":"block";
   if(typeof setExploreFab==="function")setExploreFab(!opened);
+  try{renderInStockArrows();}catch(e){} // masque/affiche les flèches selon l'état de la liste
   if(!silent){try{playSound("pop");}catch(e){}}
 }
 function exploreToggleSheet(){
@@ -10991,6 +11005,11 @@ function renderInStockArrows(){
   var wrap=document.getElementById("explore-edge-arrows");
   if(!wrap){wrap=document.createElement("div");wrap.id="explore-edge-arrows";wrap.style.cssText="position:absolute;inset:0;pointer-events:none;z-index:1140";mapEl.appendChild(wrap);}
   wrap.innerHTML="";
+  // Liste dépliée : NE PAS dessiner les flèches — elles passaient par-dessus la
+  // liste (z-index supérieur) et bloquaient le défilement. On les réserve à la
+  // vue carte (sheet réduite).
+  var _sh=document.getElementById("explore-sheet");
+  if(_sh&&_sh.classList.contains("open"))return;
   if(!exploreFilter||window._routeLayer)return; // seulement en mode boisson, hors itineraire
   var did=exploreFilter.drinkId;
   var vendors=(window._exploreRawList||[]).filter(function(s){return typeof s.lat==="number"&&(s.drinks||[]).some(function(id){return Number(id)===Number(did);});});
@@ -11179,7 +11198,6 @@ function openExploreMap(opts){
           '<div id="explore-thumb" onclick="if(typeof openDrinkZoom===\'function\'&&curSel)openDrinkZoom();" role="button" tabindex="0" aria-label="Agrandir la photo" onkeydown="if(event.key===\'Enter\'){if(typeof openDrinkZoom===\'function\'&&curSel)openDrinkZoom();}" style="display:none;width:44px;height:44px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid var(--border);align-items:center;justify-content:center;flex-shrink:0;cursor:pointer"></div>'+
           '<div id="explore-titlebtn" onclick="openDrinkInfoFromMap()" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){openDrinkInfoFromMap();}" style="flex:1;min-width:0;cursor:pointer;display:flex;align-items:center;gap:6px;padding:6px 9px;border-radius:13px;border:1px solid transparent;transition:background .15s"><div style="flex:1;min-width:0"><div id="explore-title" style="font-size:15px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Magasins</div><div id="explore-subtitle" style="font-size:11px;color:var(--s2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">autour de toi</div></div><span id="explore-chevron" style="display:none;color:var(--s2);flex-shrink:0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M9 6l6 6-6 6"/></svg></span></div>'+
           '<div id="explore-hunt-btn" onclick="exploreToggleHunt()" role="button" tabindex="0" aria-label="Lancer la chasse" onkeydown="if(event.key===\'Enter\'){exploreToggleHunt();}" style="display:none;position:relative;width:40px;height:40px;border-radius:13px;background:var(--bg2);border:1px solid var(--border);align-items:center;justify-content:center;color:var(--s1);cursor:pointer;flex-shrink:0;transition:background .22s ease,color .22s ease,border-color .22s ease,transform .16s ease"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 1.6v3M12 19.4v3M1.6 12h3M19.4 12h3"/></svg></div>'+
-          '<div onclick="exploreCenterUser()" role="button" tabindex="0" aria-label="Ma position" style="width:40px;height:40px;border-radius:13px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.2" stroke="var(--s1)" stroke-width="2"/><path d="M12 2v3.5M12 18.5V22M2 12h3.5M18.5 12H22" stroke="var(--s1)" stroke-width="2" stroke-linecap="round"/></svg></div>'+
         '</div>'+
         '<div id="explore-search-row" style="display:none;margin-top:9px;gap:8px">'+
         '<input id="explore-city-q" placeholder="Aller \u00E0\u2026 S\u00E9oul, Paris, Tournai" style="flex:1;padding:11px 13px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-family:inherit">'+
