@@ -6641,6 +6641,7 @@ function nearbyDistLabel(m){
 }
 function renderNearby(){
   var host=document.getElementById("nearby-card");if(!host)return;
+  sanitizeAutoStores();
   // Masque en mode filtre categorie (comme les autres sections "parcourir").
   if(curCat&&curCat!=="Tous"){host.style.display="none";host.innerHTML="";return;}
   host.style.display="";
@@ -9235,6 +9236,7 @@ function exploreCityFromSearch(q){
 }
 function renderStoreList(){
   if(!curSel)return;
+  sanitizeAutoStores();
   var allStores=STORES.filter(function(s){
     // Support drinks comme tableau d'IDs (nombres ou strings)
     if(!s.drinks||!s.drinks.length)return false;
@@ -9467,6 +9469,7 @@ function closeStoreSheet(){document.getElementById("map-sheet-modal").style.disp
 function openStoreDetail(storeId){
   var s=STORES.find(function(x){return x.id===storeId||x.fbId===storeId;});
   if(!s)return;
+  _stripAutoDrinks(s);
   // Ouvert depuis la carte Explorer : le "retour" doit REVENIR sur la carte, pas
   // sauter à l'accueil (l'écran sous l'overlay). On mémorise ce contexte et on
   // masque proprement la carte le temps de la fiche.
@@ -10334,6 +10337,21 @@ function looksLikeProducer(el){
   return NON_SHOP_KW.test(nm);
 }
 var _autoImportBusy=false;
+/* Nettoyage des inventaires INVENTÉS : les magasins auto-importés d'OpenStreetMap
+   (id commençant par "o") avaient reçu des boissons supposées (jusqu'à ~101).
+   On ne garde QUE les boissons réellement confirmées (confirmations > 0). Appelé
+   à chaque rendu -> les "101 boissons" fantômes disparaissent, sans rien inventer. */
+function _stripAutoDrinks(s){
+  if(!s||typeof s.id!=="string"||s.id.charAt(0)!=="o")return s;
+  var conf=s.confirmations||{};
+  var real=(s.drinks||[]).filter(function(id){return (conf[id]||0)>0;});
+  if(real.length!==(s.drinks||[]).length){
+    s.drinks=real;
+    if(s.drinksVerified)s.drinksVerified=(s.drinksVerified||[]).filter(function(id){return (conf[id]||0)>0;});
+  }
+  return s;
+}
+function sanitizeAutoStores(){try{(window.STORES||[]).forEach(_stripAutoDrinks);}catch(e){}}
 function autoImportZone(cLat,cLng){
   if(_autoImportBusy||typeof cLat!=="number"||!cLat)return;
   // Le suffixe de version force un nouvel import des zones déjà visitées quand on
@@ -10361,16 +10379,13 @@ function autoImportZone(cLat,cLng){
         if(lat==null||lng==null||!name)return null;
         if(looksLikeProducer(el))return null; // producteur/atelier, pas une boutique
         var gcat=guessStoreCat(name+" "+(el.tags.brand||""));
-        // Enseigne connue -> rayon VERIFIE d'office ; categorie detectee ->
-        // probables ; sinon superette/night shop -> le socle mainstream en
-        // probable (un night shop sans Coca, ca n'existe pas)
-        var chain=chainIdsFor(name,el.tags.brand);
-        var cd={drinks:[],dv:null,vs:null};
-        if(chain){cd.drinks=chain.ids.slice();cd.dv=chain.ids.slice();cd.vs="catalogue enseigne (auto)";}
-        else if(gcat){cd.drinks=brandIds(M4_CATS[gcat]||[]);}
-        else{cd.drinks=packDrinkIds();}
+        // Rayon VIDE \u00e0 l'import : on n'invente PLUS d'inventaire. Avant, chaque
+        // magasin import\u00e9 recevait un catalogue suppos\u00e9 (jusqu'\u00e0 ~101 boissons) \u2014
+        // d'o\u00f9 l'absurdit\u00e9 "Librairie = 132 boissons", "Action = 142". D\u00e9sormais
+        // une boisson n'appara\u00eet dans un magasin QUE quand un vrai utilisateur
+        // l'y confirme (scan, "je l'ai ici", rafale). Donn\u00e9es honn\u00eates.
         return {id:"o"+el.id,osm:el.id,name:name,emoji:osmShopEmoji(el.tags.shop),lat:lat,lng:lng,hours:(el.tags.opening_hours||null),
-          brand:(el.tags.brand||null),type:gcat?("\u00e9picerie "+gcat):null,drinks:cd.drinks,drinksVerified:cd.dv,verifiedSource:cd.vs};
+          brand:(el.tags.brand||null),type:gcat?("\u00e9picerie "+gcat):null,drinks:[],drinksVerified:null,verifiedSource:null};
       }).filter(Boolean).filter(function(s){var k=s.id;if(seen[k])return false;seen[k]=1;return true;});
       if(!found.length){_autoImportBusy=false;return;}
       var zone=window.fbQueryZone?window.fbQueryZone(cLat,cLng,km+0.5):Promise.resolve(STORES||[]);
@@ -11359,6 +11374,7 @@ function exploreLoadStores(useCache){
   else{if(status)status.textContent="Chargement\u2026";q=window.fbQueryZone?window.fbQueryZone(cLat,cLng,Math.min(radiusKm,25)):Promise.resolve(STORES||[]);}
   q.then(function(list){
     list=list||[];
+    list.forEach(_stripAutoDrinks);           // retire les inventaires inventés
     if(!useCache)window._exploreRawList=list;
     // Zone du monde encore vierge (Dakar, Tokyo...) : au lieu d'afficher le
     // vide, on declenche la decouverte OpenStreetMap automatique — avant, ce
