@@ -1298,6 +1298,14 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
           <div class="set-txt"><div class="set-title">Tester la notification</div><div class="set-sub">Envoie-toi une notif de test — ferme l'app juste après pour vérifier</div></div>
           <span class="set-chev">›</span>
         </div>
+        <div class="set-row" style="cursor:default">
+          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></div>
+          <div class="set-txt" style="flex:1"><div class="set-title">Rayon d'alerte des chasses</div><div class="set-sub">Sois prévenu quand une boisson suivie est signalée à moins de…</div></div>
+          <div style="display:flex;gap:6px;background:var(--bg2);border:1.5px solid var(--border);border-radius:11px;padding:3px;flex-shrink:0">
+            <span id="hr-opt-5" onclick="setHuntRadius(5)" role="button" tabindex="0" aria-label="Rayon 5 kilomètres" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setHuntRadius(5);}" style="padding:7px 13px;border-radius:9px;font-size:13px;font-weight:800;cursor:pointer;color:var(--s2)">5 km</span>
+            <span id="hr-opt-10" onclick="setHuntRadius(10)" role="button" tabindex="0" aria-label="Rayon 10 kilomètres" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setHuntRadius(10);}" style="padding:7px 13px;border-radius:9px;font-size:13px;font-weight:800;cursor:pointer;color:var(--s2)">10 km</span>
+          </div>
+        </div>
       </div>
       <div class="set-sec" data-i18n="privacySec">Confidentialité</div>
       <div class="set-group">
@@ -2686,9 +2694,13 @@ window.fbSyncWatch = async function(add, drinkId, drinkName, lat, lng) {
     var user = await ensureAuthed();
     var wid = user.uid + "_" + drinkId;
     if (add) {
+      // Rayon d'alerte choisi par l'utilisateur (5 ou 10 km) — le serveur ne
+      // prévient que si la boisson est signalée dans ce périmètre. 10 par défaut.
+      var radius = Number(window.magoHuntRadius) || 10;
       await setDoc(doc(db, "watches", wid), {
         uid: user.uid, drinkId: Number(drinkId), drinkName: String(drinkName || "").slice(0, 60),
         lat: lat != null ? lat : null, lng: lng != null ? lng : null,
+        radius: radius,
         createdAt: serverTimestamp()
       });
     } else {
@@ -8561,6 +8573,36 @@ var drinkWatches=[];
 try{drinkWatches=JSON.parse(localStorage.getItem("magoWatch")||"[]");}catch(e){}
 function saveWatches(){try{localStorage.setItem("magoWatch",JSON.stringify(drinkWatches));}catch(e){}}
 function isWatched(id){return drinkWatches.some(function(w){return Number(w.id)===Number(id);});}
+/* Rayon d'alerte des chasses : la personne choisit d'être prévenue quand sa
+   boisson est signalée dans un rayon de 5 ou 10 km autour d'elle. Réglage
+   global (localStorage), 10 km par défaut, écrit dans chaque doc "watches"
+   pour que le serveur (notifyStockToWatchers) respecte SON choix. */
+window.magoHuntRadius=10;
+try{var _hr=Number(localStorage.getItem("magoHuntRadius"));if(_hr===5||_hr===10)window.magoHuntRadius=_hr;}catch(e){}
+function setHuntRadius(km){
+  km=(Number(km)===5)?5:10;
+  window.magoHuntRadius=km;
+  try{localStorage.setItem("magoHuntRadius",String(km));}catch(e){}
+  try{playSound("pop");}catch(e){}
+  // Applique le nouveau rayon aux chasses DÉJÀ actives (réécrit leurs docs).
+  try{
+    (drinkWatches||[]).forEach(function(w){
+      if(window.fbSyncWatch)window.fbSyncWatch(true,w.id,w.name,(w.lat!=null?w.lat:userLat),(w.lng!=null?w.lng:userLng));
+    });
+  }catch(e){}
+  try{updateHuntRadiusUI();}catch(e){}
+  toast("Alerte réglée sur "+km+" km");
+}
+function updateHuntRadiusUI(){
+  var km=Number(window.magoHuntRadius)||10;
+  ["5","10"].forEach(function(v){
+    var el=document.getElementById("hr-opt-"+v);if(!el)return;
+    var on=(String(km)===v);
+    el.style.background=on?"var(--s1)":"transparent";
+    el.style.color=on?"var(--app-bg)":"var(--s2)";
+    el.setAttribute("aria-pressed",on?"true":"false");
+  });
+}
 function toggleWatch(d){
   var i=drinkWatches.findIndex(function(w){return Number(w.id)===Number(d.id);});
   if(i!==-1){
@@ -8570,7 +8612,7 @@ function toggleWatch(d){
   }else{
     drinkWatches.push({id:d.id,name:d.name,emoji:d.emoji,lat:userLat||null,lng:userLng||null,created:Date.now(),triggered:false});
     playSound("pop");
-    toast("Alerte activ\u00e9e \u00B7 une chasse est lanc\u00e9e pr\u00E8s de toi ");
+    toast("Alerte activ\u00e9e \u00B7 rayon "+(Number(window.magoHuntRadius)||10)+" km \u00B7 chasse lanc\u00e9e pr\u00E8s de toi");
     // Chasse de zone : les gens autour verront que cette boisson est recherch\u00e9e
     if(window.fbJoinHunt)window.fbJoinHunt(d.id,d.name,d.emoji,userLat,userLng);
     pushActivity({
@@ -11320,6 +11362,7 @@ function refreshNotifState(){
   // La ligne "Tester la notification" n'a de sens qu'une fois le push actif.
   var tr=document.getElementById("notif-test-row");
   if(tr)tr.style.display=(p==="granted"&&window._pushToken)?"":"none";
+  try{updateHuntRadiusUI();}catch(e){}
 }
 function settingsTestPush(){
   if(!window._pushToken){toast("Active d'abord les notifications");playSound("err");return;}

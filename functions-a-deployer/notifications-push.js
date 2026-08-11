@@ -211,7 +211,9 @@ exports.notifyStockToWatchers = onDocumentUpdated(
       } catch (e) { console.warn("watches query:", e && e.message); continue; }
       for (const w of watchSnap.docs) {
         const wd = w.data();
-        if (sLat != null && wd.lat != null && _dist(sLat, sLng, wd.lat, wd.lng) > 12) continue;
+        // Rayon choisi par la personne (5 ou 10 km) ; 10 par défaut si absent.
+        const radius = (wd.radius === 5 || wd.radius === 10) ? wd.radius : 10;
+        if (sLat != null && wd.lat != null && _dist(sLat, sLng, wd.lat, wd.lng) > radius) continue;
         const dName = String(wd.drinkName || "Ta boisson").slice(0, 40);
         const storeId = String(event.params.id);
         await pushToUser(
