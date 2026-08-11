@@ -1789,15 +1789,14 @@ window.fbLoadNearbyHunts = async function(lat, lng, radiusKm) {
       var near = 0, mine = false;
       Object.keys(seekers).forEach(function(uid) {
         var s = seekers[uid]; if (!s || !s.at || s.at < fresh) return;
+        // On EXCLUT seulement quand on est SÛR que c'est trop loin (les deux
+        // positions connues ET distance > R). Si une position manque (GPS pas
+        // prêt côté viewer OU côté chercheur), on INCLUT quand même : mieux vaut
+        // montrer une vraie chasse que la cacher — c'était LE bug qui empêchait
+        // de voir la chasse lancée par quelqu'un d'autre (ex: ton père).
         if (lat != null && s.lat != null) {
           var dLa = (lat - s.lat) * 111, dLo = (lng - s.lng) * 111 * Math.cos(lat * Math.PI / 180);
           if (Math.sqrt(dLa * dLa + dLo * dLo) > R) return;
-        } else if (uid !== myUid) {
-          // Sans position (viewer ou chercheur), on ne peut PAS affirmer
-          // "près de toi" : on ne compte alors que soi-même (les chasses des
-          // autres restent masquées tant que le GPS n'a pas répondu — évite
-          // d'afficher des chasses de l'autre bout du monde comme locales).
-          return;
         }
         near++; if (uid === myUid) mine = true;
       });
@@ -7130,6 +7129,7 @@ function toggleWatch(d){
     toast("Veille retir\u00e9e");
     if(window.fbLeaveHunt)window.fbLeaveHunt(d.id);
   }else{
+    try{refreshLocation();}catch(e){}   // position fra\u00eeche pour que la chasse soit g\u00e9olocalis\u00e9e
     drinkWatches.push({id:d.id,name:d.name,emoji:d.emoji,lat:userLat||null,lng:userLng||null,created:Date.now(),triggered:false});
     playSound("pop");
     toast("Alerte activ\u00e9e \u00B7 rayon "+(Number(window.magoHuntRadius)||10)+" km \u00B7 chasse lanc\u00e9e pr\u00E8s de toi");
