@@ -10700,9 +10700,11 @@ function fmtDist(m){
 // Masque le bouton "+ Magasin" quand une fiche/feuille/itineraire occupe le bas
 // de la carte explore (il chevauchait la fiche magasin), le reaffiche sinon.
 function setExploreFab(show){
-  var f=document.getElementById("explore-add-fab");if(!f)return;
-  if(show){f.style.opacity="1";f.style.transform="none";f.style.pointerEvents="auto";}
-  else{f.style.opacity="0";f.style.transform="translateY(8px)";f.style.pointerEvents="none";}
+  ["explore-add-fab","explore-recenter-fab"].forEach(function(id){
+    var f=document.getElementById(id);if(!f)return;
+    if(show){f.style.opacity="1";f.style.transform="none";f.style.pointerEvents="auto";}
+    else{f.style.opacity="0";f.style.transform="translateY(8px)";f.style.pointerEvents="none";}
+  });
 }
 function exploreShowCard(s){
   var card=document.getElementById("explore-store-card");
@@ -10845,6 +10847,14 @@ function exploreCenterUser(){
 }
 function exploreAddStore(){
   if(exploreFilter&&typeof drinkLocate==="function"){drinkLocate();return;}
+  // Ancien bug : openAddStoreForm() écrivait dans le panneau du sélecteur qui
+  // n'était PAS ouvert depuis la carte -> le bouton "+ Magasin" ne faisait rien.
+  // On ouvre donc le sélecteur PUIS le formulaire d'ajout, tout de suite visible.
+  if(typeof openStorePicker==="function"&&typeof openAddStoreForm==="function"){
+    openStorePicker();
+    setTimeout(function(){try{openAddStoreForm();}catch(e){}},70);
+    return;
+  }
   if(typeof openAddStoreForm==="function"){openAddStoreForm();return;}
   toast("Ajout indisponible pour le moment");
 }
@@ -11115,6 +11125,7 @@ function openExploreMap(opts){
       '<div id="explore-city-results" style="position:absolute;top:calc(122px + env(safe-area-inset-top));left:14px;right:14px;z-index:1300"></div>'+
       '<div id="explore-map" style="flex:1"></div>'+
       '<div id="explore-add-fab" onclick="exploreAddStore()" role="button" tabindex="0" aria-label="Ajouter un magasin" onkeydown="if(event.key===\'Enter\'){exploreAddStore()}" style="position:absolute;right:14px;bottom:calc(150px + env(safe-area-inset-bottom));z-index:1150;display:flex;align-items:center;gap:7px;padding:11px 15px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;box-shadow:0 6px 18px rgba(0,0,0,.28);cursor:pointer;transition:opacity .2s,transform .2s">+ Magasin</div>'+
+      '<div id="explore-recenter-fab" onclick="exploreCenterUser()" role="button" tabindex="0" aria-label="Recentrer sur ma position" onkeydown="if(event.key===\'Enter\'){exploreCenterUser()}" style="position:absolute;right:14px;bottom:calc(202px + env(safe-area-inset-bottom));z-index:1150;width:46px;height:46px;border-radius:50%;background:var(--app-bg);border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,.24);cursor:pointer;transition:opacity .2s,transform .2s"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.4" stroke="var(--s1)" stroke-width="2"/><path d="M12 2v3.6M12 18.4V22M2 12h3.6M18.4 12H22" stroke="var(--s1)" stroke-width="2" stroke-linecap="round"/></svg></div>'+
       '<div id="explore-store-card" role="button" tabindex="0" style="display:none;position:absolute;bottom:calc(88px + env(safe-area-inset-bottom));left:14px;right:14px;background:var(--app-bg);border:1.5px solid var(--border);border-radius:18px;padding:12px 14px;align-items:center;gap:12px;box-shadow:0 8px 24px rgba(0,0,0,.22);cursor:pointer;z-index:1200"></div>'+
       '<div id="explore-status" style="position:absolute;bottom:calc(92px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--app-bg);border:1.5px solid var(--border);border-radius:999px;padding:8px 16px;font-size:12px;font-weight:700;color:var(--s1);box-shadow:0 4px 14px rgba(0,0,0,.18);white-space:nowrap;z-index:1100">Chargement\u2026</div>'+
       '<div id="explore-sheet"><div id="explore-sheet-head" role="button" tabindex="0" aria-label="Glisser pour ouvrir ou fermer la liste des magasins" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();exploreToggleSheet();}"><div id="explore-sheet-grip"></div><div style="display:flex;align-items:center;justify-content:space-between"><div id="explore-sheet-title" style="font-size:13.5px;font-weight:800;color:var(--s1)">Magasins autour de toi</div><div id="explore-sheet-chev" style="font-size:12px;font-weight:700;color:var(--s2);white-space:nowrap">Voir la liste \u25b2</div></div></div><div id="explore-sheet-list"></div></div>';
