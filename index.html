@@ -487,6 +487,11 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div class="set-txt"><div class="set-title">Tester la notification</div><div class="set-sub">Envoie-toi une notif de test — ferme l'app juste après pour vérifier</div></div>
           <span class="set-chev">›</span>
         </div>
+        <div class="set-row" onclick="runNotifDiagnostic()" role="button" tabindex="0" aria-label="Diagnostic des notifications" onkeydown="if(event.key==='Enter'){runNotifDiagnostic();}">
+          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg></div>
+          <div class="set-txt"><div class="set-title">Diagnostic des notifications</div><div class="set-sub">Vérifie ce qui bloque les notifs de chasse (à m'envoyer en capture)</div></div>
+          <span class="set-chev">›</span>
+        </div>
         <div class="set-row static hr-block">
           <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:16px">
             <div class="set-txt" style="flex:1">
@@ -1865,6 +1870,43 @@ window.fbEnablePush = async function(lat, lng) {
     return { ok: true };
   } catch (e) { console.warn("Push setup:", e); return { ok: false, reason: String(e && e.message || e) }; }
 };
+/* LE correctif clé des notifs de zone : garder la position du jeton push À JOUR
+   côté serveur. Sans ça, le serveur ne sait pas où tu es et ne peut pas te
+   notifier "près de toi" (alors que le test direct, lui, marchait). Appelé dès
+   que le GPS répond, si les notifs sont activées. */
+window.fbUpdatePushPosition = async function(lat, lng) {
+  try {
+    if (!window._pushToken || lat == null) return;
+    var user = auth.currentUser; if (!user) return;
+    await setDoc(doc(db, "pushTokens", user.uid), { lat: lat, lng: lng, updatedAt: serverTimestamp() }, { merge: true });
+  } catch (e) { /* silencieux */ }
+};
+/* Diagnostic : lit le document push de l'utilisateur (jeton + position enregistrée)
+   pour montrer, dans l'app, ce que le serveur voit réellement. */
+window.fbGetMyPushDoc = async function() {
+  try {
+    var user = await ensureAuthed();
+    var s = await getDoc(doc(db, "pushTokens", user.uid));
+    if (!s.exists()) return { exists: false, uid: user.uid };
+    var d = s.data() || {};
+    return { exists: true, uid: user.uid, hasToken: !!d.token, lat: (d.lat != null ? d.lat : null), lng: (d.lng != null ? d.lng : null), updatedAt: (d.updatedAt && d.updatedAt.toMillis ? d.updatedAt.toMillis() : null) };
+  } catch (e) { return { exists: false, error: String(e && (e.code || e.message) || e) }; }
+};
+/* Diagnostic : combien de MES chasses ont une position enregistrée (sinon elles
+   sont invisibles/insonorisées pour les autres). */
+window.fbGetMyHuntsInfo = async function() {
+  try {
+    var user = await ensureAuthed();
+    var snap = await getDocs(query(collection(db, "hunts"), limit(200)));
+    var total = 0, mineTotal = 0, mineWithPos = 0;
+    snap.forEach(function(dd) {
+      var h = dd.data() || {}; var seekers = h.seekers || {}; total++;
+      var mine = seekers[user.uid];
+      if (mine) { mineTotal++; if (mine.lat != null) mineWithPos++; }
+    });
+    return { totalHunts: total, mineTotal: mineTotal, mineWithPos: mineWithPos };
+  } catch (e) { return { error: String(e && (e.code || e.message) || e) }; }
+};
 /* Bouton "Tester la notification" : appelle la Cloud Function sendTestPush qui
    renvoie un vrai push FCM sur CE téléphone. Preuve app-fermée pour l'utilisateur.
    Region europe-west1 (doit matcher le déploiement des fonctions). */
@@ -2412,6 +2454,7 @@ function initGPS(){
   // point recyclé quand on a bougé.
   navigator.geolocation.getCurrentPosition(function(pos){
     userLat=pos.coords.latitude;userLng=pos.coords.longitude;
+    if(window.fbUpdatePushPosition)window.fbUpdatePushPosition(userLat,userLng); // serveur = ta vraie position
     // Recalcule immédiatement les distances des magasins déjà en mémoire (chargés autour du centre par défaut)
     STORES.forEach(function(s){s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));});
     STORES.sort(function(a,b){return(a.dist||0)-(b.dist||0);});
@@ -2460,6 +2503,7 @@ function refreshLocation(cb){
     _gpsRefreshing=false;
     userLat=pos.coords.latitude;userLng=pos.coords.longitude;
     _lastGpsRefresh=Date.now();
+    if(window.fbUpdatePushPosition)window.fbUpdatePushPosition(userLat,userLng); // serveur = ta vraie position
     STORES.forEach(function(s){if(typeof s.lat==="number")s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));});
     STORES.sort(function(a,b){return(a.dist||0)-(b.dist||0);});
     var dot=document.getElementById("gps-dot");if(dot)dot.style.background="#22c55e";
@@ -10040,6 +10084,65 @@ function settingsTestPush(){
     else if(r&&r.reason==="not-deployed"){toast("Fonction de test pas encore déployée côté serveur");playSound("err");}
     else{toast("Échec du test — réessaie");playSound("err");}
   });
+}
+/* Diagnostic notifications : montre EXACTEMENT ce que le serveur voit, pour ne
+   plus deviner. Une capture de cet écran = on sait quelle condition bloque. */
+function _diagRow(ok,label,detail){
+  return '<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">'+
+    '<span style="flex-shrink:0;font-size:16px;line-height:1.3">'+(ok?"✅":"❌")+'</span>'+
+    '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:800;color:var(--s1)">'+label+'</div>'+
+    (detail?'<div style="font-size:11.5px;color:var(--s2);margin-top:2px;line-height:1.4;word-break:break-word">'+detail+'</div>':'')+'</div></div>';
+}
+async function runNotifDiagnostic(){
+  try{playSound("pop");}catch(e){}
+  var old=document.getElementById("notif-diag");if(old)old.remove();
+  var ios=(typeof isIOSDevice==="function")?isIOSDevice():false;
+  var installed=(typeof isStandaloneMode==="function")?isStandaloneMode():false;
+  var perm=("Notification" in window)?Notification.permission:"unsupported";
+  var hasToken=!!window._pushToken;
+  var gps=(typeof userLat==="number"&&userLat)?(userLat.toFixed(4)+", "+userLng.toFixed(4)):null;
+  var pushDoc={exists:false},hunts={};
+  try{if(window.fbGetMyPushDoc)pushDoc=await window.fbGetMyPushDoc();}catch(e){}
+  try{if(window.fbGetMyHuntsInfo)hunts=await window.fbGetMyHuntsInfo();}catch(e){}
+  var serverPos=!!(pushDoc&&pushDoc.exists&&pushDoc.lat!=null);
+  var tokenServer=!!(pushDoc&&pushDoc.exists&&pushDoc.hasToken);
+  var verdict,vcol;
+  if(ios&&!installed){verdict="Installe d'abord l'app sur l'écran d'accueil (obligatoire sur iPhone), puis autorise les notifications.";vcol="#b45309";}
+  else if(perm!=="granted"){verdict="Autorise les notifications : appuie sur « Notifications » juste au-dessus.";vcol="#b45309";}
+  else if(!hasToken||!tokenServer){verdict="Jeton push manquant : rouvre l'app et réappuie sur « Notifications » pour le réactiver.";vcol="#b45309";}
+  else if(!serverPos){verdict="C'EST ÇA LE BLOCAGE : ta position n'est pas enregistrée côté serveur, donc il ne peut pas te notifier par zone. Appuie sur « Enregistrer ma position » ci-dessous, laisse l'app ouverte 5 s, puis relance ce diagnostic.";vcol="#b45309";}
+  else{verdict="Tout est bon côté téléphone. Si une notif de chasse n'arrive toujours pas, c'est la fonction serveur (notifyHuntNearby) — envoie-moi cette capture.";vcol="#15803d";}
+  var rows=_diagRow(!ios||installed,"App sur l'écran d'accueil",installed?"Oui":(ios?"NON — indispensable sur iPhone":"Non applicable (Android/PC)"))+
+    _diagRow(perm==="granted","Notifications autorisées","État : "+perm)+
+    _diagRow(hasToken&&tokenServer,"Jeton push actif",(hasToken?"local: oui":"local: non")+" · "+(tokenServer?"serveur: oui":"serveur: non")+(pushDoc&&pushDoc.error?(" · err: "+pushDoc.error):""))+
+    _diagRow(serverPos,"Position enregistrée (serveur)",serverPos?("oui — "+Number(pushDoc.lat).toFixed(3)+", "+Number(pushDoc.lng).toFixed(3)):"NON — le serveur ne sait pas où tu es")+
+    _diagRow(!!gps,"GPS actuel dans l'app",gps||"non détecté (active ta position)")+
+    _diagRow((hunts&&hunts.mineTotal)?hunts.mineWithPos>0:true,"Tes chasses géolocalisées",(hunts&&hunts.mineTotal!=null)?(hunts.mineWithPos+"/"+hunts.mineTotal+" avec position · "+(hunts.totalHunts||0)+" chasses au total"):(hunts&&hunts.error?("err: "+hunts.error):"—"));
+  var ov=document.createElement("div");
+  ov.id="notif-diag";
+  ov.style.cssText="position:fixed;inset:0;z-index:100000;background:rgba(12,10,8,.55);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:18px";
+  ov.onclick=function(e){if(e.target===ov)ov.remove();};
+  ov.innerHTML='<div style="width:100%;max-width:420px;max-height:86vh;overflow-y:auto;background:var(--bg2);border-radius:22px;padding:20px 20px calc(18px + env(safe-area-inset-bottom))">'+
+    '<div style="font-size:18px;font-weight:800;color:var(--s1);margin-bottom:2px">Diagnostic notifications</div>'+
+    '<div style="font-size:12px;color:var(--s2);margin-bottom:12px">Envoie-moi une capture de cet écran.</div>'+
+    rows+
+    '<div style="margin-top:14px;padding:12px 14px;border-radius:14px;background:'+(vcol==="#15803d"?"rgba(21,128,61,.10)":"rgba(180,83,9,.10)")+';border:1px solid '+(vcol==="#15803d"?"rgba(21,128,61,.3)":"rgba(180,83,9,.3)")+';font-size:12.5px;font-weight:700;line-height:1.5;color:'+vcol+'">'+verdict+'</div>'+
+    '<div onclick="diagFixPosition()" role="button" tabindex="0" style="margin-top:12px;text-align:center;padding:13px;border-radius:14px;background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer">Enregistrer ma position</div>'+
+    '<div onclick="var p=document.getElementById(\'notif-diag\');if(p)p.remove();" role="button" tabindex="0" style="margin-top:8px;text-align:center;padding:11px;font-size:13px;font-weight:700;color:var(--s2);cursor:pointer">Fermer</div>'+
+  '</div>';
+  document.body.appendChild(ov);
+}
+function diagFixPosition(){
+  toast("Récupération de ta position…");
+  var done=function(){
+    if(window.fbUpdatePushPosition&&typeof userLat==="number"&&userLat){
+      window.fbUpdatePushPosition(userLat,userLng);
+      toast("Position enregistrée ! Relance le diagnostic dans 3 s");
+      playSound("win");
+    }else{toast("Position introuvable — autorise la localisation");playSound("err");}
+  };
+  if(typeof refreshLocation==="function")refreshLocation(function(){done();});
+  else done();
 }
 function settingsEnablePush(){
   if(!("Notification" in window)){toast("Non support\u00e9es ici");playSound("err");return;}
