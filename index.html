@@ -5217,11 +5217,11 @@ function openAddStoreForm(){
     b.onclick=function(){
       tEl.querySelectorAll("button").forEach(function(x){x.style.background="var(--bg3)";x.style.color="var(--s2)";});
       b.style.background="var(--s1)";b.style.color="var(--app-bg)";
-      tEl.dataset.emoji=t[0];
+      tEl.dataset.emoji=t[0];tEl.dataset.type=t[1];
     };
     tEl.appendChild(b);
   });
-  tEl.dataset.emoji=types[0][0];
+  tEl.dataset.emoji=types[0][0];tEl.dataset.type=types[0][1];
   renderAddStorePos();
   document.getElementById("add-store-cancel").onclick=function(){addStorePlacing=false;renderStorePicker();};
   document.getElementById("add-store-save").onclick=saveNewStore;
@@ -5238,6 +5238,21 @@ function renderAddStorePos(){
   var html="";
   if(addStorePos){
     html="Position : "+(addStorePos.src==="gps"?"ta position GPS actuelle":"choisie sur la carte")+" \u2713";
+    // Adresse + numero recuperes AUTOMATIQUEMENT (une seule fois par position).
+    if(addStorePos.address){
+      html+='<br><span style="color:var(--s1);font-weight:800">\uD83D\uDCCD '+sanitize(addStorePos.address)+'</span>';
+    }else if(addStorePos._geoTried){
+      html+='<br><span style="color:var(--s3)">Adresse non trouv\u00E9e \u2014 la position suffit</span>';
+    }else{
+      html+='<br><span style="color:var(--s3)">Recherche de l\'adresse\u2026</span>';
+      (function(pos){
+        reverseGeocodeAddr(pos.lat,pos.lng,function(addr){
+          if(addStorePos!==pos)return;
+          addStorePos.address=addr||"";addStorePos._geoTried=true;
+          renderAddStorePos();
+        });
+      })(addStorePos);
+    }
   }else{
     html="Position requise \u2014 pas de GPS d\u00E9tect\u00E9";
   }
@@ -5270,14 +5285,20 @@ function saveNewStore(){
   var name=((document.getElementById("add-store-name")||{}).value||"").trim();
   if(name.length<2){toast("Donne un nom au magasin");playSound("err");return;}
   if(!addStorePos){toast("Place le magasin : GPS ou carte");playSound("err");return;}
-  var emoji=(document.getElementById("add-store-types")||{dataset:{}}).dataset.emoji||"";
+  var typesEl=document.getElementById("add-store-types")||{dataset:{}};
+  var emoji=typesEl.dataset.emoji||"";
+  var stype=typesEl.dataset.type||"";
   var s={
     id:"u"+Date.now(),
     name:name,
     emoji:emoji,
+    type:stype,
     lat:addStorePos.lat,lng:addStorePos.lng,
     drinks:[],confirmations:{},community:true
   };
+  // Adresse + numero detectes automatiquement (geocodage inverse) : on les
+  // enregistre avec le magasin pour toute la communaute.
+  if(addStorePos.address)s.address=addStorePos.address;
   s.fbId=s.id;
   // Distance calculee localement (haversineKm vit dans le module Firebase,
   // inaccessible depuis ce script — reference directe = ReferenceError)
@@ -5337,8 +5358,16 @@ function updatePickerMapMarkers(list){
       '<button onclick="pickerSelectStore(\''+String(s.id).replace(/'/g,"")+'\')" style="padding:7px 14px;border-radius:10px;border:none;background:#1a1714;color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">C\'est ici</button></div>');
     pts.push([s.lat,s.lng]);
   });
-  if(userLat)pts.push([userLat,userLng]);
-  if(pts.length){
+  // Cadrage : en recherche ("lidl") on cadre tous les résultats ; sinon on
+  // CENTRE sur toi (zoom proche) pour que tu voies direct ton coin — c'était la
+  // gêne : la carte partait cadrer des magasins lointains au lieu de toi.
+  var qv=((document.getElementById("store-picker-q")||{}).value||"").trim();
+  if(qv&&pts.length){
+    if(userLat)pts.push([userLat,userLng]);
+    try{window._pickerMap.fitBounds(pts,{padding:[28,28],maxZoom:16});}catch(e){}
+  }else if(userLat){
+    try{window._pickerMap.setView([userLat,userLng],15);}catch(e){}
+  }else if(pts.length){
     try{window._pickerMap.fitBounds(pts,{padding:[28,28],maxZoom:15});}catch(e){}
   }
 }
@@ -9448,6 +9477,25 @@ function resolveStoreAddress(s){
         if(subEl)subEl.textContent=(s.brand?s.brand+" · ":"")+(s.type||"")+" · "+full;
       }
     }).catch(function(){});
+}
+/* Géocodage inverse générique (coords -> "12 Rue X, Bruxelles"), mis en cache
+   par coordonnées arrondies. Sert à remplir AUTOMATIQUEMENT l'adresse + le
+   numéro d'un magasin qu'on ajoute — plus besoin de la taper à la main.
+   cb reçoit la chaîne trouvée, ou "" si Nominatim ne renvoie rien. */
+function reverseGeocodeAddr(lat,lng,cb){
+  if(typeof lat!=="number"||typeof lng!=="number"){cb&&cb("");return;}
+  var key=lat.toFixed(4)+","+lng.toFixed(4);
+  if(geocodeCache[key]){cb&&cb(geocodeCache[key]);return;}
+  fetch("https://nominatim.openstreetmap.org/reverse?lat="+lat+"&lon="+lng+"&format=json")
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var a=(d&&d.address)||{};
+      var street=(a.house_number?a.house_number+" ":"")+(a.road||a.street||a.pedestrian||"");
+      var city=a.city||a.town||a.village||a.municipality||"";
+      var full=[street,city].filter(Boolean).join(", ");
+      if(full){geocodeCache[key]=full;try{localStorage.setItem("magoGeocodeCache",JSON.stringify(geocodeCache));}catch(e){}}
+      cb&&cb(full||"");
+    }).catch(function(){cb&&cb("");});
 }
 function storeIsPartner(s){
   return !!(s&&s.verifiedSource&&String(s.verifiedSource).indexOf("photos")!==-1);
