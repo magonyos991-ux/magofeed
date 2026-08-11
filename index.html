@@ -1777,6 +1777,20 @@ window.fbSimulateHunt = async function(lat, lng, drinkId, drinkName) {
     return { ok: true, docId: docId };
   } catch (e) { return { ok: false, reason: String(e && (e.code || e.message) || e) }; }
 };
+/* Nettoyage : efface TOUTES les chasses (collection hunts). Sert à repartir sur
+   une base propre après les tests, pour que chaque « 1 personne cherche » soit
+   ensuite une vraie personne. Admin uniquement (les règles veillent aussi). */
+window.fbWipeAllHunts = async function() {
+  try {
+    var snap = await getDocs(collection(db, "hunts"));
+    var total = snap.docs.length, ok = 0, fail = 0, lastErr = null;
+    for (var i = 0; i < snap.docs.length; i++) {
+      try { await deleteDoc(snap.docs[i].ref); ok++; }
+      catch (e) { fail++; lastErr = String(e && (e.code || e.message) || e); }
+    }
+    return { ok: fail === 0, total: total, deleted: ok, failed: fail, reason: lastErr };
+  } catch (e) { return { ok: false, reason: String(e && (e.code || e.message) || e) }; }
+};
 window.fbJoinHunt = async function(drinkId, drinkName, emoji, lat, lng) {
   try {
     var user = await ensureAuthed();
@@ -10180,6 +10194,7 @@ async function runNotifDiagnostic(){
     '<div onclick="diagFixPosition()" role="button" tabindex="0" style="margin-top:12px;text-align:center;padding:13px;border-radius:14px;background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer">Enregistrer ma position</div>'+
     '<div onclick="simulateNeighborHunt()" role="button" tabindex="0" style="margin-top:8px;text-align:center;padding:13px;border-radius:14px;background:#e67e22;color:#fff;font-size:14px;font-weight:800;cursor:pointer">🧪 Tester : simuler une chasse voisine</div>'+
     '<div style="margin-top:6px;font-size:10.5px;color:var(--s3);text-align:center;line-height:1.4">Simule quelqu\'un qui lance une chasse près de toi. Ferme l\'app après : tu dois recevoir la notif. Test seul, sans 2e téléphone.</div>'+
+    (isAdmin?'<div onclick="wipeTestHunts()" role="button" tabindex="0" style="margin-top:12px;text-align:center;padding:12px;border-radius:14px;background:transparent;border:1.5px solid #dc2626;color:#dc2626;font-size:13px;font-weight:800;cursor:pointer">🗑️ Effacer toutes les chasses de test (repartir propre)</div>':'')+
     '<div onclick="var p=document.getElementById(\'notif-diag\');if(p)p.remove();" role="button" tabindex="0" style="margin-top:10px;text-align:center;padding:11px;font-size:13px;font-weight:700;color:var(--s2);cursor:pointer">Fermer</div>'+
   '</div>';
   document.body.appendChild(ov);
@@ -10218,6 +10233,27 @@ function simulateNeighborHunt(){
       var why=String(r&&r.reason||"?");
       if(why.indexOf("permission")>=0||why.indexOf("PERMISSION")>=0)toast("Bloqué par les règles Firestore — envoie-moi une capture, on ajustera");
       else toast("Échec : "+why);
+      playSound("err");
+    }
+  });
+}
+/* Admin : efface toutes les chasses (base propre après tests). */
+function wipeTestHunts(){
+  if(!isAdmin){toast("Réservé à l'admin");playSound("err");return;}
+  if(!window.fbWipeAllHunts){toast("Indisponible ici");playSound("err");return;}
+  var okGo=true; try{okGo=confirm("Effacer TOUTES les chasses (tests inclus) pour repartir propre ?\n\nÀ faire une seule fois. Ensuite, chaque « 1 personne cherche » sera une vraie personne.");}catch(e){}
+  if(!okGo)return;
+  toast("Nettoyage des chasses…");
+  window.fbWipeAllHunts().then(function(r){
+    if(r&&r.ok){
+      playSound("win");
+      toast("✓ "+r.deleted+" chasse(s) effacée(s). Base propre !");
+      try{var p=document.getElementById("notif-diag");if(p)p.remove();}catch(e){}
+      try{if(typeof renderHunts==="function")renderHunts();}catch(e){}
+    }else{
+      var why=String(r&&r.reason||"?");
+      if(why.indexOf("permission")>=0||why.indexOf("PERMISSION")>=0)toast("Bloqué par les règles Firestore — dis-le-moi, je te donne la règle à ajouter");
+      else toast("Partiel : "+(r&&r.deleted||0)+" effacées, "+(r&&r.failed||0)+" échecs");
       playSound("err");
     }
   });
