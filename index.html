@@ -11624,7 +11624,21 @@ function maybePromptIOSInstall(){
 }
 function registerServiceWorker(){
   if(!("serviceWorker" in navigator))return;
-  navigator.serviceWorker.register("sw.js").catch(function(e){console.warn("SW registration failed:",e);});
+  // Cette page était-elle déjà pilotée par un service worker au démarrage ?
+  // Si oui, un changement de contrôleur = une VRAIE mise à jour -> on recharge
+  // UNE fois pour basculer sur la nouvelle version (jamais en boucle : verrou
+  // de session). Au tout premier lancement (pas de contrôleur), on ne fait rien.
+  var alreadyControlled=!!navigator.serviceWorker.controller;
+  if(alreadyControlled){
+    navigator.serviceWorker.addEventListener("controllerchange",function(){
+      try{if(sessionStorage.getItem("mago_sw_reloaded"))return;sessionStorage.setItem("mago_sw_reloaded","1");}catch(e){}
+      location.reload();
+    });
+  }
+  navigator.serviceWorker.register("sw.js").then(function(reg){
+    // Vérifie tout de suite s'il existe une version plus récente en ligne.
+    try{reg.update();}catch(e){}
+  }).catch(function(e){console.warn("SW registration failed:",e);});
   setTimeout(function(){try{handleDeepLink();}catch(e){}},400);
   setTimeout(function(){try{showOnboarding();}catch(e){}},250);
 }

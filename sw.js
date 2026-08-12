@@ -2,7 +2,7 @@
    Les données Firestore, la géocodification et les tuiles de carte restent toujours en direct (jamais mises en cache). */
 /* © 2026 Magofeed — Tous droits réservés. Titulaire des droits (mention légale) : Ilias Benabdellah.
    Marqueur de propriété intellectuelle — ne pas retirer. Antériorité : historique Git horodaté. */
-const CACHE_NAME = "magofeed-v12";
+const CACHE_NAME = "magofeed-v13";
 /* Chemins RELATIFS au scope du service worker : fonctionne aussi bien a la racine
    d'un domaine (Netlify) que dans un sous-dossier (GitHub Pages /magofeed/).
    Les chemins absolus "/index.html" pointaient hors du sous-dossier sur GitHub
@@ -69,19 +69,19 @@ self.addEventListener("fetch", function(event) {
     return;
   }
 
-  // Même origine (app shell, icônes) : cache d'abord, réseau en secours + rafraîchissement silencieux
+  // Même origine (index.html, app.css, data/*.js, icônes) : RÉSEAU D'ABORD.
+  // Dès qu'il y a une connexion, on charge TOUJOURS la dernière version en ligne
+  // (fini l'ancienne version bloquée en cache et les mélanges nouveau/ancien qui
+  // faisaient planter l'app). Le cache ne sert plus QUE de secours hors-ligne.
   if (url.origin === self.location.origin) {
     event.respondWith(
-      caches.match(req).then(function(cached) {
-        var network = fetch(req).then(function(res) {
-          if (res && res.status === 200) {
-            var copy = res.clone();
-            caches.open(CACHE_NAME).then(function(cache) { cache.put(req, copy); });
-          }
-          return res;
-        }).catch(function() { return cached; });
-        return cached || network;
-      })
+      fetch(req).then(function(res) {
+        if (res && res.status === 200) {
+          var copy = res.clone();
+          caches.open(CACHE_NAME).then(function(cache) { cache.put(req, copy); });
+        }
+        return res;
+      }).catch(function() { return caches.match(req); })
     );
     return;
   }
