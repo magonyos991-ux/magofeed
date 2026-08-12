@@ -11820,6 +11820,18 @@ document.getElementById("q").addEventListener("blur",function(){var v=document.g
 /* ================================
    INIT
 ================================ */
+/* ── Filet de sécurité global ──────────────────────────────────────────────
+   Une erreur imprévue (dans un gestionnaire d'événement, un minuteur, une
+   promesse, un flux asynchrone) ne doit JAMAIS figer toute l'app ni donner
+   l'impression qu'elle "redémarre toute seule". On l'attrape, on la note en
+   console pour le débogage, et l'app continue de tourner normalement. */
+window.addEventListener("error",function(e){
+  try{console.warn("[Magofeed] erreur interceptée:",(e&&(e.message||(e.error&&e.error.message)))||e);}catch(_){}
+});
+window.addEventListener("unhandledrejection",function(e){
+  try{console.warn("[Magofeed] promesse rejetée:",(e&&e.reason)||e);}catch(_){}
+  try{e.preventDefault();}catch(_){}
+});
 try{
   var savedMode=localStorage.getItem("magomode");
   var savedLang=localStorage.getItem("magolang");
@@ -12049,7 +12061,25 @@ try{
   // en production il relançait l'onboarding a chaque visite. Pour le revoir en dev,
   // utiliser le bouton "Revoir l'introduction" dans les parametres (resetOnboarding).
 }catch(e){
-  document.body.innerHTML='<div style="color:red;padding:20px;font-family:monospace;font-size:14px;background:#fff;position:fixed;inset:0;overflow:auto;z-index:9999"><b>ERREUR JS:</b><br>'+e.message+'<br><br><b>Stack:</b><br>'+(e.stack||'').replace(/\n/g,'<br>')+'</div>';
+  try{console.error("[Magofeed] erreur de démarrage:",e);}catch(_){}
+  // Plutôt qu'un mur de texte rouge (illisible et effrayant pour un utilisateur),
+  // on affiche un écran doux et on tente UNE récupération automatique : vider le
+  // cache puis recharger. Verrou de session -> jamais de boucle de rechargement.
+  var _triedRecover=false;try{_triedRecover=sessionStorage.getItem("mago_boot_recover")==="1";}catch(_){}
+  document.body.innerHTML='<div style="position:fixed;inset:0;background:#151210;color:#f4f0e9;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px;font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;z-index:99999">'+
+    '<div style="font-size:46px;margin-bottom:14px">🍹</div>'+
+    '<div style="font-size:18px;font-weight:800;margin-bottom:8px">Un instant…</div>'+
+    '<div style="font-size:14px;color:#9a8f80;max-width:300px;line-height:1.5;margin-bottom:24px">Magofeed a rencontré un petit souci au démarrage. On repart proprement, tes données sont en sécurité.</div>'+
+    '<button id="mago-recover" style="background:#f4f0e9;color:#151210;border:none;border-radius:14px;padding:13px 28px;font-size:15px;font-weight:800;cursor:pointer">Recharger l\'app</button></div>';
+  var _doRecover=function(){
+    try{sessionStorage.setItem("mago_boot_recover","1");}catch(_){}
+    if(window.caches&&caches.keys){
+      caches.keys().then(function(ks){return Promise.all(ks.map(function(k){return caches.delete(k);}));}).catch(function(){}).then(function(){location.reload();});
+    }else{location.reload();}
+  };
+  var _rb=document.getElementById("mago-recover");if(_rb)_rb.onclick=_doRecover;
+  // Récupération auto UNE seule fois (si pas déjà tentée dans cette session).
+  if(!_triedRecover)setTimeout(_doRecover,1300);
 }
 </script>
 </body>
