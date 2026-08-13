@@ -399,7 +399,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       <div id="leaderboard-list" style="padding:0 20px 20px"></div>
       <div style="padding:8px 20px 10px" class="t-section">Boissons favorites</div>
       <div id="fav-list" style="padding:0 20px 20px">
-        <div style="font-size:13px;font-weight:500;color:var(--s3);text-align:center;padding:16px 0">Aucune favorite pour l'instant — touche le cœur d'une boisson</div>
+        <div class="mt-empty"><div class="mt-empty-i"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5C7 16.5 3.5 13.2 3.5 9.3 3.5 6.6 5.6 4.5 8.2 4.5c1.6 0 3 .8 3.8 2 .8-1.2 2.2-2 3.8-2 2.6 0 4.7 2.1 4.7 4.8 0 3.9-3.5 7.2-8.5 11.2z"/></svg></div><div class="mt-empty-t">Aucune favorite</div><div class="mt-empty-s">Touche le cœur d'une boisson pour la garder ici, toujours à portée de main.</div></div>
       </div>
       <div style="padding:8px 20px 10px" class="t-section" id="t-badges">Badges</div>
       <div id="badges-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:0 20px 6px"></div>
@@ -2659,6 +2659,28 @@ function moveNavPill(animate){
 }
 window.addEventListener("resize",function(){try{moveNavPill(false);}catch(e){}});
 setTimeout(function(){try{moveNavPill(false);}catch(e){}},0);
+/* ── Etats vides soignes : partout le meme bloc (visuel + phrase + action)
+   au lieu d'une ligne de texte nue. Icones vectorielles maison. ── */
+var EMPTY_ICONS={
+  radar:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><path d="M12 1.6v2M12 20.4v2M1.6 12h2M20.4 12h2"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+  heart:'<path d="M12 20.5C7 16.5 3.5 13.2 3.5 9.3 3.5 6.6 5.6 4.5 8.2 4.5c1.6 0 3 .8 3.8 2 .8-1.2 2.2-2 3.8-2 2.6 0 4.7 2.1 4.7 4.8 0 3.9-3.5 7.2-8.5 11.2z"/>',
+  bell:'<path d="M18 9a6 6 0 1 0-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/>',
+  spark:'<path d="M12 2.5v3.2M12 18.3v3.2M2.5 12h3.2M18.3 12h3.2M5.3 5.3l2.2 2.2M16.5 16.5l2.2 2.2M5.3 18.7l2.2-2.2M16.5 7.5l2.2-2.2"/><circle cx="12" cy="12" r="3.2"/>'
+};
+function emptyStateHTML(icon,title,sub,btnLabel,onclick){
+  return '<div class="mt-empty">'+
+    '<div class="mt-empty-i"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'+(EMPTY_ICONS[icon]||EMPTY_ICONS.spark)+'</svg></div>'+
+    '<div class="mt-empty-t">'+title+'</div>'+
+    (sub?'<div class="mt-empty-s">'+sub+'</div>':"")+
+    (btnLabel?'<button class="mt-empty-b" onclick="'+onclick+'">'+btnLabel+'</button>':"")+
+  '</div>';
+}
+/* Action d'un etat vide : ferme une eventuelle feuille missions puis navigue */
+function emptyGo(tab){
+  var ms=document.getElementById("mission-sheet");if(ms)ms.remove();
+  navTo(tab);
+}
 function show(s){
   var cur=document.querySelector(".screen.on");
   var curId=cur?cur.id.replace(/^s-/,""):null;
@@ -2704,13 +2726,19 @@ function _showRaw(s){
   }
   var navScreens=["home","search","scan","discover","profile"];
   var activeTab=navScreens.includes(s)?s:(["settings","privacy","terms"].includes(s)?"profile":null);
+  var prevOnTab=document.querySelector(".ntab.on");
   document.querySelectorAll(".ntab").forEach(function(tab){tab.classList.remove("on");});
   if(activeTab){
     var tab=document.querySelector(".ntab[data-screen='"+activeTab+"']");
     if(tab){
-      var wasOn=tab.classList.contains("on");
+      var wasOn=prevOnTab===tab;
       tab.classList.add("on");
-      if(!wasOn){tab.classList.remove("pop");void tab.offsetWidth;tab.classList.add("pop");setTimeout(function(){tab.classList.remove("pop");},460);}
+      if(!wasOn){
+        tab.classList.remove("pop");void tab.offsetWidth;tab.classList.add("pop");setTimeout(function(){tab.classList.remove("pop");},460);
+        // Micro-vibration au changement d'onglet : le "clic" physique qui rend
+        // la pastille satisfaisante (sans son : c'est un geste, pas un evenement).
+        try{if(navigator.vibrate)navigator.vibrate(8);}catch(e){}
+      }
     }
   }
   try{moveNavPill(true);}catch(e){}
@@ -3229,7 +3257,7 @@ function openFeedback(){
   ov.id="feedback-ov";
   ov.style.cssText="position:fixed;inset:0;z-index:10001;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px)";
   var card=document.createElement("div");
-  card.style.cssText="width:100%;max-width:440px;background:var(--app-bg);border-radius:24px 24px 0 0;padding:24px 22px calc(26px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28);animation:fbSheetUp .32s cubic-bezier(.2,.8,.3,1) both";
+  card.style.cssText="width:100%;max-width:440px;background:var(--app-bg);border-radius:24px 24px 0 0;padding:24px 22px calc(26px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28);animation:fbSheetUp .5s cubic-bezier(.3,1.38,.44,1) both";
   card.innerHTML='<div style="width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 18px"></div>'+
     '<div style="font-size:19px;font-weight:800;color:var(--s1);text-align:center">Ton avis compte</div>'+
     '<div style="font-size:13px;color:var(--s2);text-align:center;margin:6px auto 18px;line-height:1.5;max-width:320px">Tu testes Magofeed — dis-nous franchement ce qui te plaît, ce qui manque ou ce qu\'il faut retirer. Ça guide vraiment la suite.</div>'+
@@ -5393,11 +5421,11 @@ function openMissions(){
       '<span style="width:40px;height:40px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0">'+thumb+'</span>'+
       '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(h.drinkName||"Boisson")+'</div><div style="font-size:11.5px;font-weight:600;color:var(--s2)">'+who+' près d\'ici</div></div>'+
       '<span style="font-size:12px;font-weight:800;color:#e67e22;flex-shrink:0">Je l\'ai vue →</span></div>';
-  }).join(""):'<div style="padding:16px 0 4px;font-size:12.5px;color:var(--s3);text-align:center">Aucune chasse près de toi pour l\'instant.</div>';
+  }).join(""):emptyStateHTML("radar","Aucune chasse en cours","Cherche une boisson introuvable et lance la chasse : les explorateurs autour de toi seront prévenus dès qu\'elle est repérée.","Explorer les boissons","emptyGo(\'search\')");
   var ov=document.createElement("div");
   ov.id="mission-sheet";
   ov.style.cssText="position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center";
-  ov.innerHTML='<div id="ms-card" style="background:var(--app-bg);border-radius:24px 24px 0 0;width:100%;max-width:520px;max-height:82vh;overflow-y:auto;padding:10px 20px calc(24px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.35);transform:translateY(100%);transition:transform .34s cubic-bezier(.2,.8,.2,1)">'+
+  ov.innerHTML='<div id="ms-card" style="background:var(--app-bg);border-radius:24px 24px 0 0;width:100%;max-width:520px;max-height:82vh;overflow-y:auto;padding:10px 20px calc(24px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.35);transform:translateY(100%);transition:transform .5s cubic-bezier(.3,1.38,.44,1)">'+
     '<div style="width:40px;height:4px;border-radius:3px;background:var(--border);margin:0 auto 14px"></div>'+
     '<div style="font-size:18px;font-weight:850;color:var(--s1);margin-bottom:2px">Tes missions &amp; chasses</div>'+
     '<div style="font-size:12.5px;font-weight:600;color:var(--s2);margin-bottom:14px">Gagne des points en contribuant près de chez toi.</div>'+
@@ -5774,8 +5802,9 @@ function renderList(){
   var matchingDiscoveries=q?DISCOVERIES.filter(function(d){return d.name&&d.name.toLowerCase().includes(q);}):[];
   if(!f.length&&!matchingDiscoveries.length){
     var empty=document.createElement("div");
-    empty.style.cssText="padding:48px;text-align:center;font-size:14px;font-weight:500;color:var(--s3)";
-    empty.textContent=curBrandFilter?"Aucune boisson "+curBrandFilter+" dans cette cat\u00E9gorie":"Aucun r\u00E9sultat ";
+    empty.innerHTML=curBrandFilter
+      ?emptyStateHTML("search","Aucune boisson "+sanitize(curBrandFilter)+" ici","Essaie une autre cat\u00E9gorie \u2014 ou propose-la en photo, l'IA la reconna\u00EEt.","Proposer en photo","openProposeForm()")
+      :emptyStateHTML("search","Aucun r\u00E9sultat","Pas encore dans Magofeed ? Prends-la en photo : l'IA la reconna\u00EEt et peut l'ajouter directement.","Proposer en photo","openProposeForm()");
     el.appendChild(empty);return;
   }
   if(isFuzzy){
@@ -7397,9 +7426,7 @@ function _runActivityAction(act){
 function _renderActivityList(){
   var host=document.getElementById("act-list");if(!host)return;
   if(!_activity.length){
-    host.innerHTML='<div style="text-align:center;padding:34px 14px">'+
-      '<div style="font-size:13.5px;font-weight:800;color:var(--s2)">Rien pour l\'instant</div>'+
-      '<div style="font-size:12px;margin-top:6px;line-height:1.55;color:var(--s3)">Dès qu\'une boisson que tu cherches est repérée près de toi, ou qu\'une de tes découvertes entre au catalogue, ça apparaît ici — et tu pourras la retrouver à tout moment.</div></div>';
+    host.innerHTML=emptyStateHTML("bell","Rien pour l\'instant","Dès qu\'une boisson que tu cherches est repérée près de toi, ou qu\'une de tes découvertes entre au catalogue, ça apparaît ici.");
     return;
   }
   host.innerHTML=_activity.map(function(a,i){
@@ -7441,7 +7468,7 @@ function _openActivityUI(){
   ov.id="activity-ov";
   ov.style.cssText="position:fixed;inset:0;z-index:10001;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px)";
   var card=document.createElement("div");
-  card.style.cssText="width:100%;max-width:440px;max-height:82vh;display:flex;flex-direction:column;background:var(--app-bg);border-radius:24px 24px 0 0;padding:18px 20px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28);animation:fbSheetUp .32s cubic-bezier(.2,.8,.3,1) both";
+  card.style.cssText="width:100%;max-width:440px;max-height:82vh;display:flex;flex-direction:column;background:var(--app-bg);border-radius:24px 24px 0 0;padding:18px 20px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28);animation:fbSheetUp .5s cubic-bezier(.3,1.38,.44,1) both";
   card.innerHTML='<div style="width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 14px;flex-shrink:0"></div>'+
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-shrink:0">'+
       '<div style="font-size:18px;font-weight:800;color:var(--s1)">Activité</div>'+
@@ -8394,7 +8421,7 @@ function openAddDrinkToStore(){
   ov.id="add-drink-ov";
   ov.style.cssText="position:fixed;inset:0;z-index:10002;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px)";
   var card=document.createElement("div");
-  card.style.cssText="width:100%;max-width:440px;max-height:86vh;display:flex;flex-direction:column;background:var(--app-bg);border-radius:24px 24px 0 0;padding:16px 18px calc(16px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28);animation:fbSheetUp .32s cubic-bezier(.2,.8,.3,1) both";
+  card.style.cssText="width:100%;max-width:440px;max-height:86vh;display:flex;flex-direction:column;background:var(--app-bg);border-radius:24px 24px 0 0;padding:16px 18px calc(16px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28);animation:fbSheetUp .5s cubic-bezier(.3,1.38,.44,1) both";
   card.innerHTML='<div style="width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 12px;flex-shrink:0"></div>'+
     '<div style="font-size:16px;font-weight:800;color:var(--s1);margin-bottom:2px;flex-shrink:0">Ajouter une boisson</div>'+
     '<div style="font-size:12px;color:var(--s2);margin-bottom:12px;flex-shrink:0;line-height:1.45">chez <b>'+sanitize(s.name)+'</b> — cherche la boisson que tu as vue en rayon, puis tape dessus.</div>'+
@@ -10782,7 +10809,7 @@ function incrementScan(id){scanCounts[id]=(scanCounts[id]||0)+1;localStorage.set
 function renderTopScanned(){
   var el=document.getElementById("top-scanned");if(!el)return;
   var sorted=DRINKS.slice().sort(function(a,b){return(scanCounts[b.id]||0)-(scanCounts[a.id]||0);}).slice(0,5);
-  if(!sorted.some(function(d){return scanCounts[d.id];})){el.innerHTML='<div style="font-size:13px;color:var(--s3);font-weight:500">Aucune recherche encore — explore des boissons !</div>';return;}
+  if(!sorted.some(function(d){return scanCounts[d.id];})){el.innerHTML=emptyStateHTML("spark","Aucune tendance encore","Explore des boissons : les plus recherchées de ta zone apparaîtront ici.");return;}
   el.innerHTML="";var max=scanCounts[sorted[0].id]||1;
   sorted.forEach(function(d,i){
     var count=scanCounts[d.id]||0;if(!count)return;var pct=Math.round(count/max*100);
@@ -11869,7 +11896,7 @@ function toggleFav(id,el){
 function renderFavs(){
   var el=document.getElementById("fav-list");if(!el)return;
   var fd=DRINKS.filter(function(d){return favorites.indexOf(d.id)!==-1;});
-  if(!fd.length){el.innerHTML='<div style="font-size:13px;font-weight:500;color:var(--s3);text-align:center;padding:16px 0">Aucune favorite — touche le cœur sur une boisson</div>';return;}
+  if(!fd.length){el.innerHTML=emptyStateHTML("heart","Aucune favorite","Touche le cœur d\'une boisson pour la garder ici, toujours à portée de main.","Explorer les boissons","emptyGo(\'search\')");return;}
   el.innerHTML="";
   fd.forEach(function(d){
     var div=document.createElement("div");div.className="ritem";
