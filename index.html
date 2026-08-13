@@ -826,6 +826,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <span id="propose-photo-hint" style="font-size:13px;font-weight:700;color:var(--s2)">Prendre une photo / choisir dans la pellicule</span>
         <img id="propose-photo-preview" alt="" style="display:none;max-width:100%;max-height:220px;border-radius:12px">
       </label>
+      <div id="propose-ai-status" style="display:none;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:12px;margin:-4px 0 12px;font-size:12.5px;font-weight:600;line-height:1.45"></div>
       <input id="propose-photo-input" type="file" accept="image/*" style="display:none" onchange="proposePhotoChosen(this)">
       <input id="propose-name" type="text" maxlength="60" placeholder="Nom de la boisson *" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:'Space Grotesk',sans-serif;outline:none;margin-bottom:10px">
       <input id="propose-brand" type="text" maxlength="30" placeholder="Marque (facultatif)" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:'Space Grotesk',sans-serif;outline:none;margin-bottom:14px">
@@ -1976,6 +1977,36 @@ window.fbTestPush = async function() {
     if (/not-found|functions\/not-found|internal/.test(String(code)))
       return { ok: false, reason: "not-deployed" };
     return { ok: false, reason: String((e && e.message) || e) };
+  }
+};
+/* Reconnaissance IA d'une photo de boisson (Cloud Function identifyDrink).
+   Renvoie {ok, isDrink, isAlcohol, name, brand, category, confidence} ou
+   {ok:false, reason} — "not-deployed" si la fonction n'est pas encore en ligne
+   (l'app retombe alors en silence sur le formulaire manuel). */
+window.fbIdentifyDrink = async function(imageDataUrl) {
+  try {
+    await ensureAuthed();
+    var fns = getFunctions(app, "europe-west1");
+    var call = httpsCallable(fns, "identifyDrink");
+    var res = await call({ image: imageDataUrl });
+    return (res && res.data) || { ok: false, reason: "no-response" };
+  } catch (e) {
+    var code = String((e && e.code) || "");
+    if (/not-found|unimplemented|internal/.test(code)) return { ok: false, reason: "not-deployed" };
+    return { ok: false, reason: code || String((e && e.message) || e) };
+  }
+};
+/* Promotion automatique apres verification IA : le serveur relit son propre
+   verdict (aiVerified) puis fait la promotion officielle avec l'Admin SDK. */
+window.fbConfirmAiDrink = async function(discoveryId) {
+  try {
+    await ensureAuthed();
+    var fns = getFunctions(app, "europe-west1");
+    var call = httpsCallable(fns, "confirmAiDrink");
+    var res = await call({ discoveryId: String(discoveryId) });
+    return (res && res.data) || { ok: false, reason: "no-response" };
+  } catch (e) {
+    return { ok: false, reason: String((e && e.code) || (e && e.message) || e) };
   }
 };
 window.fbSyncWatch = async function(add, drinkId, drinkName, lat, lng) {
@@ -9220,12 +9251,22 @@ function openProposeForm(){
   if(hint)hint.style.display="block";
   var n=document.getElementById("propose-name");if(n){if(!photoSuggestTarget)n.value="";n.disabled=!!photoSuggestTarget;}
   var b=document.getElementById("propose-brand");if(b){if(!photoSuggestTarget)b.value="";b.disabled=!!photoSuggestTarget;}
+  resetProposeAi();
   ov.style.display="block";
   playSound("pop");
+}
+/* Remise a zero de l'etat IA de la feuille (verdict, statut, bouton) */
+function resetProposeAi(){
+  window._aiPropose=null;window._aiBlockAlcohol=false;
+  window._aiSeq=(window._aiSeq||0)+1; // invalide une analyse encore en vol
+  try{_aiStatusHide();}catch(e){}
+  var btn=document.getElementById("propose-send");
+  if(btn)btn.textContent="Envoyer la proposition";
 }
 function closeProposeForm(){
   var ov=document.getElementById("propose-sheet");if(ov)ov.style.display="none";
   photoSuggestTarget=null;
+  resetProposeAi();
 }
 /* Compression partagee : pellicule -> JPEG <250 Ko pret pour Firestore */
 function compressPhotoFile(file,done,fail){
@@ -9260,8 +9301,71 @@ function proposePhotoChosen(input){
     if(pv){pv.src=data;pv.style.display="block";}
     if(hint)hint.style.display="none";
     playSound("pop");
+    analyzeProposePhoto(data);
   });
   input.value="";
+}
+/* ── Reconnaissance IA de la photo proposée ──────────────────────────────────
+   La photo part à la Cloud Function identifyDrink (Claude, vision). Selon la
+   réponse : alcool -> envoi bloqué ; confiance >= 85 -> pré-rempli + validé et
+   ajouté au catalogue à l'envoi ; confiance moyenne -> pré-rempli à vérifier ;
+   indisponible/incertain -> formulaire manuel inchangé, en silence. */
+function _aiStatus(kind,html){
+  var el=document.getElementById("propose-ai-status");if(!el)return;
+  var C={think:["rgba(198,154,87,.12)","rgba(198,154,87,.3)","var(--s1)"],
+         ok:["rgba(22,163,74,.1)","rgba(22,163,74,.3)","#15803d"],
+         warn:["rgba(217,119,6,.1)","rgba(217,119,6,.3)","#b45309"],
+         bad:["rgba(220,38,38,.1)","rgba(220,38,38,.3)","#b91c1c"],
+         dim:["var(--bg2)","var(--border)","var(--s2)"]}[kind]||["var(--bg2)","var(--border)","var(--s2)"];
+  el.style.display="flex";el.style.background=C[0];el.style.border="1px solid "+C[1];el.style.color=C[2];
+  el.innerHTML=html;
+}
+function _aiStatusHide(){var el=document.getElementById("propose-ai-status");if(el){el.style.display="none";el.innerHTML="";}}
+function analyzeProposePhoto(data){
+  window._aiPropose=null;window._aiBlockAlcohol=false;
+  var btn0=document.getElementById("propose-send");
+  if(btn0)btn0.textContent="Envoyer la proposition"; // nouvelle photo : bouton neutre
+  if(!window.fbIdentifyDrink||photoSuggestTarget)return; // suggestion de photo : pas d'analyse
+  var seq=(window._aiSeq=(window._aiSeq||0)+1);
+  _aiStatus("think",'<span class="mago-live-dot" style="width:7px;height:7px;border-radius:50%;background:#c69a57;flex-shrink:0;margin-top:5px"></span><span>Analyse de la photo par l’IA…</span>');
+  window.fbIdentifyDrink(data).then(function(r){
+    if(seq!==window._aiSeq)return; // une photo plus récente a été choisie
+    if(!r||!r.ok){
+      if(r&&r.reason==="quota"){_aiStatus("dim","Limite d’analyses du jour atteinte — remplis à la main.");}
+      else _aiStatusHide(); // fonction pas déployée / erreur : silence, manuel
+      return;
+    }
+    if(r.isAlcohol){
+      window._aiBlockAlcohol=true;
+      _aiStatus("bad","<span>⛔</span><span><b>Boisson alcoolisée détectée</b> — Magofeed reste 100% sans alcool, cette proposition ne peut pas être envoyée.</span>");
+      return;
+    }
+    if(!r.isDrink){
+      _aiStatus("warn","<span>🤔</span><span>L’IA ne voit pas de boisson sur cette photo. Reprends-la bien nette, ou remplis à la main.</span>");
+      return;
+    }
+    var nameEl=document.getElementById("propose-name"),brandEl=document.getElementById("propose-brand");
+    if(nameEl&&!nameEl.value.trim()&&r.name)nameEl.value=r.name;
+    if(brandEl&&!brandEl.value.trim()&&r.brand)brandEl.value=r.brand;
+    var label=sanitize(r.name+(r.brand?" · "+r.brand:""));
+    // Déjà au catalogue ? On le dit tout de suite au lieu de créer un doublon.
+    var existing=(typeof DRINKS!=="undefined")?DRINKS.find(function(d){return String(d.name).toLowerCase()===String(r.name).toLowerCase().trim();}):null;
+    if(existing&&r.confidence>=70){
+      window._aiPropose={existingId:existing.id};
+      _aiStatus("ok","<span>✅</span><span><b>"+sanitize(existing.name)+"</b> est déjà dans Magofeed ! Appuie sur Envoyer pour ouvrir sa fiche.</span>");
+      return;
+    }
+    if(r.confidence>=85){
+      window._aiPropose={name:r.name,brand:r.brand,cat:r.category,confidence:r.confidence};
+      _aiStatus("ok","<span>✨</span><span><b>Reconnue : "+label+"</b> (certitude "+r.confidence+"%) — elle sera validée et ajoutée directement à l’envoi, sans scan.</span>");
+      var btn=document.getElementById("propose-send");if(btn)btn.textContent="Valider — reconnue par l’IA ✨";
+    }else if(r.confidence>=55){
+      window._aiPropose={name:r.name,brand:r.brand,cat:r.category,confidence:r.confidence};
+      _aiStatus("warn","<span>🔎</span><span>Ça ressemble à <b>"+label+"</b> (certitude "+r.confidence+"%). Vérifie le nom puis envoie — elle passera en vérification communautaire.</span>");
+    }else{
+      _aiStatusHide();
+    }
+  }).catch(function(){if(seq===window._aiSeq)_aiStatusHide();});
 }
 function submitProposal(){
   var name=((document.getElementById("propose-name")||{}).value||"").trim();
@@ -9285,24 +9389,71 @@ function submitProposal(){
     toast("Photo sugg\u00E9r\u00E9e \u00B7 +1 pt \u2014 l'admin va la v\u00E9rifier");
     return;
   }
+  // \u2500\u2500 Verdicts de l'IA sur la photo \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // Alcool detecte : envoi refuse, Magofeed reste 100% sans alcool.
+  if(window._aiBlockAlcohol){toast("Boisson alcoolis\u00E9e \u2014 Magofeed reste 100% sans alcool");playSound("err");return;}
+  var ai=window._aiPropose||null;
+  // Deja au catalogue : on ouvre sa fiche au lieu de creer un doublon.
+  if(ai&&ai.existingId){
+    var ex=DRINKS.find(function(x){return String(x.id)===String(ai.existingId);});
+    closeProposeForm();
+    if(ex){pick(ex);toast("\u00AB "+ex.name+" \u00BB est d\u00E9j\u00E0 dans Magofeed \u2728");}
+    playSound("pop");
+    return;
+  }
+  // Validation automatique UNIQUEMENT si le nom envoye est celui que l'IA a
+  // reconnu (un nom corrige a la main repasse par le vote communautaire).
+  var aiAuto=!!(ai&&ai.confidence>=85&&window.fbConfirmAiDrink&&
+    name.toLowerCase()===String(ai.name||"").trim().toLowerCase());
   var id="m"+Date.now();
-  var d={id:id,name:sanitize(name),brand:sanitize(brand),votes:1,cat:"",foundIn:[],hasPhoto:true,manualProposal:true};
+  var d={id:id,name:sanitize(name),brand:sanitize(brand),votes:1,cat:(ai&&ai.cat)||"",foundIn:[],hasPhoto:true,manualProposal:true};
   DISCOVERIES.unshift(d);
   markVotedDiscovery(id);
-  if(window.fbAddDiscovery)window.fbAddDiscovery(id,d.name,d.brand,"",{hasPhoto:true,manualProposal:true}).catch(function(e){console.warn(e);});
+  var extra={hasPhoto:true,manualProposal:true};
+  if(ai&&ai.confidence!=null)extra.aiConfidence=ai.confidence;
+  var pDisc=null,pPhoto=null;
+  if(window.fbAddDiscovery){
+    pDisc=window.fbAddDiscovery(id,d.name,d.brand,d.cat,extra);
+    pDisc.catch(function(e){console.warn(e);});
+  }
   if(window.fbSaveDiscoveryPhoto){
-    window.fbSaveDiscoveryPhoto(id,proposePhotoData).catch(function(e){
+    pPhoto=window.fbSaveDiscoveryPhoto(id,proposePhotoData);
+    pPhoto.catch(function(e){
       console.warn("Photo save error:",e);
       toast("Photo non envoy\u00E9e (v\u00E9rifie la r\u00E8gle discoveryPhotos)");
     });
   }
+  var photoData=proposePhotoData; // capture avant fermeture du formulaire
   if(awardOnce("propose",1)){userStats.pts+=2;}
   updateProfileStats();
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
   closeProposeForm();
   renderDiscoveries();
   playSound("win");
-  toast("Proposition envoy\u00E9e \u00B7 +2 pts \u2014 \u00E0 la communaut\u00E9 de voter !");
+  if(aiAuto&&pDisc){
+    // Le serveur relit son verdict IA puis fait la promotion officielle
+    // (catalogue + photo publique + notif). Si quoi que ce soit cloche, la
+    // proposition reste simplement en vote communautaire : rien ne casse.
+    toast("Proposition envoy\u00E9e \u2014 validation par l'IA en cours\u2026");
+    Promise.all([pDisc,pPhoto||Promise.resolve()]).then(function(){
+      return window.fbConfirmAiDrink(id);
+    }).then(function(res){
+      if(!res||!res.ok||!res.entry)return;
+      d.promoted=true;
+      try{mergeCatalog([res.entry]);}catch(e){console.warn(e);}
+      if(photoData){
+        imgCache[String(res.entry.id)]={url:photoData,ts:Date.now(),community:true,manual:true};
+        try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+        var dr=DRINKS.find(function(x){return String(x.id)===String(res.entry.id);});
+        if(dr){try{refreshDrinkVisual(dr);}catch(e){}}
+      }
+      try{renderDiscoveries();}catch(e){}
+      playSound("win");
+      toast("\u2728 \u00AB "+res.entry.name+" \u00BB valid\u00E9e par l'IA \u2014 d\u00E9j\u00E0 dans le catalogue !");
+    }).catch(function(e){console.warn("Confirm AI error:",e);});
+  }else{
+    toast("Proposition envoy\u00E9e \u00B7 +2 pts \u2014 \u00E0 la communaut\u00E9 de voter !");
+  }
 }
 function discLocate(discId){
   lastScanContext={discoveryId:discId};
