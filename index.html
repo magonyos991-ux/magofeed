@@ -103,8 +103,8 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       </div>
       <div class="ob-slide" id="ob-1">
         <div class="ob-visual">
-          <svg width="46" height="46" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#c69a57" stroke-width="1.9"/><path d="M16.6 16.6 21 21" stroke="#c69a57" stroke-width="1.9" stroke-linecap="round"/></svg>
-          <div class="ob-store-mini" style="top:8px;left:-30px"><div class="ob-store-dot"></div>Night Shop · 180 m</div>
+          <svg width="46" height="46" viewBox="0 0 24 24" fill="none" style="margin-top:-38px"><circle cx="11" cy="11" r="7" stroke="#c69a57" stroke-width="1.9"/><path d="M16.6 16.6 21 21" stroke="#c69a57" stroke-width="1.9" stroke-linecap="round"/></svg>
+          <div class="ob-store-mini" style="top:-16px;left:-30px"><div class="ob-store-dot"></div>Night Shop · 180 m</div>
           <div class="ob-store-mini" style="bottom:34px;right:-34px"><div class="ob-store-dot"></div>Épicerie Malik · 400 m</div>
           <div class="ob-store-mini" style="bottom:-14px;left:-14px"><div class="ob-store-dot" style="background:#f59e0b"></div>Itinéraire en un tap</div>
         </div>
@@ -119,7 +119,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         </div>
         <div class="ob-tag">Magofeed · 3 sur 4</div>
         <div class="ob-title">Scanne… ou photographie</div>
-        <div class="ob-desc">Un code-barres ou une simple photo : l'IA reconnaît la boisson, vérifie qu'elle est sans alcool et l'ajoute au catalogue.</div>
+        <div class="ob-desc">Un code-barres ou une simple photo : l'IA reconnaît la boisson, vérifie qu'elle est bien sans alcool et peut l'ajouter au catalogue.</div>
       </div>
       <div class="ob-slide" id="ob-3">
         <div class="ob-visual">
@@ -11133,6 +11133,11 @@ var COACH_TIPS={
   profile:{sel:"#leaderboard-list",pos:"above",txt:"Chaque contribution rapporte des <b>points</b> — grimpe au classement des explorateurs."}
 };
 function hideCoach(){
+  // Annule TOUT ce qui appartient a la bulle courante (minuteur d'auto-fermeture,
+  // minuteur d'armement du tap, listener) : sinon un reliquat de la bulle
+  // precedente tuait la suivante — qui, marquee "vue", ne revenait jamais.
+  clearTimeout(window._coachArmT);clearTimeout(window._coachHideT);
+  document.removeEventListener("pointerdown",hideCoach);
   var b=document.getElementById("coach-bubble");
   if(b){b.style.opacity="0";setTimeout(function(){if(b.parentNode)b.remove();},260);}
 }
@@ -11165,8 +11170,8 @@ function showCoach(screen){
     if(arrow){arrow.style.left=(ax-16)+"px";arrow.style[tip.pos==="above"?"bottom":"top"]="-6px";}
     seen[screen]=1;
     try{localStorage.setItem("magoCoach",JSON.stringify(seen));}catch(e){}
-    setTimeout(function(){document.addEventListener("pointerdown",hideCoach,{once:true});},400);
-    setTimeout(hideCoach,9000);
+    window._coachArmT=setTimeout(function(){document.addEventListener("pointerdown",hideCoach,{once:true});},400);
+    window._coachHideT=setTimeout(hideCoach,9000);
   },750);
 }
 
