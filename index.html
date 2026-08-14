@@ -260,7 +260,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div class="res-emoji" id="res-emoji" onclick="openDrinkZoom()" role="button" tabindex="0" aria-label="Agrandir la photo" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrinkZoom();}" style="cursor:pointer;position:relative"></div>
           <div style="flex:1">
             <div id="res-sub" style="font-size:12px;color:rgba(255,255,255,.8);font-weight:500"></div>
-            <div id="res-stars" style="font-size:11px;font-weight:600;color:rgba(255,255,255,.9);margin-top:3px"></div>
+            <div id="res-stars" onclick="scrollToRating()" role="button" tabindex="0" aria-label="Voir et donner une note" onkeydown="if(event.key==='Enter')scrollToRating()" style="font-size:11px;font-weight:600;color:rgba(255,255,255,.9);margin-top:3px;cursor:pointer;text-decoration:underline;text-decoration-color:rgba(255,255,255,.35);text-underline-offset:3px"></div>
             <div class="fmt-row" id="res-fmt"></div>
             <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap" id="res-badges"></div>
           </div>
@@ -282,8 +282,8 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px 8px">
         <div class="t-section" id="t-stores">Magasins proches</div>
       </div>
-      <div id="rating-panel" style="display:none"></div>
       <div id="store-list"></div>
+      <div id="rating-panel" style="display:none"></div>
       <div class="extrow">
         <div class="extbtn" onclick="openGmaps()">Google Maps</div>
         <div class="extbtn" onclick="openWaze()">Waze</div>
@@ -4908,7 +4908,7 @@ function pick(d){
     var titleEl=document.getElementById("res-title");if(titleEl)titleEl.textContent=d.name;
     var emojiEl=document.getElementById("res-emoji");if(emojiEl)emojiEl.innerHTML=drinkIconHTML(d);
     var subEl=document.getElementById("res-sub");if(subEl)subEl.textContent=d.brand+" · "+d.cat;
-    var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent="★ "+d.stars;
+    var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent=starsLabel(d);
     var favElSkel=document.getElementById("res-fav");if(favElSkel)favElSkel.innerHTML=heartSVG(favorites.indexOf(d.id)!==-1,22);
     var listEl=document.getElementById("store-list");if(listEl)listEl.innerHTML=storeSkeletonHTML();
     show("results");
@@ -7257,7 +7257,7 @@ function renderResults(){
   document.getElementById("res-title").textContent=curSel.name;
   document.getElementById("res-emoji").innerHTML=drinkIconHTML(curSel);
   document.getElementById("res-sub").textContent=curSel.brand+" · "+curSel.cat;
-  document.getElementById("res-stars").textContent="★ "+curSel.stars;
+  document.getElementById("res-stars").textContent=starsLabel(curSel);
   var favEl=document.getElementById("res-fav");if(favEl)favEl.innerHTML=heartSVG(favorites.indexOf(curSel.id)!==-1,22);
   renderFormats(curSel);
   renderMap();renderStoreList();renderStarPanel();
@@ -10833,9 +10833,40 @@ function renderTopScanned(){
   });
 }
 
+/* Provenance de la note, affichee franchement : « 12 avis » quand la
+   communaute a vote, « note indicative » pour les valeurs d'origine du
+   catalogue (personne n'aime une note sortie de nulle part). */
+function starsLabel(d){
+  if(!d)return "";
+  var a=drinkRatingsAgg[d.id];
+  if(a&&a.count>0)return "★ "+d.stars+" · "+a.count+" avis";
+  return "★ "+d.stars+" · sois le 1er à noter";
+}
+/* Tap sur la note dans l'en-tete de fiche -> on descend au panneau de
+   notation (il existait mais personne ne le trouvait). */
+function scrollToRating(){
+  function go(){
+    var p=document.getElementById("rating-panel");if(!p)return;
+    p.scrollIntoView({behavior:"smooth",block:"center"});
+    p.style.transition="box-shadow .3s";
+    p.style.boxShadow="0 0 0 3px rgba(198,154,87,.55)";
+    setTimeout(function(){p.style.boxShadow="";},1400);
+    playSound("pop");
+  }
+  // La fiche s'ouvre sur la CARTE : le panneau de notation vit dans la vue
+  // infos — on y bascule d'abord si la carte est ouverte.
+  var host=document.getElementById("explore-map-host");
+  if(host&&host.style.display!=="none"&&host.offsetHeight>0){
+    try{openDrinkInfoFromMap();}catch(e){}
+    setTimeout(go,480);
+  }else go();
+}
 function renderStarPanel(){
   if(!curSel)return;
   var panel=document.getElementById("rating-panel");if(!panel)return;
+  // Le panneau dormait en display:none depuis sa creation : personne ne
+  // pouvait noter. Il vit desormais en carte sous la liste des magasins.
+  panel.style.cssText="display:block;margin:6px 20px 16px;padding:14px 16px;background:var(--bg2);border:1.5px solid var(--border);border-radius:16px";
   var myRating=userRatings[curSel.id]||0;
   var myRec=userRecs[curSel.id]||null;
   // Notation ouverte à tous : on veut de l'engagement dès qu'on regarde une
@@ -10874,7 +10905,7 @@ function setRating(val){
   else{toast("★ Note mise \u00e0 jour : "+val+"/5");}
   updateProfileStats();playSound("pop");
   renderStarPanel();
-  var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent="★ "+curSel.stars;
+  var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent=starsLabel(curSel);
   if(!prev&&window.fbAddRating)window.fbAddRating(curSel.id,val);
 }
 function setRec(val){
@@ -12242,7 +12273,7 @@ try{
       if(a && a.count>0) d.stars=Math.round((a.sum/a.count)*10)/10;
     });
     renderTrends();
-    if(curSel){var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent="★ "+curSel.stars;}
+    if(curSel){var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent=starsLabel(curSel);}
   });
   window.addEventListener("fbDrinkRecsLoaded", function(e) {
     drinkRecsAgg=e.detail||{};
