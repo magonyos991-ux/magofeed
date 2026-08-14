@@ -999,7 +999,15 @@ window.fbDeleteAccount = async function() {
   return true;
 };
 
+/* Firebase restaure la session enregistree (compte Google lie inclus) de
+   maniere ASYNCHRONE au demarrage : tant que cette restauration n'a pas
+   emis son premier evenement, auth.currentUser vaut null meme si un compte
+   existe. Cette promesse marque le moment ou l'etat est enfin connu. */
+var _authReadyResolve;
+window._fbAuthReady = new Promise(function(res) { _authReadyResolve = res; });
+
 onAuthStateChanged(auth, async function(user) {
+  if (_authReadyResolve) { _authReadyResolve(); _authReadyResolve = null; }
   if (!user) {
     signInAnonymously(auth).catch(function(e) { console.warn("Firebase anonymous sign-in error (active le provider Anonyme dans la console Firebase) :", e); });
     return;
@@ -2335,6 +2343,18 @@ window.fbTagDiscoveryStore = async function(discId, storeId) {
    locale, invisible pour le reste du monde. Ici : si pas d'utilisateur,
    on declenche la connexion anonyme et on ATTEND avant d'envoyer. */
 async function ensureAuthed() {
+  if (auth.currentUser) return auth.currentUser;
+  // currentUser null ne veut PAS dire "pas de compte" : la restauration de la
+  // session enregistree est asynchrone. Creer un compte anonyme ici ECRASAIT
+  // la session Google liee — l'utilisateur se retrouvait deconnecte de son
+  // compte a chaque lancement. On attend donc le verdict de Firebase (avec un
+  // plafond de 8 s pour ne pas bloquer une contribution si l'init se fige).
+  try {
+    await Promise.race([
+      window._fbAuthReady,
+      new Promise(function(res) { setTimeout(res, 8000); })
+    ]);
+  } catch (e) {}
   if (auth.currentUser) return auth.currentUser;
   try {
     var cred = await signInAnonymously(auth);
@@ -11096,6 +11116,7 @@ function obFinish(){
   localStorage.setItem("magoob","1");
   var ob=document.getElementById("onboarding");ob.classList.add("hidden");
   setTimeout(function(){ob.style.display="none";},400);
+  try{updateMissionFab();}catch(e){}
   // Premier atterrissage sur l'accueil : la bulle d'accueil prend le relais.
   setTimeout(function(){try{showCoach("home");}catch(e){}},700);
 }
@@ -11220,7 +11241,14 @@ function initSplash(){
     var ob=document.getElementById("onboarding");
     if(ob)ob.style.display="none";
   }
-  setTimeout(function(){splash.classList.add("hidden");setTimeout(function(){splash.style.display="none";},400);},1400);
+  setTimeout(function(){
+    splash.classList.add("hidden");
+    setTimeout(function(){splash.style.display="none";},400);
+    // La pastille chasse etait calculee PENDANT le splash (donc masquee par la
+    // garde anti-intro) et rien ne la recalculait apres : elle n'apparaissait
+    // qu'au premier changement d'onglet. On la reevalue des que le splash part.
+    try{updateMissionFab();}catch(e){}
+  },1400);
 }
 
 /* ================================
