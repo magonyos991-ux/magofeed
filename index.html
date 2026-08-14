@@ -4194,12 +4194,21 @@ function parseFormatFromOFF(p){
   else if(cl!==null)type=cl<=33?"canette":"bouteille"; // heuristique douce
   return {type:type,cl:cl};
 }
+/* Normalisation "famille" : en plus de normTxt, les traits d'union deviennent
+   des espaces ("Coca-Cola" ~ "coca cola") et les facons de dire "sans sucre"
+   sont ramenees a un seul jeton ("Coca Cola Sans Sucre" tape a la main doit
+   retrouver "Coca-Cola Zero Sucre" du catalogue : MEME produit, pas un doublon). */
+function normFamilyTxt(s){
+  var t=normTxt(s).replace(/[-_'.]/g," ");
+  t=t.replace(/\b(?:sans sucres?|zero sucres?|no sugar|sugar ?free|zero)\b/g," zero ");
+  return t.replace(/\s+/g," ").trim();
+}
 function findFamilyDrink(offName,offBrand){
-  var n=normTxt(offName||""),b=normTxt(offBrand||"");
+  var n=normFamilyTxt(offName||""),b=normFamilyTxt(offBrand||"");
   if(!n)return null;
   var best=null,bestScore=0;
   DRINKS.forEach(function(d){
-    var dn=normTxt(d.name),db=normTxt(d.brand||"");
+    var dn=normFamilyTxt(d.name),db=normFamilyTxt(d.brand||"");
     if(db&&b&&b.indexOf(db)===-1&&db.indexOf(b)===-1)return; // marques etrangeres
     // tous les mots significatifs du nom catalogue doivent etre dans la fiche
     var toks=dn.split(" ").filter(function(t){return t.length>1;});
@@ -4241,18 +4250,18 @@ function confirmFamilyFormat(family,barcode,fmt){
   toast("Format ajout\u00E9 \u00E0 "+family.name+" \u00B7 +2 pts");
 }
 function hasVariantExtras(offName,candidate){
-  var n=normTxt(offName||"");
-  var toks=normTxt(candidate.name).split(" ").filter(function(t){return t.length>1;});
+  var n=normFamilyTxt(offName||"");
+  var toks=normFamilyTxt(candidate.name).split(" ").filter(function(t){return t.length>1;});
   var extras=n.split(" ").filter(function(t){return t.length>1&&toks.indexOf(t)===-1;});
   return extras.some(function(t){return OFF_VARIANT_WORDS.indexOf(t)!==-1;});
 }
 function findBrandFamily(offBrand,offName){
-  var hay=normTxt((offBrand||"")+" "+(offName||""));
+  var hay=normFamilyTxt((offBrand||"")+" "+(offName||""));
   if(!hay.trim())return [];
   var out=[];
   var seenBrand={};
   DRINKS.forEach(function(d){
-    var db=normTxt(d.brand||"");
+    var db=normFamilyTxt(d.brand||"");
     if(db.length<3)return;
     if(hay.indexOf(db)!==-1){out.push(d);seenBrand[db]=1;}
   });
@@ -6170,12 +6179,12 @@ function offIsBeverage(p){
 }
 function offImageMatches(d,p){
   if(!offIsBeverage(p))return false;
-  var pBrands=normTxt(p.brands||"");
-  var dBrand=normTxt(d.brand||"");
+  var pBrands=normFamilyTxt(p.brands||"");
+  var dBrand=normFamilyTxt(d.brand||"");
   if(dBrand&&pBrands.indexOf(dBrand)===-1)return false;
-  var pName=normTxt((p.product_name_fr||p.product_name||""));
+  var pName=normFamilyTxt((p.product_name_fr||p.product_name||""));
   if(!pName)return false;
-  var dTokens=normTxt(d.name+" "+d.brand).split(/[^a-z0-9]+/).filter(Boolean);
+  var dTokens=normFamilyTxt(d.name+" "+d.brand).split(/[^a-z0-9]+/).filter(Boolean);
   // 3) mots de variante etrangers dans la fiche OFF -> refus
   var pTokens=pName.split(/[^a-z0-9]+/).filter(Boolean);
   for(var i=0;i<pTokens.length;i++){
@@ -6183,7 +6192,7 @@ function offImageMatches(d,p){
   }
   // 2) mots distinctifs requis (hors tokens de la marque et hors mots optionnels)
   var brandTokens=dBrand.split(/[^a-z0-9]+/).filter(Boolean);
-  var words=normTxt(d.name).split(/[^a-z0-9]+/).filter(function(w){
+  var words=normFamilyTxt(d.name).split(/[^a-z0-9]+/).filter(function(w){
     return w.length>=3&&brandTokens.indexOf(w)===-1&&OFF_OPTIONAL_WORDS.indexOf(w)===-1;
   });
   if(!words.length)return true;
