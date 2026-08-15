@@ -755,6 +755,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff">←</div>
           <span style="font-size:15px;font-weight:700;color:#fff;flex:1">Magasin</span>
           <div id="sd-share" onclick="event.stopPropagation();shareStore()" style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer" role="button" tabindex="0" aria-label="Partager ce magasin" onkeydown="if(event.key==='Enter'){event.stopPropagation();shareStore();}">↗</div>
+          <div id="sd-fridge" onclick="event.stopPropagation();scanFridgeStart()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;cursor:pointer" role="button" tabindex="0" aria-label="Scanner un frigo (IA) : ajouter toutes les boissons d'une photo" onkeydown="if(event.key==='Enter'){event.stopPropagation();scanFridgeStart();}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M5 10h14"/><path d="M9 5v2M9 14v3"/></svg></div>
           <div id="sd-batch" onclick="event.stopPropagation();adminBatchAssignHere()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px;cursor:pointer" role="button" tabindex="0" aria-label="Rayon par photos : assigner une liste (admin)" onkeydown="if(event.key==='Enter'){event.stopPropagation();adminBatchAssignHere();}"></div>
           <div id="sd-remove" onclick="event.stopPropagation();adminRemoveStore()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px;cursor:pointer" role="button" tabindex="0" aria-label="Supprimer ce magasin (admin)" onkeydown="if(event.key==='Enter'){event.stopPropagation();adminRemoveStore();}"></div>
         </div>
@@ -2069,6 +2070,21 @@ window.fbIdentifyDrink = async function(imageDataUrl) {
 };
 /* Promotion automatique apres verification IA : le serveur relit son propre
    verdict (aiVerified) puis fait la promotion officielle avec l'Admin SDK. */
+/* Scan de frigo : une photo -> la liste de TOUTES les boissons reconnues.
+   L'alcool est ecarte cote serveur, quota 10 frigos/jour/utilisateur. */
+window.fbIdentifyFridge = async function(imageDataUrl) {
+  try {
+    await ensureAuthed();
+    var fns = getFunctions(app, "europe-west1");
+    var call = httpsCallable(fns, "identifyFridge");
+    var res = await call({ image: imageDataUrl });
+    return (res && res.data) || { ok: false, reason: "no-response" };
+  } catch (e) {
+    var code = String((e && e.code) || "");
+    if (/not-found|unimplemented|internal/.test(code)) return { ok: false, reason: "not-deployed" };
+    return { ok: false, reason: code || String((e && e.message) || e) };
+  }
+};
 window.fbConfirmAiDrink = async function(discoveryId) {
   try {
     await ensureAuthed();
@@ -8336,12 +8352,122 @@ function openStoreDetail(storeId){
   curStoreDetailQuery="";curStoreDetailCat="Tous";
   var btS=document.getElementById("sd-batch");
   if(btS)btS.style.display=isAdmin?"flex":"none";
+  var frS=document.getElementById("sd-fridge");
+  if(frS)frS.style.display=isAdmin?"flex":"none";
   var rmS=document.getElementById("sd-remove");
   if(rmS)rmS.style.display=isAdmin?"flex":"none";
   var sdSearch=document.getElementById("sd-search");if(sdSearch)sdSearch.value="";
   renderStoreDetail();
   show("storedetail");
   playSound("pop");
+}
+/* ── SCAN DE FRIGO ──
+   Une photo du frigo -> l'IA liste toutes les boissons -> correspondance au
+   catalogue -> ajout groupe au magasin (confirmations + fraicheur seenAt).
+   L'outil d'embarquement des night shops : 30 boissons en une photo. */
+function scanFridgeStart(){
+  if(!curStoreDetail){toast("Ouvre d'abord la fiche d'un magasin");return;}
+  var inp=document.getElementById("fridge-file");
+  if(!inp){
+    inp=document.createElement("input");
+    inp.type="file";inp.accept="image/*";inp.id="fridge-file";
+    inp.setAttribute("capture","environment");
+    inp.style.display="none";
+    document.body.appendChild(inp);
+  }
+  inp.value="";
+  inp.onchange=function(){
+    var file=inp.files&&inp.files[0];
+    if(!file)return;
+    toast("Analyse du frigo par l'IA… (~20 s)");
+    playSound("pop");
+    compressPhotoFile(file,function(data){
+      if(!window.fbIdentifyFridge){toast("Fonction IA non disponible");return;}
+      window.fbIdentifyFridge(data).then(function(res){
+        if(!res||!res.ok){
+          var msg=res&&res.reason==="quota"?"Quota du jour atteint (10 frigos)":
+                  res&&res.reason==="not-deployed"?"Fonction identifyFridge pas encore déployée":
+                  "Analyse impossible — réessaie";
+          toast(msg);playSound("err");return;
+        }
+        openFridgeResults(res);
+      });
+    },function(){toast("Photo illisible");playSound("err");},
+    {maxSide:1400,maxKb:420}); // etiquettes petites : plus de definition
+  };
+  inp.click();
+}
+function openFridgeResults(res){
+  var s=curStoreDetail;if(!s)return;
+  var items=(res.drinks||[]).map(function(it){
+    var match=null;
+    try{match=findFamilyDrink(it.name,it.brand);}catch(e){}
+    return {ai:it,match:match,checked:!!match&&it.confidence>=60};
+  });
+  var matched=items.filter(function(x){return x.match;});
+  var unmatched=items.filter(function(x){return !x.match;});
+  var ov=document.createElement("div");
+  ov.id="fridge-sheet";
+  ov.style.cssText="position:fixed;inset:0;z-index:8600;background:rgba(12,10,8,.55)";
+  ov.onclick=function(e){if(e.target===ov)ov.remove();};
+  var rows="";
+  matched.forEach(function(x,i){
+    rows+='<label style="display:flex;align-items:center;gap:11px;padding:9px 0;border-bottom:1px solid var(--border);cursor:pointer">'+
+      '<input type="checkbox" data-fi="'+i+'" '+(x.checked?"checked":"")+' style="width:19px;height:19px;accent-color:#c69a57;flex-shrink:0">'+
+      '<span style="flex:1;min-width:0"><span style="display:block;font-size:13.5px;font-weight:700;color:var(--s1)">'+sanitize(x.match.name)+'</span>'+
+      '<span style="display:block;font-size:11px;color:var(--s2)">'+sanitize(x.match.brand)+' · vu par l\'IA : « '+sanitize(x.ai.name)+' » · '+x.ai.confidence+'%</span></span>'+
+      '</label>';
+  });
+  var unrows="";
+  unmatched.forEach(function(x){
+    unrows+='<div style="padding:7px 0;border-bottom:1px solid var(--border)"><span style="font-size:12.5px;font-weight:600;color:var(--s2)">'+sanitize(x.ai.name)+(x.ai.brand?' · '+sanitize(x.ai.brand):'')+'</span> <span style="font-size:10.5px;color:var(--s3)">· pas encore au catalogue</span></div>';
+  });
+  ov.innerHTML='<div style="position:absolute;left:0;right:0;bottom:0;max-height:82vh;overflow-y:auto;background:var(--app-bg);border-radius:22px 22px 0 0;padding:18px 20px 28px" onclick="event.stopPropagation()">'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'+
+      '<div style="font-size:15px;font-weight:800;color:var(--s1)">Frigo analysé ✓</div>'+
+      '<div onclick="document.getElementById(\'fridge-sheet\').remove()" role="button" tabindex="0" style="width:34px;height:34px;border-radius:12px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer">✕</div>'+
+    '</div>'+
+    '<div style="font-size:12px;color:var(--s2);margin-bottom:12px">'+matched.length+' boisson'+(matched.length>1?"s":"")+' reconnue'+(matched.length>1?"s":"")+' au catalogue · décoche ce qui est faux'+
+    (res.alcoholExcluded?' · '+res.alcoholExcluded+' alcool écarté'+(res.alcoholExcluded>1?"s":"")+' automatiquement':'')+'</div>'+
+    '<div id="fridge-rows">'+(rows||'<div style="font-size:13px;color:var(--s2);padding:12px 0">Aucune correspondance avec le catalogue sur cette photo.</div>')+'</div>'+
+    (unrows?'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin:14px 0 4px">Vues mais pas au catalogue</div>'+unrows:'')+
+    (matched.length?'<button id="fridge-add" style="width:100%;margin-top:16px;padding:14px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">Ajouter à '+sanitize(s.name)+'</button>':'')+
+    '</div>';
+  document.body.appendChild(ov);
+  var addBtn=document.getElementById("fridge-add");
+  if(addBtn)addBtn.onclick=function(){
+    var ids=[];
+    ov.querySelectorAll('input[data-fi]').forEach(function(cb){
+      if(cb.checked){var x=matched[Number(cb.getAttribute("data-fi"))];if(x&&x.match)ids.push(Number(x.match.id));}
+    });
+    ids=ids.filter(function(v,i,a){return a.indexOf(v)===i;});
+    if(!ids.length){toast("Rien de coché");return;}
+    addBtn.disabled=true;addBtn.textContent="Ajout en cours…";
+    // Local : boissons + confirmation + fraicheur, tout de suite.
+    if(!s.drinks)s.drinks=[];
+    if(!s.confirmations)s.confirmations={};
+    if(!s.seenAt)s.seenAt={};
+    ids.forEach(function(id){
+      if(s.drinks.indexOf(id)===-1)s.drinks.push(id);
+      s.confirmations[id]=(s.confirmations[id]||0)+1;
+      s.seenAt[id]=Date.now();
+    });
+    // Partage : la meme ecriture Firestore que l'assignation communautaire.
+    var p=window.fbCommunityAddDrinks?window.fbCommunityAddDrinks(s.fbId||s.id,ids):Promise.resolve();
+    Promise.resolve(p).then(function(){
+      if(awardOnce("fridge:"+s.id+":"+_dailyKey(),FOREVER)){userStats.pts+=10;flyPts(10);}
+      if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+      if(window.fbTouchCache)window.fbTouchCache();
+      ov.remove();
+      try{renderStoreDetail();}catch(e){}
+      toast("✓ "+ids.length+" boissons ajoutées à "+s.name+" · +10 pts");
+      playSound("win");
+    }).catch(function(){
+      ov.remove();
+      toast("Ajout partiel — vérifie la connexion");
+    });
+  };
+  playSound("win");
 }
 function closeStoreDetail(){
   // Retour vers la carte Explorer si la fiche a été ouverte depuis elle.
@@ -9569,20 +9695,23 @@ function closeProposeForm(){
   resetProposeAi();
 }
 /* Compression partagee : pellicule -> JPEG <250 Ko pret pour Firestore */
-function compressPhotoFile(file,done,fail){
+function compressPhotoFile(file,done,fail,opts){
   if(!file)return;
   var img=new Image();
   var url=URL.createObjectURL(file);
   img.onload=function(){
     URL.revokeObjectURL(url);
-    var maxSide=900;
+    // opts : un frigo entier a besoin de plus de definition qu'un produit seul
+    // (les etiquettes sont petites) — maxSide/maxKb ajustables par appelant.
+    var maxSide=(opts&&opts.maxSide)||900;
+    var maxBytes=((opts&&opts.maxKb)||250)*1024;
     var scale=Math.min(1,maxSide/Math.max(img.width,img.height));
     var canvas=document.createElement("canvas");
     canvas.width=Math.round(img.width*scale);
     canvas.height=Math.round(img.height*scale);
     canvas.getContext("2d").drawImage(img,0,0,canvas.width,canvas.height);
     var quality=0.72,data=canvas.toDataURL("image/jpeg",quality);
-    while(data.length>250*1024&&quality>0.3){
+    while(data.length>maxBytes&&quality>0.3){
       quality-=0.12;
       data=canvas.toDataURL("image/jpeg",quality);
     }
