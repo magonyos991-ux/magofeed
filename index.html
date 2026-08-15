@@ -260,7 +260,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div class="res-emoji" id="res-emoji" onclick="openDrinkZoom()" role="button" tabindex="0" aria-label="Agrandir la photo" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrinkZoom();}" style="cursor:pointer;position:relative"></div>
           <div style="flex:1">
             <div id="res-sub" style="font-size:12px;color:rgba(255,255,255,.8);font-weight:500"></div>
-            <div id="res-stars" onclick="scrollToRating()" role="button" tabindex="0" aria-label="Voir et donner une note" onkeydown="if(event.key==='Enter')scrollToRating()" style="font-size:11px;font-weight:600;color:rgba(255,255,255,.9);margin-top:3px;cursor:pointer;text-decoration:underline;text-decoration-color:rgba(255,255,255,.35);text-underline-offset:3px"></div>
+            <div id="res-stars" onclick="openRateSheet()" role="button" tabindex="0" aria-label="Noter cette boisson" onkeydown="if(event.key==='Enter')openRateSheet()" style="font-size:11px;font-weight:600;color:rgba(255,255,255,.9);margin-top:3px;cursor:pointer;text-decoration:underline;text-decoration-color:rgba(255,255,255,.35);text-underline-offset:3px"></div>
             <div class="fmt-row" id="res-fmt"></div>
             <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap" id="res-badges"></div>
           </div>
@@ -840,6 +840,19 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
     </div>
   </nav>
 
+  <!-- Notation directe : la feuille s'ouvre depuis l'en-tête de la fiche,
+       plus besoin de descendre au fond de la fiche pour trouver le panneau -->
+  <!-- z-index au-dessus de la carte plein ecran (4100) : la fiche s'ouvre sur
+       la carte et la feuille doit passer DEVANT, pas derriere -->
+  <div id="rate-sheet" role="dialog" aria-modal="true" aria-label="Noter cette boisson" style="display:none;position:fixed;inset:0;z-index:8600;background:rgba(12,10,8,.55)" onclick="closeRateSheet()">
+    <div onclick="event.stopPropagation()" style="position:absolute;left:0;right:0;bottom:0;background:var(--app-bg);border-radius:22px 22px 0 0;padding:18px 20px 30px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
+        <div style="font-size:15px;font-weight:800;color:var(--s1)" id="rate-sheet-title">Noter</div>
+        <div onclick="closeRateSheet()" role="button" tabindex="0" aria-label="Fermer" onkeydown="if(event.key==='Enter'){closeRateSheet();}" style="width:34px;height:34px;border-radius:12px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer">✕</div>
+      </div>
+      <div id="rate-sheet-body"></div>
+    </div>
+  </div>
   <!-- Sélecteur de langue : une feuille sobre au lieu d'une grille de 10 boutons -->
   <div id="lang-sheet" role="dialog" aria-modal="true" aria-label="Choisir la langue" style="display:none;position:fixed;inset:0;z-index:3500;background:rgba(12,10,8,.55)" onclick="closeLangSheet()">
     <div onclick="event.stopPropagation()" style="position:absolute;left:0;right:0;bottom:0;max-height:75vh;overflow-y:auto;background:var(--app-bg);border-radius:22px 22px 0 0;padding:18px 20px 28px">
@@ -5032,7 +5045,19 @@ function storeSkeletonHTML(n){
   }
   return html;
 }
+/* Dernieres boissons consultees : la memoire visuelle de la recherche.
+   Des vignettes AVEC photo, pas des mots — tap = retour direct sur la fiche. */
+var recentDrinks=[];
+try{recentDrinks=JSON.parse(localStorage.getItem("magoRecentDrinks")||"[]")||[];}catch(e){}
+function recordRecentDrink(id){
+  id=Number(id);if(!id)return;
+  recentDrinks=recentDrinks.filter(function(x){return Number(x)!==id;});
+  recentDrinks.unshift(id);
+  recentDrinks=recentDrinks.slice(0,10);
+  try{localStorage.setItem("magoRecentDrinks",JSON.stringify(recentDrinks));}catch(e){}
+}
 function pick(d){
+  try{recordRecentDrink(d&&d.id);}catch(e){}
   window._storeListExpanded=false;
   // Recherche (une seule fois, mise en cache) de la vraie photo du produit sur OpenFoodFacts
   fetchVerifiedOFFImage(d);
@@ -5765,7 +5790,7 @@ function renderTrends(){
     var div=document.createElement("div");div.className="dcard";div.dataset.id=d.id;
     var isFav=favorites.indexOf(d.id)!==-1;
     div.innerHTML='<div class="dcard-photo" style="background:'+d.light+'">'+
-      '<div class="dcard-rating"><span class="star">★</span><span class="val">'+d.stars+'</span></div>'+
+      (realAgg(d)?'<div class="dcard-rating"><span class="star">★</span><span class="val">'+d.stars+'</span></div>':'')+
       '<div class="dcard-fav" onclick="event.stopPropagation();toggleFav('+d.id+',this)">'+heartSVG(isFav,18)+'</div>'+
       '<div class="dcard-tag">'+d.tag+'</div>'+
       drinkCardPhotoHTML(d)+'</div>'+
@@ -5798,7 +5823,7 @@ function renderRecents(){
   recents.forEach(function(d){
     var div=document.createElement("div");div.className="ritem";
     div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
-      '<div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.cat+' · '+d.brand+' · ★ '+d.stars+'</div></div>'+
+      '<div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.cat+' · '+d.brand+starSuffix(d)+'</div></div>'+
       '<span class="c3" style="font-size:18px">›</span>';
     div.onclick=function(){pick(d);};el.appendChild(div);
   });
@@ -5839,13 +5864,17 @@ function renderDeals(){
     return;
   }
   // Cold-start : boisson du moment (rotation par jour, parmi les mieux notees)
-  var pool=DRINKS.filter(function(d){return (d.stars||0)>=4.3;});if(!pool.length)pool=DRINKS;
+  // D'abord les boissons REELLEMENT bien notees par la communaute ; repli sur
+  // l'amorcage interne tant qu'il n'y a pas assez d'avis reels.
+  var pool=DRINKS.filter(function(d){return realAgg(d)&&(d.stars||0)>=4;});
+  if(pool.length<3)pool=DRINKS.filter(function(d){return (d.stars||0)>=4.3;});
+  if(!pool.length)pool=DRINKS;
   if(!pool.length){el.innerHTML="";return;}
   var d=pool[Math.floor(Date.now()/86400000)%pool.length];
   el.innerHTML='<div class="sec-hd"><div class="t-section">Boisson du moment</div></div>'+
     '<div onclick="pick(DRINKS.find(function(x){return x.id==='+d.id+';}))" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){pick(DRINKS.find(function(x){return x.id==='+d.id+';}));}" style="display:flex;align-items:center;gap:13px;background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:13px;cursor:pointer;margin-bottom:14px">'+
     '<div style="width:52px;height:52px;border-radius:13px;background:'+(d.light||"var(--bg2)")+';display:flex;align-items:center;justify-content:center;font-size:26px;overflow:hidden;flex-shrink:0">'+drinkIconHTML(d)+'</div>'+
-    '<div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:800;color:var(--s1)">'+sanitize(d.name)+'</div><div style="font-size:12px;color:var(--s2);margin-top:2px">'+sanitize(d.brand)+' · ★ '+d.stars+' — trouve-la près de toi</div></div>'+
+    '<div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:800;color:var(--s1)">'+sanitize(d.name)+'</div><div style="font-size:12px;color:var(--s2);margin-top:2px">'+sanitize(d.brand)+starSuffix(d)+' — trouve-la près de toi</div></div>'+
     '<span style="font-size:18px;color:var(--s3)">›</span>'+
   '</div>';
 }
@@ -5877,8 +5906,42 @@ var _listLimit=120,_listSig=" ";
    C'est ce que l'utilisateur voit en ouvrant l'onglet Chercher. */
 function renderSearchDefault(el){
   el.innerHTML="";
-  // 1) Recherches recentes, en pastilles cliquables
-  if(searchHistory.length){
+  // 0) Tes dernieres boissons : vignettes AVEC image, tap = fiche directe.
+  //    (Remplace les pastilles de mots quand on a de vraies boissons a montrer.)
+  var recents=recentDrinks.map(function(id){
+    return DRINKS.find(function(d){return Number(d.id)===Number(id);});
+  }).filter(Boolean).slice(0,8);
+  if(recents.length){
+    var rd=document.createElement("div");
+    rd.style.cssText="margin-bottom:20px";
+    var rdh=document.createElement("div");
+    rdh.style.cssText="display:flex;align-items:center;justify-content:space-between;margin-bottom:11px";
+    rdh.innerHTML='<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3)">Tes dernières boissons</span>'+
+      '<span class="rd-clr" style="font-size:11px;font-weight:600;color:var(--s3);cursor:pointer;padding:2px 4px">Effacer</span>';
+    rd.appendChild(rdh);
+    var rail=document.createElement("div");
+    rail.style.cssText="display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch;scrollbar-width:none";
+    recents.forEach(function(d){
+      queueImageFetch(d);
+      var img=getCachedDrinkImage(d);
+      var t=document.createElement("div");
+      t.setAttribute("role","button");t.setAttribute("tabindex","0");t.setAttribute("aria-label",d.name);
+      t.style.cssText="flex:none;width:86px;cursor:pointer;-webkit-tap-highlight-color:transparent";
+      t.innerHTML='<div style="width:86px;height:86px;border-radius:18px;overflow:hidden;background:'+d.light+';display:flex;align-items:center;justify-content:center">'+
+          (img?'<img src="'+img+'" alt="" style="width:100%;height:100%;object-fit:cover">':drinkIconHTML(d))+
+        '</div>'+
+        '<div style="margin-top:6px;font-size:11px;font-weight:700;color:var(--s1);line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-align:center">'+sanitize(d.name)+'</div>';
+      t.onclick=function(){pick(d);};
+      t.onkeydown=function(ev){if(ev.key==="Enter")pick(d);};
+      rail.appendChild(t);
+    });
+    rd.appendChild(rail);
+    el.appendChild(rd);
+    var rclr=rdh.querySelector(".rd-clr");
+    if(rclr)rclr.onclick=function(){recentDrinks=[];try{localStorage.removeItem("magoRecentDrinks");}catch(e){}renderList();playSound("pop");};
+  }
+  // 1) Recherches recentes, en pastilles cliquables (si pas encore de boissons)
+  if(!recents.length&&searchHistory.length){
     var recWrap=document.createElement("div");
     recWrap.style.cssText="margin-bottom:20px";
     var rh=document.createElement("div");
@@ -5917,7 +5980,7 @@ function renderSearchDefault(el){
     var div=document.createElement("div");div.className="ritem";
     var rank=i<3?'<span style="flex-shrink:0;width:20px;text-align:center;font-size:13px;font-weight:800;color:var(--s3)">'+(i+1)+'</span>':'<span style="flex-shrink:0;width:20px"></span>';
     div.innerHTML=rank+'<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
-      '<div style="flex:1;min-width:0"><div class="rname">'+d.name+'</div><div class="rsub">'+d.brand+' · '+d.cat+' · ★ '+d.stars+'</div></div>'+
+      '<div style="flex:1;min-width:0"><div class="rname">'+d.name+'</div><div class="rsub">'+d.brand+' · '+d.cat+starSuffix(d)+'</div></div>'+
       '<span class="rfav" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();toggleFav('+d.id+',this);}" style="display:flex;align-items:center;padding:6px 4px;cursor:pointer">'+heartSVG(isFav,20)+'</span>';
     div.onclick=function(){pick(d);};a11yCard(div,d.name+", "+d.brand);el.appendChild(div);
   });
@@ -5994,7 +6057,7 @@ function renderList(){
     var isFav=favorites.indexOf(d.id)!==-1;
     var div=document.createElement("div");div.className="ritem";
     div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
-      '<div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.brand+' · '+d.cat+' · ★ '+d.stars+'</div></div>'+
+      '<div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.brand+' · '+d.cat+starSuffix(d)+'</div></div>'+
       '<span class="rfav" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();toggleFav('+d.id+',this);}" style="display:flex;align-items:center;padding:6px 4px;cursor:pointer">'+heartSVG(isFav,20)+'</span>';
     div.onclick=function(){pick(d);};a11yCard(div,d.name+", "+d.brand);el.appendChild(div);
   });
@@ -8432,7 +8495,7 @@ function renderStoreDetail(){
     div.innerHTML=
       '<div class="sd-row" onclick="pick(DRINKS.find(function(x){return x.id==='+d.id+'}))">'+
         '<div class="store-ico" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
-        '<div class="sd-txt"><div class="store-name">'+d.name+'</div><div class="store-meta">'+d.cat+' · ★ '+d.stars+stat+'</div></div>'+
+        '<div class="sd-txt"><div class="store-name">'+d.name+'</div><div class="store-meta">'+d.cat+starSuffix(d)+stat+'</div></div>'+
         toggles+
       '</div>';
     listEl.appendChild(div);
@@ -11002,11 +11065,19 @@ function renderTopScanned(){
 /* Provenance de la note, affichee franchement : « 12 avis » quand la
    communaute a vote, « note indicative » pour les valeurs d'origine du
    catalogue (personne n'aime une note sortie de nulle part). */
+/* Honnetete des notes : une etoile ne s'affiche QUE si de vraies personnes
+   ont note (drinkRatingsAgg). Les notes d'amorcage du catalogue ne sont plus
+   jamais montrees — elles ne servent qu'aux tris internes. */
+function realAgg(d){
+  var a=(typeof drinkRatingsAgg!=="undefined"&&drinkRatingsAgg)?drinkRatingsAgg[d&&d.id]:null;
+  return(a&&a.count>0)?a:null;
+}
+function starSuffix(d){var a=realAgg(d);return a?" · ★ "+d.stars:"";}
 function starsLabel(d){
   if(!d)return "";
-  var a=drinkRatingsAgg[d.id];
-  if(a&&a.count>0)return "★ "+d.stars+" · "+a.count+" avis";
-  return "★ "+d.stars+" · sois le 1er à noter";
+  var a=realAgg(d);
+  if(a)return "★ "+d.stars+" · "+a.count+" avis";
+  return "Donne ton avis";
 }
 /* Tap sur la note dans l'en-tete de fiche -> on descend au panneau de
    notation (il existait mais personne ne le trouvait). */
@@ -11057,6 +11128,47 @@ function renderStarPanel(){
   if(noBtn){noBtn.style.background=myRec==="no"?activeBg:"var(--bg3)";noBtn.style.color=myRec==="no"?activeCol:"var(--s1)";noBtn.style.borderColor=myRec==="no"?activeBg:"var(--border)";}
   var recRes=document.getElementById("rec-result");if(recRes&&myRec){recRes.style.display="block";recRes.textContent=myRec==="yes"?"Tu la recommandes ✓":"Tu ne la recommandes pas";}
 }
+/* Feuille de notation : le meme moteur que le panneau de fiche, mais a un
+   tap de l'en-tete — 5 grosses etoiles au pouce, recommandation, ferme. */
+function openRateSheet(){
+  if(!curSel)return;
+  var sh=document.getElementById("rate-sheet");if(!sh)return;
+  var t=document.getElementById("rate-sheet-title");
+  if(t)t.textContent="Noter "+curSel.name;
+  renderRateSheet();
+  sh.style.display="block";
+  playSound("pop");
+}
+function closeRateSheet(){var sh=document.getElementById("rate-sheet");if(sh)sh.style.display="none";}
+function renderRateSheet(){
+  var body=document.getElementById("rate-sheet-body");if(!body||!curSel)return;
+  var myRating=userRatings[curSel.id]||0;
+  var myRec=userRecs[curSel.id]||null;
+  var a=realAgg(curSel);
+  var isDark=document.body.classList.contains("dark");
+  var activeBg=isDark?"#f0f0f0":"#1a1714", activeCol=isDark?"#1a1714":"#fff";
+  var html='<div style="font-size:12px;color:var(--s2);margin-bottom:14px">'+(a?("★ "+curSel.stars+" · "+a.count+" avis de la communauté"):"Sois la première personne à la noter")+'</div>';
+  html+='<div id="rate-sheet-stars" style="display:flex;justify-content:center;gap:6px;margin-bottom:6px"></div>';
+  html+='<div id="rate-sheet-val" style="text-align:center;font-size:12.5px;font-weight:700;color:var(--s2);margin-bottom:16px">'+(myRating?myRating+" / 5":"Appuie sur une étoile")+'</div>';
+  html+='<div style="font-size:12.5px;font-weight:700;color:var(--s2);margin-bottom:8px">La recommandes-tu ?</div>'+
+    '<div style="display:flex;gap:8px">'+
+      '<button onclick="setRec(\'yes\')" style="flex:1;padding:12px;border-radius:13px;border:1.5px solid '+(myRec==="yes"?activeBg:"var(--border)")+';background:'+(myRec==="yes"?activeBg:"var(--bg3)")+';color:'+(myRec==="yes"?activeCol:"var(--s1)")+';font-size:13.5px;font-weight:700;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">Oui</button>'+
+      '<button onclick="setRec(\'no\')" style="flex:1;padding:12px;border-radius:13px;border:1.5px solid '+(myRec==="no"?activeBg:"var(--border)")+';background:'+(myRec==="no"?activeBg:"var(--bg3)")+';color:'+(myRec==="no"?activeCol:"var(--s1)")+';font-size:13.5px;font-weight:700;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">Non</button>'+
+    '</div>';
+  body.innerHTML=html;
+  var wrap=document.getElementById("rate-sheet-stars");
+  for(var i=1;i<=5;i++){
+    var s=document.createElement("span");
+    s.setAttribute("role","button");s.setAttribute("tabindex","0");
+    s.style.cssText="font-size:42px;line-height:1;cursor:pointer;padding:4px 2px;color:"+(i<=myRating?"#c69a57":"var(--s3)");
+    s.textContent=i<=myRating?"★":"☆";
+    (function(val){
+      s.addEventListener("click",function(){setRating(val);});
+      s.addEventListener("keydown",function(ev){if(ev.key==="Enter")setRating(val);});
+    })(i);
+    wrap.appendChild(s);
+  }
+}
 function setRating(val){
   if(!curSel)return;
   var prev=userRatings[curSel.id];
@@ -11071,6 +11183,7 @@ function setRating(val){
   else{toast("★ Note mise \u00e0 jour : "+val+"/5");}
   updateProfileStats();playSound("pop");
   renderStarPanel();
+  try{var _rs=document.getElementById("rate-sheet");if(_rs&&_rs.style.display!=="none")renderRateSheet();}catch(e){}
   var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent=starsLabel(curSel);
   if(!prev&&window.fbAddRating)window.fbAddRating(curSel.id,val);
 }
@@ -11083,6 +11196,7 @@ function setRec(val){
   else{toast("Avis mis \u00e0 jour");}
   updateProfileStats();playSound("pop");
   renderStarPanel();
+  try{var _rs2=document.getElementById("rate-sheet");if(_rs2&&_rs2.style.display!=="none")renderRateSheet();}catch(e){}
   if(!prev&&window.fbAddRec)window.fbAddRec(curSel.id,val);
 }
 
@@ -12176,7 +12290,7 @@ function renderFavs(){
   el.innerHTML="";
   fd.forEach(function(d){
     var div=document.createElement("div");div.className="ritem";
-    div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div><div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.cat+' · ★ '+d.stars+'</div></div><span style="cursor:pointer;display:flex" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Retirer des favoris">'+heartSVG(true,20)+'</span>';
+    div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div><div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.cat+starSuffix(d)+'</div></div><span style="cursor:pointer;display:flex" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Retirer des favoris">'+heartSVG(true,20)+'</span>';
     div.onclick=function(){pick(d);};a11yCard(div,d.name+", favori");el.appendChild(div);
   });
 }
