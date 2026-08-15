@@ -1316,8 +1316,14 @@ function applyStores(stores, banner, fromCache) {
 }
 
 // Point d'entrée principal : charge les magasins dans un rayon donné (km) autour de lat/lng
+// Jeton de génération : deux requêtes peuvent se croiser (lot de démarrage
+// centré sur l'ancienne position vs lot GPS frais). Sans ce jeton, la requête
+// la plus LENTE gagnait et pouvait écraser le lot frais avec des magasins
+// d'ailleurs. Seule la requête la plus récente a le droit d'appliquer.
+window._fbQuerySeq = 0;
 window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
   opts = opts || {};
+  var mySeq = ++window._fbQuerySeq;
   var banner = document.getElementById("fb-status");
   var now = Date.now();
 
@@ -1349,6 +1355,7 @@ window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
   try {
     if (banner && !servedFromCache) { banner.style.display = "block"; banner.textContent = "Recherche des magasins à proximité…"; }
     var stores = await queryNearbyStores(lat, lng, radiusKm);
+    if (mySeq !== window._fbQuerySeq) return stores; // une requête plus récente a pris la main
     window._fbLastQuery = { lat: lat, lng: lng, radiusKm: radiusKm };
     applyStores(stores, banner, false);
     saveStoresCache(lat, lng, radiusKm, now, stores);
@@ -1365,7 +1372,7 @@ window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
     try {
       var cachedFallback = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
       if (cachedFallback && cachedFallback.v !== CACHE_DATA_V) cachedFallback = null;
-      if (cachedFallback && cachedFallback.stores && cachedFallback.stores.length) {
+      if (cachedFallback && cachedFallback.stores && cachedFallback.stores.length && mySeq === window._fbQuerySeq) {
         applyStores(cachedFallback.stores, banner, true);
         return cachedFallback.stores;
       }
@@ -2498,7 +2505,13 @@ window.fbLoadCommunityData = async function() {
 // initGPS() (script classique) relance une requête précise dès que la position réelle est connue.
 var _bootPos = null;
 try { _bootPos = JSON.parse(localStorage.getItem("magoLastPos") || "null"); } catch (e) {}
-var _bootCenter = (_bootPos && typeof _bootPos.lat === "number" && typeof _bootPos.lng === "number") ? _bootPos : DEFAULT_CENTER;
+// Memes garde-fous que la restauration cote script classique : une position
+// trop vieille (7 j) ou trop imprecise (fix Wi-Fi/IP grossier) n'est pas un
+// centre de chargement credible.
+var _bootOk = _bootPos && typeof _bootPos.lat === "number" && typeof _bootPos.lng === "number"
+  && (Date.now() - (_bootPos.ts || 0)) < 7 * 24 * 3600 * 1000
+  && !(_bootPos.acc && _bootPos.acc > 1500);
+var _bootCenter = _bootOk ? _bootPos : DEFAULT_CENTER;
 window.fbLoadNearbyStores(_bootCenter.lat, _bootCenter.lng, 10);
 window.fbLoadCommunityData();
 </script>
@@ -2618,12 +2631,17 @@ function initGPS(){
   navigator.geolocation.getCurrentPosition(function(pos){
     userLat=pos.coords.latitude;userLng=pos.coords.longitude;
     window._posProvisional=false;
-    try{localStorage.setItem("magoLastPos",JSON.stringify({lat:userLat,lng:userLng,ts:Date.now()}));}catch(e){}
-    // Premier fix parfois grossier (Wi-Fi) : on repasse une lecture precise
-    // quelques secondes plus tard pour coller au vrai emplacement.
-    if(pos.coords.accuracy>200&&!window._gpsRefineT){window._gpsRefineT=setTimeout(function(){try{refreshLocation();}catch(e){}},7000);}
+    var _acc=Math.round(pos.coords.accuracy||0);
+    try{localStorage.setItem("magoLastPos",JSON.stringify({lat:userLat,lng:userLng,ts:Date.now(),acc:_acc}));}catch(e){}
+    // Premier fix parfois grossier (Wi-Fi) : on repasse une lecture FRAICHE
+    // (maximumAge:0, sinon le navigateur ressert le meme point en cache)
+    // quelques secondes plus tard. Le jeton est libere apres le tir pour
+    // qu'un futur initGPS puisse replanifier un raffinage.
+    if(_acc>200&&!window._gpsRefineT){window._gpsRefineT=setTimeout(function(){window._gpsRefineT=null;try{refreshLocation(null,{fresh:true});}catch(e){}},7000);}
     if(window.fbUpdatePushPosition)window.fbUpdatePushPosition(userLat,userLng); // serveur = ta vraie position
-    if(window.fbRepositionMyHunts&&!window._huntsRepositioned&&(drinkWatches||[]).length){window._huntsRepositioned=true;window.fbRepositionMyHunts(userLat,userLng,drinkWatches);}
+    // Chasses : on ne les ancre PAS sur un fix grossier (>200 m) — le
+    // raffinage a +7 s s'en chargera avec la vraie position.
+    if(window.fbRepositionMyHunts&&!window._huntsRepositioned&&(drinkWatches||[]).length&&_acc<=200){window._huntsRepositioned=true;window.fbRepositionMyHunts(userLat,userLng,drinkWatches);}
     // Recalcule immédiatement les distances des magasins déjà en mémoire (chargés autour du centre par défaut)
     STORES.forEach(function(s){s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));});
     STORES.sort(function(a,b){return(a.dist||0)-(b.dist||0);});
@@ -2645,6 +2663,14 @@ function initGPS(){
     // Echec GPS (refus, timeout, capteur absent) : ne plus rester muet.
     // On signale l'etat pour que l'utilisateur comprenne pourquoi les magasins
     // proposes sont ceux du centre par defaut, et qu'il cherche sa ville a la main.
+    // Et on SOLDE l'etat provisoire : la note "actualisation…" promettrait une
+    // mise a jour qui ne viendra pas. GPS refuse = on lache aussi la position
+    // restauree (l'accueil repasse honnetement sur "Active ta position").
+    if(window._posProvisional){
+      window._posProvisional=false;
+      if(err&&err.code===1){userLat=null;userLng=null;}
+      try{renderNearby();}catch(e){}
+    }
     var dot=document.getElementById("gps-dot");if(dot)dot.style.background="#f59e0b";
     var lbl=document.getElementById("gps-label");
     if(lbl){
@@ -2667,6 +2693,7 @@ try{
     var lp=JSON.parse(localStorage.getItem("magoLastPos")||"null");
     if(!lp||typeof lp.lat!=="number"||typeof lp.lng!=="number")return;
     if((Date.now()-(lp.ts||0))>7*24*3600*1000)return; // trop vieille : on n'invente pas
+    if(lp.acc&&lp.acc>1500)return;                     // fix Wi-Fi/IP grossier : inutilisable
     if(typeof userLat==="number"&&userLat)return;      // un vrai fix est deja la
     userLat=lp.lat;userLng=lp.lng;
     window._posProvisional=true;
@@ -2687,7 +2714,7 @@ try{
    point de depart). On rappelle donc le GPS au moment du scan pour que les
    distances et la liste des magasins collent a l'endroit ou tu es vraiment. */
 var _lastGpsRefresh=0,_gpsRefreshing=false;
-function refreshLocation(cb){
+function refreshLocation(cb,opts){
   if(!navigator.geolocation){cb&&cb(false);return;}
   if(_gpsRefreshing){cb&&cb(false);return;}
   _gpsRefreshing=true;
@@ -2695,7 +2722,7 @@ function refreshLocation(cb){
     _gpsRefreshing=false;
     userLat=pos.coords.latitude;userLng=pos.coords.longitude;
     window._posProvisional=false;
-    try{localStorage.setItem("magoLastPos",JSON.stringify({lat:userLat,lng:userLng,ts:Date.now()}));}catch(e){}
+    try{localStorage.setItem("magoLastPos",JSON.stringify({lat:userLat,lng:userLng,ts:Date.now(),acc:Math.round(pos.coords.accuracy||0)}));}catch(e){}
     _lastGpsRefresh=Date.now();
     if(window.fbUpdatePushPosition)window.fbUpdatePushPosition(userLat,userLng); // serveur = ta vraie position
     if(window.fbRepositionMyHunts&&!window._huntsRepositioned&&(drinkWatches||[]).length){window._huntsRepositioned=true;window.fbRepositionMyHunts(userLat,userLng,drinkWatches);}
@@ -2710,7 +2737,10 @@ function refreshLocation(cb){
     try{var hp=document.getElementById("s-home");if(hp&&hp.classList.contains("on"))renderHunts();}catch(e){}
     try{renderNearby();}catch(e){}
     cb&&cb(true);
-  },function(){_gpsRefreshing=false;cb&&cb(false);},{enableHighAccuracy:true,timeout:8000,maximumAge:15000});
+  },function(){_gpsRefreshing=false;cb&&cb(false);},
+  // opts.fresh (raffinage apres un fix grossier) : maximumAge 0 pour forcer une
+  // VRAIE lecture capteur — sinon le navigateur ressert le meme point en cache.
+  {enableHighAccuracy:true,timeout:8000,maximumAge:(opts&&opts.fresh)?0:15000});
 }
 
 /* ================================
@@ -5349,7 +5379,9 @@ function renderNearby(){
   var head=document.createElement("div");
   head.style.cssText="display:flex;align-items:center;gap:8px;margin-bottom:10px";
   var _prov=!!window._posProvisional;
-  head.innerHTML='<span class="mago-live-dot" style="width:8px;height:8px;border-radius:50%;background:'+(_prov?"#f59e0b":"#22c55e")+';flex-shrink:0;box-shadow:0 0 0 0 rgba(34,197,94,.5)"></span>'+
+  // En provisoire : pas de classe "live" (son halo pulsant est code en VERT
+  // dans app.css — un point orange au halo vert serait incoherent).
+  head.innerHTML='<span class="'+(_prov?"":"mago-live-dot")+'" style="width:8px;height:8px;border-radius:50%;background:'+(_prov?"#f59e0b":"#22c55e")+';flex-shrink:0;box-shadow:0 0 0 0 rgba(34,197,94,.5)"></span>'+
     '<span style="flex:1;font-size:13px;font-weight:800;color:var(--s1)">Autour de toi'+(_prov?' <span style="font-size:11px;font-weight:600;color:var(--s2)">· position en cours d’actualisation…</span>':"")+'</span>';
   var mapLink=document.createElement("span");
   mapLink.setAttribute("role","button");mapLink.setAttribute("tabindex","0");
@@ -5651,11 +5683,12 @@ function renderTopRail(){
   var wrap=document.getElementById("top-rail-wrap");
   var rail=document.getElementById("top-rail");
   if(!wrap||!rail)return;
-  var scanned=DRINKS.slice().sort(function(a,b){return(scanCounts[b.id]||0)-(scanCounts[a.id]||0);})
-    .filter(function(d){return scanCounts[d.id];});
-  // Vraies photos d'abord (meme raison que la grille "A decouvrir").
-  var top=scanned.filter(function(d){return !!getCachedDrinkImage(d);})
-    .concat(scanned.filter(function(d){return !getCachedDrinkImage(d);})).slice(0,8);
+  // La SELECTION reste le classement par scans (c'est l'identite du rail) ;
+  // seul l'ORDRE d'affichage met les vraies photos devant les vignettes.
+  var top=DRINKS.slice().sort(function(a,b){return(scanCounts[b.id]||0)-(scanCounts[a.id]||0);})
+    .filter(function(d){return scanCounts[d.id];}).slice(0,8);
+  top=top.filter(function(d){return !!getCachedDrinkImage(d);})
+    .concat(top.filter(function(d){return !getCachedDrinkImage(d);}));
   if(top.length<2){wrap.style.display="none";return;}
   wrap.style.display="block";
   rail.innerHTML="";
@@ -5706,11 +5739,24 @@ function renderTrends(){
   // les marques, les categories et la recherche
   if(curCat==="Tous"&&f.length>8){
     // Credibilite de la vitrine : les boissons avec une VRAIE photo passent
-    // devant les vignettes dessinees — on ne montre pas des canettes SVG en
-    // page d'accueil quand on a de vraies photos en stock.
-    var wp=f.filter(function(d){return !!getCachedDrinkImage(d);});
-    if(wp.length)f=wp.concat(f.filter(function(d){return !getCachedDrinkImage(d);}));
-    f=f.slice(0,8);capped=true;
+    // devant les vignettes dessinees. La selection est FIGEE pour la session
+    // (window._homeTop8) : sans ce gel, chaque photo qui arrivait en asynchrone
+    // re-partitionnait la grille et les cartes sautaient sous les yeux.
+    // L'entrelacement par marque est refait DANS chaque groupe, sinon la
+    // partition recreait les murs de variantes qu'il est cense empecher.
+    if(!window._homeTop8){
+      var wp=f.filter(function(d){return !!getCachedDrinkImage(d);});
+      var np=f.filter(function(d){return !getCachedDrinkImage(d);});
+      window._homeTop8=interleaveByBrand(wp).concat(interleaveByBrand(np)).slice(0,8).map(function(d){return Number(d.id);});
+    }
+    var byId={};f.forEach(function(d){byId[Number(d.id)]=d;});
+    var picked=window._homeTop8.map(function(id){return byId[id];}).filter(Boolean);
+    // Complement si des elus ont disparu (fusion de fiches, filtre)
+    if(picked.length<8){
+      var have={};picked.forEach(function(d){have[Number(d.id)]=1;});
+      f.forEach(function(d){if(picked.length<8&&!have[Number(d.id)])picked.push(d);});
+    }
+    f=picked.slice(0,8);capped=true;
   }
   var cnt=document.getElementById("trends-count");
   if(cnt)cnt.textContent=capped?"Top "+f.length+" \u00B7 "+all.length+" au total":all.length+" boissons";
@@ -12422,6 +12468,9 @@ try{
     });
     if(applied){
       try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(err){}
+      // Le lot de photos communautaires vient d'arriver : UNE recomposition de
+      // la vitrine (puis la selection reste figee pour la session).
+      window._homeTop8=null;
       renderTrends();
       var sEl=document.getElementById("s-search");
       if(sEl&&sEl.classList.contains("on"))renderList();
