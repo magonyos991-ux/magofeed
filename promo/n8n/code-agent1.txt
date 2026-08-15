@@ -1,0 +1,40 @@
+// AGENT 1 (image) — choisit la boisson du jour dans le MENU (banque de cartes).
+const prev = $('Memoire et aiguillage').first().json;
+const MENU = [
+  { slug: "guarana-antarctica", nom: "Guaraná Antarctica", info: "soda guarana, le prefere du Bresil depuis 1921" },
+  { slug: "ramune", nom: "Ramune", info: "soda japonais avec une bille de verre dans le goulot" },
+  { slug: "calpico", nom: "Calpico", info: "soda lacte japonais au gout yaourt, cree en 1919" },
+  { slug: "mogu-mogu", nom: "Mogu Mogu", info: "jus thailandais avec cubes de nata de coco qui se machent" },
+  { slug: "inca-kola", nom: "Inca Kola", info: "soda dore peruvien qui bat le cola chez lui" },
+  { slug: "milkis", nom: "Milkis", info: "soda lacte coreen doux et petillant" },
+  { slug: "ciao-energy", nom: "Ciao Energy", info: "energy drink introuvable dont tout le monde parle" },
+  { slug: "jarritos", nom: "Jarritos", info: "sodas mexicains aux vrais fruits depuis 1950" },
+  { slug: "sumol", nom: "Sumol", info: "soda portugais a l'ananas, culte a Lisbonne" },
+  { slug: "pocari-sweat", nom: "Pocari Sweat", info: "boisson desalterante n°1 au Japon" },
+  { slug: "vimto", nom: "Vimto", info: "boisson fruitee anglaise de Manchester, depuis 1908" },
+  { slug: "chupa-chups", nom: "Chupa Chups Sparkling", info: "la sucette devenue soda petillant, Coree" }
+];
+const menuTxt = MENU.map(m => "- " + m.slug + " : " + m.nom + " (" + m.info + ")").join("\n");
+const prompt =
+  "Tu es le responsable marketing de Magofeed, appli belge (Bruxelles) qui aide a TROUVER des boissons rares et exotiques SANS ALCOOL dans les magasins proches. Public familial, ton fun et curieux, langue: FRANCAIS.\n\n" +
+  "Choisis LA boisson du jour dans ce MENU (une boisson pas encore utilisee recemment, varie les continents) puis cree le post Instagram + Facebook:\n" + menuTxt + "\n\n" +
+  "REGLES ABSOLUES:\n" +
+  "- JAMAIS d'alcool, meme 0.0%. Univers 100% famille.\n" +
+  "- Sujet DIFFERENT de tous ceux deja publies (liste plus bas) — si une boisson du menu y figure deja, prends-en une autre.\n" +
+  "- Varie les angles: anecdote, le-savais-tu, question communaute, defi, comparaison.\n" +
+  "- CTA vers l'appli: " + prev.appLink + "\n" +
+  "- Instagram: accroche forte + 8-12 hashtags. Facebook: conversationnel, 2-4 hashtags.\n\n" +
+  "SUJETS DEJA PUBLIES (interdits): " + prev.usedTopicsList;
+return [{ json: { claudeBody: {
+  model: "claude-opus-5", max_tokens: 4000,
+  output_config: { effort: "low", format: { type: "json_schema", schema: {
+    "type": "object", "additionalProperties": false,
+    "required": ["topic", "image_query", "caption_instagram", "caption_facebook"],
+    "properties": {
+      "topic": {"type": "string", "description": "Sujet court et unique du post (inclut le nom de la boisson)"},
+      "image_query": {"type": "string", "enum": ["guarana-antarctica","ramune","calpico","mogu-mogu","inca-kola","milkis","ciao-energy","jarritos","sumol","pocari-sweat","vimto","chupa-chups"], "description": "slug EXACT de la boisson choisie dans le menu"},
+      "caption_instagram": {"type": "string", "description": "Legende Instagram: accroche forte, corps, CTA appli, 8-12 hashtags"},
+      "caption_facebook": {"type": "string", "description": "Version Facebook conversationnelle, 2-4 hashtags, CTA appli"}
+    }} } },
+  messages: [{ role: "user", content: prompt }]
+} } }];
