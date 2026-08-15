@@ -1328,7 +1328,10 @@ window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
       if (cached && cached.v !== CACHE_DATA_V) { cached = null; try { localStorage.removeItem(CACHE_KEY); } catch (e2) {} }
       if (cached && (now - cached.ts) < CACHE_HARD_TTL_MS && cached.radiusKm >= radiusKm) {
         var driftKm = haversineKm(lat, lng, cached.lat, cached.lng);
-        if (driftKm < radiusKm * 0.5) {
+        // Plafond 3 km : un cache enregistre a plus de 3 km de la position
+        // demandee decrit un AUTRE quartier — requete fraiche plutot que de
+        // servir des magasins d'ailleurs avec aplomb.
+        if (driftKm < Math.min(radiusKm * 0.5, 3)) {
           applyStores(cached.stores, banner, true);
           servedFromCache = true;
           window._fbLastQuery = { lat: cached.lat, lng: cached.lng, radiusKm: cached.radiusKm };
@@ -2488,9 +2491,15 @@ window.fbLoadCommunityData = async function() {
   } catch (e) { console.warn("Firestore drink recs load error:", e); }
 };
 
-// Chargement initial : centre par défaut (Bruxelles), rayon 10km.
+// Chargement initial : DERNIERE POSITION CONNUE si on en a une (magoLastPos,
+// ecrite a chaque fix GPS), sinon centre par défaut (Bruxelles). Avant, le
+// premier lot etait toujours centre sur Bruxelles-centre : au lancement,
+// l'accueil montrait des magasins d'ailleurs jusqu'au fix GPS.
 // initGPS() (script classique) relance une requête précise dès que la position réelle est connue.
-window.fbLoadNearbyStores(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng, 10);
+var _bootPos = null;
+try { _bootPos = JSON.parse(localStorage.getItem("magoLastPos") || "null"); } catch (e) {}
+var _bootCenter = (_bootPos && typeof _bootPos.lat === "number" && typeof _bootPos.lng === "number") ? _bootPos : DEFAULT_CENTER;
+window.fbLoadNearbyStores(_bootCenter.lat, _bootCenter.lng, 10);
 window.fbLoadCommunityData();
 </script>
 
@@ -2608,6 +2617,11 @@ function initGPS(){
   // point recyclé quand on a bougé.
   navigator.geolocation.getCurrentPosition(function(pos){
     userLat=pos.coords.latitude;userLng=pos.coords.longitude;
+    window._posProvisional=false;
+    try{localStorage.setItem("magoLastPos",JSON.stringify({lat:userLat,lng:userLng,ts:Date.now()}));}catch(e){}
+    // Premier fix parfois grossier (Wi-Fi) : on repasse une lecture precise
+    // quelques secondes plus tard pour coller au vrai emplacement.
+    if(pos.coords.accuracy>200&&!window._gpsRefineT){window._gpsRefineT=setTimeout(function(){try{refreshLocation();}catch(e){}},7000);}
     if(window.fbUpdatePushPosition)window.fbUpdatePushPosition(userLat,userLng); // serveur = ta vraie position
     if(window.fbRepositionMyHunts&&!window._huntsRepositioned&&(drinkWatches||[]).length){window._huntsRepositioned=true;window.fbRepositionMyHunts(userLat,userLng,drinkWatches);}
     // Recalcule immédiatement les distances des magasins déjà en mémoire (chargés autour du centre par défaut)
@@ -2644,6 +2658,29 @@ function haversine(a,b,c,d){
   var x=Math.sin(dL/2)*Math.sin(dL/2)+Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin(dG/2)*Math.sin(dG/2);
   return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
 }
+/* Demarrage : on repart de la DERNIERE position connue (magoLastPos) en
+   attendant le vrai fix GPS, marquee "provisoire" — l'accueil montre les
+   magasins de l'endroit ou tu etais, avec un point orange "actualisation…",
+   au lieu de presenter une vieille zone comme une verite fraiche. */
+try{
+  (function(){
+    var lp=JSON.parse(localStorage.getItem("magoLastPos")||"null");
+    if(!lp||typeof lp.lat!=="number"||typeof lp.lng!=="number")return;
+    if((Date.now()-(lp.ts||0))>7*24*3600*1000)return; // trop vieille : on n'invente pas
+    if(typeof userLat==="number"&&userLat)return;      // un vrai fix est deja la
+    userLat=lp.lat;userLng=lp.lng;
+    window._posProvisional=true;
+    // Les distances des magasins (cache ou requete) se recalent sur cette
+    // position des leur arrivee, tant que le vrai GPS n'a pas repondu.
+    window.addEventListener("fbStoresLoaded",function(e){
+      if(!window._posProvisional)return;
+      var list=e.detail||[];
+      list.forEach(function(s){if(typeof s.lat==="number")s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));});
+      list.sort(function(a,b){return(a.dist||0)-(b.dist||0);});
+    });
+  })();
+}catch(e){}
+
 /* Rafraichit la position EN TEMPS REEL (initGPS ne lit qu'une fois au
    demarrage : si tu ouvres l'app chez toi puis vas au magasin, userLat/Lng
    reste bloque chez toi et "Ou l'as-tu trouve ?" propose les magasins du
@@ -2657,6 +2694,8 @@ function refreshLocation(cb){
   navigator.geolocation.getCurrentPosition(function(pos){
     _gpsRefreshing=false;
     userLat=pos.coords.latitude;userLng=pos.coords.longitude;
+    window._posProvisional=false;
+    try{localStorage.setItem("magoLastPos",JSON.stringify({lat:userLat,lng:userLng,ts:Date.now()}));}catch(e){}
     _lastGpsRefresh=Date.now();
     if(window.fbUpdatePushPosition)window.fbUpdatePushPosition(userLat,userLng); // serveur = ta vraie position
     if(window.fbRepositionMyHunts&&!window._huntsRepositioned&&(drinkWatches||[]).length){window._huntsRepositioned=true;window.fbRepositionMyHunts(userLat,userLng,drinkWatches);}
@@ -5309,8 +5348,9 @@ function renderNearby(){
   // En-tete commun : point vert vivant + titre + raccourci carte.
   var head=document.createElement("div");
   head.style.cssText="display:flex;align-items:center;gap:8px;margin-bottom:10px";
-  head.innerHTML='<span class="mago-live-dot" style="width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;box-shadow:0 0 0 0 rgba(34,197,94,.5)"></span>'+
-    '<span style="flex:1;font-size:13px;font-weight:800;color:var(--s1)">Autour de toi</span>';
+  var _prov=!!window._posProvisional;
+  head.innerHTML='<span class="mago-live-dot" style="width:8px;height:8px;border-radius:50%;background:'+(_prov?"#f59e0b":"#22c55e")+';flex-shrink:0;box-shadow:0 0 0 0 rgba(34,197,94,.5)"></span>'+
+    '<span style="flex:1;font-size:13px;font-weight:800;color:var(--s1)">Autour de toi'+(_prov?' <span style="font-size:11px;font-weight:600;color:var(--s2)">· position en cours d’actualisation…</span>':"")+'</span>';
   var mapLink=document.createElement("span");
   mapLink.setAttribute("role","button");mapLink.setAttribute("tabindex","0");
   mapLink.setAttribute("aria-label","Explorer la carte des magasins");
@@ -5611,8 +5651,11 @@ function renderTopRail(){
   var wrap=document.getElementById("top-rail-wrap");
   var rail=document.getElementById("top-rail");
   if(!wrap||!rail)return;
-  var top=DRINKS.slice().sort(function(a,b){return(scanCounts[b.id]||0)-(scanCounts[a.id]||0);})
-    .filter(function(d){return scanCounts[d.id];}).slice(0,8);
+  var scanned=DRINKS.slice().sort(function(a,b){return(scanCounts[b.id]||0)-(scanCounts[a.id]||0);})
+    .filter(function(d){return scanCounts[d.id];});
+  // Vraies photos d'abord (meme raison que la grille "A decouvrir").
+  var top=scanned.filter(function(d){return !!getCachedDrinkImage(d);})
+    .concat(scanned.filter(function(d){return !getCachedDrinkImage(d);})).slice(0,8);
   if(top.length<2){wrap.style.display="none";return;}
   wrap.style.display="block";
   rail.innerHTML="";
@@ -5661,7 +5704,14 @@ function renderTrends(){
   var capped=false;
   // Sur "Tous", une selection variee suffit : le reste est accessible via
   // les marques, les categories et la recherche
-  if(curCat==="Tous"&&f.length>8){f=f.slice(0,8);capped=true;}
+  if(curCat==="Tous"&&f.length>8){
+    // Credibilite de la vitrine : les boissons avec une VRAIE photo passent
+    // devant les vignettes dessinees — on ne montre pas des canettes SVG en
+    // page d'accueil quand on a de vraies photos en stock.
+    var wp=f.filter(function(d){return !!getCachedDrinkImage(d);});
+    if(wp.length)f=wp.concat(f.filter(function(d){return !getCachedDrinkImage(d);}));
+    f=f.slice(0,8);capped=true;
+  }
   var cnt=document.getElementById("trends-count");
   if(cnt)cnt.textContent=capped?"Top "+f.length+" \u00B7 "+all.length+" au total":all.length+" boissons";
   f.forEach(function(d){
