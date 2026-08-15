@@ -1213,6 +1213,7 @@ function normalizeStore(data, id, distKm) {
   data.emoji = data.emoji || "";
   data.drinks = data.drinks || [];
   data.confirmations = data.confirmations || {};
+  data.seenAt = data.seenAt || {};
   data.reports = data.reports || [];
   if (distKm != null) data.dist = Math.round(distKm * 1000); // mètres, comme haversine() côté app
   return data;
@@ -1437,6 +1438,9 @@ window.fbConfirmStock = async function(storeId, drinkId, value) {
     if(!s || !s.fbId) return;
     var updates = {};
     updates["confirmations."+drinkId] = window.fbIncrement(value);
+    // Fraicheur : une confirmation POSITIVE horodate la derniere observation
+    // (un "non, absente" n'est pas une observation du produit).
+    if (value > 0) updates["seenAt."+drinkId] = Date.now();
     await window.fbUpdateDoc(window.fbDoc(window.db, "stores", s.fbId), updates);
   } catch(e) {
     console.warn("Firebase update error:", e);
@@ -1752,6 +1756,7 @@ window.fbAddDrinkToStore = async function(storeId, drinkId) {
   var updates = {};
   updates["drinks"] = arrayUnion(Number(drinkId) || drinkId);
   updates["confirmations." + drinkId] = increment(1);
+  updates["seenAt." + drinkId] = Date.now();
   await window.fbUpdateDoc(window.fbDoc(window.db, "stores", s.fbId), updates);
 };
 
@@ -2231,18 +2236,22 @@ window.fbCommunityAddDrinks = async function(storeId, ids) {
   const nums = ids.map(Number).filter(n => !isNaN(n));
   if (!nums.length) return 0;
   const upd = { drinks: arrayUnion.apply(null, nums) };
-  nums.forEach(function(id) { upd["confirmations." + id] = increment(1); });
+  const seenNow = Date.now();
+  nums.forEach(function(id) { upd["confirmations." + id] = increment(1); upd["seenAt." + id] = seenNow; });
   await updateDoc(doc(db, "stores", String(storeId)), upd);
   return nums.length;
 };
 window.fbAssignListToStore = async function(storeId, ids) {
   const nums = ids.map(Number).filter(n => !isNaN(n));
   if (!nums.length) return 0;
-  await updateDoc(doc(db, "stores", String(storeId)), {
+  var updV = {
     drinks: arrayUnion.apply(null, nums),
     drinksVerified: arrayUnion.apply(null, nums),
     verifiedSource: "photos rayon (07/2026)"
-  });
+  };
+  var seenNowV = Date.now();
+  nums.forEach(function(id) { updV["seenAt." + id] = seenNowV; });
+  await updateDoc(doc(db, "stores", String(storeId)), updV);
   return nums.length;
 };
 window.fbAssignPackToBrand = async function(drinkIds, brand) {
@@ -2923,7 +2932,7 @@ function report(type){
   var pts={stock:10,rupture:5,contrefacon:15,nouveau:20};
   var msgs={stock:"✓ +10 pts",rupture:"✕ +5 pts",contrefacon:"+15 pts",nouveau:"+20 pts"};
   var now=new Date(),time=now.getHours()+":"+String(now.getMinutes()).padStart(2,"0");
-  if(type==="stock"){if(!s.confirmations[d.id])s.confirmations[d.id]=0;s.confirmations[d.id]++;userStats.confirms++;}
+  if(type==="stock"){if(!s.confirmations[d.id])s.confirmations[d.id]=0;s.confirmations[d.id]++;if(!s.seenAt)s.seenAt={};s.seenAt[d.id]=Date.now();userStats.confirms++;}
   else{
     userStats.signals++;
     if(type==="rupture"){
@@ -2946,6 +2955,21 @@ function report(type){
   updateProfileStats();renderStoreList();
 }
 
+/* Fraicheur d'une observation (store, drink) : libelle + facteur de decote
+   applique a la barre de fiabilite. Base sur seenAt (epoch ms), pose par
+   toute confirmation POSITIVE (locale + Firestore). */
+function freshnessInfo(s,did){
+  var ts=s&&s.seenAt&&Number(s.seenAt[did]);
+  if(!ts||!isFinite(ts))return null;
+  var days=Math.floor((Date.now()-ts)/86400000);
+  if(days<0)days=0;
+  if(days===0)return{label:"vu aujourd'hui",col:"#15803d",bg:"#f0fdf4",f:1};
+  if(days===1)return{label:"vu hier",col:"#15803d",bg:"#f0fdf4",f:1};
+  if(days<7)return{label:"vu il y a "+days+" j",col:"#15803d",bg:"#f0fdf4",f:1};
+  if(days<30)return{label:"vu il y a "+days+" j",col:"#b45309",bg:"#fffbeb",f:.7};
+  var lbl=days<60?"vu il y a "+days+" j · à reconfirmer":"à reconfirmer";
+  return{label:lbl,col:"var(--s2)",bg:"var(--bg3)",f:.4};
+}
 function doConfirm(btn,sid,did,val){
   if(!awardFree("conf:"+sid+":"+did,24)){
     toast("D\u00e9j\u00e0 pris en compte aujourd'hui pour ce magasin");playSound("err");return;
@@ -2980,6 +3004,7 @@ function confirmWithPrice(sid,did){
   var s=STORES.find(function(x){return x.id===sid||x.id===String(sid);});if(!s)return;
   if(!s.confirmations[did])s.confirmations[did]=0;
   s.confirmations[did]++;
+  if(!s.seenAt)s.seenAt={};s.seenAt[did]=Date.now();
   if(price&&price>0){
     if(!storePrices[sid])storePrices[sid]={};
     storePrices[sid][did]=price;
@@ -4251,7 +4276,7 @@ function tagScanToStore(s){
     var did=ctx.drinkId;
     if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
     if(!s.confirmations)s.confirmations={};
-    s.confirmations[did]=(s.confirmations[did]||0)+1;
+    s.confirmations[did]=(s.confirmations[did]||0)+1;if(!s.seenAt)s.seenAt={};s.seenAt[did]=Date.now();
     if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||sid,did).catch(function(e){console.warn(e);});
     if(window.fbTouchCache)window.fbTouchCache();
   }else if(ctx.pendingBarcode!=null){
@@ -6678,7 +6703,7 @@ function submitAddDrinks(){
     var pts=0;
     ids.forEach(function(id){
       if(s.drinks.indexOf(id)===-1)s.drinks.push(id);
-      s.confirmations[id]=(s.confirmations[id]||0)+1;
+      s.confirmations[id]=(s.confirmations[id]||0)+1;if(!s.seenAt)s.seenAt={};s.seenAt[id]=Date.now();
       if(awardOnce("tag:"+id+":"+(s.fbId||s.id),FOREVER))pts+=2;
     });
     var live=(STORES||[]).find(function(x){return String(x.id)===String(s.id);});
@@ -8152,7 +8177,13 @@ function renderStoreList(){
   el.insertAdjacentHTML("beforeend",'<div style="padding:8px 20px 4px"><button onclick="drinkLocate()" style="width:100%;padding:8px;border-radius:12px;border:none;background:transparent;color:var(--s3);font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit;text-decoration:underline">Ajouter un autre magasin qui la vend</button></div>');
   stores.forEach(function(s){
     var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):"~?km";
-    var confs=Math.max(0,s.confirmations[sid]||0),trust=Math.min(confs*20,100);
+    var confs=Math.max(0,s.confirmations[sid]||0);
+    // Fraicheur : un stock change chaque semaine — une confirmation d'il y a
+    // 2 mois ne vaut pas une d'hier. La fiabilite decote avec l'age de la
+    // derniere observation, et la date est montree a l'utilisateur.
+    var fr=freshnessInfo(s,sid);
+    var frF=fr?fr.f:(confs>0?0.6:1); // confirmations sans date (historique) : prudence
+    var trust=Math.round(Math.min(confs*20,100)*frF);
     var storePriceVal=getStorePrice(s,sid);
     var storePrice=storePriceVal?storePriceVal.toFixed(2)+"€":null;
     var storeIdStr=String(s.id);
@@ -8188,9 +8219,12 @@ function renderStoreList(){
         '<div style="display:inline-flex;align-items:center;gap:5px;margin-bottom:7px;padding:3px 10px;border-radius:999px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:10.5px;font-weight:700;color:#15803d">\u2713 Confirm\u00e9 au catalogue de l\'enseigne</div>':
        (confN<0?
         '<div style="display:inline-flex;align-items:center;gap:5px;margin-bottom:7px;padding:3px 10px;border-radius:999px;background:#fef2f2;border:1px solid #fecaca;font-size:10.5px;font-weight:700;color:#b91c1c">Tu la vois ici ? confirme pour aider !</div>':''))+
-      '<div style="display:flex;justify-content:space-between;margin-bottom:5px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;gap:8px">'+
         '<span style="font-size:10px;font-weight:600;color:var(--s3)">Fiabilité</span>'+
-        '<span style="font-size:10px;font-weight:600;color:var(--s2)">'+confs+' confirmation'+(confs>1?"s":"")+'</span>'+
+        '<span style="display:inline-flex;align-items:center;gap:6px">'+
+          (fr?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;background:'+fr.bg+';color:'+fr.col+';white-space:nowrap">'+fr.label+'</span>':'')+
+          '<span style="font-size:10px;font-weight:600;color:var(--s2)">'+confs+' confirmation'+(confs>1?"s":"")+'</span>'+
+        '</span>'+
       '</div>'+
       '<div class="trust-bar-bg"><div class="trust-fill" style="width:'+trust+'%;background:'+(trust>=60?"#22c55e":trust>=30?"#f59e0b":"var(--s3)")+'"></div></div>'+
       priceHistoryRowHTML(s,sid)+
@@ -8622,7 +8656,7 @@ function rafaleAddCode(code){
   if(!s.drinks)s.drinks=[];
   s.drinks.push(did);
   if(!s.confirmations)s.confirmations={};
-  s.confirmations[did]=(s.confirmations[did]||0)+1;
+  s.confirmations[did]=(s.confirmations[did]||0)+1;if(!s.seenAt)s.seenAt={};s.seenAt[did]=Date.now();
   if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(function(e){console.warn(e);});
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
   window._rafaleCount=(window._rafaleCount||0)+1;
@@ -8715,7 +8749,7 @@ function addDrinkToStoreHere(d){
   var did=d.id;
   if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
   if(!s.confirmations)s.confirmations={};
-  s.confirmations[did]=(s.confirmations[did]||0)+1;
+  s.confirmations[did]=(s.confirmations[did]||0)+1;if(!s.seenAt)s.seenAt={};s.seenAt[did]=Date.now();
   if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(function(e){console.warn(e);});
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
   var key="tag:"+did+":"+String(s.id);
