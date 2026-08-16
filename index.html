@@ -10010,6 +10010,7 @@ function exploreHideCard(){
   // ce qui refermait la bandelette dans la meme milliseconde. On ignore
   // les fermetures dans les 450ms suivant une ouverture.
   if(Date.now()-_cardOpenedAt<450)return;
+  try{exploreCloseResults();}catch(e){}
   var card=document.getElementById("explore-store-card");
   if(card){card.classList.remove("in");card.style.display="none";}
   var status=document.getElementById("explore-status");
@@ -10105,14 +10106,19 @@ function exploreSheetPick(id){
   playSound("pop");
 }
 window._exploreChips={instock:false,open:false,near:false};
-function exploreToggleSearch(){
-  var r=document.getElementById("explore-search-row");if(!r)return;
-  var show=(r.style.display==="none"||!r.style.display);
-  r.style.display=show?"flex":"none";
-  if(show){var i=document.getElementById("explore-city-q");if(i){try{i.focus();}catch(e){}}}
+/* Ferme la liste de suggestions (tap sur la carte, changement de vue…).
+   Le champ de recherche, lui, reste toujours visible : la version precedente
+   le cachait derriere une bascule que RIEN n'appelait — la recherche mondiale
+   etait donc inaccessible depuis sa creation. */
+function exploreCloseResults(){
+  var box=document.getElementById("explore-city-results");
+  if(box)box.innerHTML="";
 }
 function exploreCenterUser(){
   if(!exploreMap)return;
+  window._explorePlace="";
+  var _q=document.getElementById("explore-city-q");if(_q)_q.value="";
+  var _c=document.getElementById("explore-city-clear");if(_c)_c.style.display="none";
   if(typeof userLat==="number"&&userLat){try{exploreMap.setView([userLat,userLng],16);}catch(e){}}
   else toast("Active ta position d'abord");
 }
@@ -10327,7 +10333,14 @@ function exploreSetHeader(shown,sure){
     if(btn){btn.style.background="var(--bg2)";btn.style.borderColor="var(--border)";}
   }else{
     if(t)t.textContent="Magasins";
-    if(sub)sub.textContent=shown?(shown+" autour de toi"):"autour de toi";
+    // Apres une recherche (New York, Japon…), on nomme l'endroit : dire
+    // "autour de toi" alors qu'on survole Tokyo serait faux.
+    // Pas de preposition ("à Japon" est faux, "au Japon" ne marche pas pour
+    // New York) : le nom du lieu se suffit a lui-meme.
+    var _place=window._explorePlace||"";
+    if(sub)sub.textContent=_place
+      ?(shown?(shown+" magasin"+(shown>1?"s":"")+" · "+_place):_place)
+      :(shown?(shown+" autour de toi"):"autour de toi");
     if(thumb){thumb.style.display="none";thumb.innerHTML="";}
     if(chev)chev.style.display="none";
     if(btn){btn.style.background="transparent";btn.style.borderColor="transparent";}
@@ -10440,6 +10453,7 @@ function openExploreMap(opts){
   window._exploreBrand=null;
   window._exploreBrandQuery="";
   window._exploreFocus=(opts&&opts.center)?{lat:Number(opts.center.lat),lng:Number(opts.center.lng)}:null;
+  window._explorePlace="";
   setTimeout(function(){try{renderExploreChips();exploreSetHeader(0,exploreFilter?0:undefined);}catch(e){}},60);
   [420,950].forEach(function(t){setTimeout(function(){try{if(exploreMap)exploreMap.invalidateSize();}catch(e){}},t);});
   var host=document.getElementById("explore-map-host");
@@ -10454,13 +10468,17 @@ function openExploreMap(opts){
           '<div id="explore-titlebtn" onclick="openDrinkInfoFromMap()" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){openDrinkInfoFromMap();}" style="flex:1;min-width:0;cursor:pointer;display:flex;align-items:center;gap:6px;padding:6px 9px;border-radius:13px;border:1px solid transparent;transition:background .15s"><div style="flex:1;min-width:0"><div id="explore-title" style="font-size:15px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Magasins</div><div id="explore-subtitle" style="font-size:11px;color:var(--s2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">autour de toi</div></div><span id="explore-chevron" style="display:none;color:var(--s2);flex-shrink:0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M9 6l6 6-6 6"/></svg></span></div>'+
           '<div id="explore-hunt-btn" onclick="exploreToggleHunt()" role="button" tabindex="0" aria-label="Lancer la chasse" onkeydown="if(event.key===\'Enter\'){exploreToggleHunt();}" style="display:none;position:relative;width:40px;height:40px;border-radius:13px;background:var(--bg2);border:1px solid var(--border);align-items:center;justify-content:center;color:var(--s1);cursor:pointer;flex-shrink:0;transition:background .22s ease,color .22s ease,border-color .22s ease,transform .16s ease"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 1.6v3M12 19.4v3M1.6 12h3M19.4 12h3"/></svg></div>'+
         '</div>'+
-        '<div id="explore-search-row" style="display:none;margin-top:9px;gap:8px">'+
-        '<input id="explore-city-q" placeholder="Aller \u00E0\u2026 S\u00E9oul, Paris, Tournai" style="flex:1;padding:11px 13px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-family:inherit">'+
-        '<button id="explore-city-go" aria-label="Chercher" style="width:42px;height:42px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);font-size:15px;cursor:pointer;flex-shrink:0"></button>'+
+        '<div id="explore-search-row" style="display:flex;margin-top:9px;gap:8px;align-items:center">'+
+        '<div style="flex:1;position:relative;display:flex;align-items:center">'+
+          '<svg style="position:absolute;left:12px;pointer-events:none;opacity:.5" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16.2 16.2 21 21"/></svg>'+
+          '<input id="explore-city-q" autocomplete="off" placeholder="Cherche une ville, un pays\u2026 New York, Japon" style="width:100%;padding:11px 34px 11px 34px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-family:inherit;outline:none">'+
+          '<span id="explore-city-clear" role="button" tabindex="0" aria-label="Effacer" style="display:none;position:absolute;right:10px;width:20px;height:20px;border-radius:50%;background:var(--bg3);color:var(--s2);font-size:11px;align-items:center;justify-content:center;cursor:pointer">\u2715</span>'+
+        '</div>'+
+        '<button id="explore-city-go" aria-label="Chercher" style="width:42px;height:42px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16.2 16.2 21 21"/></svg></button>'+
         '</div>'+
         '<div id="explore-chips" style="display:flex;gap:7px;margin-top:9px;overflow-x:auto"></div>'+
+        '<div id="explore-city-results" style="position:absolute;left:12px;right:12px;top:calc(100% - 6px);z-index:1300"></div>'+
       '</div>'+
-      '<div id="explore-city-results" style="position:absolute;top:calc(122px + env(safe-area-inset-top));left:14px;right:14px;z-index:1300"></div>'+
       '<div id="explore-map" style="flex:1"></div>'+
       '<div id="explore-add-fab" onclick="exploreAddStore()" role="button" tabindex="0" aria-label="Ajouter un magasin" onkeydown="if(event.key===\'Enter\'){exploreAddStore()}" style="position:absolute;right:14px;bottom:calc(150px + env(safe-area-inset-bottom));z-index:1150;display:flex;align-items:center;gap:7px;padding:11px 15px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;box-shadow:0 6px 18px rgba(0,0,0,.28);cursor:pointer;transition:opacity .2s,transform .2s">+ Magasin</div>'+
       '<div id="explore-recenter-fab" onclick="exploreCenterUser()" role="button" tabindex="0" aria-label="Recentrer sur ma position" onkeydown="if(event.key===\'Enter\'){exploreCenterUser()}" style="position:absolute;right:14px;bottom:calc(202px + env(safe-area-inset-bottom));z-index:1150;width:46px;height:46px;border-radius:50%;background:var(--app-bg);border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,.24);cursor:pointer;transition:opacity .2s,transform .2s"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.4" stroke="var(--s1)" stroke-width="2"/><path d="M12 2v3.6M12 18.4V22M2 12h3.6M18.4 12H22" stroke="var(--s1)" stroke-width="2" stroke-linecap="round"/></svg></div>'+
@@ -10468,8 +10486,22 @@ function openExploreMap(opts){
       '<div id="explore-status" style="position:absolute;bottom:calc(92px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--app-bg);border:1.5px solid var(--border);border-radius:999px;padding:8px 16px;font-size:12px;font-weight:700;color:var(--s1);box-shadow:0 4px 14px rgba(0,0,0,.18);white-space:nowrap;z-index:1100">Chargement\u2026</div>'+
       '<div id="explore-sheet"><div id="explore-sheet-head" role="button" tabindex="0" aria-label="Glisser pour ouvrir ou fermer la liste des magasins" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();exploreToggleSheet();}"><div id="explore-sheet-grip"></div><div style="display:flex;align-items:center;justify-content:space-between"><div id="explore-sheet-title" style="font-size:13.5px;font-weight:800;color:var(--s1)">Magasins autour de toi</div><div id="explore-sheet-chev" style="font-size:12px;font-weight:700;color:var(--s2);white-space:nowrap">Voir la liste \u25b2</div></div></div><div id="explore-sheet-list"></div></div>';
     document.body.appendChild(host);
-    host.querySelector("#explore-city-go").onclick=exploreGoCity;
-    host.querySelector("#explore-city-q").addEventListener("keydown",function(ev){if(ev.key==="Enter")exploreGoCity();});
+    host.querySelector("#explore-city-go").onclick=function(){exploreGoCity();};
+    var _cq=host.querySelector("#explore-city-q");
+    var _cclr=host.querySelector("#explore-city-clear");
+    _cq.addEventListener("keydown",function(ev){if(ev.key==="Enter"){ev.preventDefault();exploreGoCity();_cq.blur();}});
+    // Suggestions en direct : on interroge apres une pause de frappe (le service
+    // de geocodage OpenStreetMap demande de ne pas le marteler).
+    _cq.addEventListener("input",function(){
+      if(_cclr)_cclr.style.display=_cq.value?"flex":"none";
+      clearTimeout(window._cityTimer);
+      var q=_cq.value.trim();
+      if(q.length<2){exploreCitySuggest();return;}
+      window._cityTimer=setTimeout(function(){exploreGoCity(true);},450);
+    });
+    // Champ vide : on propose les villes emblematiques (demo instantanee).
+    _cq.addEventListener("focus",function(){if(!_cq.value.trim())exploreCitySuggest();});
+    if(_cclr)_cclr.onclick=function(){_cq.value="";_cclr.style.display="none";window._explorePlace="";exploreCitySuggest();try{_cq.focus();}catch(e){}};
     initExploreSheetDrag();
     setExploreSheet("min",true);
   }
@@ -10532,6 +10564,9 @@ function exploreLoadStores(useCache){
   var radiusKm=Math.sqrt(dLa*dLa+dLo*dLo);
   if(!useCache&&radiusKm>30){
     if(status)status.textContent="Zoome pour voir les magasins";
+    // Vue trop large pour compter les magasins, mais l'en-tete doit quand meme
+    // dire OU on est (sinon il garde le nom du lieu precedent).
+    try{exploreSetHeader(0,exploreFilter?0:undefined);}catch(e){}
     return;
   }
   var q;
@@ -10645,41 +10680,127 @@ function exploreLoadStores(useCache){
     if(status)status.textContent="Chargement impossible, r\u00E9essaie";
   });
 }
-function exploreGoCity(){
+/* Villes emblematiques : le champ vide propose un tour du monde en un tap.
+   C'est la demo qui parle a quelqu'un a qui on montre l'app pour la premiere
+   fois \u2014 pas besoin de savoir ecrire "S\u00E9oul" pour aller y voir. */
+var EXPLORE_SPOTS=[
+  {n:"Bruxelles",s:"chez toi",lat:50.8466,lng:4.3528,z:13},
+  {n:"Paris",s:"France",lat:48.8566,lng:2.3522,z:12},
+  {n:"New York",s:"\u00C9tats-Unis",lat:40.7128,lng:-73.9855,z:12},
+  {n:"Tokyo",s:"le pays du Ramune",lat:35.6812,lng:139.7671,z:12},
+  {n:"S\u00E9oul",s:"le pays du Milkis",lat:37.5665,lng:126.9780,z:12},
+  {n:"Londres",s:"le pays du Vimto",lat:51.5074,lng:-0.1278,z:12},
+  {n:"Mexico",s:"le pays des Jarritos",lat:19.4326,lng:-99.1332,z:12},
+  {n:"Lima",s:"le pays de l'Inca Kola",lat:-12.0464,lng:-77.0428,z:12},
+  {n:"Duba\u00EF",s:"\u00C9mirats arabes unis",lat:25.2048,lng:55.2708,z:12},
+  {n:"Casablanca",s:"Maroc",lat:33.5731,lng:-7.5898,z:12}
+];
+function _cityBoxCard(txt){
+  return '<div style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:14px;padding:11px 14px;font-size:12px;font-weight:600;color:var(--s2);box-shadow:0 6px 18px rgba(0,0,0,.15)">'+txt+'</div>';
+}
+function exploreCitySuggest(){
+  var box=document.getElementById("explore-city-results");if(!box)return;
+  box.innerHTML="";
+  var wrap=document.createElement("div");
+  wrap.style.cssText="background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);max-height:46vh;overflow-y:auto";
+  var t=document.createElement("div");
+  t.style.cssText="font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--s3);padding:6px 8px 8px";
+  t.textContent="Fais le tour du monde";
+  wrap.appendChild(t);
+  EXPLORE_SPOTS.forEach(function(sp){
+    var row=document.createElement("div");
+    row.setAttribute("role","button");row.setAttribute("tabindex","0");
+    row.style.cssText="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;cursor:pointer;-webkit-tap-highlight-color:transparent";
+    row.innerHTML='<span style="width:26px;height:26px;border-radius:9px;background:var(--bg2);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.65"><path d="M12 21s-6-5.7-6-10a6 6 0 0 1 12 0c0 4.3-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg></span>'+
+      '<span style="flex:1;min-width:0"><span style="display:block;font-size:13.5px;font-weight:700;color:var(--s1)">'+sanitize(sp.n)+'</span>'+
+      '<span style="display:block;font-size:11px;color:var(--s2)">'+sanitize(sp.s)+'</span></span>';
+    var go=function(){
+      box.innerHTML="";
+      var inp=document.getElementById("explore-city-q");
+      if(inp){inp.value=sp.n;inp.blur();}
+      var clr=document.getElementById("explore-city-clear");if(clr)clr.style.display="flex";
+      window._explorePlace=sp.n;
+      if(exploreMap)exploreMap.setView([sp.lat,sp.lng],sp.z);
+      playSound("pop");
+    };
+    row.onclick=go;
+    row.onkeydown=function(ev){if(ev.key==="Enter")go();};
+    wrap.appendChild(row);
+  });
+  box.appendChild(wrap);
+}
+/* Recherche mondiale (villes, pays, rues) via le geocodage OpenStreetMap.
+   auto = frappe en cours : on reste discret (pas de son d'erreur, pas de
+   message qui clignote a chaque lettre). */
+function exploreGoCity(auto){
   var q=((document.getElementById("explore-city-q")||{}).value||"").trim();
   var box=document.getElementById("explore-city-results");
-  if(!q||!box)return;
-  box.innerHTML='<div style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:14px;padding:11px 14px;font-size:12px;font-weight:600;color:var(--s2);box-shadow:0 6px 18px rgba(0,0,0,.15)">Recherche de \u00AB '+q+' \u00BB\u2026</div>';
-  fetchWithTimeout("https://nominatim.openstreetmap.org/search?format=json&limit=4&q="+encodeURIComponent(q),15000)
+  if(!box)return;
+  if(!q){exploreCitySuggest();return;}
+  var seq=(window._citySeq=(window._citySeq||0)+1);
+  if(!auto)box.innerHTML=_cityBoxCard("Recherche de \u00AB "+sanitize(q)+" \u00BB\u2026");
+  fetchWithTimeout("https://nominatim.openstreetmap.org/search?format=json&limit=6&addressdetails=0&q="+encodeURIComponent(q),15000)
     .then(function(r){return r.json();})
     .then(function(rows){
+      if(seq!==window._citySeq)return; // une frappe plus recente a pris la main
       box.innerHTML="";
       if(!rows||!rows.length){
-        box.innerHTML='<div style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:14px;padding:11px 14px;font-size:12px;font-weight:600;color:var(--s2);box-shadow:0 6px 18px rgba(0,0,0,.15)">Introuvable \u2014 essaie \u00AB '+q+' + pays \u00BB</div>';
+        if(auto)return;
+        box.innerHTML=_cityBoxCard("Introuvable \u2014 essaie \u00AB "+sanitize(q)+" + pays \u00BB");
         playSound("err");
-        setTimeout(function(){box.innerHTML="";},2500);
+        setTimeout(function(){if(seq===window._citySeq)box.innerHTML="";},2500);
         return;
       }
+      var wrap=document.createElement("div");
+      wrap.style.cssText="background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);max-height:46vh;overflow-y:auto";
       rows.forEach(function(r){
-        var label=String(r.display_name||"").split(",").slice(0,3).join(",");
-        var btn=document.createElement("button");
-        btn.textContent=""+label;
-        btn.style.cssText="display:block;width:100%;text-align:left;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--app-bg);color:var(--s1);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 6px 18px rgba(0,0,0,.15)";
-        btn.onclick=function(){
+        var parts=String(r.display_name||"").split(",");
+        var main=parts[0].trim();
+        var sub=parts.slice(1,3).join(",").trim();
+        var row=document.createElement("div");
+        row.setAttribute("role","button");row.setAttribute("tabindex","0");
+        row.style.cssText="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;cursor:pointer;-webkit-tap-highlight-color:transparent";
+        row.innerHTML='<span style="width:26px;height:26px;border-radius:9px;background:var(--bg2);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.65"><path d="M12 21s-6-5.7-6-10a6 6 0 0 1 12 0c0 4.3-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg></span>'+
+          '<span style="flex:1;min-width:0"><span style="display:block;font-size:13.5px;font-weight:700;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(main)+'</span>'+
+          (sub?'<span style="display:block;font-size:11px;color:var(--s2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(sub)+'</span>':'')+'</span>';
+        var go=function(){
           box.innerHTML="";
           var inp=document.getElementById("explore-city-q");
-          if(inp){inp.value=label.split(",")[0];inp.blur();}
-          exploreMap.setView([Number(r.lat),Number(r.lon)],14);
+          if(inp){inp.value=main;inp.blur();}
+          window._explorePlace=main;
+          exploreFlyToResult(r);
           playSound("pop");
         };
-        box.appendChild(btn);
+        row.onclick=go;
+        row.onkeydown=function(ev){if(ev.key==="Enter")go();};
+        wrap.appendChild(row);
       });
+      box.appendChild(wrap);
     })
     .catch(function(){
-      box.innerHTML='<div style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:14px;padding:11px 14px;font-size:12px;font-weight:600;color:var(--s2)">Recherche indisponible, r\u00E9essaie</div>';
+      if(seq!==window._citySeq||auto)return;
+      box.innerHTML=_cityBoxCard("Recherche indisponible, r\u00E9essaie");
       playSound("err");
-      setTimeout(function(){box.innerHTML="";},2500);
+      setTimeout(function(){if(seq===window._citySeq)box.innerHTML="";},2500);
     });
+}
+/* Le zoom s'adapte a ce qu'on a trouve : le contour renvoye par OpenStreetMap
+   cadre un pays entier comme une seule rue (avant, tout atterrissait au meme
+   zoom 14 \u2014 un pays devenait un quartier au hasard). */
+function exploreFlyToResult(r){
+  if(!exploreMap)return;
+  var lat=Number(r.lat),lng=Number(r.lon);
+  var bb=r.boundingbox;
+  if(bb&&bb.length===4){
+    var s=Number(bb[0]),n=Number(bb[1]),w=Number(bb[2]),e=Number(bb[3]);
+    if(isFinite(s)&&isFinite(n)&&isFinite(w)&&isFinite(e)){
+      try{
+        exploreMap.fitBounds([[s,w],[n,e]],{padding:[28,28],maxZoom:16});
+        return;
+      }catch(err){}
+    }
+  }
+  if(isFinite(lat)&&isFinite(lng))exploreMap.setView([lat,lng],14);
 }
 /* Partage d'une fiche : lien direct #drink=ID (Web Share natif, sinon copie).
    C'est le canal de croissance : chaque trouvaille devient un lien TikTok/WhatsApp. */
