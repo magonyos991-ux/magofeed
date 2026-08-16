@@ -8154,7 +8154,11 @@ function exploreCityFromSearch(q){
   openExploreMap({});
   setTimeout(function(){
     var inp=document.getElementById("explore-city-q");
-    if(inp){inp.value=q;if(typeof exploreGoCity==="function")exploreGoCity();}
+    if(inp){
+      inp.value=q;
+      var c=document.getElementById("explore-city-clear");if(c)c.style.display="flex";
+      if(typeof exploreGoCity==="function")exploreGoCity();
+    }
   },450);
 }
 function renderStoreList(){
@@ -10110,16 +10114,29 @@ window._exploreChips={instock:false,open:false,near:false};
    Le champ de recherche, lui, reste toujours visible : la version precedente
    le cachait derriere une bascule que RIEN n'appelait — la recherche mondiale
    etait donc inaccessible depuis sa creation. */
+/* Coupe TOUT ce qui pourrait repeindre le panneau : le minuteur de frappe et
+   les requetes deja parties (jeton _citySeq). Sans ca, une reponse tardive
+   rouvrait la liste par-dessus la carte apres que l'utilisateur l'a fermee. */
+function exploreAbortCity(){
+  clearTimeout(window._cityTimer);
+  window._citySeq=(window._citySeq||0)+1;
+}
 function exploreCloseResults(){
+  exploreAbortCity();
   var box=document.getElementById("explore-city-results");
   if(box)box.innerHTML="";
 }
 function exploreCenterUser(){
   if(!exploreMap)return;
-  window._explorePlace="";
-  var _q=document.getElementById("explore-city-q");if(_q)_q.value="";
-  var _c=document.getElementById("explore-city-clear");if(_c)_c.style.display="none";
-  if(typeof userLat==="number"&&userLat){try{exploreMap.setView([userLat,userLng],16);}catch(e){}}
+  // On n'efface la recherche QUE si le recentrage a vraiment lieu : sans GPS,
+  // la carte reste sur le lieu cherche et le champ doit le refleter.
+  if(typeof userLat==="number"&&userLat){
+    exploreCloseResults();
+    window._explorePlace="";window._exploreFreeMove=false;
+    var _q=document.getElementById("explore-city-q");if(_q)_q.value="";
+    var _c=document.getElementById("explore-city-clear");if(_c)_c.style.display="none";
+    try{exploreMap.setView([userLat,userLng],16);}catch(e){}
+  }
   else toast("Active ta position d'abord");
 }
 // Distance exacte en mètres (haversine) — pour un filtre distance fiable, sans
@@ -10338,9 +10355,11 @@ function exploreSetHeader(shown,sure){
     // Pas de preposition ("à Japon" est faux, "au Japon" ne marche pas pour
     // New York) : le nom du lieu se suffit a lui-meme.
     var _place=window._explorePlace||"";
+    var _zone=!!window._exploreFreeMove;
     if(sub)sub.textContent=_place
       ?(shown?(shown+" magasin"+(shown>1?"s":"")+" · "+_place):_place)
-      :(shown?(shown+" autour de toi"):"autour de toi");
+      :(_zone?(shown?(shown+" magasin"+(shown>1?"s":"")+" dans cette zone"):"dans cette zone")
+             :(shown?(shown+" autour de toi"):"autour de toi"));
     if(thumb){thumb.style.display="none";thumb.innerHTML="";}
     if(chev)chev.style.display="none";
     if(btn){btn.style.background="transparent";btn.style.borderColor="transparent";}
@@ -10453,7 +10472,14 @@ function openExploreMap(opts){
   window._exploreBrand=null;
   window._exploreBrandQuery="";
   window._exploreFocus=(opts&&opts.center)?{lat:Number(opts.center.lat),lng:Number(opts.center.lng)}:null;
-  window._explorePlace="";
+  window._explorePlace="";window._exploreFreeMove=false;
+  // Reouverture : le champ gardait l'ancienne recherche ("Tokyo") alors que la
+  // carte revenait autour de soi.
+  try{
+    exploreCloseResults();
+    var _oq=document.getElementById("explore-city-q");if(_oq)_oq.value="";
+    var _oc=document.getElementById("explore-city-clear");if(_oc)_oc.style.display="none";
+  }catch(e){}
   setTimeout(function(){try{renderExploreChips();exploreSetHeader(0,exploreFilter?0:undefined);}catch(e){}},60);
   [420,950].forEach(function(t){setTimeout(function(){try{if(exploreMap)exploreMap.invalidateSize();}catch(e){}},t);});
   var host=document.getElementById("explore-map-host");
@@ -10470,9 +10496,9 @@ function openExploreMap(opts){
         '</div>'+
         '<div id="explore-search-row" style="display:flex;margin-top:9px;gap:8px;align-items:center">'+
         '<div style="flex:1;position:relative;display:flex;align-items:center">'+
-          '<svg style="position:absolute;left:12px;pointer-events:none;opacity:.5" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16.2 16.2 21 21"/></svg>'+
+          '<svg style="position:absolute;left:12px;pointer-events:none;color:var(--s2);opacity:.75" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16.2 16.2 21 21"/></svg>'+
           '<input id="explore-city-q" autocomplete="off" placeholder="Cherche une ville, un pays\u2026 New York, Japon" style="width:100%;padding:11px 34px 11px 34px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-family:inherit;outline:none">'+
-          '<span id="explore-city-clear" role="button" tabindex="0" aria-label="Effacer" style="display:none;position:absolute;right:10px;width:20px;height:20px;border-radius:50%;background:var(--bg3);color:var(--s2);font-size:11px;align-items:center;justify-content:center;cursor:pointer">\u2715</span>'+
+          '<span id="explore-city-clear" role="button" tabindex="0" aria-label="Effacer la recherche" style="display:none;position:absolute;right:6px;width:28px;height:28px;border-radius:50%;background:var(--bg3);color:var(--s2);font-size:12px;align-items:center;justify-content:center;cursor:pointer">\u2715</span>'+
         '</div>'+
         '<button id="explore-city-go" aria-label="Chercher" style="width:42px;height:42px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16.2 16.2 21 21"/></svg></button>'+
         '</div>'+
@@ -10501,7 +10527,8 @@ function openExploreMap(opts){
     });
     // Champ vide : on propose les villes emblematiques (demo instantanee).
     _cq.addEventListener("focus",function(){if(!_cq.value.trim())exploreCitySuggest();});
-    if(_cclr)_cclr.onclick=function(){_cq.value="";_cclr.style.display="none";window._explorePlace="";exploreCitySuggest();try{_cq.focus();}catch(e){}};
+    var _doClear=function(){_cq.value="";_cclr.style.display="none";window._explorePlace="";exploreCitySuggest();try{_cq.focus();}catch(e){}};
+    if(_cclr){_cclr.onclick=_doClear;_cclr.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();_doClear();}};}
     initExploreSheetDrag();
     setExploreSheet("min",true);
   }
@@ -10526,11 +10553,17 @@ function openExploreMap(opts){
         try{var _c=exploreMap.getCenter();autoOsmForArea(_c.lat,_c.lng,exploreMap.getZoom());}catch(e){}
       });
       exploreMap.on("click",exploreHideCard);
+      // Panoramique a la main : le lieu cherche n'est plus ce qu'on regarde, et
+      // "autour de toi" serait faux aussi -> troisieme etat honnete.
+      exploreMap.on("dragstart",function(){
+        window._explorePlace="";
+        window._exploreFreeMove=true;
+      });
       if(typeof userLat==="number"&&userLat){
         L.circleMarker([userLat,userLng],{radius:7,color:"#fff",weight:2,fillColor:"#2e86c1",fillOpacity:1}).addTo(exploreMap);
       }
     }
-    if(window._exploreFocus){exploreMap.setView([window._exploreFocus.lat,window._exploreFocus.lng],17);}
+    if(window._exploreFocus){exploreMap.setView([window._exploreFocus.lat,window._exploreFocus.lng],window._exploreFocus.z||17);}
     else exploreMap.setView([typeof userLat==="number"&&userLat?userLat:50.8466,typeof userLng==="number"&&userLng?userLng:4.3528],14);
     setTimeout(function(){try{exploreMap.invalidateSize();}catch(e){}exploreLoadStores();
       try{var _cc=exploreMap.getCenter();autoOsmForArea(_cc.lat,_cc.lng,exploreMap.getZoom());}catch(e){}
@@ -10564,9 +10597,10 @@ function exploreLoadStores(useCache){
   var radiusKm=Math.sqrt(dLa*dLa+dLo*dLo);
   if(!useCache&&radiusKm>30){
     if(status)status.textContent="Zoome pour voir les magasins";
-    // Vue trop large pour compter les magasins, mais l'en-tete doit quand meme
-    // dire OU on est (sinon il garde le nom du lieu precedent).
-    try{exploreSetHeader(0,exploreFilter?0:undefined);}catch(e){}
+    // Vue trop large pour compter les magasins : on rafraichit l'en-tete pour
+    // nommer l'endroit, mais JAMAIS en mode filtre boisson — annoncer
+    // "0 en stock" sans avoir cherche serait un mensonge.
+    if(!exploreFilter){try{exploreSetHeader(0);}catch(e){}}
     return;
   }
   var q;
@@ -10700,6 +10734,7 @@ function _cityBoxCard(txt){
 }
 function exploreCitySuggest(){
   var box=document.getElementById("explore-city-results");if(!box)return;
+  exploreAbortCity(); // une reponse en vol ne doit pas ecraser cette liste
   box.innerHTML="";
   var wrap=document.createElement("div");
   wrap.style.cssText="background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);max-height:46vh;overflow-y:auto";
@@ -10711,16 +10746,20 @@ function exploreCitySuggest(){
     var row=document.createElement("div");
     row.setAttribute("role","button");row.setAttribute("tabindex","0");
     row.style.cssText="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;cursor:pointer;-webkit-tap-highlight-color:transparent";
-    row.innerHTML='<span style="width:26px;height:26px;border-radius:9px;background:var(--bg2);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.65"><path d="M12 21s-6-5.7-6-10a6 6 0 0 1 12 0c0 4.3-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg></span>'+
+    row.innerHTML='<span style="width:26px;height:26px;border-radius:9px;background:var(--bg2);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--s2);opacity:.85"><path d="M12 21s-6-5.7-6-10a6 6 0 0 1 12 0c0 4.3-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg></span>'+
       '<span style="flex:1;min-width:0"><span style="display:block;font-size:13.5px;font-weight:700;color:var(--s1)">'+sanitize(sp.n)+'</span>'+
       '<span style="display:block;font-size:11px;color:var(--s2)">'+sanitize(sp.s)+'</span></span>';
     var go=function(){
+      exploreAbortCity();
       box.innerHTML="";
       var inp=document.getElementById("explore-city-q");
       if(inp){inp.value=sp.n;inp.blur();}
       var clr=document.getElementById("explore-city-clear");if(clr)clr.style.display="flex";
-      window._explorePlace=sp.n;
+      window._explorePlace=sp.n;window._exploreFreeMove=false;
+      // La barre est utilisable avant meme que Leaflet soit telecharge : on
+      // memorise la destination, build() l'appliquera a l'ouverture.
       if(exploreMap)exploreMap.setView([sp.lat,sp.lng],sp.z);
+      else window._exploreFocus={lat:sp.lat,lng:sp.lng,z:sp.z};
       playSound("pop");
     };
     row.onclick=go;
@@ -10736,6 +10775,10 @@ function exploreGoCity(auto){
   var q=((document.getElementById("explore-city-q")||{}).value||"").trim();
   var box=document.getElementById("explore-city-results");
   if(!box)return;
+  // Entree / loupe : le minuteur de frappe est souvent encore arme (on valide
+  // en moins de 450 ms). Sans cette coupure une 2e requete partait et jetait
+  // la reponse de la premiere — la carte "Recherche de..." restait figee.
+  if(!auto)clearTimeout(window._cityTimer);
   if(!q){exploreCitySuggest();return;}
   var seq=(window._citySeq=(window._citySeq||0)+1);
   if(!auto)box.innerHTML=_cityBoxCard("Recherche de \u00AB "+sanitize(q)+" \u00BB\u2026");
@@ -10760,14 +10803,16 @@ function exploreGoCity(auto){
         var row=document.createElement("div");
         row.setAttribute("role","button");row.setAttribute("tabindex","0");
         row.style.cssText="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;cursor:pointer;-webkit-tap-highlight-color:transparent";
-        row.innerHTML='<span style="width:26px;height:26px;border-radius:9px;background:var(--bg2);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.65"><path d="M12 21s-6-5.7-6-10a6 6 0 0 1 12 0c0 4.3-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg></span>'+
+        row.innerHTML='<span style="width:26px;height:26px;border-radius:9px;background:var(--bg2);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--s2);opacity:.85"><path d="M12 21s-6-5.7-6-10a6 6 0 0 1 12 0c0 4.3-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg></span>'+
           '<span style="flex:1;min-width:0"><span style="display:block;font-size:13.5px;font-weight:700;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(main)+'</span>'+
           (sub?'<span style="display:block;font-size:11px;color:var(--s2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(sub)+'</span>':'')+'</span>';
         var go=function(){
+          exploreAbortCity(); // sinon le minuteur de frappe rouvrait la liste
           box.innerHTML="";
           var inp=document.getElementById("explore-city-q");
           if(inp){inp.value=main;inp.blur();}
-          window._explorePlace=main;
+          var _c=document.getElementById("explore-city-clear");if(_c)_c.style.display="flex";
+          window._explorePlace=main;window._exploreFreeMove=false;
           exploreFlyToResult(r);
           playSound("pop");
         };
@@ -10778,9 +10823,11 @@ function exploreGoCity(auto){
       box.appendChild(wrap);
     })
     .catch(function(){
-      if(seq!==window._citySeq||auto)return;
+      if(seq!==window._citySeq)return;
+      // Meme pendant la frappe on le dit : rester muet laissait la liste des
+      // villes emblematiques sous une requete tapee, sans aucun retour.
       box.innerHTML=_cityBoxCard("Recherche indisponible, r\u00E9essaie");
-      playSound("err");
+      if(!auto)playSound("err");
       setTimeout(function(){if(seq===window._citySeq)box.innerHTML="";},2500);
     });
 }
@@ -10793,11 +10840,21 @@ function exploreFlyToResult(r){
   var bb=r.boundingbox;
   if(bb&&bb.length===4){
     var s=Number(bb[0]),n=Number(bb[1]),w=Number(bb[2]),e=Number(bb[3]);
-    if(isFinite(s)&&isFinite(n)&&isFinite(w)&&isFinite(e)){
+    var okNums=isFinite(s)&&isFinite(n)&&isFinite(w)&&isFinite(e)&&n>s;
+    // Contour aberrant : OpenStreetMap englobe les territoires lointains
+    // (la "France" va de la Guadeloupe a Wallis = 350 deg de large) et les
+    // pays a cheval sur l'antimeridien (Fidji, Russie, Nouvelle-Zelande).
+    // Cadrer ca montrerait la Terre entiere : on recentre sur le point
+    // principal a une echelle de pays.
+    var absurd=okNums&&((e-w)>80||(n-s)>60||w>e);
+    if(okNums&&!absurd){
       try{
         exploreMap.fitBounds([[s,w],[n,e]],{padding:[28,28],maxZoom:16});
         return;
       }catch(err){}
+    }
+    if(absurd&&isFinite(lat)&&isFinite(lng)){
+      try{exploreMap.setView([lat,lng],5);return;}catch(err){}
     }
   }
   if(isFinite(lat)&&isFinite(lng))exploreMap.setView([lat,lng],14);
