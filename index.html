@@ -675,6 +675,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div class="t-label" style="margin-bottom:8px">Données que nous collectons</div>
           <div style="font-size:13.5px;line-height:1.7;color:var(--s1)">
             <b>• Position GPS</b> — utilisée pour trier les magasins par distance et centrer la carte. Elle reste sur ton appareil pour l'affichage ; si tu actives les alertes/notifications de proximité, ta position est enregistrée (base Firebase) afin de te prévenir quand une boisson que tu suis est repérée près de toi. Elle n'est alors lisible que par toi, et pour les « chasses » partagées elle est volontairement arrondie (~1 km) pour préserver ta vie privée.<br>
+            <b>• Ville d'utilisation</b> — tant que l'application est ouverte et que tu as autorisé la localisation, une position <b>arrondie à environ 1 km</b> est enregistrée avec ton pseudo, pour savoir dans quelles villes Magofeed est utilisé. Cette information n'est lisible que par l'administrateur de Magofeed, elle ne permet pas de remonter à une adresse, et elle disparaît si tu refuses la localisation.<br>
             <b>• Compte</b> — un identifiant anonyme t'est attribué automatiquement à l'ouverture de l'app (Firebase Authentication) pour associer tes points de façon persistante. Si tu choisis de te connecter avec Google, ton nom, ta photo de profil et ton e-mail sont récupérés pour identifier ton compte.<br>
             <b>• Pseudo et statistiques</b> (signalements, confirmations, points) — stockés pour faire fonctionner le système communautaire et le classement.<br>
             <b>• Contributions</b> (confirmation de stock, signalement de rupture ou de contrefaçon) — enregistrées avec l'horodatage et le magasin concerné, sans lien direct avec ton identité civile.<br>
@@ -786,7 +787,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         </div>
       </div>
       <div class="sd-actions">
-        <button class="sd-go" id="sd-go" aria-label="Ouvrir l'itinéraire dans Google Maps">
+        <button class="sd-go" id="sd-go" aria-label="Y aller — itinéraire dans Google Maps">
           <span class="ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg></span>
           <span class="tx"><b>Y aller</b><i id="sd-go-sub">Itinéraire dans Google Maps</i></span>
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="arw"><path d="M7 17 17 7M9 7h8v8"/></svg>
@@ -1929,11 +1930,57 @@ window.fbFounderStats = async function() {
 window.fbHeartbeat = async function() {
   try {
     var user = auth.currentUser; if (!user) return;
-    await setDoc(doc(db, "presence", user.uid), {
+    var beat = {
       lastSeen: serverTimestamp(),
       pseudo: (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24)
-    }, { merge: true });
+    };
+    /* POSITION ARRONDIE A ~1 KM (deux decimales), jamais la position exacte.
+       C'est assez pour savoir dans quelle ville quelqu'un utilise l'app —
+       la seule chose utile pour comprendre d'ou viennent les gens — et bien
+       trop grossier pour approcher une adresse. Meme arrondi que les chasses
+       de zone. Lisible par le seul administrateur (regles Firestore). */
+    if (typeof window.userLat === "number" && window.userLat &&
+        typeof window.userLng === "number") {
+      beat.lat = Math.round(window.userLat * 100) / 100;
+      beat.lng = Math.round(window.userLng * 100) / 100;
+    }
+    await setDoc(doc(db, "presence", user.uid), beat, { merge: true });
   } catch (e) { /* règles pas encore publiées, ou hors-ligne : sans gravité */ }
+};
+/* Les derniers inscrits, avec la date d'arrivee. Croise ensuite avec
+   `presence` pour savoir d'ou ils se connectent. Reserve a l'administrateur. */
+window.fbRecentUsers = async function(n) {
+  try {
+    var snap = await getDocs(query(collection(db, "users"), orderBy("createdAt", "desc"), limit(n || 15)));
+    var out = [];
+    snap.forEach(function(d) {
+      var v = d.data() || {};
+      out.push({
+        uid: d.id,
+        pseudo: v.pseudo || "Explorateur",
+        points: v.points || 0,
+        createdAt: (v.createdAt && v.createdAt.toMillis) ? v.createdAt.toMillis() : null
+      });
+    });
+    return out;
+  } catch (e) { return { error: String((e && (e.code || e.message)) || e) }; }
+};
+/* Ou se connectent les gens (position arrondie du battement de coeur). */
+window.fbPresenceAll = async function() {
+  try {
+    var snap = await getDocs(collection(db, "presence"));
+    var map = {};
+    snap.forEach(function(d) {
+      var v = d.data() || {};
+      map[d.id] = {
+        pseudo: v.pseudo || null,
+        lat: (typeof v.lat === "number") ? v.lat : null,
+        lng: (typeof v.lng === "number") ? v.lng : null,
+        lastSeen: (v.lastSeen && v.lastSeen.toMillis) ? v.lastSeen.toMillis() : null
+      };
+    });
+    return map;
+  } catch (e) { return { __error: String((e && (e.code || e.message)) || e) }; }
 };
 window.fbCountOnline = async function() {
   try {
@@ -8837,11 +8884,19 @@ function renderStoreDetail(){
      c'est-a-dire le trace d'itineraire INTERNE. Il ouvre maintenant vraiment
      Google Maps. La carte Magofeed a son propre bouton juste a cote. */
   var go=document.getElementById("sd-go");
-  if(go)go.onclick=function(){ try{playSound("pop");}catch(e){} openNavApp(storeNavUrl(s)); };
+  if(go)go.onclick=function(){
+    if(!storeHasCoords(s)){toast("Position de ce magasin inconnue");try{playSound("err");}catch(e){}return;}
+    try{playSound("pop");}catch(e){}
+    openNavApp(storeNavUrl(s));
+  };
   var goSub=document.getElementById("sd-go-sub");
   if(goSub)goSub.textContent=navSubLabel(s);
   var waze=document.getElementById("sd-waze");
-  if(waze)waze.onclick=function(){ try{playSound("pop");}catch(e){} openNavApp("https://waze.com/ul?ll="+s.lat+","+s.lng+"&navigate=yes"); };
+  if(waze)waze.onclick=function(){
+    if(!storeHasCoords(s)){toast("Position de ce magasin inconnue");try{playSound("err");}catch(e){}return;}
+    try{playSound("pop");}catch(e){}
+    openNavApp("https://waze.com/ul?ll="+s.lat+","+s.lng+"&navigate=yes");
+  };
   try{renderStoreMission();}catch(e){}
   try{renderMerchantCard(s);}catch(e){}
 
@@ -8858,7 +8913,10 @@ function renderStoreDetail(){
       return(curStoreDetailCat==="Tous"||d.cat===curStoreDetailCat)&&fuzzyIncludes(q,d.name+" "+d.brand);
     });
   }
-  document.getElementById("sd-drink-count").textContent=drinks.length+" disponible"+(drinks.length>1?"s":"")+(drinks.length!==allDrinks.length?" / "+allDrinks.length:"");
+  // « disponibles » etait faux : la liste contient aussi les boissons signalees
+  // en rupture (chaque ligne l'affiche). On annonce donc ce qu'on compte
+  // vraiment : les boissons referencees dans ce magasin.
+  document.getElementById("sd-drink-count").textContent=drinks.length+" référencée"+(drinks.length>1?"s":"")+(drinks.length!==allDrinks.length?" / "+allDrinks.length:"");
   var listEl=document.getElementById("sd-drink-list");
   if(!allDrinks.length){listEl.innerHTML='<div style="padding:32px 20px;text-align:center;font-size:13px;color:var(--s3)">Aucune boisson répertoriée pour ce magasin</div>';return;}
   if(!drinks.length){listEl.innerHTML='<div style="padding:32px 20px;text-align:center;font-size:13px;color:var(--s3)">Aucun résultat pour ce filtre </div>';return;}
@@ -8969,7 +9027,9 @@ function renderMerchantCard(s){
    mais rangee en bas de page pour ceux que ca concerne vraiment. */
 function claimThisShop(){
   var s=curStoreDetail; if(!s)return;
-  try{ toggleMyShop(String(s.id)); }catch(e){}
+  // MEME assainissement que le panneau gerant : deux ecritures differentes de
+  // la meme cle rendraient la revendication impossible a retirer.
+  try{ toggleMyShop(String(s.id).replace(/[^A-Za-z0-9_-]/g,"")); }catch(e){}
 }
 function startRafale(){
   var s=curStoreDetail; if(!s){toast("Ouvre d'abord un magasin");return;}
@@ -11606,7 +11666,7 @@ function openGmaps(){
   toast((sure?"\u2713 ":"")+sanitize(s.name)+(s.dist?" \u00b7 "+fmtDist(s.dist):""));
   showRouteToStore(s.lat,s.lng,s);
 }
-function openWaze(){if(!curSel)return;var s=STORES.filter(function(x){return x.drinks.includes(curSel.id)&&x.open;})[0];if(s)window.open("https://waze.com/ul?ll="+s.lat+","+s.lng+"&navigate=yes","_blank");}
+function openWaze(){if(!curSel)return;var s=STORES.filter(function(x){return x.drinks.includes(curSel.id)&&x.open;})[0];if(s&&storeHasCoords(s))openNavApp("https://waze.com/ul?ll="+s.lat+","+s.lng+"&navigate=yes");else toast("Position de ce magasin inconnue");}
 /* "Y aller" trace maintenant le CHEMIN dans notre carte (ligne type suivi de
    livreur, distance + duree a pied) via le routage OpenStreetMap public —
    gratuit, sans cle. Google Maps reste en secours dans le bandeau pour la
@@ -11630,9 +11690,18 @@ function openNavApp(url){
 /* A pied en dessous de 2 km, en voiture au-dela : Google Maps ouvre
    directement le bon mode au lieu de proposer la voiture pour 300 metres. */
 function storeNavUrl(s){
-  var mode=(typeof s.dist==="number"&&isFinite(s.dist)&&s.dist>=2000)?"driving":"walking";
-  return "https://www.google.com/maps/dir/?api=1&travelmode="+mode+
+  // A pied SEULEMENT quand on sait que c'est proche. Distance inconnue (GPS
+  // refuse) = voiture : proposer 30 km de marche serait absurde.
+  var proche=(typeof s.dist==="number"&&isFinite(s.dist)&&s.dist<2000);
+  return "https://www.google.com/maps/dir/?api=1&travelmode="+(proche?"walking":"driving")+
          "&destination="+encodeURIComponent(s.lat+","+s.lng);
+}
+/* Un magasin sans coordonnees valides existe (import partiel, saisie manuelle).
+   Sans ce controle, on envoyait la personne HORS de l'app vers une page Google
+   Maps « destination=undefined » — pire que ne rien faire. */
+function storeHasCoords(s){
+  return !!(s && typeof s.lat==="number" && isFinite(s.lat) &&
+                 typeof s.lng==="number" && isFinite(s.lng));
 }
 /* Sous-titre du bouton : on annonce la distance quand on la connait, plutot
    qu'une promesse vague. ~80 m/min, la vitesse de marche courante. */
@@ -11715,7 +11784,7 @@ function showRouteToStore(lat,lng,store){
   window._navDest=store||(STORES||[]).find(function(x){return x.lat===lat&&x.lng===lng;})||null;
   if(typeof userLat!=="number"||!userLat){
     toast("Active ta position d'abord");playSound("err");
-    window.open("https://www.google.com/maps/dir/?api=1&destination="+lat+","+lng,"_blank");
+    openNavApp("https://www.google.com/maps/dir/?api=1&destination="+lat+","+lng);
     return;
   }
   // On ouvre la carte SEULEMENT si elle n'est pas deja affichee, sinon le
@@ -11803,7 +11872,7 @@ function showRouteToStore(lat,lng,store){
           :'')+
           '<div style="display:flex;gap:9px;width:100%">'+
             '<div onclick="clearRoute();var h=document.getElementById(\'explore-map-host\');if(h){h.classList.remove(\'in\');h.style.display=\'none\';}window._cameFromExplore=true;if(typeof openStoreDetail===\'function\')openStoreDetail(\''+_sid+'\')" role="button" tabindex="0" aria-label="Voir ce qu\'il y a dans ce magasin" style="flex:1;text-align:center;padding:9px;border-radius:12px;background:'+(_hunt?"var(--bg2)":"var(--s1)")+';border:1.5px solid '+(_hunt?"var(--border)":"var(--s1)")+';color:'+(_hunt?"var(--s1)":"var(--app-bg)")+';font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap">D\u00e9tails du magasin</div>'+
-            '<div onclick="window.open(\'https://www.google.com/maps/dir/?api=1&travelmode=walking&destination='+lat+','+lng+'\',\'_blank\')" role="button" tabindex="0" style="flex-shrink:0;text-align:center;padding:9px 15px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:11.5px;font-weight:800;color:var(--s1);cursor:pointer;white-space:nowrap">GPS \u2197</div>'+
+            '<div onclick="openNavApp(\'https://www.google.com/maps/dir/?api=1&travelmode=walking&destination='+lat+','+lng+'\')" role="button" tabindex="0" style="flex-shrink:0;text-align:center;padding:9px 15px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:11.5px;font-weight:800;color:var(--s1);cursor:pointer;white-space:nowrap">GPS \u2197</div>'+
           '</div>'+
           '<div onclick="bannerReportStore(\''+_sid+'\')" role="button" tabindex="0" aria-label="'+(isAdmin?"Supprimer ce magasin":"Signaler : ce magasin n\'existe pas")+'" style="text-align:center;padding:4px 8px 0;font-size:11px;font-weight:600;color:var(--s3);cursor:pointer">'+(isAdmin?"Supprimer ce magasin de la carte":"Ce magasin n\u2019existe pas ?")+'</div>';
         host.appendChild(b);
@@ -11815,7 +11884,7 @@ function showRouteToStore(lat,lng,store){
   }).catch(function(e){
     console.warn("route:",e);
     toast("Trac\u00e9 indisponible \u2014 ouverture GPS");
-    window.open("https://www.google.com/maps/dir/?api=1&travelmode=walking&destination="+lat+","+lng,"_blank");
+    openNavApp("https://www.google.com/maps/dir/?api=1&travelmode=walking&destination="+lat+","+lng);
   });
 }
 
@@ -12353,6 +12422,7 @@ function renderAdmin(){
   var el=document.getElementById("admin-list");if(!el)return;
   el.innerHTML="";
   renderFounderDash();
+  try{ renderNewcomers(); }catch(e){ console.warn("newcomers:",e); }
   renderContribFeed();
   renderFeedbackAdmin();
   renderPhotoSuggestions();
@@ -12475,6 +12545,123 @@ function renderFormatSuggestions(){
    base (flags promoted/rejected) — on les liste, repliees par defaut. */
 /* Le coup d'oeil quotidien du fondateur : la vie de l'app en 6 tuiles,
    sans ouvrir Firestore. Rafraichi a chaque ouverture de l'Administration. */
+/* ── D'OU VIENNENT LES GENS ─────────────────────────────────────────────
+   Voir un compteur « 2 nouveaux » sans savoir si ce sont de vraies personnes
+   ou soi-meme sur un autre telephone, ca ne sert a rien. Ce bloc croise les
+   derniers inscrits (users.createdAt) avec l'endroit d'ou ils se connectent
+   (presence, arrondi a ~1 km) et affiche une VILLE, pas des coordonnees.
+   Le nom de la ville est obtenu par geocodage inverse OpenStreetMap, mis en
+   cache pour de bon : une requete par ville, jamais deux. ── */
+var _cityCache = null;
+function _cityCacheLoad(){
+  if (_cityCache) return _cityCache;
+  try { _cityCache = JSON.parse(localStorage.getItem("magoCityCache") || "{}"); }
+  catch (e) { _cityCache = {}; }
+  return _cityCache;
+}
+function _cityCacheSet(k, v){
+  _cityCacheLoad()[k] = v;
+  try { localStorage.setItem("magoCityCache", JSON.stringify(_cityCache)); } catch (e) {}
+}
+async function reverseCity(lat, lng){
+  if (typeof lat !== "number" || typeof lng !== "number") return null;
+  var key = lat.toFixed(2) + "," + lng.toFixed(2);
+  var hit = _cityCacheLoad()[key];
+  if (hit) return hit;
+  try {
+    var r = await fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&accept-language=fr" +
+                        "&lat=" + encodeURIComponent(lat) + "&lon=" + encodeURIComponent(lng));
+    if (!r.ok) return null;
+    var j = await r.json(), a = (j && j.address) || {};
+    var city = a.city || a.town || a.village || a.municipality || a.county || a.state || "";
+    var label = city ? (a.country ? city + ", " + a.country : city) : (a.country || "");
+    if (!label) return null;
+    _cityCacheSet(key, label);
+    return label;
+  } catch (e) { return null; }
+}
+function _ago(ms){
+  if (!ms) return null;
+  var d = Date.now() - ms;
+  if (d < 60000) return "à l'instant";
+  if (d < 3600000) return "il y a " + Math.floor(d / 60000) + " min";
+  if (d < 86400000) return "il y a " + Math.floor(d / 3600000) + " h";
+  var j = Math.floor(d / 86400000);
+  return "il y a " + j + " j";
+}
+function renderNewcomers(){
+  var host = document.getElementById("newcomers");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "newcomers";
+    var fd = document.getElementById("founder-dash");
+    if (fd && fd.parentNode) fd.parentNode.insertBefore(host, fd.nextSibling);
+    else return;
+  }
+  host.innerHTML = '<div style="font-size:13px;font-weight:800;color:var(--s1);margin:2px 0 10px">Qui vient d\'arriver</div>' +
+    '<div id="nc-list" style="font-size:12.5px;color:var(--s2);padding:10px 0">Chargement…</div>';
+  if (!window.fbRecentUsers) return;
+  Promise.all([window.fbRecentUsers(15), window.fbPresenceAll ? window.fbPresenceAll() : {}])
+    .then(async function(r){
+      var users = r[0] || [], pres = r[1] || {};
+      var box = document.getElementById("nc-list");
+      if (!box) return;
+      if (users && users.error) {
+        box.textContent = "Lecture impossible (" + users.error + ")";
+        return;
+      }
+      if (!users.length) {
+        box.textContent = "Aucun inscrit avec date d'arrivée enregistrée pour l'instant.";
+        return;
+      }
+      box.innerHTML = users.map(function(u, i){
+        var p = pres[u.uid] || {};
+        var hasPos = (typeof p.lat === "number" && typeof p.lng === "number");
+        var vu = _ago(p.lastSeen);
+        var moi = (window._fbUser && window._fbUser.uid === u.uid);
+        return '<div style="display:flex;align-items:center;gap:11px;padding:11px 0;border-top:' + (i ? "1px solid var(--border)" : "none") + '">' +
+            '<div style="flex-shrink:0;width:34px;height:34px;border-radius:11px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:var(--s1)">' +
+              sanitize(String(u.pseudo || "?").slice(0,1).toUpperCase()) + '</div>' +
+            '<div style="flex:1;min-width:0">' +
+              '<div style="font-size:13px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
+                sanitize(u.pseudo) + (moi ? ' <span style="font-size:10px;font-weight:800;color:var(--s2)">(toi)</span>' : '') + '</div>' +
+              '<div style="font-size:11px;color:var(--s2);margin-top:1px">' +
+                'arrivé ' + (_ago(u.createdAt) || "?") + (vu ? ' · vu ' + vu : ' · jamais revu') + '</div>' +
+              '<div class="nc-city" data-lat="' + (hasPos ? p.lat : "") + '" data-lng="' + (hasPos ? p.lng : "") + '" ' +
+                   'style="font-size:11.5px;font-weight:700;color:' + (hasPos ? "var(--s1)" : "var(--s3)") + ';margin-top:2px">' +
+                (hasPos ? "…" : "position non partagée") + '</div>' +
+            '</div>' +
+            (hasPos ? '<button class="ghost-btn quiet" style="flex-shrink:0;padding:7px 11px;min-height:32px;font-size:11px" ' +
+                      'onclick="ncShowOnMap(' + p.lat + ',' + p.lng + ')">Carte</button>' : '') +
+          '</div>';
+      }).join("");
+      // Noms de villes en differe : une requete par ville, espacees pour
+      // respecter la limite d'OpenStreetMap (1 requete/seconde).
+      var cells = [].slice.call(box.querySelectorAll(".nc-city[data-lat]:not([data-lat=\'\'])"));
+      for (var i = 0; i < cells.length; i++) {
+        var c = cells[i];
+        var la = parseFloat(c.getAttribute("data-lat")), ln = parseFloat(c.getAttribute("data-lng"));
+        if (!isFinite(la) || !isFinite(ln)) { c.textContent = "position non partagée"; continue; }
+        var nom = await reverseCity(la, ln);
+        c.textContent = nom || (la.toFixed(2) + ", " + ln.toFixed(2));
+        if (i < cells.length - 1) await new Promise(function(res){ setTimeout(res, 1100); });
+      }
+    })
+    .catch(function(e){
+      var box = document.getElementById("nc-list");
+      if (box) box.textContent = "Lecture impossible (" + ((e && e.message) || e) + ")";
+    });
+}
+/* Voir sur la carte l'endroit (arrondi) d'ou quelqu'un se connecte. */
+function ncShowOnMap(lat, lng){
+  try { playSound("pop"); } catch (e) {}
+  try { openExploreMap({ center: { lat: Number(lat), lng: Number(lng) } }); } catch (e) {}
+  [250, 700].forEach(function(t){
+    setTimeout(function(){
+      try { if (window.exploreMap) exploreMap.setView([Number(lat), Number(lng)], 12); } catch (e) {}
+    }, t);
+  });
+}
 function renderFounderDash(){
   var host=document.getElementById("founder-dash");
   if(!host){
