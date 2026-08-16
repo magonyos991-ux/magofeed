@@ -90,20 +90,24 @@ function renderStoreCount(n){
 ================================ */
 var _ac=null;
 function getAC(){if(!_ac&&window.AudioContext)_ac=new(window.AudioContext||window.webkitAudioContext)();return _ac;}
+/* L'interrupteur du son etait INVERSE : quand le son etait actif, le bouton
+   s'affichait a gauche (= eteint), et inversement. Il pilote maintenant la
+   classe .sw partagee, comme tous les autres interrupteurs de l'app. */
+function applySoundSwitch(){
+  var t=document.getElementById("sound-toggle");
+  if(t)t.classList.toggle("on",!!soundEnabled);
+  // C'est la LIGNE qui porte le role de commutateur (cible tactile pleine
+  // largeur) : c'est donc elle qui doit annoncer l'etat aux lecteurs d'ecran.
+  var row=document.getElementById("sound-row");
+  if(row)row.setAttribute("aria-checked",soundEnabled?"true":"false");
+}
 function toggleSound(){
   soundEnabled=!soundEnabled;
   localStorage.setItem("magosound",soundEnabled?"1":"0");
-  var toggle=document.getElementById("sound-toggle");
-  var knob=document.getElementById("sound-knob");
-  if(toggle)toggle.style.background=soundEnabled?"var(--s1)":"var(--s3)";
-  if(knob)knob.style.transform=soundEnabled?"":"translateX(20px)";
+  applySoundSwitch();
   if(soundEnabled)setTimeout(function(){playSound("pop");},50);
 }
-function initSoundToggle(){
-  var toggle=document.getElementById("sound-toggle");
-  var knob=document.getElementById("sound-knob");
-  if(!soundEnabled){if(toggle)toggle.style.background="var(--s3)";if(knob)knob.style.transform="translateX(20px)";}
-}
+function initSoundToggle(){ applySoundSwitch(); }
 function haptic(type){
   try{
     if(!navigator.vibrate)return;

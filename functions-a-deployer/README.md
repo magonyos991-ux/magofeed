@@ -104,3 +104,61 @@ de qui confirme). Dis-moi quand tu veux t'y attaquer, je te guide pas à pas.
 - **Maintenant, sans risque** : règles + push réel → +sécurité, +vraies notifs.
 - **Plus tard** : points serveur + réputation → points **infalsifiables**.
 - **Jamais** : de fausses données, de faux stock, de fausses récompenses.
+
+---
+
+## E-mails de chasse (Brevo) — mise à jour du 16/08
+
+Le fichier `emails-brevo.js` contient maintenant **trois** fonctions :
+
+| Fonction | Quand elle part | Pourquoi elle existe |
+|---|---|---|
+| `emailHuntStarted` | dès que tu appuies sur le bouton de chasse | confirmation immédiate : la preuve visible que la chaîne marche |
+| `emailHuntFound` | quand un membre ajoute la boisson au stock d'un magasin de ton rayon | le vrai but |
+| `sendTestEmail` | bouton « Envoyer un e-mail de test » dans les réglages | renvoie l'erreur **exacte** de Brevo dans l'app, au lieu de te laisser deviner |
+
+### Ce qu'il faut faire une fois
+
+1. Recopier `emails-brevo.js` dans ton dossier `functions/` (il remplace l'ancien).
+2. Dans `functions/index.js`, avoir les **trois** lignes :
+
+   ```js
+   exports.emailHuntFound   = require("./emails-brevo").emailHuntFound;
+   exports.emailHuntStarted = require("./emails-brevo").emailHuntStarted;
+   exports.sendTestEmail    = require("./emails-brevo").sendTestEmail;
+   ```
+
+3. Déployer les trois d'un coup :
+
+   ```
+   firebase deploy --only functions:emailHuntFound,functions:emailHuntStarted,functions:sendTestEmail
+   ```
+
+4. Publier les **règles Firestore** mises à jour (nouvelle collection `userPrivate`) :
+
+   ```
+   firebase deploy --only firestore:rules
+   ```
+
+### Où vit l'adresse e-mail (et pourquoi ça compte)
+
+`users/{uid}` est **lisible par tout le monde** — c'est ce qui fait marcher le
+classement. Y stocker une adresse revenait à publier l'annuaire des membres.
+Pire : puisque le téléphone écrit lui-même ce document, n'importe qui pouvait y
+mettre l'adresse de quelqu'un d'autre et faire partir du courrier Magofeed vers
+cette personne. C'est ce qu'on appelle un relais de courrier ouvert, et ça fait
+blacklister un domaine en une journée.
+
+L'adresse ne va donc dans **aucun** document : les Cloud Functions la lisent
+directement dans **Firebase Auth** (`getAuth().getUser(uid).email`), là où
+Google l'a posée et où personne ne peut la falsifier. Firestore ne conserve que
+le consentement (`emailOptIn`), qui n'a rien de sensible. L'app efface au
+passage les adresses laissées par les anciennes versions — rien à faire.
+
+### Si un e-mail n'arrive toujours pas
+
+Réglages → **Vérifier mes e-mails**. L'écran teste, dans l'ordre : compte
+connecté, adresse enregistrée côté serveur, consentement, puis envoi réel.
+La cause la plus fréquente d'un échec Brevo est l'**expéditeur non vérifié**
+(Brevo → Expéditeurs & IP → `magofeed@outlook.com` doit être au vert) ;
+le message d'erreur s'affiche mot pour mot dans l'app.

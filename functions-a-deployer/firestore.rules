@@ -56,7 +56,12 @@ service cloud.firestore {
     //    (Phase 1 : points inclus. Version stricte en bas du fichier.)
     match /users/{uid} {
       allow read: if true;
-      allow create, update: if isSelf(uid);
+      allow create: if isSelf(uid);
+      // Les compteurs d'e-mails sont ecrits par les Cloud Functions (Admin SDK,
+      // qui contourne ces regles). Le client n'y touche pas, sinon il lui
+      // suffirait de les remettre a zero pour contourner l'anti-spam.
+      allow update: if isSelf(uid)
+        && !changed().hasAny(['emailDay','emailCount','emailStartDay','emailStartCount','emailTestDay','emailTestCount']);
       allow delete: if isSelf(uid) || isAdmin();
       // Sous-collections éventuelles (favoris, etc.) : réservées au propriétaire
       match /{doc=**} {
