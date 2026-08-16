@@ -10759,6 +10759,17 @@ function showFindLanding(d){
   }catch(e){}
 }
 function handleDeepLink(){
+  // Desabonnement en un clic depuis un e-mail (#stopmails=uid) : obligation
+  // legale. On coupe le consentement sans demander de se connecter d'abord.
+  var mu=(location.hash||"").match(/#stopmails=([A-Za-z0-9_-]+)/);
+  if(mu){
+    window._emailOptIn=false;
+    try{renderEmailOptInRow();}catch(e){}
+    if(window.fbSetEmailOptIn)window.fbSetEmailOptIn(false).catch(function(){});
+    try{history.replaceState(null,"",location.pathname);}catch(e){}
+    setTimeout(function(){toast("Tu ne recevras plus d'e-mails de chasse");},900);
+    return;
+  }
   // Raccourcis d'app (long-press sur l'icone installee -> Scanner / Chercher).
   // Le manifest pointe vers #tab=scan, #tab=search, etc. On route vers l'onglet.
   var mt=(location.hash||"").match(/#tab=(home|search|scan|discover|profile)/);
