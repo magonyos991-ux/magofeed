@@ -189,8 +189,9 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       <!-- ACCUEIL ÉPURÉ : l'essentiel d'abord — autour de toi, ce que tu attends
            (alertes + chasses), puis à découvrir. Le reste est plus bas. -->
       <div id="nearby-card" style="margin-bottom:16px"></div>
-      <div id="alerts-card"></div>
-      <div id="hunts-card"></div>
+      <!-- Alertes et chasses ne sont plus ici : elles vivent dans la pastille
+           de chasse (mission-fab), qui porte deja leur compteur. L'accueil
+           s'ouvre sur l'accueil. -->
       <div class="sec-hd">
         <div class="t-section" id="t-trends">À découvrir</div>
         <div class="sec-count" id="trends-count"></div>
@@ -5919,10 +5920,15 @@ function openMissions(){
     var who=h.seekers>1?(h.seekers+" cherchent"):(h.mine?"Tu cherches":"1 cherche");
     var thumb=hd?drinkIconHTML(hd):magoCatIcon("Autre",20,"#7a4a10");
     return '<div class="ms-hunt" data-did="'+h.drinkId+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 0;cursor:pointer;border-top:1px solid var(--border)">'+
-      '<span style="width:40px;height:40px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0">'+thumb+'</span>'+
+      '<span class="ms-thumb" data-did="'+h.drinkId+'" role="button" tabindex="0" aria-label="Voir cette boisson sur la carte" style="width:40px;height:40px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">'+thumb+'</span>'+
       '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(h.drinkName||"Boisson")+'</div><div style="font-size:11.5px;font-weight:600;color:var(--s2)">'+who+' près d\'ici</div></div>'+
       '<span style="font-size:12px;font-weight:800;color:#e67e22;flex-shrink:0">Je l\'ai vue →</span></div>';
   }).join(""):emptyStateHTML("radar","Aucune chasse en cours","Cherche une boisson introuvable et lance la chasse : les explorateurs autour de toi seront prévenus dès qu\'elle est repérée.","Explorer les boissons","emptyGo(\'search\')");
+  // Bloc « Tes alertes » : il vivait sur l'accueil, il vit maintenant ici.
+  var alertsBlock="";
+  if((drinkWatches||[]).length){
+    alertsBlock='<div id="alerts-card" style="margin-bottom:14px"></div>';
+  }
   var ov=document.createElement("div");
   ov.id="mission-sheet";
   ov.style.cssText="position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center";
@@ -5934,11 +5940,13 @@ function openMissions(){
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px"><span style="font-size:13px;font-weight:800;color:var(--s1)">Missions du jour</span><span style="font-size:11.5px;font-weight:800;color:'+(defs.length&&missDone===defs.length?"#c69a57":"var(--s2)")+'">'+missDone+'/'+defs.length+'</span></div>'+
       missRows+
     '</div>'+
+    alertsBlock+
     '<div style="font-size:13px;font-weight:800;color:var(--s1);margin:0 2px 2px">Chasses près de toi</div>'+
     huntRows+
     '<button id="ms-close" style="width:100%;margin-top:18px;padding:13px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">Fermer</button>'+
   '</div>';
   document.body.appendChild(ov);
+  try{ renderAlertsCard(); }catch(e){}
   var card=document.getElementById("ms-card");
   requestAnimationFrame(function(){if(card)card.style.transform="none";});
   var close=function(){if(card)card.style.transform="translateY(100%)";setTimeout(function(){if(ov.parentNode)ov.remove();},300);};
@@ -5951,6 +5959,15 @@ function openMissions(){
     card.addEventListener("touchmove",function(e){if(_sy===null)return;var d=e.touches[0].clientY-_sy;if(d<0)return;_dy=d;card.style.transform="translateY("+d+"px)";},{passive:true});
     card.addEventListener("touchend",function(){if(_sy===null)return;card.style.transition="transform .3s cubic-bezier(.2,.8,.2,1)";if(_dy>110){close();}else{card.style.transform="none";}_sy=null;_dy=0;},{passive:true});
   }
+  ov.querySelectorAll(".ms-thumb").forEach(function(th){
+    th.onclick=function(ev){
+      ev.stopPropagation();
+      var did=Number(th.getAttribute("data-did"));
+      close();
+      setTimeout(function(){alertOpenOnMap(did);},260);
+    };
+    th.onkeydown=function(ev){if(ev.key==="Enter"){ev.preventDefault();th.onclick(ev);}};
+  });
   ov.querySelectorAll(".ms-hunt").forEach(function(row){
     row.onclick=function(){var did=Number(row.getAttribute("data-did"));var d=DRINKS.find(function(x){return Number(x.id)===did;});close();if(d)setTimeout(function(){pick(d);},260);else toast("Boisson introuvable");};
     row.onkeydown=function(ev){if(ev.key==="Enter")row.click();};
@@ -8147,6 +8164,23 @@ function openWatchStore(storeId,drinkId){
     }
   });
 }
+/* Toucher la PHOTO d'une alerte ou d'une chasse = « montre-moi ou trouver
+   cette boisson », donc l'ecran de resultats avec la carte — exactement comme
+   si on l'avait cherchee. Toucher ailleurs sur la ligne garde l'ancien
+   comportement : ca ouvre le magasin ou elle a ete reperee. */
+function alertOpenOnMap(did){
+  var d=(DRINKS||[]).find(function(x){return Number(x.id)===Number(did);});
+  if(!d){toast("Boisson introuvable");return;}
+  try{playSound("pop");}catch(e){}
+  pick(d);
+  // On deroule la carte des resultats : c'est ce qu'on vient chercher.
+  setTimeout(function(){
+    try{
+      var box=document.getElementById("map-box");
+      if(box&&!box.classList.contains("map-fullscreen")&&typeof toggleDrinkMapFull==="function")toggleDrinkMapFull();
+    }catch(e){}
+  },420);
+}
 function removeWatch(id){
   drinkWatches=drinkWatches.filter(function(w){return Number(w.id)!==Number(id);});
   saveWatches();renderAlertsCard();
@@ -8159,10 +8193,12 @@ function removeWatch(id){
    l'accueil ; données réelles agrégées (aucun nom, position arrondie).
 ================================ */
 function _drawHunts(map,noReflow){
-  var host=document.getElementById("hunts-card");if(!host)return;
   var list=Object.keys(map).map(function(k){return map[k];}).filter(function(h){return h.seekers>0;});
   list.sort(function(a,b){return b.seekers-a.seekers;});
+  // IMPORTANT : on alimente la pastille AVANT de chercher un conteneur.
+  // L'accueil n'en a plus ; sortir trop tot laisserait la pastille vide.
   window._huntCount=list.length;window._huntList=list;window._huntMap=map;try{updateMissionFab();}catch(e){}
+  var host=document.getElementById("hunts-card");if(!host)return;
   if(!list.length){host.innerHTML="";return;}
   var needPhoto=false;
   var LIMIT=window._huntsExpanded?999:4;   // liste courte + "voir plus" (pas d'infini)
@@ -8175,7 +8211,7 @@ function _drawHunts(map,noReflow){
     if(hd&&!getCachedDrinkImage(hd)){needPhoto=true;try{fetchVerifiedOFFImage(hd);}catch(e){}}
     var thumb=hd?drinkIconHTML(hd):magoCatIcon("Autre",22,"#7a4a10");
     return '<div class="hunt-row" data-did="'+h.drinkId+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 0;cursor:pointer">'+
-      '<span style="width:42px;height:42px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid rgba(240,184,64,.55);display:flex;align-items:center;justify-content:center;flex-shrink:0">'+thumb+'</span>'+
+      '<span class="hunt-thumb" data-did="'+h.drinkId+'" role="button" tabindex="0" aria-label="Voir cette boisson sur la carte" style="width:42px;height:42px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid rgba(240,184,64,.55);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">'+thumb+'</span>'+
       '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:800;color:#2a1e12;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(h.drinkName||"Boisson")+'</div>'+
       '<div style="font-size:11px;font-weight:600;color:#8a6338">'+who+' près d\'ici</div></div>'+
       '<span style="font-size:11px;font-weight:800;color:#e67e22;flex-shrink:0">Je l\'ai vue →</span>'+
@@ -8200,6 +8236,10 @@ function _drawHunts(map,noReflow){
     };
     row.onkeydown=function(ev){if(ev.key==="Enter")row.click();};
   });
+  host.querySelectorAll(".hunt-thumb").forEach(function(th){
+    th.onclick=function(ev){ev.stopPropagation();alertOpenOnMap(Number(th.getAttribute("data-did")));};
+    th.onkeydown=function(ev){if(ev.key==="Enter"){ev.preventDefault();th.onclick(ev);}};
+  });
   // Les photos OpenFoodFacts arrivent en asynchrone : on redessine UNE fois (sans
   // re-interroger le reseau) quand elles sont pretes, si on est encore sur l'accueil.
   if(needPhoto&&!noReflow){
@@ -8207,7 +8247,8 @@ function _drawHunts(map,noReflow){
   }
 }
 function renderHunts(){
-  var host=document.getElementById("hunts-card");if(!host)return;
+  // Plus de conteneur sur l'accueil : les chasses alimentent la pastille (et
+  // son panneau). On ne sort donc PAS ici, sinon le compteur resterait a zero.
   // Base LOCALE : tes propres veilles = tes chasses, affichées TOUT DE SUITE
   // (même si Firestore est lent ou que les règles ne sont pas encore prêtes).
   var map={};
@@ -8244,7 +8285,7 @@ function renderAlertsCard(){
     if(wd&&!getCachedDrinkImage(wd)){_alertNeedPhoto=true;try{fetchVerifiedOFFImage(wd);}catch(e){}}
     var thumb=wd?drinkIconHTML(wd):magoCatIcon("Autre",20,"var(--s2)");
     return '<div class="alert-row" style="display:flex;align-items:center;gap:12px;padding:11px 0'+(last?"":";border-bottom:1px solid var(--border)")+'" data-wid="'+w.id+'">'+
-      '<span style="width:46px;height:46px;border-radius:13px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" onclick="'+lineAction+'">'+thumb+'</span>'+
+      '<span style="width:46px;height:46px;border-radius:13px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" role="button" tabindex="0" aria-label="Voir '+sanitize(w.name)+' sur la carte" onkeydown="if(event.key===\'Enter\'){this.click();}" onclick="event.stopPropagation();alertOpenOnMap('+w.id+')">'+thumb+'</span>'+
       '<span style="flex:1;min-width:0;cursor:pointer" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')this.click()" onclick="'+lineAction+'">'+
         '<span style="display:block;font-size:14px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(w.name)+'</span>'+
         '<span style="display:block;margin-top:4px">'+pill+'</span>'+
