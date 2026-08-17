@@ -7646,6 +7646,14 @@ function populateClusterMarkers(cluster){
    sa taille, le bouton devient une croix. */
 function toggleDrinkMapFull(){
   var box=document.getElementById("map-box");if(!box)return;
+  /* #map-box.map-fullscreen passe en position:fixed;inset:0;z-index:8500 : il
+     recouvre TOUT l'ecran. Sans carte Leaflet dessous, on obtient un
+     rectangle noir plein ecran qui masque la liste. On refuse d'y entrer. */
+  if(!box.classList.contains("map-fullscreen")&&!window._leafletMap){
+    toast("La carte n'est pas encore prête");
+    try{playSound("err");}catch(e){}
+    return;
+  }
   var full=box.classList.toggle("map-fullscreen");
   var btn=document.getElementById("map-full-btn");
   if(btn)btn.textContent=full?"\u2715":"\u26f6";
@@ -8173,13 +8181,27 @@ function alertOpenOnMap(did){
   if(!d){toast("Boisson introuvable");return;}
   try{playSound("pop");}catch(e){}
   pick(d);
-  // On deroule la carte des resultats : c'est ce qu'on vient chercher.
-  setTimeout(function(){
-    try{
-      var box=document.getElementById("map-box");
-      if(box&&!box.classList.contains("map-fullscreen")&&typeof toggleDrinkMapFull==="function")toggleDrinkMapFull();
-    }catch(e){}
-  },420);
+  /* On ne deroule la carte QUE s'il y a quelque chose a y voir, et QUE si
+     Leaflet a fini de se charger. Une carte plein ecran vide et noire, sans
+     rien dedans et qui masque la liste, est bien pire que pas de carte :
+     c'est exactement ce que produisait la version precedente sur une boisson
+     a zero magasin (Leaflet arrive du reseau, il n'etait pas encore la). */
+  var essais=0;
+  (function attendreCarte(){
+    essais++;
+    var aDesMagasins=(window.STORES||[]).some(function(st){
+      return (st.drinks||[]).some(function(x){return Number(x)===Number(did);});
+    });
+    if(!aDesMagasins)return;             // la liste explique deja la situation
+    var box=document.getElementById("map-box");
+    if(!box)return;
+    if(box.classList.contains("map-fullscreen"))return;   // deja ouverte
+    if(window._leafletMap&&typeof toggleDrinkMapFull==="function"){
+      toggleDrinkMapFull();
+      return;
+    }
+    if(essais<16)setTimeout(attendreCarte,250);           // 4 s au maximum
+  })();
 }
 function removeWatch(id){
   drinkWatches=drinkWatches.filter(function(w){return Number(w.id)!==Number(id);});
