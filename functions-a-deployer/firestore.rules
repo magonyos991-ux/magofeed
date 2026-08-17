@@ -60,13 +60,28 @@ service cloud.firestore {
       // Les compteurs d'e-mails sont ecrits par les Cloud Functions (Admin SDK,
       // qui contourne ces regles). Le client n'y touche pas, sinon il lui
       // suffirait de les remettre a zero pour contourner l'anti-spam.
+      // 'penalty'/'penaltyAt' = points retires par l'anti-farm (Cloud Function
+      // antiFarmRupture, Admin SDK, qui contourne ces regles). Si le client
+      // pouvait y toucher, il lui suffirait de remettre le champ a zero pour
+      // annuler sa sanction : toute la mecanique anti-triche ne servirait plus
+      // a rien. C'est LA ligne qui rend la sanction ineffacable.
       allow update: if isSelf(uid)
-        && !changed().hasAny(['emailDay','emailCount','emailStartDay','emailStartCount','emailTestDay','emailTestCount']);
+        && !changed().hasAny(['emailDay','emailCount','emailStartDay','emailStartCount','emailTestDay','emailTestCount',
+                              'penalty','penaltyAt']);
       allow delete: if isSelf(uid) || isAdmin();
       // Sous-collections éventuelles (favoris, etc.) : réservées au propriétaire
       match /{doc=**} {
         allow read, write: if isSelf(uid);
       }
+    }
+
+    // ── Sanctions anti-farm : ecrites UNIQUEMENT par la Cloud Function
+    //    (Admin SDK). Personne ne peut ni en creer, ni en effacer une pour
+    //    reprendre ses points. Lecture reservee a l'admin : ce n'est pas un
+    //    pilori public.
+    match /penalties/{pid} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     // ── Tokens push : chacun le sien. (Les Cloud Functions utilisent l'Admin

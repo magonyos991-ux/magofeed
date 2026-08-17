@@ -14,6 +14,7 @@ Tout est **testable/déployable par toi**, jamais mis en prod sans essai.
 | `notifications-push.js` | **Push réel** sur le téléphone (découverte promue / photo à refaire / **chasse près de toi**), même app fermée | Faible (n'ajoute aucun point) | **Maintenant** |
 | `locate-stores.js` | Remplace le faux « +0 magasins » : localise de vrais commerces via OSM, sans stock inventé | Faible | Quand tu veux |
 | `points-serveur-PHASE2.js` | Points **validés côté serveur** (infalsifiables) + bases de la réputation | Moyen (change qui crédite les points) | Plus tard, en suivant la « Bascule Phase 2 » |
+| `anti-farm.js` | **Les faux stocks font perdre des points** : une annonce contredite par 2 personnes sur place est sanctionnée, et la sanction est ineffaçable | Faible (ne crédite rien, ne fait que retirer) | **Maintenant**, avec les règles |
 
 ---
 
@@ -74,6 +75,52 @@ stock inventé** (`drinks: []`) ; la communauté remplit le stock. Coupe d'abord
 l'ancien job « +0 » dans Console → Functions.
 
 ---
+
+## 4) Anti-farm : les faux stocks coûtent des points — `anti-farm.js` (~10 min)
+
+Le problème : annoncer « en stock » rapporte +10 points, et rien n'empêchait
+quelqu'un d'en inventer depuis son canapé. Les points montaient, la carte
+devenait fausse, et les vraies personnes se déplaçaient pour rien.
+
+**Ce que fait la fonction** — à chaque signalement de rupture, elle regarde qui
+avait annoncé cette boisson en stock dans ce magasin. Si **2 personnes
+différentes** (ni l'auteur, ni deux fois la même) ont signalé l'absence dans les
+**10 jours**, l'auteur perd **10 points** — exactement ce que l'annonce lui avait
+rapporté.
+
+**Ce qui protège les honnêtes :**
+
+- il faut deux témoins, donc un seul râleur ne peut sanctionner personne ;
+- ses propres corrections ne comptent jamais contre lui ;
+- au-delà de 10 jours, plus de sanction : une boisson vue puis vendue, c'est la
+  vie d'un rayon, pas un mensonge ;
+- une même annonce n'est sanctionnée qu'**une fois** (verrou `penalties/{clé}`).
+
+**Ce qui la rend ineffaçable :** la sanction ne touche pas `users/{uid}.points`
+(que l'app réécrit à chaque synchronisation), mais un champ séparé
+`users/{uid}.penalty`. Les règles de ce dossier **interdisent au client d'y
+toucher**. L'app affiche partout `points − penalty` : profil, niveau, classement.
+Vider le cache du navigateur ne rend pas les points.
+
+1. Copie les `exports` de `anti-farm.js` dans ton `functions/index.js`.
+2. **Re-publie les règles d'abord** (`firestore.rules` de ce dossier) : sans la
+   ligne qui protège `penalty`, la fonction ne sert à rien.
+3. Déploie : `firebase deploy --only functions:antiFarmRupture`
+4. **Attends-toi à une erreur au premier déclenchement** : Firestore réclamera un
+   **index composite** sur `reports` (`storeId` + `drinkId` + `type` +
+   `createdAt`). Le lien de création est dans le message d'erreur
+   (Console → Functions → Journaux) : un clic, deux minutes, c'est fait. Tant
+   que l'index n'existe pas, la fonction se contente d'écrire un avertissement
+   dans les logs — elle ne casse rien.
+
+**Pour vérifier que ça marche** : depuis deux comptes différents, signale une
+rupture sur une boisson qu'un troisième compte avait annoncée en stock. Le
+troisième compte doit voir `-10 points` dans sa cloche, et son total baisser.
+Côté console, un document apparaît dans `penalties`.
+
+**Pour lever une sanction** (erreur, faux signalements coordonnés) : Console
+Firestore → `users/{uid}` → mets `penalty` à la valeur voulue. Le client la
+relit au prochain lancement.
 
 ## Bascule PHASE 2 — points infalsifiables (à faire quand tu es prêt)
 

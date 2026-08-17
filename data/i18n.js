@@ -19,7 +19,10 @@ var curCat="Tous",curSel=null,recents=[DRINKS[14],DRINKS[22]];
 var accentColor="#1a1714",accentLight="#f0eee9";
 var userLat=null,userLng=null;
 var scanActive=false,quaggaRunning=false;
-var userStats={signals:0,confirms:0,pts:0,discAccepted:0,activity:[]};
+/* penalty : points RETIRES par le serveur (anti-farm). Le client ne l'ecrit
+   jamais — il le lit seulement. C'est ce qui rend la sanction impossible a
+   effacer en vidant le cache. Voir functions-a-deployer/anti-farm.js. */
+var userStats={signals:0,confirms:0,pts:0,discAccepted:0,penalty:0,activity:[]};
 var PROMO_REWARD=50; // points gagnes quand TA decouverte est acceptee au catalogue
 var reportTarget=null,curMode="light",curLang="fr";
 var searchDebounce=null;

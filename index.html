@@ -882,7 +882,6 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       <span class="ntab-lbl" id="nt-profile">Profil</span>
     </div>
   </nav>
-  <div id="home-fab" role="button" tabindex="0" aria-label="Retour à l'accueil" onclick="navTo('home')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();navTo('home');}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7M6 9.5V20h12V9.5"/></svg></div>
 
   <!-- Compte Magofeed par e-mail : connexion / inscription / mot de passe oublié -->
   <div id="auth-sheet" role="dialog" aria-modal="true" aria-label="Compte Magofeed" style="display:none;position:fixed;inset:0;z-index:8600;background:rgba(12,10,8,.55)" onclick="closeAuthSheet()">
@@ -1763,13 +1762,28 @@ window.fbLoadFeedback = async function() {
 };
 window.fbLoadLeaderboard = async function() {
   try {
-    var lbQuery = query(collection(db, "users"), orderBy("points", "desc"), limit(10));
+    // On lit large (30) parce que le dedoublonnage par pseudo va reduire la
+    // liste : sinon un classement de 10 pourrait finir a 6 lignes.
+    var lbQuery = query(collection(db, "users"), orderBy("points", "desc"), limit(30));
     var snap = await getDocs(lbQuery);
-    var rows = [];
+    /* UN SEUL joueur par pseudo. Trois comptes anonymes crees sur des
+       appareils differents et renommes pareil apparaissaient trois fois dans
+       le classement : ca n'a aucun sens et ca decredibilise le tableau.
+       On garde le meilleur score de chaque pseudo. */
+    var parPseudo = {};
     snap.forEach(function(d) {
-      var data = d.data();
-      rows.push({ uid: d.id, pseudo: data.pseudo || "Anonyme", points: data.points || 0, streak: data.streak || 0 });
+      var data = d.data() || {};
+      var pseudo = String(data.pseudo || "Anonyme").trim();
+      var cle = pseudo.toLowerCase();
+      // Points NETS : ce que le serveur a retire (anti-farm) est deduit ici
+      // aussi, sinon un compte sanctionne resterait en tete du classement.
+      var pts = Math.max(0, (data.points || 0) - (data.penalty || 0));
+      if (!parPseudo[cle] || pts > parPseudo[cle].points) {
+        parPseudo[cle] = { uid: d.id, pseudo: pseudo, points: pts, streak: data.streak || 0 };
+      }
     });
+    var rows = Object.keys(parPseudo).map(function(k){ return parPseudo[k]; })
+      .sort(function(a,b){ return b.points - a.points; });
     window.dispatchEvent(new CustomEvent("fbLeaderboardLoaded", { detail: rows }));
     return rows;
   } catch (e) {
@@ -3080,27 +3094,19 @@ var NAV_SCREENS=["home","search","results","scan","discover","profile","rewards"
    - En plus : glissement interactif maison (l'ecran suit le doigt).
 ================================ */
 var TAB_SCREENS=["home","search","scan","discover","profile"];
-/* Le bouton d'accueil n'apparait QUE la ou aucun onglet n'est allume. On
-   reproduit exactement le calcul d'activeTab : reglages / confidentialite /
-   conditions allument l'onglet Profil, donc pas de bouton en double. */
-function updateHomeFab(s){
-  var el=document.getElementById("home-fab");
-  if(!el)return;
-  var allume=TAB_SCREENS.indexOf(s)!==-1||["settings","privacy","terms"].indexOf(s)!==-1;
-  var visible=NAV_SCREENS.indexOf(s)!==-1&&!allume;
-  el.classList.toggle("on",visible);
-  // Miroir de la pastille de chasse : les deux occupent la meme bande a
-  // gauche, elles ne doivent jamais se chevaucher.
-  var cote="right";
-  try{ cote=localStorage.getItem("magoFabSide")||"right"; }catch(e){}
-  el.classList.toggle("side-right",cote==="left");
-  // Le toast ne remonte pas quand la carte plein ecran est ouverte : la place
-  // y est deja prise par « + Magasin ».
-  var h=document.getElementById("explore-map-host");
-  var carteOuverte=!!(h&&h.style.display!=="none"&&h.classList.contains("in"));
-  try{ document.body.classList.toggle("homefab",visible&&!carteOuverte); }catch(e){}
-}
+
 var navStack=[];
+/* Le retour du geste doit emprunter le MEME chemin que la fleche de l'ecran.
+   La fiche magasin, par exemple, sait qu'elle doit revenir a la carte quand
+   on en vient — navBack() l'ignorait et sautait a l'ecran precedent. */
+function _gesteRetour(){
+  var cur=document.querySelector(".screen.on");
+  var id=cur?cur.id.replace(/^s-/,""):"";
+  if(id==="storedetail"&&typeof closeStoreDetail==="function"){
+    try{closeStoreDetail();playSound("pop");return;}catch(e){}
+  }
+  if(navStack.length){navBack();playSound("pop");}
+}
 function navBack(){
   if(!navStack.length)return false;
   var prev=navStack.pop();
@@ -3186,7 +3192,6 @@ function _showRaw(s){
     try{var _q=document.getElementById("q");if(_q)_q.value="";var _sl=document.getElementById("search-list");if(_sl)_sl.innerHTML="";exploreFilter=null;window._exploreFromDrink=false;}catch(e){}
   }
   try{updateMissionFab();}catch(e){}
-  try{updateHomeFab(s);}catch(e){}
   // Quitter l'écran scan met fin au remplissage rafale (nettoie HUD + état).
   if(s!=="scan"&&window._rafaleStore)try{endRafale(true);}catch(e){}
   if(s!=="scan"&&scanActive)stopScan();
@@ -3420,7 +3425,7 @@ function badgeDefs(){
     {key:"reliable",emoji:"\u2713",name:T.badgeReliable||"Fiable",tiers:[3,15,50,150,400],value:userStats.confirms||0},
     {key:"discoverer",emoji:"",name:"D\u00e9couvreur",tiers:[1,5,15,40,100],value:userStats.discAccepted||0},
     {key:"streak",emoji:"",name:T.badgeStreak||"Assidu",tiers:[3,7,30,90,365],value:(userStreak&&userStreak.best)||0},
-    {key:"star",emoji:"\u2605",name:T.badgeStar||"\u00C9toile",tiers:[100,500,2000,7500,25000],value:userStats.pts||0},
+    {key:"star",emoji:"\u2605",name:T.badgeStar||"\u00C9toile",tiers:[100,500,2000,7500,25000],value:ptsNets()},
     {key:"founder",emoji:"",name:T.badgeFounder||"Fondateur",tiers:[1],value:isAdmin?1:0,special:true}
   ];
 }
@@ -3698,7 +3703,7 @@ function celebrateLevelUp(lv){
 function checkLevelUp(){
   try{
     if(!window._statsReady)return; // pas encore de vrais points : évite une fausse fête au boot avant chargement
-    var lv=levelInfo(userStats.pts||0);
+    var lv=levelInfo(ptsNets());
     var raw=localStorage.getItem("magoLevelSeen");
     var seen=(raw==null)?null:parseInt(raw,10);
     if(seen==null||isNaN(seen)){
@@ -3797,9 +3802,45 @@ function maybeAskFeedback(){
   try{
     if(localStorage.getItem("magoFeedbackDone")==="1")return;
     if(localStorage.getItem("magoFeedbackAsked")==="1")return;
-    if((userStats.pts||0)<25)return;
+    if(ptsNets()<25)return;
     localStorage.setItem("magoFeedbackAsked","1");
     setTimeout(function(){openFeedback();},1200);
+  }catch(e){}
+}
+/* Le solde AFFICHE = points gagnes moins les points retires par le serveur.
+   On garde les deux separes : userStats.pts est ce que le client a compte,
+   userStats.penalty est ce que le serveur a retire. Le client ne peut pas
+   effacer la seconde valeur (regle Firestore), donc pas effacer sa sanction. */
+function ptsNets(){
+  var p=(userStats.pts||0)-(userStats.penalty||0);
+  return p>0?p:0;
+}
+function _chev(){
+  return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" '+
+    'stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" '+
+    'style="display:inline-block;vertical-align:-0.15em;margin-left:3px"><path d="M9 5l7 7-7 7"/></svg>';
+}
+/* Une sanction silencieuse serait vecue comme un bug (« j'ai perdu des points
+   sans raison »). On previent UNE fois par palier de sanction, avec le motif
+   et le chemin vers l'explication complete. */
+function annoncerSanction(total){
+  if(!total)return;
+  var vu=0;
+  try{vu=parseInt(localStorage.getItem("magoPenaltyVu")||"0",10)||0;}catch(e){}
+  if(total<=vu)return;
+  try{localStorage.setItem("magoPenaltyVu",String(total));}catch(e){}
+  if(!vu)return;   // premiere lecture sur cet appareil : on ne re-annonce pas l'historique
+  var perdu=total-vu;
+  try{playSound("err");}catch(e){}
+  try{toast("-"+perdu+" points : un stock que tu avais annoncé n'y était pas");}catch(e){}
+  try{
+    pushActivity({
+      key:"pen:"+total,
+      type:"penalty",
+      title:"-"+perdu+" points",
+      body:"Un stock que tu avais annoncé a été signalé absent par plusieurs personnes. Signale ce que tu vois vraiment : les points remontent tout seuls.",
+      ts:Date.now()
+    });
   }catch(e){}
 }
 function levelInfo(pts){
@@ -3823,7 +3864,7 @@ var LEVEL_PERKS=[
   "Anneau doré autour de ton avatar",
   "Ton badge de niveau affiché au classement, vu de toute la communauté",
   "Pseudo argent — visible par toute la communauté",
-  "Pseudo or + coche de confiance ✓ sur ton profil",
+  "Pseudo or + coche de confiance sur ton profil",
   "Pseudo Légende doré — le sommet de Magofeed"
 ];
 // Couleur de pseudo debloquee selon le niveau (lisible en clair ET sombre).
@@ -3847,7 +3888,7 @@ function myLeaderboardRank(){
 }
 function renderRewards(){
   var host=document.getElementById("rewards-body");if(!host)return;
-  var pts=userStats.pts||0,lv=levelInfo(pts);
+  var pts=ptsNets(),lv=levelInfo(pts);
   var pct=lv.next?Math.min(100,Math.round((pts-lv.floor)/(lv.next-lv.floor)*100)):100;
   var toNext=lv.next?(lv.next-pts):0;
   var tr=trustLevel(),rank=myLeaderboardRank();
@@ -3864,27 +3905,46 @@ function renderRewards(){
       '<div style="font-size:11.5px;opacity:.85;margin-top:7px">Plus que <b>'+toNext+' points</b> pour devenir <b>'+sanitize(lv.nextName)+'</b></div></div>')
      :'<div style="font-size:12px;opacity:.85;margin-top:12px">Tu es au sommet — merci pour tout ce que tu apportes à la communauté.</div>')+
   '</div>';
+  // 1bis) Points retires par le serveur : on l'affiche, sans detour.
+  if((userStats.penalty||0)>0){
+    h+='<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:16px;padding:14px 15px;margin-bottom:16px">'+
+      '<div style="font-size:12.5px;font-weight:800;color:#b91c1c">'+(userStats.penalty||0)+' points retirés</div>'+
+      '<div style="font-size:11.5px;line-height:1.6;color:#7f1d1d;margin-top:5px">Des boissons que tu avais annoncées en stock ont été signalées absentes par plusieurs autres personnes. Ces points sont rendus à la communauté. Signale ce que tu vois vraiment : ça remonte tout seul.</div>'+
+    '</div>';
+  }
   // 2) Avantages debloques par niveau (#1 deblocages)
   h+='<div class="t-section" style="padding:6px 0 10px">Tes avantages</div>';
   h+='<div style="background:var(--bg2);border-radius:16px;overflow:hidden;margin-bottom:16px">';
   LEVELS.forEach(function(L,i){
     var got=lv.idx>=i;
+    var suivant=(i===lv.idx+1);          // LE palier a viser : mis en avant
     var col=levelPseudoColor(i);
-    h+='<div style="display:flex;align-items:center;gap:11px;padding:12px 14px;'+(i?'border-top:1px solid var(--border);':'')+(got?'':'opacity:.5')+'">'+
-      '<div style="font-size:20px;width:26px;text-align:center">'+(got?L[2]:'')+'</div>'+
-      '<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:800;color:'+(got&&col?col:'var(--s1)')+'">'+sanitize(L[1])+' <span style="font-weight:600;color:var(--s3)">· '+L[0]+' pts</span></div>'+
-        '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:1px">'+sanitize(LEVEL_PERKS[i]||"")+'</div></div>'+
-      (got?'<span style="font-size:11px;font-weight:800;color:#16a34a">✓</span>':'')+
+    var manque=Math.max(0,L[0]-pts);
+    h+='<div class="perk-row'+(suivant?' next':'')+(got?'':' locked')+'">'+
+      '<div class="perk-num">'+(i+1)+'</div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div class="perk-name" style="color:'+(got&&col?col:'var(--s1)')+'">'+sanitize(L[1])+
+          ' <span style="font-weight:600;color:var(--s3)">· '+L[0]+' pts</span></div>'+
+        '<div class="perk-desc">'+sanitize(LEVEL_PERKS[i]||"")+'</div>'+
+        (suivant&&manque?'<div class="perk-todo">Encore '+manque+' point'+(manque>1?'s':'')+' — tu y es presque</div>':'')+
+      '</div>'+
+      (got?'<span class="perk-ok">'+icoOk(15)+'</span>':(suivant?'<span class="perk-tag">Prochain</span>':''))+
     '</div>';
   });
   h+='</div>';
   // 3) Statut de confiance (#2 reputation — partie visible)
-  h+='<div class="t-section" style="padding:6px 0 10px">'+tr.emoji+' Confiance</div>';
+  h+='<div class="t-section" style="padding:6px 0 10px">Confiance</div>';
   h+='<div style="background:var(--bg2);border-radius:16px;padding:15px;margin-bottom:16px">'+
     '<div style="display:flex;align-items:center;gap:10px"><span style="font-size:22px">'+tr.emoji+'</span>'+
       '<div style="flex:1"><div style="font-size:13.5px;font-weight:800;color:'+tr.color+'">'+tr.name+'</div>'+
       '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:1px">'+(userStats.discAccepted||0)+' découverte(s) acceptée(s) · '+(userStats.confirms||0)+' confirmation(s)</div></div></div>'+
     '<div style="font-size:11px;line-height:1.55;color:var(--s3);margin-top:10px">Plus tu contribues avec des infos justes, plus ta parole compte. Bientôt, tes ajouts seront validés plus vite grâce à ta réputation.</div>'+
+    /* La regle anti-triche est ECRITE, en clair, avant la faute. Une sanction
+       qu'on decouvre apres coup est vecue comme un bug ; annoncee, elle tient
+       lieu de garde-fou. */
+    '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:11px;line-height:1.6;color:var(--s3)">'+
+      '<b style="color:var(--s2)">La règle :</b> annoncer une boisson en stock rapporte des points. Si plusieurs personnes passent ensuite sur place et la signalent absente, ces points repartent. Inventer des stocks ne fait donc jamais monter : ça fait redescendre.'+
+    '</div>'+
   '</div>';
   // 4) Classement (#3)
   h+='<div class="t-section" style="padding:6px 0 10px">Classement</div>';
@@ -3908,7 +3968,7 @@ function updateProfileStats(){
   _st("stat-disc",userStats.discAccepted||0);
   _st("stat-signals",userStats.signals);
   _st("stat-confirms",userStats.confirms);
-  _st("stat-pts",userStats.pts);
+  _st("stat-pts",ptsNets());
   var lvHost=document.getElementById("level-bar");
   if(!lvHost){
     lvHost=document.createElement("div");
@@ -3917,15 +3977,26 @@ function updateProfileStats(){
     if(sp&&sp.parentNode)sp.parentNode.insertBefore(lvHost,sp);
   }
   if(lvHost){
-    var lv=levelInfo(userStats.pts||0);
-    var pct=lv.next?Math.min(100,Math.round((userStats.pts-lv.floor)/(lv.next-lv.floor)*100)):100;
-    lvHost.innerHTML='<div style="margin:0 20px 10px;background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:12px 15px">'+
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">'+
-        '<span style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:800;color:var(--s1)"><span style="width:22px;height:22px;border-radius:7px;background:rgba(240,184,64,.16);border:1px solid #f0b840;color:#c69a57;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:900">'+(lv.idx+1)+'</span>Niveau '+(lv.idx+1)+' \u00B7 '+lv.name+'</span>'+
-        '<span style="font-size:10.5px;font-weight:700;color:var(--s2)">'+(lv.next?(userStats.pts+" / "+lv.next+" \u2192 "+lv.nextName):"MAX")+'</span>'+
+    var pNet=ptsNets();
+    var lv=levelInfo(pNet);
+    var pct=lv.next?Math.min(100,Math.round((pNet-lv.floor)/(lv.next-lv.floor)*100)):100;
+    var reste=lv.next?(lv.next-pNet):0;
+    /* Elle ne repondait pas au doigt : on tapait sur sa barre et il ne se
+       passait rien. Elle ouvre maintenant « Tes points », qui montre ce qu'il
+       reste a gagner ET ce que chaque palier suivant debloque. */
+    lvHost.innerHTML='<div class="lvl-card" role="button" tabindex="0" '+
+      'aria-label="Niveau '+(lv.idx+1)+', '+sanitize(lv.name)+'. Voir tes points et les prochains niveaux" '+
+      'onclick="show(\'rewards\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();show(\'rewards\');}">'+
+      '<div class="lvl-top">'+
+        '<span class="lvl-name"><span class="lvl-num">'+(lv.idx+1)+'</span>Niveau '+(lv.idx+1)+' \u00B7 '+sanitize(lv.name)+'</span>'+
+        '<span class="lvl-count">'+(lv.next?(pNet+" / "+lv.next):"MAX")+'</span>'+
       '</div>'+
-      '<div style="height:7px;border-radius:99px;background:var(--bg3);overflow:hidden">'+
-        '<div style="height:100%;width:'+pct+'%;border-radius:99px;background:linear-gradient(90deg,#c69a57,#e0b878);transition:width .6s cubic-bezier(.2,.8,.3,1)"></div>'+
+      '<div class="lvl-track"><div class="lvl-fill" style="width:'+pct+'%"></div></div>'+
+      '<div class="lvl-foot">'+
+        '<span>'+(lv.next
+          ?('Encore <b>'+reste+' point'+(reste>1?'s':'')+'</b> pour devenir <b>'+sanitize(lv.nextName)+'</b>')
+          :'Niveau maximum atteint')+'</span>'+
+        '<span class="lvl-go">Voir'+_chev()+'</span>'+
       '</div>'+
     '</div>';
   }
@@ -5772,7 +5843,7 @@ function renderMissions(){
   // Revelation progressive : le tout nouveau venu ne voit QUE le chemin
   // "cherche -> trouve". Les missions apparaissent apres sa premiere
   // action — une recompense qui se devoile, pas une charge d'entree.
-  var newcomer=(userStats.pts||0)<1&&!Object.keys(scanCounts||{}).length&&!(userStats.signals||0)&&!(userStats.confirms||0);
+  var newcomer=ptsNets()<1&&!Object.keys(scanCounts||{}).length&&!(userStats.signals||0)&&!(userStats.confirms||0);
   if(newcomer){host.innerHTML="";return;}
   var defs=missionDefs();
   var done=defs.filter(function(m){return m.have>=m.need;}).length;
@@ -5975,8 +6046,6 @@ function ensureMissionFab(){
     fab.style.transition="left .34s cubic-bezier(.34,1.4,.4,1),top .34s cubic-bezier(.34,1.4,.4,1),opacity .3s ease";
     fab.style.left=(side==="left"?12:(w-W-12))+"px";fab.style.top=t+"px";
     try{localStorage.setItem("magoFabSide",side);localStorage.setItem("magoFabTop",String(t));}catch(_){}
-    // La pastille change de bord : le bouton d'accueil part de l'autre cote.
-    try{var _c=document.querySelector(".screen.on");updateHomeFab(_c?_c.id.replace(/^s-/,""):"home");}catch(_){}
     idle();
   }
   function up(){if(!dragging)return;dragging=false;fab.style.cursor="grab";if(moved){snap();}else{openMissions();idle();}}
@@ -6085,7 +6154,7 @@ function updateMissionFab(){
     var _ob=document.getElementById("onboarding"),_sp=document.getElementById("splash");
     var _introUp=(_ob&&getComputedStyle(_ob).display!=="none"&&!_ob.classList.contains("hidden"))||(_sp&&getComputedStyle(_sp).display!=="none"&&!_sp.classList.contains("hidden"));
     if(_introUp){fab.style.display="none";return;}
-    var newcomer=(userStats.pts||0)<1&&!Object.keys(scanCounts||{}).length&&!(userStats.signals||0)&&!(userStats.confirms||0);
+    var newcomer=ptsNets()<1&&!Object.keys(scanCounts||{}).length&&!(userStats.signals||0)&&!(userStats.confirms||0);
     var miss=0;
     if(!newcomer){try{miss=missionDefs().filter(function(m){return m.have<m.need;}).length;}catch(e){}}
     var hunts=window._huntCount||0;
@@ -7037,11 +7106,24 @@ function _dragOverlayOpen(){
   if(pk&&pk.style.display==="block")return pk;
   var pr=document.getElementById("propose-sheet");
   if(pr&&pr.style.display==="block")return pr;
+  // Les surcouches ajoutees depuis : sans elles, le geste « retour » agissait
+  // sur l'ecran cache DESSOUS et donnait l'impression de ne rien faire.
+  var ex=document.getElementById("explore-map-host");
+  if(ex&&ex.style.display!=="none"&&ex.classList.contains("in"))return ex;
+  var ac=document.getElementById("activity-ov");
+  if(ac)return ac;
+  var ms=document.getElementById("mission-sheet");
+  if(ms)return ms;
+  var au=document.getElementById("auth-sheet");
+  if(au&&au.style.display!=="none")return au;
   return null;
 }
 function _dragCloseOverlay(el){
   if(el.id==="img-zoom")closeDrinkZoom();
   else if(el.id==="store-picker")closeStorePicker();
+  else if(el.id==="explore-map-host"){try{closeExploreMap();}catch(e){}}
+  else if(el.id==="activity-ov"||el.id==="mission-sheet"){try{el.remove();}catch(e){}}
+  else if(el.id==="auth-sheet"){try{closeAuthSheet();}catch(e){}}
   else closeProposeForm();
 }
 document.addEventListener("touchstart",function(ev){
@@ -7093,14 +7175,14 @@ document.addEventListener("touchend",function(ev){
   if(d.overlay&&dx>=64&&dy<=80){_dragCloseOverlay(d.overlay);cleanup();playSound("pop");return;}
   if(!d.started){
     // Pas de drag visuel engage (geste rapide) : seuil simple
-    if(!d.overlay&&dx>=64&&dy<=60&&navStack.length){navBack();playSound("pop");}
+    if(!d.overlay&&dx>=64&&dy<=60)_gesteRetour();
     cleanup();return;
   }
   if(dx>w*0.33){
     // Termine le glissement puis navigue
     if(d.cur){d.cur.style.transition="transform .16s ease-out";d.cur.style.transform="translateX(100%)";}
     if(d.prev){d.prev.style.transition="transform .16s ease-out";d.prev.style.transform="translateX(0)";}
-    setTimeout(function(){cleanup();if(navStack.length)navBack();playSound("pop");},170);
+    setTimeout(function(){cleanup();_gesteRetour();},170);
   }else{
     // Pas assez loin : remise en place
     if(d.cur){d.cur.style.transition="transform .18s ease";d.cur.style.transform="translateX(0)";}
@@ -8167,7 +8249,8 @@ var ACT_META={
   found:        {label:"Trouvée",     col:"#16a34a"},
   promoted:     {label:"Au catalogue",col:"#c69a57"},
   hunt:         {label:"Chasse",      col:"#e67e22"},
-  photoRejected:{label:"Photo à refaire", col:"#dc2626"}
+  photoRejected:{label:"Photo à refaire", col:"#dc2626"},
+  penalty:      {label:"Points retirés", col:"#dc2626"}
 };
 function _actMeta(type){ return ACT_META[type]||{label:"Info",col:"var(--s2)"}; }
 /* Vignette : la VRAIE photo du produit quand on connait la boisson, sinon le
@@ -8183,12 +8266,14 @@ function _actThumb(a){
 }
 /* Petit symbole SVG par type — style trait, aucun emoji (cohérent avec l'app). */
 function _activityIcon(type){
-  var col=type==="found"?"#16a34a":type==="promoted"?"#c69a57":type==="hunt"?"#e67e22":type==="photoRejected"?"#dc2626":"var(--s2)";
+  var col=type==="found"?"#16a34a":type==="promoted"?"#c69a57":type==="hunt"?"#e67e22":(type==="photoRejected"||type==="penalty")?"#dc2626":"var(--s2)";
   var p="";
   if(type==="found")p='<path d="M20 6 9 17l-5-5"/>';
   else if(type==="promoted")p='<path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3"/><path d="M7 5H4v2a3 3 0 0 0 3 3"/>';
   else if(type==="hunt")p='<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22"/>';
   else if(type==="photoRejected")p='<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="3"/>';
+  // Sanction : une etoile barree. Le meme trait que le reste, aucun emoji.
+  else if(type==="penalty")p='<path d="M12 3.6l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 16l-4.8 2.5.9-5.4-3.9-3.8 5.4-.8L12 3.6z"/><path d="M4 20 20 4"/>';
   else p='<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>';
   return '<span style="width:34px;height:34px;border-radius:11px;background:color-mix(in srgb,'+col+' 14%,transparent);display:flex;align-items:center;justify-content:center;color:'+col+'"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+p+'</svg></span>';
 }
@@ -8291,6 +8376,7 @@ function _openActivityUI(){
   ov.id="activity-ov";
   ov.style.cssText="position:fixed;inset:0;z-index:10001;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px)";
   var card=document.createElement("div");
+  card.id="act-card";
   card.style.cssText="width:100%;max-width:440px;max-height:82vh;display:flex;flex-direction:column;background:var(--app-bg);border-radius:24px 24px 0 0;padding:18px 20px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28);animation:fbSheetUp .5s cubic-bezier(.3,1.38,.44,1) both";
   card.innerHTML='<div style="width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 14px;flex-shrink:0"></div>'+
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-shrink:0">'+
@@ -8299,8 +8385,46 @@ function _openActivityUI(){
     '</div>'+
     '<div id="act-list" style="overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1"></div>';
   ov.appendChild(card);
-  ov.onclick=function(e){if(e.target===ov)ov.remove();};
   document.body.appendChild(ov);
+  // Le fond de page ne doit plus « rebondir » derriere la feuille : c'est ce
+  // qui laissait apparaitre le blanc du navigateur quand on tirait dessus.
+  try{document.body.classList.add("sheet-open");}catch(e){}
+  var _fermer=function(){
+    try{document.body.classList.remove("sheet-open");}catch(e){}
+    if(card)card.style.transform="translateY(100%)";
+    setTimeout(function(){if(ov.parentNode)ov.remove();},260);
+  };
+  ov.onclick=function(e){if(e.target===ov)_fermer();};
+  /* On tire la feuille vers le bas pour la fermer, comme partout ailleurs
+     dans l'app. Sans ca, le geste partait dans le vide et c'est la PAGE qui
+     glissait — on voyait le fond du navigateur. */
+  (function(){
+    var y0=null,dy=0,pid=null;
+    var lst=null;
+    card.addEventListener("pointerdown",function(e){
+      lst=document.getElementById("act-list");
+      // On ne prend le geste que si la liste est deja en haut : sinon on
+      // volerait son defilement.
+      if(lst&&lst.contains(e.target)&&lst.scrollTop>0)return;
+      if(e.target&&e.target.closest&&e.target.closest("button,.swp-fg"))return;
+      pid=e.pointerId;y0=e.clientY;dy=0;card.style.transition="none";
+    });
+    card.addEventListener("pointermove",function(e){
+      if(pid===null||e.pointerId!==pid||y0===null)return;
+      var d=e.clientY-y0;
+      if(d<0)return;                       // vers le haut : rien a faire
+      if(d>8){try{card.setPointerCapture(pid);}catch(_){}}
+      dy=d;card.style.transform="translateY("+d+"px)";
+    });
+    function fin(){
+      if(pid===null)return;pid=null;
+      card.style.transition="transform .28s cubic-bezier(.2,.8,.2,1)";
+      if(dy>120){_fermer();}else{card.style.transform="none";}
+      y0=null;dy=0;
+    }
+    card.addEventListener("pointerup",fin);
+    card.addEventListener("pointercancel",fin);
+  })();
   _renderActivityList();
   var clr=card.querySelector("#act-clear");
   if(clr)clr.onclick=function(){_activity=[];_saveActivity();refreshBell();_renderActivityList();var c2=card.querySelector("#act-clear");if(c2)c2.style.display="none";};
@@ -9196,7 +9320,7 @@ function storeIsPartner(s){
    montre la progression (points / niveau) -> rétention. */
 function renderStoreMission(){
   var el=document.getElementById("sd-mission");if(!el)return;
-  var pts=(window.userStats&&Number(userStats.pts))||0;
+  var pts=(window.userStats&&ptsNets())||0;
   var msgs=[
     "Scanne une boisson que tu vois en rayon — tu remplis la carte et tu gagnes des points.",
     "Tu vois une pépite pas encore listée ? Scanne-la, la commu te remerciera ",
@@ -10800,14 +10924,43 @@ function _distM(aLat,aLng,bLat,bLng){
   return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));
 }
 // Filtre distance réglable : chaque tap change le rayon (Off → 1 → 2 → 5 → 10 km).
+/* DISTANCE — avant il fallait taper cinq fois pour arriver a 10 km, et on ne
+   pouvait choisir que 1, 2, 5 ou 10. Maintenant un tap ouvre un curseur
+   compact SOUS les puces (il ne recouvre rien), on choisit d'un glissement,
+   et le resultat se met a jour en direct. Un deuxieme tap le referme. */
 function exploreCycleNear(){
-  var steps=[0,1,2,5,10];
-  var cur=Number(window._exploreChips.near)||0;
-  var idx=steps.indexOf(cur);if(idx<0)idx=0;
-  window._exploreChips.near=steps[(idx+1)%steps.length];
-  renderExploreChips();
-  if(exploreMap)exploreLoadStores(true);
-  playSound("pop");
+  var bar=document.getElementById("explore-near-bar");
+  if(bar){ exploreCloseNearBar(); return; }
+  var chips=document.getElementById("explore-chips");
+  if(!chips||!chips.parentNode)return;
+  var val=Number(window._exploreChips.near)||0;
+  bar=document.createElement("div");
+  bar.id="explore-near-bar";
+  bar.className="near-bar";
+  bar.innerHTML='<button class="near-off" aria-label="Retirer le filtre distance">Tout</button>'+
+    '<input id="near-range" type="range" min="1" max="10" step="1" value="'+(val||3)+'" aria-label="Rayon en kilomètres">'+
+    '<span id="near-val">'+(val?val+" km":"—")+'</span>';
+  chips.parentNode.insertBefore(bar,chips.nextSibling);
+  requestAnimationFrame(function(){bar.classList.add("in");});
+  var rng=bar.querySelector("#near-range"), lab=bar.querySelector("#near-val");
+  var appliquer=function(v,live){
+    window._exploreChips.near=v;
+    if(lab)lab.textContent=v?(v+" km"):"—";
+    renderExploreChips();
+    if(exploreMap)exploreLoadStores(true);
+    if(!live){try{playSound("pop");}catch(e){}}
+  };
+  rng.addEventListener("input",function(){ appliquer(Number(rng.value),true); });
+  rng.addEventListener("change",function(){ appliquer(Number(rng.value),false); });
+  bar.querySelector(".near-off").onclick=function(){ appliquer(0,false); exploreCloseNearBar(); };
+  if(!val)appliquer(Number(rng.value),true);   // le curseur prend effet tout de suite
+  try{playSound("pop");}catch(e){}
+}
+function exploreCloseNearBar(){
+  var bar=document.getElementById("explore-near-bar");
+  if(!bar)return;
+  bar.classList.remove("in");
+  setTimeout(function(){ if(bar.parentNode)bar.remove(); },200);
 }
 function exploreAddStore(){
   if(exploreFilter&&typeof drinkLocate==="function"){drinkLocate();return;}
@@ -10879,6 +11032,14 @@ function renderBrandPickerList(q){
   if(!brands.length)html+='<div style="padding:18px 4px;font-size:13px;color:var(--s2)">Aucune enseigne « '+sanitize(q)+' »</div>';
   el.innerHTML=html;
 }
+/* Une seule porte de sortie pour le choix d'enseigne : sans ca, trois chemins
+   fermaient le panneau d'un coup sec pendant qu'un quatrieme l'animait. */
+function closeBrandPicker(){
+  var p=document.getElementById("explore-brand-picker");
+  if(!p)return;
+  if(typeof p._close==="function"){p._close();return;}
+  p.remove();
+}
 function openExploreBrandPicker(){
   var old=document.getElementById("explore-brand-picker");if(old)old.remove();
   var ov=document.createElement("div");
@@ -10886,14 +11047,23 @@ function openExploreBrandPicker(){
   // Ouverture par le HAUT : sur iPhone, le clavier recouvrait le champ quand le
   // panneau venait du bas ("on voit pas ce qu'on écrit"). En haut, le champ reste
   // visible au-dessus du clavier.
-  ov.style.cssText="position:fixed;inset:0;z-index:4400;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center";
-  ov.onclick=function(e){if(e.target===ov)ov.remove();};
-  ov.innerHTML='<div style="width:100%;max-width:440px;background:var(--app-bg);border-radius:0 0 22px 22px;padding:calc(14px + env(safe-area-inset-top,0px)) 18px 18px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(0,0,0,.3)">'+
-    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-size:16px;font-weight:800;color:var(--s1)">Choisir une enseigne</div><div onclick="var p=document.getElementById(\'explore-brand-picker\');if(p)p.remove();" role="button" tabindex="0" aria-label="Fermer" style="font-size:22px;color:var(--s3);cursor:pointer;padding:2px 6px">✕</div></div>'+
+  // Il apparaissait d'un bloc, sans transition : brutal et « pas fini ».
+  // Le fond se voile en fondu, le panneau descend depuis le haut.
+  ov.className="brand-ov";
+  ov.style.cssText="position:fixed;inset:0;z-index:4400;display:flex;align-items:flex-start;justify-content:center";
+  var _fermeBrand=function(){
+    ov.classList.remove("in");
+    setTimeout(function(){ if(ov.parentNode)ov.remove(); },240);
+  };
+  ov._close=_fermeBrand;
+  ov.onclick=function(e){if(e.target===ov)_fermeBrand();};
+  ov.innerHTML='<div class="brand-card" style="width:100%;max-width:440px;background:var(--app-bg);border-radius:0 0 22px 22px;padding:calc(14px + env(safe-area-inset-top,0px)) 18px 18px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(0,0,0,.3)">'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-size:16px;font-weight:800;color:var(--s1)">Choisir une enseigne</div><div onclick="closeBrandPicker();" role="button" tabindex="0" aria-label="Fermer" style="font-size:22px;color:var(--s3);cursor:pointer;padding:2px 6px">✕</div></div>'+
     '<input id="brand-picker-q" placeholder="Tape une enseigne — Carrefour, Lidl…" autocomplete="off" oninput="renderBrandPickerList(this.value);exploreBrandLivePreview(this.value)" onkeydown="if(event.key===\'Enter\'){exploreBrandApplyQuery(this.value);}" style="width:100%;padding:13px 14px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:15px;font-weight:700;font-family:inherit;margin-bottom:8px;outline:none">'+
     '<div id="brand-picker-list" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>'+
   '</div>';
   document.body.appendChild(ov);
+  requestAnimationFrame(function(){ov.classList.add("in");});
   renderBrandPickerList("");
   setTimeout(function(){var i=document.getElementById("brand-picker-q");if(i){try{i.focus();}catch(e){}}},120);
   playSound("pop");
@@ -10901,7 +11071,7 @@ function openExploreBrandPicker(){
 function setExploreBrand(b){
   window._exploreBrand=b;
   window._exploreBrandQuery="";                 // choix précis -> on efface la recherche libre
-  var p=document.getElementById("explore-brand-picker");if(p)p.remove();
+  closeBrandPicker();
   renderExploreChips();
   if(exploreMap)exploreLoadStores(true);
   playSound("pop");
@@ -10921,7 +11091,7 @@ function exploreBrandLivePreview(q){
 function exploreBrandApplyQuery(q){
   window._exploreBrand=null;
   window._exploreBrandQuery=(q||"").trim();
-  var p=document.getElementById("explore-brand-picker");if(p)p.remove();
+  closeBrandPicker();
   try{renderExploreChips();}catch(e){}
   if(exploreMap)exploreLoadStores(true);
   playSound("pop");
@@ -11231,9 +11401,6 @@ function openExploreMap(opts){
     // Feuille remise a l'apercu a chaque ouverture : sans ca elle rouvrait
     // dans l'etat laisse la fois d'avant, parfois a moitie hors de l'ecran.
     try{ initExploreSheetDrag(); setExploreSheet("min",true); }catch(e){}
-    // La carte occupe l'ecran : le toast redescend, la place de 150 px est
-    // prise par « + Magasin ».
-    try{var _c=document.querySelector(".screen.on");updateHomeFab(_c?_c.id.replace(/^s-/,""):"home");}catch(e){}
   });});
   _cardOpenedAt=0;
   exploreHideCard();
@@ -11305,8 +11472,6 @@ function exploreOpenSheetFull(){
   try{ setExploreSheet("max"); }catch(e){}
 }
 function closeExploreMap(){
-  // La carte se ferme : le bouton d'accueil et le toast reprennent leur place.
-  setTimeout(function(){try{var _c=document.querySelector(".screen.on");updateHomeFab(_c?_c.id.replace(/^s-/,""):"home");}catch(e){}},60);
   clearRoute();
   var host=document.getElementById("explore-map-host");
   if(!host)return;
@@ -12896,7 +13061,7 @@ if(!userPseudo){
   try{localStorage.setItem("magopseudo",userPseudo);}catch(e){}
 }
 function applyPseudoDisplays(){
-  var lv=levelInfo(userStats.pts||0),col=levelPseudoColor(lv.idx);
+  var lv=levelInfo(ptsNets()),col=levelPseudoColor(lv.idx);
   var name=document.getElementById("profile-name-display");
   if(name){
     name.textContent=userPseudo;name.style.color=col||"";
@@ -14055,6 +14220,11 @@ try{
     userStats.signals=Math.max(userStats.signals,d.signals||0);
     userStats.confirms=Math.max(userStats.confirms,d.confirms||0);
     userStats.discAccepted=Math.max(userStats.discAccepted||0,d.discAccepted||0);
+    /* penalty vient du SERVEUR et de lui seul : les regles Firestore
+       interdisent au client de l'ecrire. On l'adopte tel quel (pas de max :
+       une sanction peut etre levee par un admin, elle doit pouvoir baisser). */
+    userStats.penalty=Number(d.penalty)||0;
+    try{annoncerSanction(userStats.penalty);}catch(err){}
     // Le pseudo du compte Firestore fait foi : on l'adopte localement pour que
     // le pseudo genere sur ce nouvel appareil n'ecrase pas celui du compte
     var incomingPseudo=d.pseudo?String(d.pseudo).slice(0,24):null;
