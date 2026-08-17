@@ -882,6 +882,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       <span class="ntab-lbl" id="nt-profile">Profil</span>
     </div>
   </nav>
+  <div id="home-fab" role="button" tabindex="0" aria-label="Retour à l'accueil" onclick="navTo('home')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();navTo('home');}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7M6 9.5V20h12V9.5"/></svg></div>
 
   <!-- Compte Magofeed par e-mail : connexion / inscription / mot de passe oublié -->
   <div id="auth-sheet" role="dialog" aria-modal="true" aria-label="Compte Magofeed" style="display:none;position:fixed;inset:0;z-index:8600;background:rgba(12,10,8,.55)" onclick="closeAuthSheet()">
@@ -3079,6 +3080,26 @@ var NAV_SCREENS=["home","search","results","scan","discover","profile","rewards"
    - En plus : glissement interactif maison (l'ecran suit le doigt).
 ================================ */
 var TAB_SCREENS=["home","search","scan","discover","profile"];
+/* Le bouton d'accueil n'apparait QUE la ou aucun onglet n'est allume. On
+   reproduit exactement le calcul d'activeTab : reglages / confidentialite /
+   conditions allument l'onglet Profil, donc pas de bouton en double. */
+function updateHomeFab(s){
+  var el=document.getElementById("home-fab");
+  if(!el)return;
+  var allume=TAB_SCREENS.indexOf(s)!==-1||["settings","privacy","terms"].indexOf(s)!==-1;
+  var visible=NAV_SCREENS.indexOf(s)!==-1&&!allume;
+  el.classList.toggle("on",visible);
+  // Miroir de la pastille de chasse : les deux occupent la meme bande a
+  // gauche, elles ne doivent jamais se chevaucher.
+  var cote="right";
+  try{ cote=localStorage.getItem("magoFabSide")||"right"; }catch(e){}
+  el.classList.toggle("side-right",cote==="left");
+  // Le toast ne remonte pas quand la carte plein ecran est ouverte : la place
+  // y est deja prise par « + Magasin ».
+  var h=document.getElementById("explore-map-host");
+  var carteOuverte=!!(h&&h.style.display!=="none"&&h.classList.contains("in"));
+  try{ document.body.classList.toggle("homefab",visible&&!carteOuverte); }catch(e){}
+}
 var navStack=[];
 function navBack(){
   if(!navStack.length)return false;
@@ -3165,6 +3186,7 @@ function _showRaw(s){
     try{var _q=document.getElementById("q");if(_q)_q.value="";var _sl=document.getElementById("search-list");if(_sl)_sl.innerHTML="";exploreFilter=null;window._exploreFromDrink=false;}catch(e){}
   }
   try{updateMissionFab();}catch(e){}
+  try{updateHomeFab(s);}catch(e){}
   // Quitter l'écran scan met fin au remplissage rafale (nettoie HUD + état).
   if(s!=="scan"&&window._rafaleStore)try{endRafale(true);}catch(e){}
   if(s!=="scan"&&scanActive)stopScan();
@@ -5172,6 +5194,91 @@ function priceHistoryRowHTML(s,drinkId){
    ACCESSIBILITE des cartes generees dynamiquement
    Rend une carte cliquable utilisable au clavier (role, tabindex, Entree/Espace).
 ================================ */
+/* ── GLISSER POUR SUPPRIMER ───────────────────────────────────────────────
+   Un seul composant pour toutes les listes, comme dans le journal d'appels.
+
+   Trois pieges evites :
+   1. Le defilement vertical de la page ne doit JAMAIS etre vole. On laisse
+      donc le navigateur gerer l'axe vertical (touch-action:pan-y) et on ne
+      prend le geste qu'une fois l'axe horizontal etabli.
+   2. Le glissement depuis le bord gauche est deja le geste « retour » du
+      systeme : on ignore tout ce qui demarre dans les 40 premiers pixels.
+   3. Les listes sont reconstruites par innerHTML : les ecouteurs sautent a
+      chaque rendu. D'ou le drapeau _swpInit par ligne, et un rappel de
+      initSwipeToDelete apres chaque reconstruction.
+
+   Le bouton de suppression visible RESTE : le glissement est un raccourci,
+   jamais le seul chemin — au clavier comme au lecteur d'ecran. */
+var SWIPE_REVEAL=92;    // largeur revelee quand la ligne reste ouverte
+var SWIPE_COMMIT=132;   // au-dela, on supprime en relachant
+function initSwipeToDelete(host){
+  if(!host)return;
+  host.querySelectorAll(".swp").forEach(function(row){
+    if(row._swpInit)return;
+    row._swpInit=true;
+    var fg=row.querySelector(".swp-fg");
+    if(!fg)return;
+    var x0=0,y0=0,dx=0,axe=null,pid=null,ouvert=false;
+
+    function pose(v){ fg.style.transform="translateX("+v+"px)"; }
+    function ferme(){ row.classList.remove("swp-dragging"); pose(0); ouvert=false; }
+    function garde(){ row.classList.remove("swp-dragging"); pose(-SWIPE_REVEAL); ouvert=true; }
+
+    function down(e){
+      if(e.pointerType==="mouse"&&e.button!==0)return;
+      if(e.clientX<=40)return;              // bord gauche : geste « retour »
+      pid=e.pointerId; x0=e.clientX; y0=e.clientY; axe=null; dx=0;
+    }
+    function move(e){
+      if(pid===null||e.pointerId!==pid)return;
+      var mx=e.clientX-x0, my=e.clientY-y0;
+      if(!axe){
+        if(Math.abs(mx)<8&&Math.abs(my)<8)return;
+        axe=Math.abs(mx)>Math.abs(my)?"x":"y";
+        if(axe==="y"){pid=null;return;}     // c'est un defilement : on rend la main
+        row.classList.add("swp-dragging");
+        try{fg.setPointerCapture(pid);}catch(_){}
+      }
+      dx=mx+(ouvert?-SWIPE_REVEAL:0);
+      if(dx>0)dx=dx*0.25;                   // vers la droite : resistance
+      if(dx<-(SWIPE_COMMIT+56))dx=-(SWIPE_COMMIT+56);
+      row.classList.toggle("swp-armed",dx<=-SWIPE_COMMIT);
+      pose(dx);
+    }
+    function up(e){
+      if(pid===null||(e&&e.pointerId!==pid))return;
+      pid=null;
+      if(axe!=="x"){return;}
+      row.classList.remove("swp-armed");
+      if(dx<=-SWIPE_COMMIT){ swipeDelete(row); return; }
+      if(dx<=-SWIPE_REVEAL*0.55){ garde(); } else { ferme(); }
+    }
+    fg.addEventListener("pointerdown",down);
+    fg.addEventListener("pointermove",move);
+    fg.addEventListener("pointerup",up);
+    fg.addEventListener("pointercancel",function(){pid=null;ferme();});
+    // Un tap sur une ligne deja ouverte la referme au lieu de l'activer.
+    fg.addEventListener("click",function(ev){
+      if(ouvert){ev.stopPropagation();ev.preventDefault();ferme();}
+    },true);
+    var bg=row.querySelector(".swp-bg");
+    if(bg)bg.addEventListener("click",function(ev){ev.stopPropagation();swipeDelete(row);});
+  });
+}
+/* Suppression effective : la ligne s'efface, puis la liste se met a jour.
+   Le jeton data-del dit QUOI supprimer — une seule porte pour toutes
+   les listes, donc un seul endroit ou se tromper. */
+function swipeDelete(row){
+  var jeton=row.getAttribute("data-del")||"";
+  row.classList.add("swp-gone");
+  try{playSound("pop");}catch(e){}
+  setTimeout(function(){
+    var i=jeton.indexOf(":");
+    var genre=jeton.slice(0,i), val=jeton.slice(i+1);
+    if(genre==="alert"){ try{removeWatch(Number(val));}catch(e){} }
+    else if(genre==="act"){ try{removeActivity(val);}catch(e){} }
+  },170);
+}
 function a11yCard(el,label){
   el.setAttribute("role","button");
   el.setAttribute("tabindex","0");
@@ -5868,6 +5975,8 @@ function ensureMissionFab(){
     fab.style.transition="left .34s cubic-bezier(.34,1.4,.4,1),top .34s cubic-bezier(.34,1.4,.4,1),opacity .3s ease";
     fab.style.left=(side==="left"?12:(w-W-12))+"px";fab.style.top=t+"px";
     try{localStorage.setItem("magoFabSide",side);localStorage.setItem("magoFabTop",String(t));}catch(_){}
+    // La pastille change de bord : le bouton d'accueil part de l'autre cote.
+    try{var _c=document.querySelector(".screen.on");updateHomeFab(_c?_c.id.replace(/^s-/,""):"home");}catch(_){}
     idle();
   }
   function up(){if(!dragging)return;dragging=false;fab.style.cursor="grab";if(moved){snap();}else{openMissions();idle();}}
@@ -8011,6 +8120,17 @@ function resetWatchTrigger(drinkId,storeId){
 var _activity=[];
 try{_activity=JSON.parse(localStorage.getItem("magoActivity")||"[]");}catch(e){_activity=[];}
 if(!Array.isArray(_activity))_activity=[];
+// Les journaux deja enregistres par les versions precedentes sont dans le
+// desordre : on les remet d'aplomb au chargement, pas seulement a l'ajout.
+_activity.sort(function(a,b){return (b&&b.ts||0)-(a&&a.ts||0);});
+/* Retirer UNE entree du journal : le glissement et le bouton passent tous
+   deux par ici. Avant, seul « Tout effacer » existait. */
+function removeActivity(key){
+  _activity=_activity.filter(function(a){return String(a&&a.key)!==String(key);});
+  _saveActivity();
+  try{refreshBell();}catch(e){}
+  try{_renderActivityList();}catch(e){}
+}
 function _saveActivity(){try{localStorage.setItem("magoActivity",JSON.stringify(_activity.slice(0,40)));}catch(e){}}
 function _activitySeen(){var v=0;try{v=Number(localStorage.getItem("magoActivitySeen"))||0;}catch(e){}return v;}
 function activityUnread(){var seen=_activitySeen();return _activity.filter(function(a){return (a.ts||0)>seen;}).length;}
@@ -8026,11 +8146,40 @@ function pushActivity(item){
   var key=item.key||(item.type+":"+(item.title||""));
   var wasThere=_activity.some(function(a){return a.key===key;});
   _activity=_activity.filter(function(a){return a.key!==key;});
-  _activity.unshift({key:key,ts:item.ts||Date.now(),type:item.type,title:item.title||"",body:item.body||"",action:item.action||null});
+  _activity.unshift({key:key,ts:item.ts||Date.now(),type:item.type,title:item.title||"",body:item.body||"",
+    action:item.action||null,drinkId:(item.drinkId!=null?item.drinkId:(item.action&&item.action.drinkId)),
+    storeName:item.storeName||null});
+  /* TRI PAR DATE — c'est ici que se jouait « je ne vois pas ce qui vient
+     d'arriver ». openActivity parcourt les notifs du serveur de la plus
+     RECENTE a la plus ancienne et les empile une par une en tete : la plus
+     VIEILLE finissait donc premiere. A chaque ouverture de la cloche, les
+     anciennes remontaient au-dessus des evenements du jour. */
+  _activity.sort(function(a,b){return (b.ts||0)-(a.ts||0);});
   if(_activity.length>40)_activity=_activity.slice(0,40);
   _saveActivity();
   try{refreshBell();}catch(e){}
   return !wasThere;
+}
+/* Metadonnees par type : un libelle lisible et une couleur, en plus du
+   pictogramme. Les traces sont EXACTEMENT ceux d'origine (_activityIcon) —
+   on ne redessine rien, on ajoute juste de quoi lire d'un coup d'oeil. */
+var ACT_META={
+  found:        {label:"Trouvée",     col:"#16a34a"},
+  promoted:     {label:"Au catalogue",col:"#c69a57"},
+  hunt:         {label:"Chasse",      col:"#e67e22"},
+  photoRejected:{label:"Photo à refaire", col:"#dc2626"}
+};
+function _actMeta(type){ return ACT_META[type]||{label:"Info",col:"var(--s2)"}; }
+/* Vignette : la VRAIE photo du produit quand on connait la boisson, sinon le
+   pictogramme du type. Une notification sans image, c'est un pave de texte —
+   c'est tout le probleme qu'on corrige ici. */
+function _actThumb(a){
+  var d=(a&&a.drinkId!=null)?(DRINKS||[]).find(function(x){return Number(x.id)===Number(a.drinkId);}):null;
+  if(d){
+    if(!getCachedDrinkImage(d)){ try{fetchVerifiedOFFImage(d);}catch(e){} }
+    return '<span class="act-thumb">'+drinkIconHTML(d)+'</span>';
+  }
+  return _activityIcon(a?a.type:"");
 }
 /* Petit symbole SVG par type — style trait, aucun emoji (cohérent avec l'app). */
 function _activityIcon(type){
@@ -8065,22 +8214,53 @@ function _renderActivityList(){
     host.innerHTML=emptyStateHTML("bell","Rien pour l\'instant","Dès qu\'une boisson que tu cherches est repérée près de toi, ou qu\'une de tes découvertes entre au catalogue, ça apparaît ici.");
     return;
   }
+  // Curseur « vu » capture A L'OUVERTURE : openActivity le remet a jour tout
+  // de suite apres, donc sans cette copie plus rien ne serait jamais non-lu.
+  var seen=(typeof window._actSeenAtOpen==="number")?window._actSeenAtOpen:0;
+  var besoinPhoto=false;
   host.innerHTML=_activity.map(function(a,i){
     var tap=!!a.action;
-    return '<div class="act-row" data-i="'+i+'" role="button" tabindex="0" style="display:flex;gap:12px;align-items:flex-start;padding:12px 2px;border-bottom:1px solid var(--border);'+(tap?"cursor:pointer":"")+'">'+
-      _activityIcon(a.type)+
-      '<div style="flex:1;min-width:0">'+
-        '<div style="font-size:13.5px;font-weight:800;color:var(--s1);line-height:1.35">'+sanitize(a.title||"")+'</div>'+
-        (a.body?'<div style="font-size:12px;color:var(--s2);margin-top:2px;line-height:1.45">'+sanitize(a.body)+'</div>':'')+
-        '<div style="font-size:10.5px;color:var(--s3);margin-top:5px;font-weight:700">'+_activityWhen(a.ts)+(tap?" · appuie pour ouvrir":"")+'</div>'+
+    var m=_actMeta(a.type);
+    var neuf=(a.ts||0)>seen;
+    var d=(a.drinkId!=null)?(DRINKS||[]).find(function(x){return Number(x.id)===Number(a.drinkId);}):null;
+    if(d&&!getCachedDrinkImage(d))besoinPhoto=true;
+    return '<div class="swp" data-del="act:'+sanitize(String(a.key||""))+'" style="margin-bottom:8px">'+
+      '<div class="swp-bg">'+(typeof icoTrash==="function"?icoTrash(16):"")+'<span>Supprimer</span></div>'+
+      '<div class="swp-fg" style="--swp-face:var(--bg2)">'+
+      '<div class="act-row'+(neuf?" act-unread":"")+(tap?" act-tap":"")+'" data-i="'+i+'"'+
+        (tap?' role="button" tabindex="0"':'')+' style="margin-bottom:0;--tag:'+m.col+'">'+
+      _actThumb(a)+
+      '<div class="act-txt">'+
+        '<div class="act-head">'+
+          '<span class="act-tag">'+sanitize(m.label)+'</span>'+
+          '<span class="act-when">'+_activityWhen(a.ts)+'</span>'+
+        '</div>'+
+        '<div class="act-title">'+sanitize(a.title||"")+'</div>'+
+        (a.body?'<div class="act-body">'+sanitize(a.body)+'</div>':'')+
       '</div>'+
-      (tap?'<span style="color:var(--s3);font-size:17px;flex-shrink:0;align-self:center">›</span>':'')+
-    '</div>';
+      '<button type="button" class="act-del" aria-label="Supprimer cette notification" onclick="event.stopPropagation();removeActivity(\''+sanitize(String(a.key||""))+'\')">'+
+        (typeof icoTrash==="function"?icoTrash(15):"\u2715")+'</button>'+
+      (tap?'<span class="act-chev">›</span>':'')+
+    '</div></div></div>';
   }).join("");
   host.querySelectorAll(".act-row").forEach(function(row){
     row.onclick=function(){var a=_activity[Number(row.getAttribute("data-i"))];if(a&&a.action)_runActivityAction(a.action);};
-    row.onkeydown=function(ev){if(ev.key==="Enter")row.click();};
+    row.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();row.click();}};
   });
+  // Le glissement est un raccourci ; le bouton visible reste la voie sure
+  // (clavier, lecteur d'ecran, doigt malhabile).
+  try{initSwipeToDelete(host);}catch(e){}
+  /* Les photos OpenFoodFacts arrivent en asynchrone : UN SEUL redessin par
+     ouverture du panneau. Le verrou doit rester pose : s'il se relachait, une
+     photo qui n'arrive jamais (hors ligne, service indisponible) relancerait
+     un redessin toutes les 1,8 s — sans fin. Et chaque redessin remplace le
+     DOM, donc annule le glissement en cours et rejoue l'animation. */
+  if(besoinPhoto&&!window._actPhotoTried){
+    window._actPhotoTried=true;
+    setTimeout(function(){
+      try{ if(document.getElementById("activity-ov"))_renderActivityList(); }catch(e){}
+    },1800);
+  }
 }
 function openActivity(){
   if(document.getElementById("activity-ov"))return;
@@ -8091,7 +8271,10 @@ function openActivity(){
         var act=null;
         if(n.type==="promoted"&&n.drinkId!=null)act={kind:"drink",drinkId:n.drinkId};
         else if(n.type==="found"&&n.storeId!=null)act={kind:"store",storeId:n.storeId,drinkId:n.drinkId};
-        pushActivity({type:n.type||"info",title:n.title||"",body:n.body||"",ts:(n.createdAt&&n.createdAt.seconds*1000)||Date.now(),action:act,key:"notif:"+(n.docId||n.title||n.type)});
+        pushActivity({type:n.type||"info",title:n.title||"",body:n.body||"",
+          ts:(n.createdAt&&n.createdAt.seconds*1000)||Date.now(),action:act,
+          drinkId:(n.drinkId!=null?n.drinkId:null),
+          key:"notif:"+(n.docId||n.title||n.type)});
       });
       try{_renderActivityList();}catch(e){}
     }).catch(function(){});
@@ -8100,6 +8283,10 @@ function openActivity(){
 }
 function _openActivityUI(){
   if(document.getElementById("activity-ov"))return;
+  // On capture le curseur « vu » AVANT de le remettre a jour, sinon aucune
+  // ligne ne pourrait jamais apparaitre comme non-lue.
+  window._actSeenAtOpen=_activitySeen();
+  window._actPhotoTried=false;   // un seul rattrapage photo par ouverture
   var ov=document.createElement("div");
   ov.id="activity-ov";
   ov.style.cssText="position:fixed;inset:0;z-index:10001;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px)";
@@ -8292,7 +8479,9 @@ function renderAlertsCard(){
     var wd=DRINKS.find(function(x){return Number(x.id)===Number(w.id);});
     if(wd&&!getCachedDrinkImage(wd)){_alertNeedPhoto=true;try{fetchVerifiedOFFImage(wd);}catch(e){}}
     var thumb=wd?drinkIconHTML(wd):magoCatIcon("Autre",20,"var(--s2)");
-    return '<div class="alert-row" style="display:flex;align-items:center;gap:12px;padding:11px 0'+(last?"":";border-bottom:1px solid var(--border)")+'" data-wid="'+w.id+'">'+
+    return '<div class="swp" data-del="alert:'+w.id+'"><div class="swp-bg">'+
+      (typeof icoTrash==="function"?icoTrash(16):"")+'<span>Supprimer</span></div>'+
+      '<div class="swp-fg" style="--swp-face:var(--bg2)"><div class="alert-row" style="display:flex;align-items:center;gap:12px;padding:11px 0'+(last?"":";border-bottom:1px solid var(--border)")+'" data-wid="'+w.id+'">'+
       '<span style="width:46px;height:46px;border-radius:13px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" role="button" tabindex="0" aria-label="Voir '+sanitize(w.name)+' sur la carte" onkeydown="if(event.key===\'Enter\'){this.click();}" onclick="event.stopPropagation();alertOpenOnMap('+w.id+')">'+thumb+'</span>'+
       '<span style="flex:1;min-width:0;cursor:pointer" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')this.click()" onclick="'+lineAction+'">'+
         '<span style="display:block;font-size:14px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(w.name)+'</span>'+
@@ -8300,11 +8489,14 @@ function renderAlertsCard(){
       '</span>'+
       (found?'<span style="flex-shrink:0;color:var(--s3);cursor:pointer" onclick="'+lineAction+'"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M9 6l6 6-6 6"/></svg></span>':'')+
       '<span onclick="removeWatch('+w.id+')" role="button" tabindex="0" aria-label="Retirer la veille" onkeydown="if(event.key===\'Enter\'){removeWatch('+w.id+');}" style="flex-shrink:0;width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--s3);cursor:pointer">✕</span>'+
-    '</div>';
+    '</div></div></div>';
   }).join("");
   host.innerHTML='<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:20px;padding:14px 16px 6px;margin-bottom:14px">'+
     '<div style="display:flex;align-items:center;gap:7px;margin-bottom:2px"><span style="font-size:14px;font-weight:800;color:var(--s1)">Tes alertes</span><span style="font-size:11px;font-weight:800;color:var(--s2);background:var(--bg3);border-radius:999px;padding:1px 8px">'+drinkWatches.length+'</span></div>'+
     '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-bottom:2px;line-height:1.4">On te prévient dès qu\'on les repère près de toi.</div>'+rows+'</div>';
+  // L'hote est recree a chaque ouverture de la feuille : on rebranche le
+  // geste apres chaque reconstruction (la garde _swpInit evite les doublons).
+  try{initSwipeToDelete(host);}catch(e){}
   if(_alertNeedPhoto&&!window._alertReflow){window._alertReflow=true;setTimeout(function(){window._alertReflow=false;try{var hp=document.getElementById("s-home");if(hp&&hp.classList.contains("on"))renderAlertsCard();}catch(e){}},1800);}
 }
 /* Rayon vide pour cette boisson : on montre quand meme les magasins autour,
@@ -10437,10 +10629,13 @@ function exploreHideCard(){
 var SHEET_PEEK=88;
 function sheetVisibleFor(state,sheetH,hostH){
   if(state==="max")return sheetH;
-  if(state==="mid")return Math.round(hostH*0.46);
+  // Borne par la hauteur REELLE : sinon « moitie » demandait parfois plus haut
+  // que « plein », et les paliers se croisaient.
+  if(state==="mid")return Math.min(sheetH,Math.max(SHEET_PEEK+60,Math.round(hostH*0.46)));
   return SHEET_PEEK;
 }
 function sheetCurOffset(sheet){
+  if(sheet&&typeof sheet._off==="number")return sheet._off;
   var m=/translateY\(\s*([-0-9.]+)px/.exec(sheet.style.transform||"");
   if(m)return parseFloat(m[1]);
   return Math.max(0,(sheet.offsetHeight||0)-SHEET_PEEK);
@@ -10454,6 +10649,7 @@ function setExploreSheet(state,silent){
   var offset=Math.max(0,sheetH-visible);
   // On pose le transform : la transition CSS l'anime en douceur (sur appareil reel).
   sheet.style.transform="translateY("+offset+"px)";
+  sheet._off=offset;   // source de verite : plus de relecture du transform
   var opened=state!=="min";
   sheet.classList.toggle("open",opened);
   sheet._sheetState=state;
@@ -10469,43 +10665,91 @@ function exploreToggleSheet(){
   var sheet=document.getElementById("explore-sheet");if(!sheet)return;
   setExploreSheet(sheet.classList.contains("open")?"min":"mid");
 }
+/* ── LE GESTE DE LA FEUILLE ───────────────────────────────────────────────
+   Ce qui ne marchait pas :
+   - on ne pouvait tirer QUE par la poignee. Rate la poignee de 10 px, et il
+     ne se passait rien : « ça bugue ».
+   - a fond, la poignee passait sous l'en-tete : plus aucun moyen de refermer.
+   - l'accrochage se faisait a la distance seule : un geste vif mais court
+     retombait au palier de depart, ce qui donne cette sensation de colle.
+   Maintenant : on peut tirer depuis TOUTE la feuille tant que la liste est en
+   haut de son defilement, et l'accrochage tient compte de la VITESSE. ── */
 function initExploreSheetDrag(){
   var sheet=document.getElementById("explore-sheet");
+  if(!sheet||sheet._dragInit)return;
+  sheet._dragInit=true;
   var head=document.getElementById("explore-sheet-head");
-  if(!sheet||!head||head._dragInit)return;
-  head._dragInit=true;
-  var startY=0,startOffset=0,dragging=false,moved=false;
-  function curOffset(){var m=/translateY\(\s*([-0-9.]+)px/.exec(sheet.style.transform||"");return m?parseFloat(m[1]):Math.max(0,sheet.offsetHeight-SHEET_PEEK);}
-  head.addEventListener("pointerdown",function(e){
+  var list=document.getElementById("explore-sheet-list");
+
+  var y0=0,off0=0,pid=null,axe=null,bouge=false,depuisTete=false;
+  var tPrev=0,yPrev=0,vitesse=0;
+
+  function maxOff(){ return Math.max(0,sheet.offsetHeight-SHEET_PEEK); }
+  function pose(v){ sheet.style.transform="translateY("+v+"px)"; sheet._off=v; }
+
+  sheet.addEventListener("pointerdown",function(e){
+    // Un bouton ou un magasin de la liste : on laisse le tap tranquille.
+    if(e.target&&e.target.closest&&e.target.closest("button,a,input,.explore-store"))return;
+    depuisTete=!!(head&&e.target&&head.contains(e.target));
+    // Depuis la liste : on ne prend le geste que si elle est deja en haut,
+    // sinon on volerait le defilement.
+    if(!depuisTete&&list&&list.contains(e.target)&&list.scrollTop>0)return;
     if(window._sheetAnim){cancelAnimationFrame(window._sheetAnim);window._sheetAnim=null;}
-    dragging=true;moved=false;startY=e.clientY;startOffset=curOffset();
-    sheet.classList.add("dragging");
-    try{head.setPointerCapture(e.pointerId);}catch(_){}
+    pid=e.pointerId; y0=e.clientY; off0=sheetCurOffset(sheet);
+    axe=null; bouge=false; vitesse=0; tPrev=Date.now(); yPrev=e.clientY;
   });
-  head.addEventListener("pointermove",function(e){
-    if(!dragging)return;
-    var dy=e.clientY-startY; // vers le bas = offset augmente (on referme)
-    if(Math.abs(dy)>5)moved=true;
-    var maxOff=Math.max(0,sheet.offsetHeight-SHEET_PEEK);
-    var off=Math.max(0,Math.min(maxOff,startOffset+dy));
-    sheet.style.transform="translateY("+off+"px)";
+
+  sheet.addEventListener("pointermove",function(e){
+    if(pid===null||e.pointerId!==pid)return;
+    var dy=e.clientY-y0;
+    if(!axe){
+      if(Math.abs(dy)<8)return;
+      axe="y";
+      sheet.classList.add("dragging");
+      try{sheet.setPointerCapture(pid);}catch(_){}
+    }
+    bouge=true;
+    // Vitesse instantanee lissee : c'est elle qui decide du palier d'arrivee.
+    var t=Date.now(), dt=Math.max(1,t-tPrev);
+    vitesse=0.7*vitesse+0.3*((e.clientY-yPrev)/dt);   // px/ms, positif = vers le bas
+    tPrev=t; yPrev=e.clientY;
+    var m=maxOff();
+    var off=off0+dy;
+    if(off<0)off=off*0.3;                 // resistance au-dela du plein
+    if(off>m)off=m+(off-m)*0.3;           // et au-dela de l'apercu
+    pose(off);
   });
-  function end(e){
-    if(!dragging)return;dragging=false;
+
+  function fin(e){
+    if(pid===null||(e&&e.pointerId!==pid))return;
+    try{sheet.releasePointerCapture(pid);}catch(_){}
+    pid=null;
     sheet.classList.remove("dragging");
-    try{head.releasePointerCapture(e.pointerId);}catch(_){}
-    if(!moved){setExploreSheet(sheet.classList.contains("open")?"min":"mid");return;}
+    if(!bouge){
+      // Simple tap : seulement depuis la tete, sinon on gene la liste.
+      if(depuisTete)setExploreSheet(sheet._sheetState==="min"?"mid":"min");
+      return;
+    }
     var host=document.getElementById("explore-map-host");
     var hostH=(host&&host.offsetHeight)?host.offsetHeight:(window.innerHeight||740);
     var sheetH=sheet.offsetHeight;
-    var off=curOffset();
-    var cands=[["min",sheetH-sheetVisibleFor("min",sheetH,hostH)],["mid",sheetH-sheetVisibleFor("mid",sheetH,hostH)],["max",0]];
-    var best="min",bd=1e9;
-    cands.forEach(function(c){var d=Math.abs(c[1]-off);if(d<bd){bd=d;best=c[0];}});
-    setExploreSheet(best,true);
+    var paliers=[["max",0],
+                 ["mid",Math.max(0,sheetH-sheetVisibleFor("mid",sheetH,hostH))],
+                 ["min",Math.max(0,sheetH-SHEET_PEEK)]];
+    paliers.sort(function(a,b){return a[1]-b[1];});
+    var off=sheetCurOffset(sheet);
+    // Palier le plus proche…
+    var i=0,bd=1e9;
+    paliers.forEach(function(p,k){var d=Math.abs(p[1]-off);if(d<bd){bd=d;i=k;}});
+    // …puis correction par la VITESSE : un geste vif emmene au palier suivant
+    // dans son sens, meme s'il n'a pas parcouru la distance.
+    if(Math.abs(vitesse)>0.5){
+      i=(vitesse>0)?Math.min(paliers.length-1,i+1):Math.max(0,i-1);
+    }
+    setExploreSheet(paliers[i][0],true);
   }
-  head.addEventListener("pointerup",end);
-  head.addEventListener("pointercancel",end);
+  sheet.addEventListener("pointerup",fin);
+  sheet.addEventListener("pointercancel",fin);
 }
 function exploreSheetPick(id){
   var s=(STORES||[]).find(function(x){return String(x.id)===String(id);});
@@ -10974,7 +11218,23 @@ function openExploreMap(opts){
     setExploreSheet("min",true);
   }
   host.style.display="flex";
-  requestAnimationFrame(function(){requestAnimationFrame(function(){host.classList.add("in");});});
+  requestAnimationFrame(function(){requestAnimationFrame(function(){
+    host.classList.add("in");
+    /* Hauteur reelle de l'en-tete (retour + titre + ville + filtres + encoche) :
+       la feuille s'arrete juste en dessous, donc sa poignee reste TOUJOURS
+       attrapable. Mesuree, parce qu'elle change avec la taille de l'ecran et
+       le nombre de puces de filtre. */
+    try{
+      var _hd=host.querySelector("#explore-head")||host.firstElementChild;
+      if(_hd&&_hd.offsetHeight)host.style.setProperty("--exhead",(_hd.offsetHeight+8)+"px");
+    }catch(e){}
+    // Feuille remise a l'apercu a chaque ouverture : sans ca elle rouvrait
+    // dans l'etat laisse la fois d'avant, parfois a moitie hors de l'ecran.
+    try{ initExploreSheetDrag(); setExploreSheet("min",true); }catch(e){}
+    // La carte occupe l'ecran : le toast redescend, la place de 150 px est
+    // prise par « + Magasin ».
+    try{var _c=document.querySelector(".screen.on");updateHomeFab(_c?_c.id.replace(/^s-/,""):"home");}catch(e){}
+  });});
   _cardOpenedAt=0;
   exploreHideCard();
   playSound("pop");
@@ -11045,6 +11305,8 @@ function exploreOpenSheetFull(){
   try{ setExploreSheet("max"); }catch(e){}
 }
 function closeExploreMap(){
+  // La carte se ferme : le bouton d'accueil et le toast reprennent leur place.
+  setTimeout(function(){try{var _c=document.querySelector(".screen.on");updateHomeFab(_c?_c.id.replace(/^s-/,""):"home");}catch(e){}},60);
   clearRoute();
   var host=document.getElementById("explore-map-host");
   if(!host)return;

@@ -152,6 +152,31 @@ body.dark #nav-pill{background:rgba(226,181,113,.12);border-color:rgba(226,181,1
   100%{transform:scaleX(1) scaleY(1)}
 }
 #nav.wob{animation:navwob .44s cubic-bezier(.36,.07,.19,.97);transform-origin:50% 100%}
+/* ── RETOUR A L'ACCUEIL ───────────────────────────────────────────────────
+   La barre du bas n'est jamais masquee, mais sur les ecrans profonds (fiche
+   boisson, fiche magasin, recompenses, admin…) AUCUN onglet n'est allume :
+   ses icones tombent a var(--s3), soit 1,6:1 sur fond clair. Elle est
+   illisible, pas absente — d'ou l'impression qu'il n'y a pas de bouton
+   d'accueil et qu'il faut enchainer les retours.
+   Ce bouton est translucide pour ne pas manger l'interface, et lisible.
+   z-index 45 (et pas plus) : le geste de retour par le bord met l'ecran
+   courant en z-index 60 : au-dessus, le bouton resterait fige pendant que
+   l'ecran glisse. ── */
+#home-fab{
+  position:absolute;z-index:45;left:14px;
+  bottom:calc(env(safe-area-inset-bottom,0px) + 88px);
+  width:40px;height:40px;border-radius:50%;
+  display:none;align-items:center;justify-content:center;
+  background:var(--nav-bg);border:1px solid var(--border);color:var(--txt2);
+  -webkit-backdrop-filter:blur(20px) saturate(1.6);backdrop-filter:blur(20px) saturate(1.6);
+  opacity:.82;cursor:pointer;-webkit-tap-highlight-color:transparent;
+  transition:opacity .2s ease,color .2s ease
+}
+#home-fab.on{display:flex}
+#home-fab.side-right{left:auto;right:14px}
+#home-fab:active,#home-fab:focus-visible{opacity:1;color:var(--s1)}
+#home-fab:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){#home-fab{transition:none}}
 @keyframes ntpop{
   0%{transform:scale(.88)}
   55%{transform:scale(1.24)}
@@ -365,13 +390,16 @@ body.dark .map-locate-btn{background:#2a2a2a}
 /* Bottom-sheet a paliers : hauteur fixe, on le fait coulisser au doigt via
    translateY (le transform est fluide et fiable, contrairement a l'animation de
    height qui restait bloquee ici). 3 paliers : apercu / moitie / plein. */
-#explore-sheet{position:absolute;left:0;right:0;bottom:0;z-index:1050;background:var(--app-bg);border-top:1px solid var(--border);border-radius:20px 20px 0 0;box-shadow:0 -8px 26px rgba(0,0,0,.28);height:86%;display:flex;flex-direction:column;transform:translateY(calc(100% - 88px));transition:transform .34s cubic-bezier(.32,.72,0,1);padding-bottom:env(safe-area-inset-bottom,0px);will-change:transform}
-#explore-sheet-head{padding:12px 16px 8px;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;flex-shrink:0}
+#explore-sheet{position:absolute;left:0;right:0;bottom:0;z-index:1180;background:var(--app-bg);border-top:1px solid var(--border);border-radius:20px 20px 0 0;box-shadow:0 -8px 26px rgba(0,0,0,.28);height:calc(100% - var(--exhead, 190px));display:flex;flex-direction:column;transform:translateY(calc(100% - 88px));transition:transform .34s cubic-bezier(.32,.72,0,1);padding-bottom:env(safe-area-inset-bottom,0px);will-change:transform}
+#explore-sheet-head{position:relative;padding:12px 16px 10px;min-height:44px;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;flex-shrink:0}
+/* Zone de prehension invisible qui deborde de 14 px vers le haut : le doigt
+   vise rarement le trait au pixel pres. */
+#explore-sheet-head::before{content:"";position:absolute;left:0;right:0;top:-14px;height:18px}
 #explore-sheet-head:active{cursor:grabbing}
 #explore-sheet.dragging{transition:none!important}
 #explore-sheet-grip{width:48px;height:6px;border-radius:99px;background:var(--s3);opacity:.55;margin:0 auto 11px;transition:background .15s,opacity .15s}
 #explore-sheet-head:active #explore-sheet-grip{opacity:1;background:var(--s2)}
-#explore-sheet-list{overflow-y:auto;flex:1;padding:0 14px 14px;-webkit-overflow-scrolling:touch}
+#explore-sheet-list{overflow-y:auto;flex:1;padding:0 14px 14px;-webkit-overflow-scrolling:touch;touch-action:pan-y;overscroll-behavior:contain}
 /* Boutons de zoom +/- de la carte explore : plus gros, thematises, au-dessus du sheet. */
 #explore-map .leaflet-bottom.leaflet-left{bottom:calc(104px + env(safe-area-inset-bottom,0px));left:10px}
 #explore-map .leaflet-control-zoom{border:none!important;box-shadow:0 3px 12px rgba(0,0,0,.28);border-radius:12px}
@@ -737,6 +765,9 @@ body.dark .rsheet{background:#2a2a2a}
   z-index:5000;max-width:82vw;text-align:center;
 }
 body.dark .toast{background:#f0f0f0;color:#111}
+/* Uniquement quand le bouton d'accueil est affiche : sinon on viendrait
+   se poser sur le « + Magasin » de la carte, qui vit a 150 px. */
+body.homefab .toast{bottom:calc(150px + env(safe-area-inset-bottom))}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 /* La carte entre en scene : montee + fondu avec un leger ressort,
    au lieu d'apparaitre brutalement */
@@ -1001,3 +1032,56 @@ body.dark #coach-bubble .cb-dot{background:#7a561d}
 body.dark #coach-bubble .cb-arrow{background:#f0ece4}
 @keyframes coachIn{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){#coach-bubble{animation:none}}
+
+/* ── CENTRE D'ACTIVITE (cloche) ───────────────────────────────────────────
+   Avant : trois lignes de texte empilees, meme graisse, meme gris, aucune
+   image — on ne pouvait que LIRE, ligne apres ligne, pour comprendre ce qui
+   s'etait passe. Maintenant chaque evenement porte la photo de la boisson
+   concernee, une etiquette coloree qui dit son type, et l'heure a droite.
+   La couleur du type arrive par la variable --tag posee sur la ligne : une
+   seule regle CSS sert les cinq types. ── */
+.act-row{display:flex;gap:12px;align-items:flex-start;padding:12px 13px;margin-bottom:8px;
+  border-radius:16px;background:var(--bg2);border:1.5px solid var(--border);position:relative}
+.act-row.act-tap{cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .12s,background .15s}
+.act-row.act-tap:active{transform:scale(.985);background:var(--bg3)}
+.act-row.act-tap:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+/* Non-lu : un liseré de la couleur du type, plus lisible qu'une pastille. */
+.act-row.act-unread{border-color:color-mix(in srgb,var(--tag) 45%,var(--border))}
+.act-row.act-unread::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;
+  border-radius:0 3px 3px 0;background:var(--tag)}
+.act-thumb{width:44px;height:44px;border-radius:13px;overflow:hidden;background:#fff;
+  border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.act-txt{flex:1;min-width:0}
+.act-head{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+.act-tag{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--tag);background:color-mix(in srgb,var(--tag) 13%,transparent);
+  padding:3px 8px;border-radius:999px;white-space:nowrap}
+.act-when{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--s3);white-space:nowrap;flex-shrink:0}
+.act-title{font-size:13.5px;font-weight:800;color:var(--s1);line-height:1.35;
+  overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.act-body{font-size:12px;color:var(--txt2);margin-top:2px;line-height:1.45}
+.act-chev{color:var(--s3);font-size:17px;flex-shrink:0;align-self:center}
+@media (prefers-reduced-motion:reduce){.act-row.act-tap{transition:none}.act-row.act-tap:active{transform:none}}
+
+/* ── GLISSER POUR SUPPRIMER ───────────────────────────────────────────────
+   touch-action:pan-y est la piece maitresse : le navigateur garde le
+   defilement vertical (donc la liste defile normalement), et nous laisse
+   l'horizontal. Sans ca, le geste volerait le scroll une fois sur deux. ── */
+.swp{position:relative;overflow:hidden;border-radius:14px}
+.swp-bg{position:absolute;inset:0;display:flex;align-items:center;justify-content:flex-end;
+  gap:7px;padding-right:18px;background:#dc2626;color:#fff;font-size:12px;font-weight:800}
+.swp-fg{position:relative;background:var(--swp-face,var(--app-bg));touch-action:pan-y;
+  transition:transform .24s cubic-bezier(.2,.8,.2,1)}
+.swp.swp-dragging .swp-fg{transition:none}
+.swp.swp-armed .swp-bg{background:#b91c1c}
+.swp.swp-gone{transition:max-height .17s ease,opacity .17s ease,margin .17s ease;
+  max-height:0;opacity:0;margin:0!important}
+@media (prefers-reduced-motion:reduce){.swp-fg{transition:none}.swp.swp-gone{transition:none}}
+/* Bouton de suppression d'une notification : discret, mais toujours la —
+   le glissement ne doit jamais etre le SEUL moyen de supprimer. */
+.act-del{flex-shrink:0;align-self:center;width:32px;height:32px;border:none;border-radius:50%;
+  background:transparent;color:var(--s3);cursor:pointer;display:flex;align-items:center;justify-content:center;
+  font-family:inherit;transition:color .15s,background .15s}
+.act-del:active{background:var(--bg3);color:#dc2626}
+.act-del:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.act-del{transition:none}}
