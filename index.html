@@ -771,10 +771,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <div class="res-back" onclick="closeStoreDetail()">
           <div style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff">←</div>
           <span style="font-size:15px;font-weight:700;color:#fff;flex:1">Magasin</span>
-          <div id="sd-share" onclick="event.stopPropagation();shareStore()" style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer" role="button" tabindex="0" aria-label="Partager ce magasin" onkeydown="if(event.key==='Enter'){event.stopPropagation();shareStore();}">↗</div>
-          <div id="sd-fridge" onclick="event.stopPropagation();scanFridgeStart()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;cursor:pointer" role="button" tabindex="0" aria-label="Scanner un frigo (IA) : ajouter toutes les boissons d'une photo" onkeydown="if(event.key==='Enter'){event.stopPropagation();scanFridgeStart();}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M5 10h14"/><path d="M9 5v2M9 14v3"/></svg></div>
-          <div id="sd-batch" onclick="event.stopPropagation();adminBatchAssignHere()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px;cursor:pointer" role="button" tabindex="0" aria-label="Rayon par photos : assigner une liste (admin)" onkeydown="if(event.key==='Enter'){event.stopPropagation();adminBatchAssignHere();}"></div>
-          <div id="sd-remove" onclick="event.stopPropagation();adminRemoveStore()" style="display:none;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.15);align-items:center;justify-content:center;font-size:13px;cursor:pointer" role="button" tabindex="0" aria-label="Supprimer ce magasin (admin)" onkeydown="if(event.key==='Enter'){event.stopPropagation();adminRemoveStore();}"></div>
+          <span id="sd-admin-badge" style="display:none;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.75);background:rgba(255,255,255,.14);padding:4px 9px;border-radius:999px">Admin</span>
         </div>
         <div class="res-product">
           <div class="res-emoji" id="sd-emoji"></div>
@@ -812,6 +809,26 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <div id="sd-add-drink" onclick="openAddDrinkToStore()" role="button" tabindex="0" aria-label="Ajouter une boisson à ce magasin" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openAddDrinkToStore();}" style="flex-shrink:0;display:inline-flex;align-items:center;gap:5px;padding:0 13px;height:34px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> Ajouter</div>
       </div>
       <div id="sd-drink-list"></div>
+      <div id="sd-admin-tools" style="display:none">
+        <div class="sd-adm-title">Outils administrateur — invisibles pour les autres</div>
+        <div class="sd-adm-row">
+          <button class="sd-adm" onclick="scanFridgeStart()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2.5"/><path d="M5 10h14M9 5.5v2M9 13.5v2.5"/></svg>
+            <b>Scanner un frigo</b>
+            <i>Une photo du frigo → l'IA liste toutes les boissons et les ajoute d'un coup</i>
+          </button>
+          <button class="sd-adm" onclick="adminBatchAssignHere()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16M4 12h16M4 17.5h10"/><path d="M17.5 15.5v5M20 18h-5"/></svg>
+            <b>Coller une liste d'ids</b>
+            <i>Remplit le rayon d'un coup à partir d'une liste de numéros de boissons</i>
+          </button>
+          <button class="sd-adm danger" onclick="adminRemoveStore()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16M9.5 6.5V4.5h5v2M6.5 6.5l.9 13a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4l.9-13"/></svg>
+            <b>Supprimer ce magasin</b>
+            <i>À n'utiliser que s'il n'existe pas ou a définitivement fermé</i>
+          </button>
+        </div>
+      </div>
       <div id="sd-mission" class="sd-mission"></div>
       <div id="sd-merchant" style="padding:0 20px"></div>
       <div style="padding:18px 20px calc(28px + env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center;gap:8px">
@@ -3478,7 +3495,7 @@ function showBadgeInfo(def,tier){
       }).join("")+'</div>';
     var nextTh=def.tiers[Math.min(tier,def.tiers.length-1)];
     var maxed=tier>=def.tiers.length;
-    progressHtml+='<div style="font-size:12.5px;font-weight:800;color:'+(maxed?"#c69a57":"var(--s2)")+';margin-top:10px;text-align:center">'+(maxed?("Palier maximum atteint · "+def.value+" "+(info.unit||"")+" 🏆"):("Toi : "+def.value+" / "+nextTh+" "+(info.unit||"")))+'</div>';
+    progressHtml+='<div style="font-size:12.5px;font-weight:800;color:'+(maxed?"#c69a57":"var(--s2)")+';margin-top:10px;text-align:center">'+(maxed?("Palier maximum atteint · "+def.value+" "+(info.unit||"")):("Toi : "+def.value+" / "+nextTh+" "+(info.unit||"")))+'</div>';
   }
   var ov=document.createElement("div");
   ov.id="badge-info";
@@ -6565,6 +6582,52 @@ var BRAND_DOMAINS={
 // this.outerHTML dans onerror remplace l'image par l'emoji si le logo n'existe pas chez Clearbit (404).
 /* Glyphes maison (SVG ligne) qui remplacent les emojis de secours : devanture
    de magasin, et « nouveauté » pour les découvertes. Monochromes = pro. */
+/* ── PICTOGRAMMES MAGOFEED ──────────────────────────────────────────────
+   Zero emoji dans l'interface. Un emoji n'est pas un dessin : c'est une
+   police differente sur chaque telephone (Apple, Google, Samsung en dessinent
+   chacun une version), il ne prend pas la couleur du texte, il ne s'aligne
+   pas sur la typographie, et il fait immediatement "brouillon".
+   Ces symboles-ci sont dessines a la main, heritent de currentColor et
+   gardent le meme trait partout. ── */
+function _svg(inner, size, extra){
+  var z = size || 16;
+  return '<svg width="'+z+'" height="'+z+'" viewBox="0 0 24 24" fill="none" '+
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '+
+    'aria-hidden="true" style="display:inline-block;vertical-align:-0.14em;flex-shrink:0'+(extra||"")+'">'+
+    inner+'</svg>';
+}
+/* Validation : pastille pleine + coche a bouts arrondis. Le "V" de Magofeed. */
+function icoOk(size){
+  var z=size||18;
+  return '<svg width="'+z+'" height="'+z+'" viewBox="0 0 24 24" fill="none" aria-hidden="true" '+
+    'style="display:inline-block;vertical-align:-0.18em;flex-shrink:0">'+
+    '<circle cx="12" cy="12" r="10" fill="#16a34a"/>'+
+    '<path d="M7.4 12.5l3.1 3.1 6.1-6.6" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+}
+/* Echec : meme pastille, meme trait, autre signe. */
+function icoNo(size){
+  var z=size||18;
+  return '<svg width="'+z+'" height="'+z+'" viewBox="0 0 24 24" fill="none" aria-hidden="true" '+
+    'style="display:inline-block;vertical-align:-0.18em;flex-shrink:0">'+
+    '<circle cx="12" cy="12" r="10" fill="#dc2626"/>'+
+    '<path d="M8.6 8.6l6.8 6.8M15.4 8.6l-6.8 6.8" stroke="#fff" stroke-width="2.3" stroke-linecap="round"/></svg>';
+}
+function icoBolt(z){    return _svg('<path d="M13 2 4.5 13.5H11l-1 8.5L19.5 10H13l0-8z"/>',z); }
+function icoTrophy(z){  return _svg('<path d="M8 3h8v5a4 4 0 0 1-8 0V3z"/><path d="M8 5H5.5A2.5 2.5 0 0 0 8 9.5M16 5h2.5A2.5 2.5 0 0 1 16 9.5"/><path d="M10 12.5V16M14 12.5V16M9 21h6M10.5 16h3l.5 5h-4l.5-5z"/>',z); }
+function icoBan(z){     return _svg('<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',z); }
+function icoAsk(z){     return _svg('<circle cx="12" cy="12" r="9"/><path d="M9.4 9.2a2.7 2.7 0 0 1 5.2.9c0 1.8-2.6 2.2-2.6 3.9"/><path d="M12 17.6h.01"/>',z); }
+function icoSpark(z){   return _svg('<path d="M12 3.5 13.7 9l5.5 1.7-5.5 1.7L12 18l-1.7-5.6L4.8 10.7 10.3 9 12 3.5z"/><path d="M18.6 3v3.2M20.2 4.6H17"/>',z); }
+function icoLoupe(z){   return _svg('<circle cx="11" cy="11" r="6.6"/><path d="M16 16l4.5 4.5"/>',z); }
+function icoFlask(z){   return _svg('<path d="M9.5 3v6.2L4.8 17.4A2 2 0 0 0 6.5 20.5h11a2 2 0 0 0 1.7-3.1L14.5 9.2V3"/><path d="M8.5 3h7M7.6 14.6h8.8"/>',z); }
+function icoTrash(z){   return _svg('<path d="M4 6.5h16M9.5 6.5V4.5h5v2M6.5 6.5l.9 13a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4l.9-13"/><path d="M10.5 10.5v6.5M13.5 10.5v6.5"/>',z); }
+function icoTarget(z){  return _svg('<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>',z); }
+function icoUsers(z){    return _svg('<path d="M16.5 20v-1.8a3.6 3.6 0 0 0-3.6-3.6H6.6A3.6 3.6 0 0 0 3 18.2V20"/><circle cx="9.7" cy="7.3" r="3.6"/><path d="M21 20v-1.8a3.6 3.6 0 0 0-2.7-3.5M15.3 4a3.6 3.6 0 0 1 0 6.6"/>',z); }
+function icoUserPlus(z){ return _svg('<path d="M14.5 20v-1.8a3.6 3.6 0 0 0-3.6-3.6H6.1A3.6 3.6 0 0 0 2.5 18.2V20"/><circle cx="8.5" cy="7.3" r="3.6"/><path d="M18.5 8v6M21.5 11h-6"/>',z); }
+function icoPulse(z){    return _svg('<path d="M3 12h4l2.5-6 4 12 2.5-6H21"/>',z); }
+function icoCompass(z){  return _svg('<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5 5-2z"/>',z); }
+function icoPhoto(z){    return _svg('<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="8.6" cy="10" r="1.8"/><path d="M4 17l4.6-4.6 3.4 3.4 2.8-2.8L20 18"/>',z); }
+function icoHourglass(z){return _svg('<path d="M7 3h10M7 21h10"/><path d="M8 3v3.5c0 2 4 3.5 4 5.5s-4 3.5-4 5.5V21M16 3v3.5c0 2-4 3.5-4 5.5s4 3.5 4 5.5V21"/>',z); }
+function icoLayers(z){  return _svg('<path d="M12 3 3 7.5l9 4.5 9-4.5L12 3z"/><path d="M3 12.5 12 17l9-4.5M3 17 12 21.5 21 17"/>',z); }
 function storeGlyph(size){
   var z=size||"70%";
   return '<svg width="'+z+'" height="'+z+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:block" aria-hidden="true"><path d="M4 9.5 5.2 4.5h13.6L20 9.5"/><path d="M4 9.5a2.4 2.4 0 0 0 4.8 0 2.4 2.4 0 0 0 4.8 0 2.4 2.4 0 0 0 4.8 0"/><path d="M5 11.5V20h14v-8.5"/><path d="M9.5 20v-5h5v5"/></svg>';
@@ -8620,12 +8683,10 @@ function openStoreDetail(storeId){
   storeDetailReturn=fromExplore?"__explore__":(current?current.id.replace("s-",""):"search");
   curStoreDetail=s;
   curStoreDetailQuery="";curStoreDetailCat="Tous";
-  var btS=document.getElementById("sd-batch");
-  if(btS)btS.style.display=isAdmin?"flex":"none";
-  var frS=document.getElementById("sd-fridge");
-  if(frS)frS.style.display=isAdmin?"flex":"none";
-  var rmS=document.getElementById("sd-remove");
-  if(rmS)rmS.style.display=isAdmin?"flex":"none";
+  var admTools=document.getElementById("sd-admin-tools");
+  if(admTools)admTools.style.display=isAdmin?"block":"none";
+  var admBadge=document.getElementById("sd-admin-badge");
+  if(admBadge)admBadge.style.display=isAdmin?"inline-block":"none";
   var sdSearch=document.getElementById("sd-search");if(sdSearch)sdSearch.value="";
   renderStoreDetail();
   show("storedetail");
@@ -9018,7 +9079,7 @@ function renderMerchantCard(s){
           '</div>'+
           '<div style="font-size:12px;color:#c9bfb2;line-height:1.35">Scanne ton rayon à la chaîne — il apparaît pour tes clients.</div>'+
         '</div>'+
-        '<button onclick="startRafale()" aria-label="Remplir ce magasin en rafale" style="flex-shrink:0;display:inline-flex;align-items:center;gap:6px;padding:11px 15px;border-radius:13px;border:none;background:#f6f1e9;color:#1a1714;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">⚡ Rafale</button>'+
+        '<button onclick="startRafale()" aria-label="Remplir ce magasin en rafale" style="flex-shrink:0;display:inline-flex;align-items:center;gap:6px;padding:11px 15px;border-radius:13px;border:none;background:#f6f1e9;color:#1a1714;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">'+icoBolt(15)+' Rafale</button>'+
       '</div>'+
       '<div onclick="toggleMyShop(\''+String(s.id).replace(/[^A-Za-z0-9_-]/g,"")+'\')" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')this.click()" style="margin-top:9px;padding-top:9px;border-top:1px solid rgba(255,255,255,.08);text-align:center;font-size:11.5px;font-weight:700;color:#9a9088;cursor:pointer">'+(mine?"Retirer « c'est mon magasin »":"C'est mon magasin ?")+'</div>'+
     '</div>';
@@ -9047,7 +9108,7 @@ function buildRafaleHUD(s){
   hud.innerHTML=
     '<div style="display:flex;align-items:center;gap:10px;max-width:520px;margin:0 auto">'+
       '<div style="flex:1;min-width:0">'+
-        '<div style="font-size:11px;font-weight:800;letter-spacing:.05em;color:#d4a960;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🏪 '+sanitize(s.name)+'</div>'+
+        '<div style="font-size:11px;font-weight:800;letter-spacing:.05em;color:#d4a960;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+storeGlyph(13)+' '+sanitize(s.name)+'</div>'+
         '<div style="font-size:13px;font-weight:700;margin-top:2px"><span id="rafale-count">0</span> ajoutée<span id="rafale-s"></span> · <span id="rafale-last" style="color:#c9bfb2;font-weight:600">scanne à la chaîne…</span></div>'+
       '</div>'+
       '<button onclick="endRafale(false)" aria-label="Terminer le remplissage" style="flex-shrink:0;padding:9px 15px;border-radius:12px;border:none;background:#f6f1e9;color:#1a1714;font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit">Terminer</button>'+
@@ -10072,11 +10133,11 @@ function analyzeProposePhoto(data){
     }
     if(r.isAlcohol){
       window._aiBlockAlcohol=true;
-      _aiStatus("bad","<span>⛔</span><span><b>Boisson alcoolisée détectée</b> — Magofeed reste 100% sans alcool, cette proposition ne peut pas être envoyée.</span>");
+      _aiStatus("bad","<span>"+icoBan(16)+"</span><span><b>Boisson alcoolisée détectée</b> — Magofeed reste 100% sans alcool, cette proposition ne peut pas être envoyée.</span>");
       return;
     }
     if(!r.isDrink){
-      _aiStatus("warn","<span>🤔</span><span>L’IA ne voit pas de boisson sur cette photo. Reprends-la bien nette, ou remplis à la main.</span>");
+      _aiStatus("warn","<span>"+icoAsk(16)+"</span><span>L’IA ne voit pas de boisson sur cette photo. Reprends-la bien nette, ou remplis à la main.</span>");
       return;
     }
     var nameEl=document.getElementById("propose-name"),brandEl=document.getElementById("propose-brand");
@@ -10087,16 +10148,16 @@ function analyzeProposePhoto(data){
     var existing=(typeof DRINKS!=="undefined")?DRINKS.find(function(d){return String(d.name).toLowerCase()===String(r.name).toLowerCase().trim();}):null;
     if(existing&&r.confidence>=70){
       window._aiPropose={existingId:existing.id};
-      _aiStatus("ok","<span>✅</span><span><b>"+sanitize(existing.name)+"</b> est déjà dans Magofeed ! Appuie sur Envoyer pour ouvrir sa fiche.</span>");
+      _aiStatus("ok","<span>"+icoOk(16)+"</span><span><b>"+sanitize(existing.name)+"</b> est déjà dans Magofeed ! Appuie sur Envoyer pour ouvrir sa fiche.</span>");
       return;
     }
     if(r.confidence>=85){
       window._aiPropose={name:r.name,brand:r.brand,cat:r.category,confidence:r.confidence};
-      _aiStatus("ok","<span>✨</span><span><b>Reconnue : "+label+"</b> (certitude "+r.confidence+"%) — elle sera validée et ajoutée directement à l’envoi, sans scan.</span>");
-      var btn=document.getElementById("propose-send");if(btn)btn.textContent="Valider — reconnue par l’IA ✨";
+      _aiStatus("ok","<span>"+icoSpark(16)+"</span><span><b>Reconnue : "+label+"</b> (certitude "+r.confidence+"%) — elle sera validée et ajoutée directement à l’envoi, sans scan.</span>");
+      var btn=document.getElementById("propose-send");if(btn)btn.textContent="Valider — reconnue par l’IA";
     }else if(r.confidence>=55){
       window._aiPropose={name:r.name,brand:r.brand,cat:r.category,confidence:r.confidence};
-      _aiStatus("warn","<span>🔎</span><span>Ça ressemble à <b>"+label+"</b> (certitude "+r.confidence+"%). Vérifie le nom puis envoie — elle passera en vérification communautaire.</span>");
+      _aiStatus("warn","<span>"+icoLoupe(16)+"</span><span>Ça ressemble à <b>"+label+"</b> (certitude "+r.confidence+"%). Vérifie le nom puis envoie — elle passera en vérification communautaire.</span>");
     }else{
       _aiStatusHide();
     }
@@ -10132,7 +10193,7 @@ function submitProposal(){
   if(ai&&ai.existingId){
     var ex=DRINKS.find(function(x){return String(x.id)===String(ai.existingId);});
     closeProposeForm();
-    if(ex){pick(ex);toast("\u00AB "+ex.name+" \u00BB est d\u00E9j\u00E0 dans Magofeed \u2728");}
+    if(ex){pick(ex);toast("\u00AB "+ex.name+" \u00BB est d\u00E9j\u00E0 dans Magofeed");}
     playSound("pop");
     return;
   }
@@ -10184,7 +10245,7 @@ function submitProposal(){
       }
       try{renderDiscoveries();}catch(e){}
       playSound("win");
-      toast("\u2728 \u00AB "+res.entry.name+" \u00BB valid\u00E9e par l'IA \u2014 d\u00E9j\u00E0 dans le catalogue !");
+      toast("\u00AB "+res.entry.name+" \u00BB valid\u00E9e par l'IA \u2014 d\u00E9j\u00E0 dans le catalogue !");
     }).catch(function(e){console.warn("Confirm AI error:",e);});
   }else{
     toast("Proposition envoy\u00E9e \u00B7 +2 pts \u2014 \u00E0 la communaut\u00E9 de voter !");
@@ -10766,8 +10827,25 @@ function openExploreMap(opts){
     });
     // Champ vide : on propose les villes emblematiques (demo instantanee).
     _cq.addEventListener("focus",function(){if(!_cq.value.trim())exploreCitySuggest();});
-    var _doClear=function(){_cq.value="";_cclr.style.display="none";window._explorePlace="";exploreCitySuggest();try{_cq.focus();}catch(e){}};
+    /* La croix EFFACE et FERME. Avant, elle remettait le focus dans le champ :
+       le clavier remontait aussitôt, et il fallait souffler dessus pour le
+       faire redescendre. Une croix ferme, elle n'ouvre pas. */
+    var _doClear=function(){
+      _cq.value="";
+      _cclr.style.display="none";
+      window._explorePlace="";
+      exploreCloseCityPanel();
+      try{_cq.blur();}catch(e){}
+    };
     if(_cclr){_cclr.onclick=_doClear;_cclr.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();_doClear();}};}
+    // Toucher la carte ferme le panneau des suggestions : c'est le geste
+    // naturel, et il n'existait tout simplement pas.
+    var _mapHost=host.querySelector("#explore-map");
+    if(_mapHost){
+      ["pointerdown","touchstart"].forEach(function(ev){
+        _mapHost.addEventListener(ev,function(){exploreCloseCityPanel();},{passive:true});
+      });
+    }
     initExploreSheetDrag();
     setExploreSheet("min",true);
   }
@@ -10971,6 +11049,13 @@ var EXPLORE_SPOTS=[
 function _cityBoxCard(txt){
   return '<div style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:14px;padding:11px 14px;font-size:12px;font-weight:600;color:var(--s2);box-shadow:0 6px 18px rgba(0,0,0,.15)">'+txt+'</div>';
 }
+/* Fermer le panneau de recherche : une seule porte de sortie, appelee depuis
+   la croix, le tap sur la carte, et le bouton Fermer du panneau. */
+function exploreCloseCityPanel(){
+  exploreAbortCity();
+  var box=document.getElementById("explore-city-results");
+  if(box)box.innerHTML="";
+}
 function exploreCitySuggest(){
   var box=document.getElementById("explore-city-results");if(!box)return;
   exploreAbortCity(); // une reponse en vol ne doit pas ecraser cette liste
@@ -10978,8 +11063,15 @@ function exploreCitySuggest(){
   var wrap=document.createElement("div");
   wrap.style.cssText="background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);max-height:46vh;overflow-y:auto";
   var t=document.createElement("div");
-  t.style.cssText="font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--s3);padding:6px 8px 8px";
-  t.textContent="Fais le tour du monde";
+  t.style.cssText="display:flex;align-items:center;gap:8px;padding:4px 4px 8px 8px";
+  t.innerHTML='<span style="flex:1;font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--s3)">Fais le tour du monde</span>'+
+    '<button aria-label="Fermer" style="width:30px;height:30px;border:none;border-radius:50%;background:var(--bg2);color:var(--s2);cursor:pointer;font-family:inherit;font-size:14px;line-height:1">\u2715</button>';
+  t.querySelector("button").onclick=function(ev){
+    ev.stopPropagation();
+    exploreCloseCityPanel();
+    var inp=document.getElementById("explore-city-q");
+    if(inp)try{inp.blur();}catch(e){}
+  };
   wrap.appendChild(t);
   EXPLORE_SPOTS.forEach(function(sp){
     var row=document.createElement("div");
@@ -11359,7 +11451,7 @@ function settingsTestPush(){
    plus deviner. Une capture de cet écran = on sait quelle condition bloque. */
 function _diagRow(ok,label,detail){
   return '<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">'+
-    '<span style="flex-shrink:0;font-size:16px;line-height:1.3">'+(ok?"✅":"❌")+'</span>'+
+    '<span style="flex-shrink:0;line-height:1;display:flex;align-items:center">'+(ok?icoOk(18):icoNo(18))+'</span>'+
     '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:800;color:var(--s1)">'+label+'</div>'+
     (detail?'<div style="font-size:11.5px;color:var(--s2);margin-top:2px;line-height:1.4;word-break:break-word">'+detail+'</div>':'')+'</div></div>';
 }
@@ -11398,9 +11490,9 @@ async function runNotifDiagnostic(){
     rows+
     '<div style="margin-top:14px;padding:12px 14px;border-radius:14px;background:'+(vcol==="#15803d"?"rgba(21,128,61,.10)":"rgba(180,83,9,.10)")+';border:1px solid '+(vcol==="#15803d"?"rgba(21,128,61,.3)":"rgba(180,83,9,.3)")+';font-size:12.5px;font-weight:700;line-height:1.5;color:'+vcol+'">'+verdict+'</div>'+
     '<div onclick="diagFixPosition()" role="button" tabindex="0" style="margin-top:12px;text-align:center;padding:13px;border-radius:14px;background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer">Enregistrer ma position</div>'+
-    '<div onclick="simulateNeighborHunt()" role="button" tabindex="0" style="margin-top:8px;text-align:center;padding:13px;border-radius:14px;background:#e67e22;color:#fff;font-size:14px;font-weight:800;cursor:pointer">🧪 Tester : simuler une chasse voisine</div>'+
+    '<div onclick="simulateNeighborHunt()" role="button" tabindex="0" style="margin-top:8px;text-align:center;padding:13px;border-radius:14px;background:#e67e22;color:#fff;font-size:14px;font-weight:800;cursor:pointer">'+icoFlask(15)+' Tester : simuler une chasse voisine</div>'+
     '<div style="margin-top:6px;font-size:10.5px;color:var(--s3);text-align:center;line-height:1.4">Simule quelqu\'un qui lance une chasse près de toi. Ferme l\'app après : tu dois recevoir la notif. Test seul, sans 2e téléphone.</div>'+
-    (isAdmin?'<div onclick="wipeTestHunts()" role="button" tabindex="0" style="margin-top:12px;text-align:center;padding:12px;border-radius:14px;background:transparent;border:1.5px solid #dc2626;color:#dc2626;font-size:13px;font-weight:800;cursor:pointer">🗑️ Effacer toutes les chasses de test (repartir propre)</div>':'')+
+    (isAdmin?'<div onclick="wipeTestHunts()" role="button" tabindex="0" style="margin-top:12px;text-align:center;padding:12px;border-radius:14px;background:transparent;border:1.5px solid #dc2626;color:#dc2626;font-size:13px;font-weight:800;cursor:pointer">'+icoTrash(15)+' Effacer toutes les chasses de test (repartir propre)</div>':'')+
     '<div onclick="var p=document.getElementById(\'notif-diag\');if(p)p.remove();" role="button" tabindex="0" style="margin-top:10px;text-align:center;padding:11px;font-size:13px;font-weight:700;color:var(--s2);cursor:pointer">Fermer</div>'+
   '</div>';
   document.body.appendChild(ov);
@@ -11503,7 +11595,7 @@ function simulateNeighborHunt(){
   var d=pool[Math.floor(Math.random()*pool.length)]||DRINKS[0];
   toast("Simulation d'une chasse voisine sur "+d.name+"…");
   window.fbSimulateHunt(userLat,userLng,d.id,d.name).then(function(r){
-    if(r&&r.ok){playSound("win");toast("Chasse voisine simulée ! FERME l'app — la notif « 🎯 Chasse près de toi » doit arriver dans ~10 s");}
+    if(r&&r.ok){playSound("win");toast("Chasse voisine simulée ! FERME l'app — la notif « Chasse près de toi » doit arriver dans ~10 s");}
     else{
       var why=String(r&&r.reason||"?");
       if(why.indexOf("permission")>=0||why.indexOf("PERMISSION")>=0)toast("Bloqué par les règles Firestore — envoie-moi une capture, on ajustera");
@@ -12673,37 +12765,37 @@ function renderFounderDash(){
   var pendingDisc=(DISCOVERIES||[]).filter(function(d){return !d.promoted&&!d.rejected;}).length;
   function tile(emoji,val,label,hot){
     return '<div style="background:var(--bg2);border:1.5px solid '+(hot&&val>0?"var(--s1)":"var(--border)")+';border-radius:16px;padding:12px 6px;text-align:center">'+
-      '<div style="font-size:17px">'+emoji+'</div>'+
+      '<div style="display:flex;justify-content:center;color:var(--s2)">'+emoji+'</div>'+
       '<div class="fd-num" style="font-size:19px;font-weight:800;color:var(--s1);margin:2px 0">'+(val==null?"\u2013":val)+'</div>'+
       '<div style="font-size:9.5px;font-weight:700;color:var(--s2);text-transform:uppercase;letter-spacing:.4px">'+label+'</div></div>';
   }
   function onlineTile(val){
     var live=val!=null&&val>0;
     return '<div style="background:'+(live?"linear-gradient(135deg,#052e16,#14532d)":"var(--bg2)")+';border:1.5px solid '+(live?"#16a34a":"var(--border)")+';border-radius:16px;padding:12px 6px;text-align:center">'+
-      '<div style="font-size:17px">'+(live?"":"")+'</div>'+
+      '<div style="display:flex;justify-content:center;color:'+(live?"#4ade80":"var(--s2)")+'">'+icoPulse(17)+'</div>'+
       '<div style="font-size:19px;font-weight:800;color:'+(live?"#fff":"var(--s1)")+';margin:2px 0">'+(val==null?"\u2013":val)+'</div>'+
       '<div style="font-size:9.5px;font-weight:700;color:'+(live?"#bbf7d0":"var(--s2)")+';text-transform:uppercase;letter-spacing:.4px">en ligne maintenant</div></div>';
   }
   host.innerHTML='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:2px 0 10px">Magofeed en vrai (chiffres r\u00E9els)</div>'+
     '<div id="fd-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">'+
     onlineTile(null)+
-    tile("","...","actifs aujourd'hui")+
-    tile("",null,"joueurs au total")+
-    tile("",null,"d\u00E9couvertes du jour")+
-    tile("",null,"magasins / 7 j")+
-    tile("\u23F3",pendingDisc,"\u00E0 valider",true)+
+    tile(icoPulse(17),"...","actifs aujourd'hui")+
+    tile(icoUsers(17),null,"joueurs au total")+
+    tile(icoCompass(17),null,"d\u00E9couvertes du jour")+
+    tile(storeGlyph(17),null,"magasins / 7 j")+
+    tile(icoHourglass(17),pendingDisc,"\u00E0 valider",true)+
     '</div>';
   if(!window.fbFounderStats)return;
   window.fbFounderStats().then(function(s){
     var grid=document.getElementById("fd-grid");if(!grid)return;
     grid.innerHTML=onlineTile(s.onlineNow)+
-      tile("",s.activeToday,"actifs aujourd'hui")+
-      tile("",s.newWeek,"nouveaux / 7 j",true)+
-      tile("",s.totalUsers,"joueurs au total")+
-      tile("",s.discToday,"d\u00E9couvertes du jour")+
-      tile("",s.storesWeek,"magasins / 7 j")+
-      tile("\u23F3",pendingDisc,"\u00E0 valider",true)+
-      tile("",s.pendingPhotos,"photos en attente",true);
+      tile(icoPulse(17),s.activeToday,"actifs aujourd'hui")+
+      tile(icoUserPlus(17),s.newWeek,"nouveaux / 7 j",true)+
+      tile(icoUsers(17),s.totalUsers,"joueurs au total")+
+      tile(icoCompass(17),s.discToday,"d\u00E9couvertes du jour")+
+      tile(storeGlyph(17),s.storesWeek,"magasins / 7 j")+
+      tile(icoHourglass(17),pendingDisc,"\u00E0 valider",true)+
+      tile(icoPhoto(17),s.pendingPhotos,"photos en attente",true);
   }).catch(function(e){console.warn("dash:",e);});
   // ── LIVE : rafraichit "en ligne maintenant" toutes les 20 s tant que l'ecran
   //    admin est ouvert. S'arrete tout seul des qu'on quitte l'ecran (aucune
@@ -12733,10 +12825,10 @@ function _recapTile(v,label){
 }
 function _recapMessage(s){
   var nt=s.newToday||0, on=s.onlineNow||0;
-  if(nt>0&&on>0)return "🎉 "+nt+" nouveau"+(nt>1?"x":"")+" aujourd'hui et du monde en ligne. La machine tourne — continue de partager ton lien !";
-  if(nt>0)return "🎉 "+nt+" nouveau"+(nt>1?"x":"")+" aujourd'hui. Beau debut — partage encore pour amplifier.";
+  if(nt>0&&on>0)return "Bravo — "+nt+" nouveau"+(nt>1?"x":"")+" aujourd'hui et du monde en ligne. La machine tourne — continue de partager ton lien !";
+  if(nt>0)return "Bravo — "+nt+" nouveau"+(nt>1?"x":"")+" aujourd'hui. Beau debut — partage encore pour amplifier.";
   if(on>0)return "Des gens sont en ligne en ce moment. Profite-en pour partager ton lien et faire venir du monde.";
-  return "Personne de nouveau aujourd'hui. C'est normal au debut : partage ton lien sur tes reseaux, un post a la fois. 💪";
+  return "Personne de nouveau aujourd'hui. C'est normal au debut : partage ton lien sur tes reseaux, un post a la fois.";
 }
 function showFounderRecap(s){
   if(document.getElementById("founder-recap"))return;
@@ -13257,7 +13349,7 @@ function showIOSInstallSheet(){
   ov.innerHTML='<div style="width:100%;max-width:460px;background:var(--bg2);border-radius:26px 26px 0 0;padding:22px 22px calc(26px + env(safe-area-inset-bottom));box-shadow:0 -12px 40px rgba(0,0,0,.3);animation:iosSlideUp .32s cubic-bezier(.22,1,.36,1)">'+
     '<div style="width:38px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 16px"></div>'+
     '<div style="font-size:19px;font-weight:800;color:var(--s1);text-align:center;margin-bottom:4px">Installe Magofeed</div>'+
-    '<div style="font-size:13px;color:var(--s2);text-align:center;line-height:1.4;margin-bottom:20px">En 3 gestes, comme une vraie app — et tu pourras recevoir les alertes de chasse 🎯</div>'+
+    '<div style="font-size:13px;color:var(--s2);text-align:center;line-height:1.4;margin-bottom:20px">En 3 gestes, comme une vraie app — et tu pourras recevoir les alertes de chasse</div>'+
     step(1,'Appuie sur '+shareIco+' <b>Partager</b> (en bas de Safari)')+
     step(2,'Fais défiler puis choisis '+plusIco+' <b>« Sur l\'écran d\'accueil »</b>')+
     step(3,'Appuie sur <b>« Ajouter »</b> en haut à droite')+
@@ -13740,7 +13832,7 @@ try{
   // cache puis recharger. Verrou de session -> jamais de boucle de rechargement.
   var _triedRecover=false;try{_triedRecover=sessionStorage.getItem("mago_boot_recover")==="1";}catch(_){}
   document.body.innerHTML='<div style="position:fixed;inset:0;background:#151210;color:#f4f0e9;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px;font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;z-index:99999">'+
-    '<div style="font-size:46px;margin-bottom:14px">🍹</div>'+
+    '<div style="margin-bottom:14px;color:var(--s1);display:flex;justify-content:center">'+icoTarget(44)+'</div>'+
     '<div style="font-size:18px;font-weight:800;margin-bottom:8px">Un instant…</div>'+
     '<div style="font-size:14px;color:#9a8f80;max-width:300px;line-height:1.5;margin-bottom:24px">Magofeed a rencontré un petit souci au démarrage. On repart proprement, tes données sont en sécurité.</div>'+
     '<button id="mago-recover" style="background:#f4f0e9;color:#151210;border:none;border-radius:14px;padding:13px 28px;font-size:15px;font-weight:800;cursor:pointer">Recharger l\'app</button></div>';
