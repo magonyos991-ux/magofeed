@@ -4289,12 +4289,7 @@ function ensurePickerMap(cb){
     }
     setTimeout(function(){window._pickerMap.invalidateSize();cb&&cb();},180);
   }
-  if(window.L){build();return;}
-  // Leaflet pas encore charge (l'utilisateur n'a jamais ouvert la carte principale)
-  var link=document.createElement("link");link.rel="stylesheet";link.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";document.head.appendChild(link);
-  var script=document.createElement("script");script.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
-  script.onload=build;
-  document.head.appendChild(script);
+  ensureLeaflet(build, function(){ try{ toast("Carte indisponible \u2014 v\u00e9rifie ta connexion"); }catch(e){} });
 }
 /* Ajout d'un magasin manquant : nom + type + position (GPS sur place, ou
    tap sur la carte du selecteur depuis chez soi). Le magasin est cree pour
@@ -6554,23 +6549,30 @@ function renderMap(){
   box.innerHTML='<div id="leaflet-map" style="width:100%;height:100%"></div>'+
     '<div style="position:absolute;top:8px;left:8px;z-index:900;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);border-radius:999px">'+mapLegendHTML()+'</div>'+
     '<div id="map-instock-btn" onclick="toggleInStockOnly()" role="button" tabindex="0" aria-pressed="'+(window._mapInStockOnly?"true":"false")+'" aria-label="N\'afficher que les magasins qui l\'ont en stock" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleInStockOnly();}" class="'+(window._mapInStockOnly?"on":"")+'" style="position:absolute;top:50px;left:8px;z-index:901;padding:7px 12px;border-radius:999px;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);font-size:11px;font-weight:800;color:var(--s1);cursor:pointer;display:flex;align-items:center;gap:6px"><span style="width:9px;height:9px;border-radius:50%;background:#16a34a;display:inline-block;flex-shrink:0"></span>En stock seulement</div>'+
-    '<div id="map-full-btn" onclick="if(window.curSel)openExploreMap({drinkId:curSel.id,name:curSel.name});else toggleDrinkMapFull();" role="button" tabindex="0" aria-label="Ouvrir la carte des magasins" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();if(window.curSel)openExploreMap({drinkId:curSel.id,name:curSel.name});}" style="position:absolute;top:8px;right:8px;z-index:900;width:36px;height:36px;border-radius:12px;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--s1);cursor:pointer">\u26f6</div>'+
+    '<div id="map-full-btn" onclick="if(document.getElementById(\'map-box\')&&document.getElementById(\'map-box\').classList.contains(\'map-fullscreen\'))toggleDrinkMapFull();else if(window.curSel)openExploreMap({drinkId:curSel.id,name:curSel.name});else toggleDrinkMapFull();" role="button" tabindex="0" aria-label="Ouvrir la carte des magasins" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();if(window.curSel)openExploreMap({drinkId:curSel.id,name:curSel.name});}" style="position:absolute;top:8px;right:8px;z-index:900;width:36px;height:36px;border-radius:12px;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--s1);cursor:pointer">\u26f6</div>'+
     '<div class="map-locate-btn" onclick="centerMapOnUser()" title="Centrer sur moi" role="button" tabindex="0" aria-label="Centrer la carte sur ma position" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();centerMapOnUser();}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="var(--s1)" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="var(--s1)" stroke-width="2" stroke-linecap="round"/></svg></div>';
   if(window._leafletMap){window._leafletMap.remove();window._leafletMap=null;}
-  if(!window.L){
-    var link=document.createElement("link");link.rel="stylesheet";link.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";document.head.appendChild(link);
-    var linkCluster=document.createElement("link");linkCluster.rel="stylesheet";linkCluster.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css";document.head.appendChild(linkCluster);
-    var script=document.createElement("script");script.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
-    script.onload=function(){
-      var scriptCluster=document.createElement("script");
-      scriptCluster.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js";
-      scriptCluster.onload=function(){initLeafletMap(lat,lng);};
-      document.head.appendChild(scriptCluster);
-    };
-    document.head.appendChild(script);
-  } else {
-    initLeafletMap(lat,lng);
-  }
+  /* Meme chargeur robuste que la carte Explorer. Le regroupement de marqueurs
+     (markercluster) est un BONUS : s'il n'arrive pas, la carte doit quand meme
+     s'afficher — avant, son onload manquant bloquait toute la carte. */
+  ensureLeaflet(function(){
+    if(window.L&&window.L.markerClusterGroup){ initLeafletMap(lat,lng); return; }
+    if(!document.getElementById("leaflet-cluster-css")){
+      var lc=document.createElement("link");
+      lc.id="leaflet-cluster-css"; lc.rel="stylesheet";
+      lc.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css";
+      document.head.appendChild(lc);
+    }
+    var done=false;
+    var go=function(){ if(done)return; done=true; initLeafletMap(lat,lng); };
+    var sc=document.createElement("script");
+    sc.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js";
+    sc.onload=go; sc.onerror=go;          // sans regroupement, mais avec une carte
+    document.head.appendChild(sc);
+    setTimeout(go,6000);                  // et jamais d'attente infinie
+  }, function(){
+    try{ toast("Carte indisponible \u2014 v\u00e9rifie ta connexion"); }catch(e){}
+  });
   var bar=document.getElementById("gps-bar");if(bar)bar.style.display=userLat?"flex":"none";
 }
 
@@ -8180,28 +8182,12 @@ function alertOpenOnMap(did){
   var d=(DRINKS||[]).find(function(x){return Number(x.id)===Number(did);});
   if(!d){toast("Boisson introuvable");return;}
   try{playSound("pop");}catch(e){}
+  /* pick() ouvre DEJA la carte tout seul (openDrinkMapView, 60 ms plus tard) :
+     c'est voulu, meme sans magasin connu, pour montrer les commerces alentour
+     en gris. Il n'y a donc rien a forcer ici — et forcer le plein ecran de
+     l'AUTRE carte (#map-box) ne montrait rien tout en laissant une classe
+     collee qui recouvrait ensuite la fiche sans issue. */
   pick(d);
-  /* On ne deroule la carte QUE s'il y a quelque chose a y voir, et QUE si
-     Leaflet a fini de se charger. Une carte plein ecran vide et noire, sans
-     rien dedans et qui masque la liste, est bien pire que pas de carte :
-     c'est exactement ce que produisait la version precedente sur une boisson
-     a zero magasin (Leaflet arrive du reseau, il n'etait pas encore la). */
-  var essais=0;
-  (function attendreCarte(){
-    essais++;
-    var aDesMagasins=(window.STORES||[]).some(function(st){
-      return (st.drinks||[]).some(function(x){return Number(x)===Number(did);});
-    });
-    if(!aDesMagasins)return;             // la liste explique deja la situation
-    var box=document.getElementById("map-box");
-    if(!box)return;
-    if(box.classList.contains("map-fullscreen"))return;   // deja ouverte
-    if(window._leafletMap&&typeof toggleDrinkMapFull==="function"){
-      toggleDrinkMapFull();
-      return;
-    }
-    if(essais<16)setTimeout(attendreCarte,250);           // 4 s au maximum
-  })();
 }
 function removeWatch(id){
   drinkWatches=drinkWatches.filter(function(w){return Number(w.id)!==Number(id);});
@@ -8461,6 +8447,52 @@ function toggleAdvFilters(){
 }
 // Ouvre la carte des magasins FILTREE sur la boisson courante (carte + feuille
 // liste + itineraire) — remplace la longue liste en file indienne.
+/* ── CHARGEMENT DE LEAFLET ────────────────────────────────────────────────
+   Trois endroits injectaient le script du CDN avec `script.onload = build` et
+   RIEN d'autre : pas de onerror, pas de delai de garde, pas de reprise. Si le
+   script n'arrivait pas (reseau faible, CDN bloque, cache du service worker
+   vide hors ligne), build() n'etait jamais appele : la carte restait nulle
+   POUR TOUJOURS et l'ecran restait vide, sans un mot d'explication.
+   Un seul chargeur desormais, memorise, avec un echec qui se dit. ── */
+window._leafletState = window._leafletState || null;   // null | "loading" | "ready" | "failed"
+function ensureLeaflet(onReady, onFail){
+  if (window.L) { window._leafletState="ready"; onReady&&onReady(); return; }
+  window._leafletWaiters = window._leafletWaiters || [];
+  window._leafletWaiters.push({ ok:onReady, ko:onFail });
+  if (window._leafletState === "loading") return;
+  window._leafletState = "loading";
+
+  var settled=false;
+  function finish(ok){
+    if(settled)return; settled=true;
+    window._leafletState = ok ? "ready" : "failed";
+    var list = window._leafletWaiters || []; window._leafletWaiters = [];
+    list.forEach(function(w){ try{ ok ? (w.ok&&w.ok()) : (w.ko&&w.ko()); }catch(e){} });
+  }
+  if(!document.getElementById("leaflet-css")){
+    var link=document.createElement("link");
+    link.id="leaflet-css"; link.rel="stylesheet";
+    link.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";
+    document.head.appendChild(link);
+  }
+  var script=document.createElement("script");
+  script.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
+  script.onload=function(){ finish(!!window.L); };
+  script.onerror=function(){ finish(false); };
+  document.head.appendChild(script);
+  // Delai de garde : onerror ne se declenche pas toujours (requete suspendue).
+  setTimeout(function(){ finish(!!window.L); }, 9000);
+}
+/* Nouvel essai apres un echec : on repart de zero. */
+function retryLeaflet(){
+  window._leafletState=null;
+  try{ var old=document.querySelector('script[src*="leaflet.min.js"]'); if(old)old.remove(); }catch(e){}
+  var box=document.getElementById("explore-map-fail");
+  if(box)box.style.display="none";
+  try{ toast("Nouvelle tentative\u2026"); }catch(e){}
+  try{ closeExploreMap(); }catch(e){}
+  setTimeout(function(){ try{ openExploreMap(window._lastExploreOpts||undefined); }catch(e){} }, 260);
+}
 function openDrinkMapView(){
   if(!curSel)return;
   window._exploreFromDrink=true;
@@ -8475,6 +8507,16 @@ function openDrinkInfoFromMap(){
   var host=document.getElementById("explore-map-host");
   if(host){host.classList.remove("in");host.style.display="none";}
   window._exploreFromDrink=false;
+  // Filet : si .map-fullscreen est restee collee sur #map-box, elle recouvrirait
+  // toute la fiche sans aucune sortie. On la retire systematiquement.
+  try{
+    var _mb=document.getElementById("map-box");
+    if(_mb&&_mb.classList.contains("map-fullscreen")){
+      _mb.classList.remove("map-fullscreen");
+      var _fb=document.getElementById("map-full-btn");
+      if(_fb)_fb.textContent="\u26f6";
+    }
+  }catch(e){}
   try{show("results");}catch(e){}
 }
 // Recherche d'une ville depuis le champ "Magasins" : ouvre la carte et geocode.
@@ -8869,7 +8911,10 @@ function closeStoreDetail(){
     var h=document.getElementById("explore-map-host");
     if(h&&typeof exploreMap!=="undefined"&&exploreMap){
       show("home"); // écran de base sous l'overlay (masqué par la carte)
-      h.style.display="";
+      // "flex", PAS "" : effacer le style en ligne faisait retomber l'hote en
+      // display:block, la carte (flex:1) s'ecrasait a zero, et on revenait sur
+      // un ecran noir. Le CSS porte desormais la meme valeur en secours.
+      h.style.display="flex";
       requestAnimationFrame(function(){h.classList.add("in");});
       setTimeout(function(){try{exploreMap.invalidateSize();}catch(e){}},80);
       return;
@@ -10707,7 +10752,14 @@ function exploreSetHeader(shown,sure){
   var thumb=document.getElementById("explore-thumb"),chev=document.getElementById("explore-chevron"),btn=document.getElementById("explore-titlebtn");
   if(exploreFilter){
     if(t)t.textContent=exploreFilter.name||"Boisson";
-    if(sub)sub.textContent=shown+" magasin"+(shown>1?"s":"")+(typeof sure==="number"?" · "+sure+" en stock":"")+" · voir la fiche";
+    // shown null = on n'a pas encore cherche. Annoncer « 0 magasin » a ce
+    // moment-la est un mensonge — et c'est ce chiffre qui restait affiche
+    // quand la carte ne chargeait pas.
+    if(sub)sub.textContent=window._exploreMapFailed
+      ? "Carte indisponible \u2014 la liste reste accessible"
+      : ((shown==null)
+        ? "Recherche des magasins\u2026"
+        : (shown+" magasin"+(shown>1?"s":"")+(typeof sure==="number"?" · "+sure+" en stock":"")+" · voir la fiche"));
     if(thumb){thumb.style.display="flex";try{if(curSel)thumb.innerHTML=drinkIconHTML(curSel);}catch(e){}}
     if(chev)chev.style.display="flex";
     if(btn){btn.style.background="var(--bg2)";btn.style.borderColor="var(--border)";}
@@ -10717,6 +10769,10 @@ function exploreSetHeader(shown,sure){
     // "autour de toi" alors qu'on survole Tokyo serait faux.
     // Pas de preposition ("à Japon" est faux, "au Japon" ne marche pas pour
     // New York) : le nom du lieu se suffit a lui-meme.
+    if(window._exploreMapFailed){
+      if(sub)sub.textContent="Carte indisponible \u2014 la liste reste accessible";
+      return;
+    }
     var _place=window._explorePlace||"";
     var _zone=!!window._exploreFreeMove;
     if(sub)sub.textContent=_place
@@ -10830,6 +10886,8 @@ function showStoreOnMap(lat,lng){
   openExploreMap({center:{lat:lat,lng:lng}});
 }
 function openExploreMap(opts){
+  window._lastExploreOpts=opts;   // pour le bouton « Reessayer » en cas d'echec
+  window._exploreMapFailed=false;
   exploreFilter=(opts&&opts.drinkId!=null)?{drinkId:opts.drinkId,name:opts.name||""}:null;
   window._exploreChips={instock:false,open:false,near:0};
   window._exploreBrand=null;
@@ -10843,7 +10901,10 @@ function openExploreMap(opts){
     var _oq=document.getElementById("explore-city-q");if(_oq)_oq.value="";
     var _oc=document.getElementById("explore-city-clear");if(_oc)_oc.style.display="none";
   }catch(e){}
-  setTimeout(function(){try{renderExploreChips();exploreSetHeader(0,exploreFilter?0:undefined);}catch(e){}},60);
+  // On n'annonce PAS « 0 magasin · 0 en stock » avant d'avoir cherche : c'est
+  // faux, et c'est ce chiffre qui restait affiche quand la carte ne chargeait
+  // pas. Tant qu'on ne sait pas, on le dit.
+  setTimeout(function(){try{renderExploreChips();exploreSetHeader(null,null);}catch(e){}},60);
   [420,950].forEach(function(t){setTimeout(function(){try{if(exploreMap)exploreMap.invalidateSize();}catch(e){}},t);});
   var host=document.getElementById("explore-map-host");
   if(!host){
@@ -10949,11 +11010,39 @@ function openExploreMap(opts){
       try{var _cc=exploreMap.getCenter();autoOsmForArea(_cc.lat,_cc.lng,exploreMap.getZoom());}catch(e){}
     },120);
   }
-  if(window.L){build();return;}
-  var link=document.createElement("link");link.rel="stylesheet";link.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";document.head.appendChild(link);
-  var script=document.createElement("script");script.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
-  script.onload=build;
-  document.head.appendChild(script);
+  ensureLeaflet(build, exploreShowMapFailure);
+}
+/* La carte n'a pas pu se charger : on le DIT, avec une sortie. Un rectangle
+   vide qui ne s'explique pas est la pire chose qu'on puisse afficher. */
+function exploreShowMapFailure(){
+  var host=document.getElementById("explore-map");
+  if(!host)return;
+  var box=document.getElementById("explore-map-fail");
+  if(!box){
+    box=document.createElement("div");
+    box.id="explore-map-fail";
+    box.setAttribute("role","status");
+    box.setAttribute("aria-live","polite");
+    box.style.cssText="position:absolute;inset:0;z-index:1100;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:28px;text-align:center;background:var(--app-bg)";
+    box.innerHTML='<div style="color:var(--s2)">'+(typeof icoBan==="function"?icoBan(30):"")+'</div>'+
+      '<div style="font-size:15px;font-weight:800;color:var(--s1)">La carte n\'a pas pu se charger</div>'+
+      '<div style="font-size:12.5px;color:var(--txt2);line-height:1.5;max-width:280px">Le fond de carte vient d\'Internet. V\u00e9rifie ta connexion, puis r\u00e9essaie.</div>'+
+      '<button onclick="retryLeaflet()" style="margin-top:4px;padding:12px 22px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;font-family:inherit;cursor:pointer">R\u00e9essayer</button>'+
+      '<button onclick="exploreOpenSheetFull()" class="ghost-btn quiet">Voir la liste des magasins</button>';
+    host.style.position="relative";
+    host.appendChild(box);
+  }
+  box.style.display="flex";
+  /* L'echec est MEMORISE : script.onerror part en quelques millisecondes,
+     donc plus tot que le reglage d'en-tete programme a 60 ms, qui ecrasait
+     sinon le message. C'est exploreSetHeader qui tranche desormais. */
+  window._exploreMapFailed=true;
+  try{ exploreSetHeader(null,null); }catch(e){}
+  var st=document.getElementById("explore-status");
+  if(st)st.style.display="none";
+}
+function exploreOpenSheetFull(){
+  try{ setExploreSheet("max"); }catch(e){}
 }
 function closeExploreMap(){
   clearRoute();
