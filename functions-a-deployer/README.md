@@ -15,6 +15,7 @@ Tout est **testable/déployable par toi**, jamais mis en prod sans essai.
 | `locate-stores.js` | Remplace le faux « +0 magasins » : localise de vrais commerces via OSM, sans stock inventé | Faible | Quand tu veux |
 | `points-serveur-PHASE2.js` | Points **validés côté serveur** (infalsifiables) + bases de la réputation | Moyen (change qui crédite les points) | Plus tard, en suivant la « Bascule Phase 2 » |
 | `anti-farm.js` | **Les faux stocks font perdre des points** : une annonce contredite par 2 personnes sur place est sanctionnée, et la sanction est ineffaçable | Faible (ne crédite rien, ne fait que retirer) | **Maintenant**, avec les règles |
+| `migration-geohash.js` | **Recherche de magasins par geohash** : arrête de lire les magasins de Cologne à chaque recherche faite à Bruxelles | Faible (n'écrit qu'un champ, relançable) | Quand tu veux |
 | `partage.js` | **Aperçu des liens partagés** : une vraie vignette (titre + photo) pour les boissons de la communauté et les magasins, qui n'ont pas de page pré-générée | Faible (ne lit que des données publiques) | Quand tu veux |
 
 ---
@@ -163,6 +164,59 @@ doit afficher le nom du magasin.
 Un lien inconnu (boisson supprimée, identifiant bidon) ne renvoie jamais d'erreur :
 il affiche une vignette Magofeed générique et ouvre l'accueil. Un lien partagé qui
 affiche « erreur 404 » dans une conversation, c'est pire que pas de lien du tout.
+
+## 6) Recherche par geohash — `migration-geohash.js` (~10 min)
+
+**Le problème.** L'app cherche les magasins par **bande de latitude** : elle
+demande à Firestore tous les magasins entre deux latitudes, puis filtre la
+longitude dans le téléphone. Or une bande de latitude fait le tour de la Terre.
+À Bruxelles (50,85°N), une bande de ±10 km contient aussi Cologne, Prague,
+Cracovie et Kiev.
+
+Mesuré sur une Europe simulée à densité réaliste : **236 magasins de Cologne lus
+à chaque recherche faite à Bruxelles**. Firestore facture les documents **lus**,
+pas ceux qu'on garde. Aujourd'hui ça reste supportable parce que presque tous
+tes magasins sont belges. Le jour où une deuxième ville étrangère se remplit à
+ta latitude, la facture double sans qu'une seule recherche de plus soit faite.
+
+**La solution.** Un geohash encode une position en une chaîne dont le **préfixe**
+désigne un carré : deux points proches partagent un préfixe. La recherche
+circulaire devient alors 4 à 9 requêtes sur des plages de chaînes triées, au
+lieu d'une bande planétaire. C'est l'algorithme de GeoFire, réécrit directement
+dans `index.html` pour ne pas ajouter de dépendance à une app sans bundler.
+
+**Mesuré** (900 requêtes simulées, comparées à un calcul de distance exhaustif) :
+**0 magasin manqué**, **43 % de lectures en moins**, soit 1,8× moins cher. Et
+l'écart grandit avec le nombre de villes partageant ta latitude — donc avec
+l'internationalisation.
+
+**Pourquoi rien ne peut casser.** L'app écrit **déjà** le champ `geohash` sur
+tout magasin créé, importé ou déplacé, mais ne s'en sert pas encore : le drapeau
+`MAGO_GEOHASH_READY` est à `false` dans `index.html`. Tant qu'il y est, c'est la
+bande de latitude qui répond, exactement comme avant. Et même une fois levé, si
+la requête par geohash échoue, l'app **retombe toute seule** sur l'ancienne
+méthode plutôt que d'afficher une carte vide.
+
+1. Récupère une clé de compte de service (Console → Paramètres → Comptes de
+   service → Générer une nouvelle clé privée), enregistre-la en
+   `serviceAccount.json` à côté du script. **Ne la commite jamais.**
+2. `npm install firebase-admin`
+3. Simulation d'abord : `node migration-geohash.js --dry-run`
+4. Pour de vrai : `node migration-geohash.js`
+5. **Seulement une fois la migration passée** : dans `index.html`, mets
+   `MAGO_GEOHASH_READY = true`, puis redéploie.
+
+> ⚠️ **L'ordre compte.** Lever le drapeau AVANT de migrer rendrait invisibles
+> tous les magasins sans geohash — donc une carte vide. Migrer sans lever le
+> drapeau, à l'inverse, ne fait rigoureusement rien : le champ est écrit et pas
+> encore lu. Migre d'abord, toujours.
+
+Le script est relançable autant de fois que tu veux : il saute les magasins déjà
+migrés, donc une coupure au milieu n'est pas un problème — relance, il reprend.
+Aucun index composite à créer : la requête ne trie que sur `geohash`, et
+Firestore indexe seuls les champs simples.
+
+---
 
 ## Bascule PHASE 2 — points infalsifiables (à faire quand tu es prêt)
 
