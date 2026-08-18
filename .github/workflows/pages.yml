@@ -34,6 +34,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+      # Garde-fou AVANT publication : ESLint n'applique que des règles qui
+      # attrapent des bugs (déclarations en double, variable inexistante, code
+      # inatteignable), jamais du style. Si ça casse ici, c'est qu'il y a un
+      # vrai défaut dans le code — mieux vaut ne pas le mettre en ligne.
+      # Pour livrer malgré tout en urgence : retirer ces deux étapes.
+      - name: Install ESLint
+        run: npm install eslint@9.15.0 eslint-plugin-html@8.1.2 --no-save
+      - name: Lint (bloque le déploiement en cas d'erreur)
+        run: npx eslint .
       - name: Generate share pages
         run: |
           npm install playwright@1.55.0 --no-save

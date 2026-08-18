@@ -1,3 +1,11 @@
+/* © 2026 Magofeed — Tous droits réservés / All rights reserved.
+   Titulaire des droits (mention légale) : Ilias Benabdellah.
+   Marqueur de propriété intellectuelle — ne pas retirer. */
+/* ============================================================================
+   TRADUCTIONS — et rien d'autre.
+   L'état applicatif est parti dans data/state.js, les utilitaires d'interface
+   dans data/ui.js.
+   ============================================================================ */
 var LANGS={
   fr:{badgeScan:"Scanneur",badgeExplorer:"Éclaireur",badgeReliable:"Fiable",badgeStreak:"Assidu",badgeStar:"Étoile",badgeFounder:"Fondateur",userSearchHint:"Tape un pseudo (au moins 2 lettres)<br>pour trouver un joueur",connectedGoogle:"Connecté avec Google",ptsLabel:"Points",me:"(moi)",mostSearched:"Les plus recherchés",suggestionsT:"Suggestions",noSuggestion:"Aucune suggestion pour l'instant",noSuggestionSub:"Scanne un produit introuvable au catalogue<br>pour le proposer à la communauté !",camWaiting:"Caméra en attente",activateCam:"Activer la caméra",lastScans:"Derniers scans",suggestBtn:"+ Suggérer",streakDay:"jour(s) d'affilée",streakRecord:"record",streakStart:"Contribue aujourd'hui pour lancer ta série",streakBroken:"série interrompue, relance-la !",settingsT:"Paramètres",language:"Langue",sounds:"Effets sonores",account:"Compte",appSec:"Application",seeIntro:"Revoir l'introduction",seeTuto:"Revoir le tutoriel",privacyL:"Politique de confidentialité",termsL:"Conditions d'utilisation",adminL:"Administration",installApp:"Installer l'application",googleLogin:"Se connecter avec Google",leaderboard:"Classement",playerProfile:"Profil du joueur",hisFavs:"Ses boissons préférées",modeDrinks:"Boissons",modeStores:"Magasins",modePlayers:"Joueurs",proposeBtn:"+ Proposer",clearHistory:"Effacer l'historique",editPseudoHint:"Appuie pour changer ton pseudo",name:"Français",greeting:"Bonjour, que boit-on ?",trends:"Tendances",recents:"Récents",search:"Recherche",scanner:"Scanner un produit",scanSub:"Pointe la caméra vers le code-barre",disc:"Découvertes",discSub:"Produits suggérés par la communauté",stores:"Magasins proches",profile:"Mon profil",badges:"Badges",activity:"Activité",noact:"Aucune activité pour l'instant",home:"Accueil",chercher:"Chercher",scan:"Scanner",discover:"Découvrir",profil:"Profil",sig:"Signalements",conf:"Confirmations",rstock:"En stock ici",rrupture:"Rupture de stock",rfake:"Possible contrefaçon",rnew:"Nouveau produit",vote:"Voter",placeholder:"Rechercher…"},
   en:{badgeScan:"Scanner",badgeExplorer:"Scout",badgeReliable:"Reliable",badgeStreak:"Devoted",badgeStar:"Star",badgeFounder:"Founder",userSearchHint:"Type a nickname (at least 2 letters)<br>to find a player",connectedGoogle:"Signed in with Google",ptsLabel:"Points",me:"(me)",mostSearched:"Most searched",suggestionsT:"Suggestions",noSuggestion:"No suggestions yet",noSuggestionSub:"Scan a product missing from the catalog<br>to suggest it to the community!",camWaiting:"Camera on standby",activateCam:"Turn on the camera",lastScans:"Recent scans",suggestBtn:"+ Suggest",streakDay:"day(s) in a row",streakRecord:"best",streakStart:"Contribute today to start your streak",streakBroken:"streak broken, restart it!",settingsT:"Settings",language:"Language",sounds:"Sound effects",account:"Account",appSec:"App",seeIntro:"Replay the intro",seeTuto:"Replay the tutorial",privacyL:"Privacy policy",termsL:"Terms of use",adminL:"Administration",installApp:"Install the app",googleLogin:"Sign in with Google",leaderboard:"Leaderboard",playerProfile:"Player profile",hisFavs:"Their favorite drinks",modeDrinks:"Drinks",modeStores:"Stores",modePlayers:"Players",proposeBtn:"+ Suggest",clearHistory:"Clear history",editPseudoHint:"Tap to change your nickname",name:"English",greeting:"Hello, what are we drinking?",trends:"Trending",recents:"Recent",search:"Search",scanner:"Scan a product",scanSub:"Point camera at barcode",disc:"Discoveries",discSub:"Community suggested products",stores:"Nearby stores",profile:"My profile",badges:"Badges",activity:"Activity",noact:"No activity yet",home:"Home",chercher:"Search",scan:"Scan",discover:"Discover",profil:"Profile",sig:"Reports",conf:"Confirms",rstock:"In stock here",rrupture:"Out of stock",rfake:"Possible fake",rnew:"New product",vote:"Vote",placeholder:"Search…"},
@@ -11,150 +19,6 @@ tr:{badgeScan:"Tarayıcı",badgeExplorer:"Kâşif",badgeReliable:"Güvenilir",ba
 pl:{badgeScan:"Skaner",badgeExplorer:"Zwiadowca",badgeReliable:"Solidny",badgeStreak:"Wytrwały",badgeStar:"Gwiazda",badgeFounder:"Założyciel",userSearchHint:"Wpisz nazwę (min. 2 litery)<br>aby znaleźć gracza",connectedGoogle:"Zalogowano przez Google",ptsLabel:"Punkty",me:"(ja)",mostSearched:"Najczęściej szukane",suggestionsT:"Sugestie",noSuggestion:"Na razie brak sugestii",noSuggestionSub:"Zeskanuj produkt spoza katalogu,<br>aby zaproponować go społeczności!",camWaiting:"Kamera w gotowości",activateCam:"Włącz kamerę",lastScans:"Ostatnie skany",suggestBtn:"+ Zaproponuj",streakDay:"dzień/dni z rzędu",streakRecord:"rekord",streakStart:"Dołóż coś dzisiaj i rozpocznij serię",streakBroken:"seria przerwana, zacznij od nowa!",settingsT:"Ustawienia",language:"Język",sounds:"Efekty dźwiękowe",account:"Konto",appSec:"Aplikacja",seeIntro:"Zobacz intro ponownie",seeTuto:"Zobacz samouczek ponownie",privacyL:"Polityka prywatności",termsL:"Warunki korzystania",adminL:"Administracja",installApp:"Zainstaluj aplikację",googleLogin:"Zaloguj się przez Google",leaderboard:"Ranking",playerProfile:"Profil gracza",hisFavs:"Ulubione napoje",modeDrinks:"Napoje",modeStores:"Sklepy",modePlayers:"Gracze",proposeBtn:"+ Zaproponuj",clearHistory:"Wyczyść historię",editPseudoHint:"Dotknij, aby zmienić nazwę",name:"Polski",greeting:"Cześć, co pijemy?",trends:"Na czasie",recents:"Ostatnie",search:"Szukaj",scanner:"Skanuj produkt",scanSub:"Skieruj aparat na kod kreskowy",disc:"Odkrycia",discSub:"Produkty polecane przez społeczność",stores:"Sklepy w pobliżu",profile:"Mój profil",badges:"Odznaki",activity:"Aktywność",noact:"Na razie brak aktywności",home:"Start",chercher:"Szukaj",scan:"Skaner",discover:"Odkrywaj",profil:"Profil",sig:"Zgłoszenia",conf:"Potwierdzenia",rstock:"Dostępne tutaj",rrupture:"Brak w magazynie",rfake:"Możliwa podróbka",rnew:"Nowy produkt",vote:"Głosuj",placeholder:"Szukaj…"}
 };
 var CATS=["Tous","Soda","Energy","Ice Tea","Jus","Eau","Sport","Exotique","Lacté","Café","Snacks","Autre"];
-
-/* ================================
-   STATE
-================================ */
-var curCat="Tous",curSel=null,recents=[DRINKS[14],DRINKS[22]];
-var accentColor="#1a1714",accentLight="#f0eee9";
-var userLat=null,userLng=null;
-var scanActive=false,quaggaRunning=false;
-/* penalty : points RETIRES par le serveur (anti-farm). Le client ne l'ecrit
-   jamais — il le lit seulement. C'est ce qui rend la sanction impossible a
-   effacer en vidant le cache. Voir functions-a-deployer/anti-farm.js. */
-var userStats={signals:0,confirms:0,pts:0,discAccepted:0,penalty:0,activity:[]};
-var PROMO_REWARD=50; // points gagnes quand TA decouverte est acceptee au catalogue
-var reportTarget=null,curMode="light",curLang="fr";
-var searchDebounce=null;
-var mapRenderedFor=null;
-var storePrices=JSON.parse(localStorage.getItem("magoPrices")||"{}");
-var curBudget=null;
-var favorites=JSON.parse(localStorage.getItem("magofavs")||"[]");
-var searchHistory=JSON.parse(localStorage.getItem("magosearchhist")||"[]");
-var userRatings=JSON.parse(localStorage.getItem("mago_ratings")||"{}");
-var userRecs=JSON.parse(localStorage.getItem("mago_recs")||"{}");
-var scanCounts=JSON.parse(localStorage.getItem("magoscans")||"{}");
-var curSort="distance";
-var soundEnabled=localStorage.getItem("magosound")!=="0";
-var deferredInstallPrompt=null;
-var searchMode="drinks";
-var curStoreDetail=null;
-var storeDetailReturn="search";
-var contributedStores={};
-var votedDiscoveries=JSON.parse(localStorage.getItem("magoVotedDisc")||"[]");
-var drinkRatingsAgg={};
-var drinkRecsAgg={};
-var curFormat=null;
-var curStoreBrandFilter=null;
-var curStoreSearchSort="distance";
-var curStoreDetailQuery="";
-var curStoreDetailCat="Tous";
-var lastBrandsAvailable=[];
-var geocodeCache=JSON.parse(localStorage.getItem("magoGeocodeCache")||"{}");
-var priceHist=JSON.parse(localStorage.getItem("magoPriceHist")||"{}");
-var leaderboardRows=null;
-var leaderboardLoadedAt=0;
-var userStreak=JSON.parse(localStorage.getItem("magoStreak")||'{"streak":0,"last":"","best":0}');
-var scanHist=JSON.parse(localStorage.getItem("magoScanHist")||"[]");
-var curBrandFilter=null;
-var isAdmin=false;
-// v3 : purge des resolutions automatiques de l'ancienne verification (incident
-// chips Stax sur le Pepsi) en CONSERVANT les corrections manuelles de l'admin
-var imgCache=(function(){
-  var v3={};
-  try{v3=JSON.parse(localStorage.getItem("magoImgCache3")||"{}");}catch(e){}
-  try{
-    var v2=JSON.parse(localStorage.getItem("magoImgCache2")||"null");
-    if(v2){
-      Object.keys(v2).forEach(function(k){
-        if(v2[k]&&v2[k].manual&&!v3[k])v3[k]=v2[k];
-      });
-      localStorage.removeItem("magoImgCache2");
-      localStorage.setItem("magoImgCache3",JSON.stringify(v3));
-    }
-    localStorage.removeItem("magoImgCache");
-  }catch(e){}
-  return v3;
-})();
-var imgFetchInFlight={};
-var communityCatalogLoaded=false;
-var offlineDataApplied=false;
-
-/* ================================
-   FIREBASE HELPER
-================================ */
-function renderStoreCount(n){
-  // Refresh results si une boisson est sélectionnée
-  if(curSel) renderStoreList();
-}
-
-/* ================================
-   AUDIO
-================================ */
-var _ac=null;
-function getAC(){if(!_ac&&window.AudioContext)_ac=new(window.AudioContext||window.webkitAudioContext)();return _ac;}
-/* L'interrupteur du son etait INVERSE : quand le son etait actif, le bouton
-   s'affichait a gauche (= eteint), et inversement. Il pilote maintenant la
-   classe .sw partagee, comme tous les autres interrupteurs de l'app. */
-function applySoundSwitch(){
-  var t=document.getElementById("sound-toggle");
-  if(t)t.classList.toggle("on",!!soundEnabled);
-  // C'est la LIGNE qui porte le role de commutateur (cible tactile pleine
-  // largeur) : c'est donc elle qui doit annoncer l'etat aux lecteurs d'ecran.
-  var row=document.getElementById("sound-row");
-  if(row)row.setAttribute("aria-checked",soundEnabled?"true":"false");
-}
-function toggleSound(){
-  soundEnabled=!soundEnabled;
-  localStorage.setItem("magosound",soundEnabled?"1":"0");
-  applySoundSwitch();
-  if(soundEnabled)setTimeout(function(){playSound("pop");},50);
-}
-function initSoundToggle(){ applySoundSwitch(); }
-function haptic(type){
-  try{
-    if(!navigator.vibrate)return;
-    if(type==="win")navigator.vibrate([15,30,15]);
-    else if(type==="can")navigator.vibrate([10,25,45]);
-    else if(type==="err")navigator.vibrate(35);
-    else navigator.vibrate(10);
-  }catch(e){}
-}
-function playSound(type){
-  haptic(type);
-  if(!soundEnabled)return;
-  try{
-    var ac=getAC();if(!ac)return;
-    var o=ac.createOscillator(),g=ac.createGain();
-    o.connect(g);g.connect(ac.destination);
-    var t=ac.currentTime;
-    if(type==="pop"){o.frequency.setValueAtTime(600,t);o.frequency.exponentialRampToValueAtTime(300,t+.1);g.gain.setValueAtTime(.3,t);g.gain.exponentialRampToValueAtTime(.001,t+.15);o.start(t);o.stop(t+.15);}
-    else if(type==="win"){[523,659,784].forEach(function(f,i){var o2=ac.createOscillator(),g2=ac.createGain();o2.connect(g2);g2.connect(ac.destination);o2.frequency.value=f;g2.gain.setValueAtTime(.2,t+i*.1);g2.gain.exponentialRampToValueAtTime(.001,t+i*.1+.15);o2.start(t+i*.1);o2.stop(t+i*.1+.15);});}
-    else if(type==="beep"){o.frequency.setValueAtTime(1000,t);g.gain.setValueAtTime(.2,t);g.gain.exponentialRampToValueAtTime(.001,t+.08);o.start(t);o.stop(t+.08);}
-    else if(type==="err"){o.frequency.setValueAtTime(200,t);g.gain.setValueAtTime(.2,t);g.gain.exponentialRampToValueAtTime(.001,t+.2);o.start(t);o.stop(t+.2);}
-    else if(type==="can"){
-      // Ouverture de canette : petit "pop" + pschitt (bruit filtre qui decroit).
-      var _d=0.5,_buf=ac.createBuffer(1,Math.max(1,Math.floor(ac.sampleRate*_d)),ac.sampleRate),_dat=_buf.getChannelData(0);
-      for(var _i=0;_i<_dat.length;_i++){var _tt=_i/_dat.length;_dat[_i]=(Math.random()*2-1)*Math.pow(1-_tt,2);}
-      var _src=ac.createBufferSource();_src.buffer=_buf;
-      var _hp=ac.createBiquadFilter();_hp.type="highpass";_hp.frequency.value=850;
-      var _gn=ac.createGain();_gn.gain.setValueAtTime(.3,t);_gn.gain.exponentialRampToValueAtTime(.001,t+_d);
-      _src.connect(_hp);_hp.connect(_gn);_gn.connect(ac.destination);_src.start(t);_src.stop(t+_d);
-      var _o=ac.createOscillator(),_g=ac.createGain();_o.connect(_g);_g.connect(ac.destination);
-      _o.frequency.setValueAtTime(430,t);_o.frequency.exponentialRampToValueAtTime(170,t+.1);
-      _g.gain.setValueAtTime(.22,t);_g.gain.exponentialRampToValueAtTime(.001,t+.13);_o.start(t);_o.stop(t+.13);
-    }
-  }catch(e){}
-}
-
-/* ================================
-   TOAST
-================================ */
-function toast(msg){
-  var t=document.getElementById("toast");
-  t.textContent=msg;t.classList.add("show");
-  setTimeout(function(){t.classList.remove("show");},2500);
-}
 
 /* ================================
    LANGUAGE

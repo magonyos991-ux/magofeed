@@ -2857,6 +2857,8 @@ window.fbLoadCommunityData();
 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
 
 <script src="data/drinks.js"></script>
+<script src="data/state.js"></script>
+<script src="data/ui.js"></script>
 <script src="data/i18n.js"></script>
 <script>
 /* ================================
@@ -3298,18 +3300,19 @@ function freshnessInfo(s,did){
   return{label:lbl,col:"var(--s2)",bg:"var(--bg3)",f:.4};
 }
 function doConfirm(btn,sid,did,val){
+  var bar;
   if(!awardFree("conf:"+sid+":"+did,24)){
     toast("D\u00e9j\u00e0 pris en compte aujourd'hui pour ce magasin");playSound("err");return;
   }
   if(val===1){
     var isDarkConfirm=document.body.classList.contains("dark");
-    var bar=btn.parentElement;
+    bar=btn.parentElement;
     bar.innerHTML=
       '<span style="font-size:12px;font-weight:500;color:var(--s2)">Prix vu ?</span>'+
       '<input id="price-input-'+sid+'" type="number" step="0.10" min="0" max="20" placeholder="ex: 1.30" style="width:80px;padding:5px 8px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:13px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none">'+
       '<button onclick="confirmWithPrice(\''+sid+'\','+did+')" style="padding:6px 12px;border-radius:20px;background:'+(isDarkConfirm?"#f0f0f0":"#1a1714")+';color:'+(isDarkConfirm?"#1a1714":"#fff")+';border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">OK</button>';
   } else {
-    var bar=btn.parentElement;
+    bar=btn.parentElement;
     bar.innerHTML='<span style="font-size:12px;font-weight:600;color:var(--s2)">Merci pour ta contribution !</span>';
     var s=STORES.find(function(x){return x.id===sid||x.id===String(sid);});if(!s)return;
     if(!s.confirmations[did])s.confirmations[did]=0;
@@ -5714,7 +5717,11 @@ function getBrandGroups(){
 /* Logos officiels des grandes marques (service Clearbit, usage nominatif :
    identifier la marque de ses propres produits). Marque absente de la carte
    ou logo qui ne charge pas -> monogramme, jamais de case vide. */
-var BRAND_DOMAINS={
+/* Logos des MARQUES DE BOISSONS. Cette table s'appelait BRAND_DOMAINS, comme
+   celle des ENSEIGNES DE MAGASINS plus bas : la seconde declaration ecrasait
+   celle-ci au chargement, et plus aucun logo de marque ne s'affichait dans le
+   rail (227 marques, zero logo). Deux tables differentes mefient deux noms. */
+var DRINK_BRAND_DOMAINS={
   "coca-cola":"coca-cola.com","fanta":"fanta.com","monster":"monsterenergy.com",
   "prime":"drinkprime.com","pepsi":"pepsi.com","red bull":"redbull.com",
   "sprite":"sprite.com","lipton":"lipton.com","schweppes":"schweppes.com",
@@ -5748,7 +5755,7 @@ function renderBrandsRail(){
   el.innerHTML="";
   groups.forEach(function(g){
     var div=document.createElement("div");div.className="brand-tile";
-    var dom=BRAND_DOMAINS[normTxt(g.brand)];
+    var dom=DRINK_BRAND_DOMAINS[normTxt(g.brand)];
     var mono='<span style="font-weight:800;font-size:24px;letter-spacing:-0.5px;color:'+g.top.color+(dom?';display:none':'')+'">'+sanitize((g.brand||"?").charAt(0).toUpperCase())+'</span>';
     var logo=dom?'<img src="https://www.google.com/s2/favicons?domain='+dom+'&sz=128" alt="" loading="lazy" style="width:62%;height:62%;object-fit:contain" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\'">':'';
     div.innerHTML='<div class="bt-ico" style="background:'+g.top.light+'">'+logo+mono+
@@ -6750,7 +6757,8 @@ function brandColor(brand){
   var hue=Math.abs(hash)%360;
   return "hsl("+hue+",55%,42%)";
 }
-var BRAND_DOMAINS={
+/* Logos des ENSEIGNES DE MAGASINS (voir DRINK_BRAND_DOMAINS pour les marques). */
+var STORE_BRAND_DOMAINS={
   "Carrefour":"carrefour.com","Carrefour Express":"carrefour.com","Carrefour Market":"carrefour.com","Carrefour Contact":"carrefour.com",
   "Delhaize":"delhaize.be","Proxy Delhaize":"delhaize.be","AD Delhaize":"delhaize.be","Shop&6Go":"delhaize.be",
   "Lidl":"lidl.be","Aldi":"aldi.be","Colruyt":"colruyt.be","Okay":"okay.be","Spar":"spar.be",
@@ -6816,7 +6824,7 @@ function discGlyph(size){
   return '<svg width="'+z+'" height="'+z+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:block" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"/></svg>';
 }
 function storeIconHTML(s){
-  var domain=s&&s.brand?BRAND_DOMAINS[s.brand]:null;
+  var domain=s&&s.brand?STORE_BRAND_DOMAINS[s.brand]:null;
   if(!domain)return storeGlyph();
   return '<img src="https://logo.clearbit.com/'+domain+'?size=128" alt="" style="width:100%;height:100%;object-fit:contain;padding:6px;box-sizing:border-box;border-radius:inherit;background:#fff" onerror="if(this.parentNode)this.parentNode.innerHTML=storeGlyph()">';
 }
@@ -12965,13 +12973,11 @@ var TUTO_STEPS=[
 ];
 function getRelativeRect(el){var app=document.getElementById("app");var top=0,left=0,node=el;while(node&&node!==app){top+=node.offsetTop;left+=node.offsetLeft;node=node.offsetParent;}return{top:top,left:left,width:el.offsetWidth,height:el.offsetHeight,appW:app.offsetWidth,appH:app.offsetHeight};}
 var tutoStep=0;
-function tutoStart(){
-  return; // Tutoriel a bulles retire : l'app doit rester evidente, sans coach-marks qui pointent les boutons.
-  if(localStorage.getItem("magotuto")==="1")return;
-  var overlay=document.getElementById("tuto-overlay");if(!overlay)return;
-  overlay.style.display="block";overlay.style.opacity="0";tutoStep=0;tutoShow(0);
-  setTimeout(function(){overlay.style.opacity="1";},50);
-}
+/* Tutoriel a bulles retire : l'app doit rester evidente, sans coach-marks qui
+   pointent les boutons. La fonction reste (des appelants la nomment encore),
+   mais son corps est parti : garde derriere un "return", il n'etait plus lu
+   par personne et faisait croire que le tutoriel pouvait encore s'ouvrir. */
+function tutoStart(){}
 function tutoShow(i){
   var step=TUTO_STEPS[i];if(!step)return tutoEnd();
   var hole=document.getElementById("tuto-hole"),card=document.getElementById("tuto-card"),arrow=document.getElementById("tuto-arrow");
