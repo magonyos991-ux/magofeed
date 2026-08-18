@@ -792,7 +792,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div class="res-emoji" id="sd-emoji"></div>
           <div style="flex:1">
             <div id="sd-name" style="font-size:17px;font-weight:800;color:#fff"></div>
-          <div id="sd-partner" style="display:none;margin-top:3px"><span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.18);font-size:10.5px;font-weight:800;color:#fff">★ Partenaire vérifié · rayon photographié sur place</span></div>
+          <div id="sd-partner" style="display:none;margin-top:3px"><span style="display:inline-flex;align-items:center;gap:6px;padding:3px 11px;border-radius:999px;background:rgba(37,99,235,.92);font-size:10.5px;font-weight:800;color:#fff"><svg width="11" height="11" viewBox="0 0 24 24" style="display:block;flex-shrink:0"><path fill="#fff" d="M12 2.4 4.4 5.9v6c0 4.6 3.2 8.5 7.6 9.7 4.4-1.2 7.6-5.1 7.6-9.7v-6L12 2.4z"/></svg>Magasin certifié · rayon vérifié sur place</span></div>
             <div id="sd-sub" style="font-size:12px;color:rgba(255,255,255,.8);font-weight:500;margin-top:2px"></div>
             <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap" id="sd-badges"></div>
           </div>
@@ -7925,16 +7925,18 @@ function populateClusterMarkers(cluster){
     // Filtre "en stock seulement" : on ne garde QUE les magasins qui l'ont vraiment
     // (vert coche), pour savoir ou ALLER a coup sur plutot qu'ou essayer.
     if(window._mapInStockOnly&&status!=="sure")return;
-    var pinCls="mago-pin"+(isOpen===false?" closed":"")+(status==="sure"?" sure":status==="no"?" no":" maybe");
+    var certif=storeCertifie(s);
+    var pinCls="mago-pin"+(isOpen===false?" closed":"")+(status==="sure"?" sure":status==="no"?" no":" maybe")+(certif?" certif":"");
     var big=status==="sure";
-    var badge=status==="sure"?'<span class="pin-check">\u2713</span>':(status==="no"?'<span class="pin-no">\u2715</span>':'<span class="pin-maybe">?</span>');
+    var badge=(status==="sure"?'<span class="pin-check">\u2713</span>':(status==="no"?'<span class="pin-no">\u2715</span>':'<span class="pin-maybe">?</span>'))+
+      (certif?pinCertifBadge():"");
     var storeIcon=L.divIcon({
       html:'<div class="'+pinCls+'" style="--pc:'+color+'">'+
         '<div class="mago-pin-head">'+initial+badge+'</div>'+
         '<div class="mago-pin-tip"></div></div>',
       className:"",iconSize:big?[38,49]:[28,36],iconAnchor:big?[19,49]:[14,36]
     });
-    var marker=L.marker([s.lat,s.lng],{icon:storeIcon,zIndexOffset:status==="sure"?600:(status==="no"?0:200)});
+    var marker=L.marker([s.lat,s.lng],{icon:storeIcon,zIndexOffset:status==="sure"?600:(status==="no"?0:(certif?450:200))});
     marker._brand=s.brand||"";
     var storeIdForSheet=String(s.id);
     marker.on("click",function(){routeFromMarker(storeIdForSheet);});
@@ -9431,8 +9433,29 @@ function reverseGeocodeAddr(lat,lng,cb){
       cb&&cb(full||"");
     }).catch(function(){if(!done){done=true;clearTimeout(to);cb&&cb("");}});
 }
-function storeIsPartner(s){
-  return !!(s&&s.verifiedSource&&String(s.verifiedSource).indexOf("photos")!==-1);
+/* ── CERTIFIE : la confiance dans le MAGASIN ──────────────────────────────
+   A ne pas confondre avec le vert, qui parle d'une BOISSON precise (« elle est
+   bien en stock ici »). Le bleu parle de l'etablissement : rayon verifie sur
+   place, tenu a jour, fiable. Les deux se cumulent, et c'est voulu — un
+   magasin certifie qui a en plus la boisson que tu cherches, c'est le meilleur
+   des cas, et ca doit se voir d'un coup d'oeil.
+
+   Deux sources aujourd'hui, une seule fonction pour ne jamais diverger :
+     - certified:true, pose plus tard par le tableau de bord commercant ;
+     - verifiedSource contenant "photos" (rayon photographie sur place). */
+function storeCertifie(s){
+  if(!s)return false;
+  if(s.certified===true)return true;
+  return !!(s.verifiedSource&&String(s.verifiedSource).indexOf("photos")!==-1);
+}
+// Ancien nom, garde parce qu'il est appele ailleurs.
+function storeIsPartner(s){ return storeCertifie(s); }
+/* Pastille bleue du pin. Un bouclier plein, pas une coche : la coche verte
+   voisine dit « en stock », et deux coches de couleurs differentes sur le meme
+   pin, personne ne les distingue. */
+function pinCertifBadge(){
+  return '<span class="pin-certif" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24">'+
+    '<path fill="#fff" d="M12 2.4 4.4 5.9v6c0 4.6 3.2 8.5 7.6 9.7 4.4-1.2 7.6-5.1 7.6-9.7v-6L12 2.4z"/></svg></span>';
 }
 /* Carte "mission" en haut de l'écran magasin : incite à contribuer (scan) et
    montre la progression (points / niveau) -> rétention. */
@@ -11684,8 +11707,10 @@ function exploreLoadStores(useCache){
       var sure=did?(hasDrink&&(storeVerifiedFor(s,did)||conf>0)):false;
       var closed=storeOpenState(s)===false;
       // vend & confirme = vert coche ; vend = point de marque ; ne vend pas = gris (contexte alentour)
-      var cls="mago-pin"+(closed?" closed":"")+(sure?" sure":"");
-      var badge=sure?'<span class="pin-check">✓</span>':"";
+      // + BLEU : magasin certifie. Independant du vert, donc cumulable.
+      var certif=storeCertifie(s);
+      var cls="mago-pin"+(closed?" closed":"")+(sure?" sure":"")+(certif?" certif":"");
+      var badge=(sure?'<span class="pin-check">✓</span>':"")+(certif?pinCertifBadge():"");
       var ctx=(exploreFilter&&!hasDrink)?"opacity:.4;filter:grayscale(1)":"";
       // Vignette PRIX : au-dessus des magasins qui vendent la boisson regardée,
       // uniquement quand on a zoomé (sinon la carte serait noyée de bulles).
@@ -11698,7 +11723,7 @@ function exploreLoadStores(useCache){
           priceTag='<div style="position:absolute;left:50%;top:-15px;transform:translateX(-50%);background:#fff;color:#12100e;font-size:10.5px;font-weight:800;line-height:1;padding:3px 7px;border-radius:999px;white-space:nowrap;box-shadow:0 2px 7px rgba(0,0,0,.32);border:1px solid rgba(0,0,0,.08);z-index:5">'+_ptxt+'</div>';
         }
       }
-      var mk=L.marker([s.lat,s.lng],{icon:L.divIcon({className:"",html:'<div class="'+cls+'" style="position:relative;--pc:'+pc+';width:30px;height:39px;'+ctx+'">'+priceTag+'<div class="mago-pin-head" style="width:30px;height:30px;font-size:12px">'+ini+badge+'</div><div class="mago-pin-tip" style="width:11px;height:11px;bottom:2px"></div></div>',iconSize:[30,39],iconAnchor:[15,39]}),zIndexOffset:sure?600:(hasDrink?300:0)});
+      var mk=L.marker([s.lat,s.lng],{icon:L.divIcon({className:"",html:'<div class="'+cls+'" style="position:relative;--pc:'+pc+';width:30px;height:39px;'+ctx+'">'+priceTag+'<div class="mago-pin-head" style="width:30px;height:30px;font-size:12px">'+ini+badge+'</div><div class="mago-pin-tip" style="width:11px;height:11px;bottom:2px"></div></div>',iconSize:[30,39],iconAnchor:[15,39]}),zIndexOffset:sure?600:(certif?450:(hasDrink?300:0))});
       mk.on("click",function(e){
         if(e&&e.originalEvent&&window.L&&L.DomEvent){try{L.DomEvent.stopPropagation(e.originalEvent);}catch(_e){}}
         try{if(exploreMap.panTo)exploreMap.panTo([s.lat,s.lng]);}catch(_e){}
