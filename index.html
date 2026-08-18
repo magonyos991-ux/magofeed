@@ -46,7 +46,17 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!-- POLICE — chargée SANS BLOQUER le démarrage.
+     Une feuille de styles externe est bloquante : le navigateur refuse
+     d'exécuter le moindre script tant qu'elle n'a pas répondu. Celle-ci vient
+     de Google : quand le réseau est mauvais — un magasin, un sous-sol, la
+     rue — l'app entière attendait une police, alors que tout son code était
+     déjà en cache et prêt à s'afficher.
+     media="print" : le navigateur la juge non prioritaire et ne bloque plus
+     rien ; onload la repasse en "all" dès qu'elle arrive. Le texte s'affiche
+     tout de suite dans la police de secours, puis bascule (display=swap). -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap"></noscript>
 <link rel="stylesheet" href="app.css">
 </head>
 <body class="light">
@@ -3021,7 +3031,18 @@ window.fbLoadCommunityData();
 </script>
 
 <!-- Quagga -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+<!-- Lecteur de code-barre (scanner uniquement) — CHARGÉ EN "defer".
+     Sans defer, ce script d'un autre domaine BLOQUE le démarrage de toute
+     l'app : le navigateur refuse d'exécuter data/drinks.js tant que le CDN
+     n'a pas répondu. Sur une connexion faible — un magasin, un sous-sol,
+     exactement là où on ouvre Magofeed — l'écran restait vide en attendant
+     un fichier dont on n'a besoin qu'au moment de scanner. Hors-ligne,
+     l'app ne démarrait carrément pas.
+     "async" plutôt que "defer" : defer ne bloque plus le rendu mais retarde
+     encore DOMContentLoaded, alors qu'async n'attend rien du tout. Quagga
+     n'est appelé que dans startScan(), jamais au chargement : l'ordre
+     d'exécution n'a aucune importance ici. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js" async></script>
 
 <script src="data/drinks.js"></script>
 <script src="data/state.js"></script>
@@ -4218,6 +4239,15 @@ function startScan(){
       btn.style.display="none";
       document.getElementById("scan-result").style.display="none";
       if(quaggaRunning)return;
+      /* Le lecteur vient d'un CDN : hors-ligne ou CDN injoignable, il peut
+         manquer. Sans ce garde, l'erreur remontait dans le .catch du bas et
+         affichait « Accès caméra refusé » — un message faux, qui envoyait la
+         personne fouiller les réglages de son téléphone pour rien. */
+      if(typeof Quagga==="undefined"){
+        hint.textContent="\u2715 Lecteur de code-barre indisponible \u2014 v\u00e9rifie ta connexion";
+        btn.style.display="";
+        return;
+      }
       Quagga.init({inputStream:{type:"LiveStream",target:video,constraints:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}}},locator:{patchSize:"medium",halfSample:true},decoder:{readers:["ean_reader","ean_8_reader","code_128_reader","upc_reader"]}},
         function(err){
           if(err){hint.textContent="✕ "+err;return;}

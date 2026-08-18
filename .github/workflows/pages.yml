@@ -49,6 +49,17 @@ jobs:
           npx playwright install --with-deps chromium
           node growth/build-share-pages.js
         continue-on-error: true
+      # Version du cache = empreinte du commit. C'est ce qui remplace le bump
+      # manuel de CACHE_NAME dans sw.js — oublié plusieurs fois, ce qui bloquait
+      # les gens sur une vieille version et avait imposé le mode "réseau
+      # d'abord" : l'app attendait le réseau à chaque lancement, même avec une
+      # copie valide en cache. Maintenant : chaque déploiement = un cache neuf,
+      # donc l'app peut partir du cache et s'ouvrir instantanément, sans jamais
+      # rester périmée.
+      - name: Stamp service worker cache version
+        run: |
+          sed -i "s/magofeed-__BUILD_ID__/magofeed-${GITHUB_SHA::12}/" sw.js
+          grep -n 'CACHE_NAME =' sw.js
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
