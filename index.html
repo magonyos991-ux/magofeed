@@ -5385,25 +5385,10 @@ function shareContent(title,text,url){
    ce sont ces versions-la qui s'executent. Les doublons qui vivaient ici ne
    servaient qu'a egarer celui qui cherche pourquoi un partage ne fait pas ce
    qu'il croit. */
-function handleDeepLink(){
-  var h=location.hash||"";
-  var m=h.match(/^#(drink|store)=(.+)$/);
-  if(!m)return;
-  var kind=m[1],id=decodeURIComponent(m[2]);
-  if(kind==="drink"){
-    var d=DRINKS.find(function(x){return String(x.id)===id;});
-    if(d)setTimeout(function(){pick(d);},600);
-    return;
-  }
-  // Magasin : il faut attendre que les magasins soient charges (Firestore ou cache)
-  var tries=0;
-  var iv=setInterval(function(){
-    tries++;
-    var s=(STORES||[]).find(function(x){return String(x.id)===id||String(x.fbId)===id;});
-    if(s){clearInterval(iv);openStoreDetail(String(s.id));return;}
-    if(tries>20){clearInterval(iv);toast("Magasin du lien hors de ta zone actuelle");}
-  },500);
-}
+/* handleDeepLink vit plus bas (recherche "stopmails") : une seconde
+   declaration du meme nom ecrasait celle-ci en silence, et c'est la version
+   du bas qui tournait depuis toujours. Le doublon ne servait qu'a faire
+   croire, en lisant ici, que les liens partages passaient par ce code. */
 
 /* ================================
    MODE HORS-LIGNE (IndexedDB)
@@ -11879,6 +11864,14 @@ function showFindLanding(d){
     setTimeout(close,14000);
   }catch(e){}
 }
+/* Lien profond deja honore. Le catalogue communautaire arrive APRES le
+   premier passage : handleDeepLink est donc rejouee quand il atterrit. Sans ce
+   verrou, l'onglet ou la fiche se rouvrirait sous les doigts de quelqu'un qui
+   a navigue entre-temps. On ne scelle QU'EN CAS DE SUCCES : tant que la
+   boisson reste introuvable, on garde le droit de reessayer. */
+var _deepLinkDone="";
+function _deepLinkSeal(){ _deepLinkDone=location.hash||""; }
+function _deepLinkSealed(){ return !!_deepLinkDone && _deepLinkDone===(location.hash||""); }
 function handleDeepLink(){
   // Desabonnement en un clic depuis un e-mail (#stopmails=uid) : obligation
   // legale. On coupe le consentement sans demander de se connecter d'abord.
@@ -11895,6 +11888,8 @@ function handleDeepLink(){
   // Le manifest pointe vers #tab=scan, #tab=search, etc. On route vers l'onglet.
   var mt=(location.hash||"").match(/#tab=(home|search|scan|discover|profile)/);
   if(mt){
+    if(_deepLinkSealed())return;
+    _deepLinkSeal();
     var target=mt[1];
     var goTab=function(n){
       if(typeof navTo==="function"){try{navTo(target);}catch(e){}}
@@ -11905,22 +11900,47 @@ function handleDeepLink(){
   }
   var m=(location.hash||"").match(/#drink=(\d+)/);
   if(m){
-    var d=DRINKS.find(function(x){return Number(x.id)===Number(m[1]);});
-    if(d){try{pick(d);}catch(e){setTimeout(function(){try{pick(d);}catch(e2){}},600);}
-      setTimeout(function(){showFindLanding(d);},1000);}
+    if(_deepLinkSealed())return;
+    var wanted=Number(m[1]);
+    /* Une boisson vient soit du catalogue local (data/drinks.js, deja en
+       memoire au premier passage), soit du catalogue COMMUNAUTAIRE, qui
+       n'entre dans DRINKS qu'au retour de Firestore (evenement
+       fbCatalogLoaded, plusieurs secondes plus tard sur mobile).
+       Sans reessai, un lien partage vers une boisson de la communaute
+       retombait en silence sur l'accueil : DRINKS.find echouait au premier
+       passage et plus personne ne repassait. C'est exactement la patience
+       qu'a deja la branche magasin juste en dessous. */
+    var tryPick=function(attempt){
+      if(_deepLinkSealed())return;
+      var d=DRINKS.find(function(x){return Number(x.id)===wanted;});
+      if(d){
+        _deepLinkSeal();
+        try{pick(d);}catch(e){setTimeout(function(){try{pick(d);}catch(e2){}},600);}
+        setTimeout(function(){showFindLanding(d);},1000);
+        return;
+      }
+      if(attempt<8){setTimeout(function(){tryPick(attempt+1);},700);return;}
+      /* Le catalogue est arrive et la boisson n'y est pas (fiche retiree,
+         fusionnee, lien bricole) : le dire vaut mieux qu'un lien qui n'a
+         l'air de rien faire. */
+      if(communityCatalogLoaded)toast("Cette boisson n'est plus au catalogue");
+    };
+    tryPick(0);
     return;
   }
   // Lien de MAGASIN (#store=ID) : le kit partenaire — un QR sur le frigo d'un
   // commercant ouvre directement SA fiche avec tout son rayon.
   var ms=(location.hash||"").match(/#store=([A-Za-z0-9_-]+)/);
   if(ms){
+    if(_deepLinkSealed())return;
     var sid=decodeURIComponent(ms[1]);
     var tryOpen=function(attempt){
       var s=(STORES||[]).find(function(x){return String(x.id)===sid||String(x.fbId)===sid;});
-      if(s){try{openStoreDetail(s.id);}catch(e){}return;}
+      if(s){_deepLinkSeal();try{openStoreDetail(s.id);}catch(e){}return;}
       if(window.fbGetStore){
         window.fbGetStore(sid).then(function(st){
           if(st){
+            _deepLinkSeal();
             if(!(STORES||[]).some(function(x){return String(x.id)===String(st.id);}))STORES.push(st);
             try{openStoreDetail(st.id);}catch(e){}
           }else if(attempt<3){setTimeout(function(){tryOpen(attempt+1);},900);}
@@ -14375,6 +14395,11 @@ try{
     // quand la fiche n'existait pas encore -> override ignore).
     if(window.applyDrinkNames)window.applyDrinkNames();
     if(rows.length)idbSet("catalog:last",{ts:Date.now(),rows:rows});
+    /* Un visiteur arrive par un lien partage vers une boisson de la
+       communaute a deja traverse handleDeepLink AVANT ce catalogue : la
+       boisson n'existait pas encore en memoire. On rejoue le lien maintenant
+       qu'elle est la (le verrou _deepLink* evite toute double ouverture). */
+    try{handleDeepLink();}catch(e){}
   });
   // Retour de connexion : relancer les chargements clés. Sans ça, une app
   // démarrée hors-ligne (sans cache) ne se remplissait jamais seule au retour
