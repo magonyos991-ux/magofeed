@@ -494,6 +494,19 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <div class="theme-btn" id="tm-dark" onclick="setMode('dark')"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg> <span data-i18n="themeDark">Sombre</span></div>
         <div class="theme-btn" id="tm-auto" onclick="setMode('auto')"><span data-i18n="themeAuto">Auto</span></div>
       </div>
+      <div class="set-sec">Position</div>
+      <div class="set-group">
+        <div id="geo-row" class="set-row static sw-row" role="switch" aria-checked="false" tabindex="0" aria-label="Localisation" onclick="toggleGeo()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleGeo();}">
+          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></div>
+          <div class="set-txt"><div class="set-title">Localisation</div><div class="set-sub" id="geo-state">Vérification…</div></div>
+          <div id="geo-toggle" class="sw" aria-hidden="true"><div class="sw-knob"></div></div>
+        </div>
+        <div id="geo-refresh-row" class="set-row" style="display:none" onclick="geoActualiser()" role="button" tabindex="0" aria-label="Actualiser ma position" onkeydown="if(event.key==='Enter'){geoActualiser();}">
+          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg></div>
+          <div class="set-txt"><div class="set-title">Actualiser ma position</div><div class="set-sub">Utile si tu as changé de quartier et que les magasins proposés sont restés les mêmes</div></div>
+          <span class="set-chev">›</span>
+        </div>
+      </div>
       <div class="set-sec" data-i18n="notifsSec">Notifications</div>
       <div class="set-group">
         <div id="push-row" class="set-row static sw-row" role="switch" aria-checked="false" tabindex="0" aria-label="Notifications" onclick="togglePush()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();togglePush();}">
@@ -1226,6 +1239,13 @@ onAuthStateChanged(auth, async function(user) {
     if (!window._hbTimer) window._hbTimer = setInterval(function() {
       if (document.visibilityState === "visible") window.fbHeartbeat();
     }, 45000);
+    // Retour sur l'app : on bat TOUT DE SUITE, sans attendre le prochain tic.
+    if (!window._hbVis) {
+      window._hbVis = true;
+      document.addEventListener("visibilitychange", function() {
+        if (document.visibilityState === "visible") { try { window.fbHeartbeat(); } catch (e) {} }
+      });
+    }
   } catch (e) {}
 });
 
@@ -2960,6 +2980,83 @@ function setAccent(d){accentColor=d?d.color:"#1a1714";accentLight=d?d.light:"#f0
 /* ================================
    GPS
 ================================ */
+/* ── ETAT REEL DE L'AUTORISATION ──────────────────────────────────────────
+   Un navigateur ne dit jamais « j'ai refuse » : getCurrentPosition echoue, et
+   c'est tout. Sur iPhone, une fois refusee, la demande ne reapparait PLUS
+   JAMAIS depuis la page — seuls les Reglages du telephone peuvent la rendre.
+   Sans cette lecture, l'app restait muette et l'utilisateur croyait a un bug
+   (« il ne me demande meme pas la localisation »).
+   navigator.permissions manque sur les vieux Safari : on repond alors
+   "inconnu" au lieu de deviner. */
+function geoEtat(cb){
+  try{
+    if(navigator.permissions&&navigator.permissions.query){
+      navigator.permissions.query({name:"geolocation"}).then(function(p){
+        cb(p.state);
+        try{p.onchange=function(){try{renderGeoRow();}catch(e){}};}catch(e){}
+      }).catch(function(){cb("inconnu");});
+      return;
+    }
+  }catch(e){}
+  cb("inconnu");
+}
+function renderGeoRow(){
+  var row=document.getElementById("geo-row");
+  if(!row)return;
+  var sub=document.getElementById("geo-state");
+  var sw=document.getElementById("geo-toggle");
+  var maj=document.getElementById("geo-refresh-row");
+  var aPos=(typeof userLat==="number"&&!!userLat);
+  geoEtat(function(etat){
+    var on=false,txt="";
+    if(etat==="denied"){
+      // On ne peut RIEN faire depuis la page : on le dit, avec le chemin exact.
+      txt="Refusée. Pour la réactiver : Réglages du téléphone, puis Magofeed (ou Safari), puis Position.";
+    }else if(aPos){
+      on=true;
+      txt="Activée — les magasins autour de toi sont triés par distance.";
+    }else if(etat==="granted"){
+      on=true;
+      txt="Autorisée — recherche de ta position en cours…";
+    }else{
+      txt="Désactivée. Sans elle, Magofeed montre les magasins du centre par défaut, pas les tiens. Appuie pour l'activer.";
+    }
+    if(sw)sw.classList.toggle("on",on);
+    row.setAttribute("aria-checked",on?"true":"false");
+    if(sub)sub.textContent=txt;
+    if(maj)maj.style.display=(on&&aPos)?"flex":"none";
+  });
+}
+function toggleGeo(){
+  var aPos=(typeof userLat==="number"&&!!userLat);
+  geoEtat(function(etat){
+    if(etat==="denied"){
+      playSound("err");
+      toast("Refusée par le téléphone — va dans Réglages > Magofeed > Position");
+      return;
+    }
+    if(aPos){
+      // On ne peut pas retirer une autorisation depuis la page : le dire, plutot
+      // que de faire semblant d'eteindre un interrupteur qui se rallumerait.
+      toast("Pour la couper, passe par les Réglages de ton téléphone");
+      return;
+    }
+    // Demande DECLENCHEE PAR UN TAP : c'est le seul moment ou iOS affiche
+    // la fenetre de facon fiable.
+    playSound("pop");
+    toast("Recherche de ta position…");
+    try{initGPS();}catch(e){}
+    setTimeout(function(){try{renderGeoRow();}catch(e){}},1500);
+  });
+}
+function geoActualiser(){
+  playSound("pop");
+  toast("Actualisation…");
+  try{refreshLocation(function(ok){
+    toast(ok?"Position mise à jour":"Position introuvable — réessaie dehors ou près d'une fenêtre");
+    try{renderGeoRow();}catch(e){}
+  },{fresh:true});}catch(e){}
+}
 function initGPS(){
   if(!navigator.geolocation)return;
   // enableHighAccuracy : force le VRAI GPS plutôt qu'une estimation par
@@ -2977,6 +3074,11 @@ function initGPS(){
     // qu'un futur initGPS puisse replanifier un raffinage.
     if(_acc>200&&!window._gpsRefineT){window._gpsRefineT=setTimeout(function(){window._gpsRefineT=null;try{refreshLocation(null,{fresh:true});}catch(e){}},7000);}
     if(window.fbUpdatePushPosition)window.fbUpdatePushPosition(userLat,userLng); // serveur = ta vraie position
+    /* Battement IMMEDIAT. Sans lui, la position n'atteignait presence/{uid}
+       qu'au battement suivant, 45 s plus tard — que presque personne
+       n'atteint. D'ou « position non partagee » sur tout le monde. */
+    if(window.fbHeartbeat)try{window.fbHeartbeat();}catch(e){}
+    try{renderGeoRow();}catch(e){}
     // Chasses : on ne les ancre PAS sur un fix grossier (>200 m) — le
     // raffinage a +7 s s'en chargera avec la vraie position.
     if(window.fbRepositionMyHunts&&!window._huntsRepositioned&&(drinkWatches||[]).length&&_acc<=200){window._huntsRepositioned=true;window.fbRepositionMyHunts(userLat,userLng,drinkWatches);}
@@ -3004,6 +3106,7 @@ function initGPS(){
     // Et on SOLDE l'etat provisoire : la note "actualisation…" promettrait une
     // mise a jour qui ne viendra pas. GPS refuse = on lache aussi la position
     // restauree (l'accueil repasse honnetement sur "Active ta position").
+    try{renderGeoRow();}catch(e){}
     if(window._posProvisional){
       window._posProvisional=false;
       if(err&&err.code===1){userLat=null;userLng=null;}
@@ -3063,6 +3166,8 @@ function refreshLocation(cb,opts){
     try{localStorage.setItem("magoLastPos",JSON.stringify({lat:userLat,lng:userLng,ts:Date.now(),acc:Math.round(pos.coords.accuracy||0)}));}catch(e){}
     _lastGpsRefresh=Date.now();
     if(window.fbUpdatePushPosition)window.fbUpdatePushPosition(userLat,userLng); // serveur = ta vraie position
+    if(window.fbHeartbeat)try{window.fbHeartbeat();}catch(e){}   // meme raison qu'au demarrage
+    try{renderGeoRow();}catch(e){}
     if(window.fbRepositionMyHunts&&!window._huntsRepositioned&&(drinkWatches||[]).length){window._huntsRepositioned=true;window.fbRepositionMyHunts(userLat,userLng,drinkWatches);}
     STORES.forEach(function(s){if(typeof s.lat==="number")s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));});
     STORES.sort(function(a,b){return(a.dist||0)-(b.dist||0);});
@@ -3186,6 +3291,7 @@ function show(s){
 function _showRaw(s){
   if(s==="profile"){try{updateProfileStats();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
+  if(s==="settings"){try{renderGeoRow();}catch(e){}}
   if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{renderHunts();}catch(e){}
     // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
     // le filtre boisson de la carte (sinon la carte rouvrait toujours sur la derniere
@@ -14345,9 +14451,24 @@ try{
   renderFavs();
   renderBadges();
   applyAvatarEverywhere();
-  // GPS demande DES le lancement (le pere de l'utilisateur voyait la demande
-  // arriver trop tard, au 1er clic) : sans position, rien n'est trie/centre.
-  initGPS();
+  /* GPS demande des le lancement — MAIS PAS PENDANT L'INTRO.
+     Deux appels se marchaient dessus : celui-ci au demarrage, et celui du
+     dernier ecran d'intro. Sur iPhone, la fenetre du premier s'ouvrait
+     DERRIERE l'intro : on tapait « Suivant », on la balayait sans la lire, et
+     iOS enregistrait un refus. Ensuite plus aucune fenetre n'apparaissait
+     jamais — d'ou « il ne me demande meme pas la localisation ».
+     Desormais : intro pas finie -> on laisse le tap final la demander (un
+     geste utilisateur, le seul chemin fiable sur iOS). */
+  try{
+    if(localStorage.getItem("magoob")==="1"){
+      // Deja refusee : reessayer echoue en silence. On affiche l'etat honnete
+      // dans les reglages plutot que de faire semblant de chercher.
+      geoEtat(function(etat){
+        if(etat==="denied"){try{renderGeoRow();}catch(e){}return;}
+        initGPS();
+      });
+    }
+  }catch(e){ initGPS(); }
   initPullToRefresh();
   initSplash();
   // Exposer au module Firebase
