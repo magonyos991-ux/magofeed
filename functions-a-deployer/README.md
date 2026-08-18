@@ -235,6 +235,11 @@ Objectif : que les points ne puissent plus être trafiqués depuis la console.
    **« VERSION STRICTE »** de `users/{uid}` (en bas de `firestore.rules`) :
    le client ne pourra plus écrire `points/discAccepted/trust/...`.
 
+> 📋 **Avant de te lancer : lis `POINTS-PHASE2-plan.md`.** L'app crédite des
+> points à **28** endroits ; ce fichier n'en couvre qu'**un**. Activer la
+> version stricte des règles aujourd'hui gèlerait les 27 autres. Le plan
+> donne l'inventaire et l'ordre par valeur du point.
+
 **Réputation (couche 1 anti-triche)** : le squelette est fourni en commentaire
 dans `points-serveur-PHASE2.js`. Il demande d'abord d'enregistrer les
 confirmations **par utilisateur** (aujourd'hui elles sont agrégées sans trace
