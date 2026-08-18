@@ -694,6 +694,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
             <b>• Compte</b> — un identifiant anonyme t'est attribué automatiquement à l'ouverture de l'app (Firebase Authentication) pour associer tes points de façon persistante. Si tu choisis de te connecter avec Google, ton nom, ta photo de profil et ton e-mail sont récupérés pour identifier ton compte.<br>
             <b>• Pseudo et statistiques</b> (signalements, confirmations, points) — stockés pour faire fonctionner le système communautaire et le classement.<br>
             <b>• Contributions</b> (confirmation de stock, signalement de rupture ou de contrefaçon) — enregistrées avec l'horodatage et le magasin concerné, sans lien direct avec ton identité civile.<br>
+            <b>• Demande de certification commerçant</b> — si tu demandes la pastille bleue pour ta boutique, ton <b>nom, ton moyen de contact</b> (téléphone ou e-mail), ton rôle et le mot que tu nous laisses sont enregistrés, pour qu'un humain puisse vérifier que tu tiens bien ce magasin. Ces informations ne sont lisibles que par l'administrateur de Magofeed et par toi. Elles sont effacées si tu supprimes ton compte, si tu retires ta demande, ou si la certification est retirée.<br>
             <b>• Préférences locales</b> (favoris, historique de recherche, thème, langue, sons) — stockées uniquement dans le stockage local de ton navigateur (localStorage), jamais transmises à nos serveurs.
           </div>
         </div>
@@ -1128,6 +1129,14 @@ window.fbDeleteAccount = async function() {
   var user = auth.currentUser;
   if (!user) throw new Error("no-user");
   try { await deleteDoc(doc(db, "users", user.uid)); } catch (e) { console.warn("delete user doc:", e); }
+  /* Une demande de certification contient un NOM et un TELEPHONE. Les laisser
+     derriere un compte supprime viderait le droit a l'effacement de son sens. */
+  try {
+    var mesDemandes = await getDocs(query(collection(db, "shopClaims"), where("by", "==", user.uid)));
+    for (var i = 0; i < mesDemandes.docs.length; i++) {
+      try { await deleteDoc(mesDemandes.docs[i].ref); } catch (e2) {}
+    }
+  } catch (e) { console.warn("delete claims:", e); }
   try {
     await deleteUser(user);
   } catch (e) {
@@ -1259,7 +1268,9 @@ const CACHE_KEY = "magoNearbyCache";
 // magasins (ex: bug "que le sud"), les caches enregistres AVANT le fix sont
 // perimes — sans ce marqueur, le telephone continuait de servir la vieille
 // tranche pendant des heures apres la mise a jour.
-const CACHE_DATA_V = "0617b";
+// 0617c : ajout de certified/owner/verifiedSource au cache. Le bump jette les
+// caches ecrits sans ces champs, qui feraient disparaitre les pastilles bleues.
+const CACHE_DATA_V = "0617c";
 // Sobriete Firestore : cache "frais" 6h (zero lecture reseau), rafraichi en
 // silence entre 6h et 24h, requete complete au-dela. Les magasins bougent
 // rarement ; les confirmations/prix, eux, arrivent par les mises a jour locales.
@@ -1391,7 +1402,16 @@ function compactStore(s) {
     id: s.id, fbId: s.fbId, name: s.name, brand: s.brand || "", emoji: s.emoji,
     lat: s.lat, lng: s.lng, type: s.type || "", hours: s.hours || null,
     dist: s.dist, drinks: s.drinks || [], drinksVerified: s.drinksVerified || [],
-    confirmations: s.confirmations || {}, community: s.community || false
+    confirmations: s.confirmations || {}, community: s.community || false,
+    /* SANS CES TROIS CHAMPS, le cache effacait la certification. Il est servi
+       tel quel pendant 6 h sans requete : un commercant certifie rouvrait
+       l'app le lendemain sans pastille bleue et sans tableau de bord.
+       verifiedSource suit pour que la reprise des rayons photographies
+       fonctionne aussi apres un demarrage sur cache. */
+    certified: s.certified === true,
+    certifiedAt: s.certifiedAt || null,
+    owner: s.owner || null,
+    verifiedSource: s.verifiedSource || null
   };
 }
 function saveStoresCache(lat, lng, radiusKm, now, stores) {
@@ -2025,7 +2045,10 @@ window.fbLoadShopClaims = async function() {
    premiere echoue on n'ecrit rien d'autre : mieux vaut une demande a
    reprendre qu'un magasin marque certifie sans dossier. */
 window.fbApproveShopClaim = async function(claim) {
-  var sid = String(claim.storeId || claim.docId);
+  /* L'ID DU DOCUMENT, jamais le champ. storeId est ecrit par le demandeur :
+     deux demandes pouvaient le pointer sur le meme magasin, et l'admin qui
+     approuvait la carte du vrai commercant executait celle de l'autre. */
+  var sid = String(claim.docId || claim.storeId);
   await setDoc(doc(db, "stores", sid), {
     certified: true,
     certifiedAt: serverTimestamp(),
@@ -2036,21 +2059,22 @@ window.fbApproveShopClaim = async function(claim) {
     decidedAt: serverTimestamp()
   }, { merge: true });
   try {
+    // fbNotifyUser pose le champ "to" — celui que fbLoadMyNotifs interroge et
+    // que les regles exigent. Un addDoc a la main avait ecrit "uid" : le
+    // document partait et restait illisible par son destinataire.
     if (claim.by) {
-      await addDoc(collection(db, "userNotifs"), {
-        uid: claim.by,
+      await window.fbNotifyUser(claim.by, {
         type: "shopCertified",
         title: "Ton magasin est certifié",
         body: String(claim.storeName || "Ta boutique") + " porte maintenant la pastille bleue. Ton tableau de bord est ouvert.",
-        read: false,
-        createdAt: serverTimestamp()
+        storeId: sid
       });
     }
   } catch (e) { console.warn("notif certif:", e && e.message); }
   return true;
 };
 window.fbRejectShopClaim = async function(claim, reason) {
-  var sid = String(claim.storeId || claim.docId);
+  var sid = String(claim.docId || claim.storeId);
   await setDoc(doc(db, "shopClaims", sid), {
     status: "rejected",
     reason: String(reason || "").slice(0, 200),
@@ -2058,13 +2082,11 @@ window.fbRejectShopClaim = async function(claim, reason) {
   }, { merge: true });
   try {
     if (claim.by) {
-      await addDoc(collection(db, "userNotifs"), {
-        uid: claim.by,
+      await window.fbNotifyUser(claim.by, {
         type: "shopRejected",
         title: "Demande de certification non retenue",
         body: (reason ? String(reason).slice(0, 160) : "Nous n'avons pas pu vérifier que tu tiens ce magasin.") + " Tu peux redemander avec plus d'éléments.",
-        read: false,
-        createdAt: serverTimestamp()
+        storeId: sid
       });
     }
   } catch (e) {}
@@ -2078,7 +2100,11 @@ window.fbRevokeCertification = async function(storeId) {
     certifiedAt: null,
     owner: null
   }, { merge: true });
-  try { await setDoc(doc(db, "shopClaims", String(storeId)), { status: "revoked", decidedAt: serverTimestamp() }, { merge: true }); } catch (e) {}
+  /* On EFFACE la demande au lieu de la marquer « retiree ». La laisser en
+     place condamnait le magasin : plus personne ne pouvait en redeposer une,
+     alors qu'une boutique qui change de main doit pouvoir etre revendiquee.
+     Effacer retire aussi le nom et le telephone d'un dossier devenu caduc. */
+  try { await deleteDoc(doc(db, "shopClaims", String(storeId))); } catch (e) {}
   return true;
 };
 /* Tableau de bord fondateur : les chiffres du jour en 5 comptages agreges
@@ -9784,11 +9810,13 @@ function renderMerchantCard(s){
   // autres, il n'y a rien a comprendre la-dedans : on laisse juste un bouton
   // discret en bas de page pour ceux qui tiennent vraiment la boutique.
   if(!mine && !isAdmin){
+    /* Un magasin deja certifie au nom de quelqu'un d'autre : proposer de le
+       revendiquer envoyait droit dans un refus. */
+    if(claim)claim.style.display=(storeCertifie(s)&&s.owner)?"none":"";
     host.innerHTML="";
     // Le tableau de bord aussi : sans ca, celui du magasin PRECEDENT restait
     // affiche sous la fiche d'un magasin qui ne nous appartient pas.
     var _b=document.getElementById("sd-board"); if(_b)_b.innerHTML="";
-    if(claim)claim.style.display="";
     return;
   }
   if(claim)claim.style.display="none";
@@ -9805,7 +9833,10 @@ function renderMerchantCard(s){
         '</div>'+
         '<button onclick="startRafale()" aria-label="Remplir ce magasin en rafale" style="flex-shrink:0;display:inline-flex;align-items:center;gap:6px;padding:11px 15px;border-radius:13px;border:none;background:#f6f1e9;color:#1a1714;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">'+icoBolt(15)+' Rafale</button>'+
       '</div>'+
-      '<div onclick="toggleMyShop(\''+String(s.id).replace(/[^A-Za-z0-9_-]/g,"")+'\')" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')this.click()" style="margin-top:9px;padding-top:9px;border-top:1px solid rgba(255,255,255,.08);text-align:center;font-size:11.5px;font-weight:700;color:#9a9088;cursor:pointer">'+(mine?"Retirer « c'est mon magasin »":"C'est mon magasin ?")+'</div>'+
+      '<div onclick="toggleMyShop(\''+String(s.id).replace(/[^A-Za-z0-9_-]/g,"")+'\')" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')this.click()" style="margin-top:9px;padding-top:9px;border-top:1px solid rgba(255,255,255,.08);text-align:center;font-size:11.5px;font-weight:700;color:#9a9088;cursor:pointer">'+
+        /* Ce bouton bascule la liste LOCALE (un simple marque-page), pas la
+           propriete validee. Le libeller d'apres « mine » melangeait les deux. */
+        (isMyShop(String(s.id))?"Retirer de mes magasins":"Ajouter à mes magasins")+'</div>'+
     '</div>';
 }
 /* ── TABLEAU DE BORD DU GERANT ────────────────────────────────────────────
@@ -9995,9 +10026,32 @@ function claimSubmit(){
     return;
   }
   if(!window.fbSubmitShopClaim){toast("Connexion indisponible — réessaie plus tard");return;}
+  /* Un compte anonyme perd son identifiant a la moindre reinstallation : le
+     magasin resterait attache a un compte qui n'existe plus, et le gerant
+     n'aurait plus acces a son propre tableau de bord. */
+  if(window._fbUser&&window._fbUser.isAnonymous){
+    try{playSound("err");}catch(e){}
+    toast("Connecte-toi d'abord — un magasin doit être rattaché à un vrai compte");
+    closeClaim();
+    setTimeout(function(){try{openAuthSheet();}catch(e){}},260);
+    return;
+  }
   var btn=document.querySelector(".claim-send");
   if(btn){btn.disabled=true;btn.textContent="Envoi…";}
-  window.fbSubmitShopClaim(s,{contact:contact,role:role,note:note}).then(function(){
+  /* Hors reseau, l'ecriture Firestore ne repond NI en succes NI en echec : le
+     bouton restait sur « Envoi... » indefiniment et on ne savait pas si la
+     demande etait partie. Douze secondes, puis on rend la main. */
+  var _fini=false;
+  var _envoi=window.fbSubmitShopClaim(s,{contact:contact,role:role,note:note});
+  setTimeout(function(){
+    if(_fini)return;
+    _fini=true;
+    if(btn){btn.disabled=false;btn.textContent="Envoyer ma demande";}
+    try{playSound("err");}catch(e){}
+    toast(navigator.onLine?"Le serveur ne répond pas — réessaie":"Pas de réseau — réessaie une fois connecté");
+  },12000);
+  _envoi.then(function(){
+    if(_fini)return; _fini=true;
     // On garde le marquage local : il sert de raccourci de travail en attendant
     // la validation, meme s'il n'ouvre plus le tableau de bord.
     try{ if(!isMyShop(String(s.id)))toggleMyShop(String(s.id).replace(/[^A-Za-z0-9_-]/g,"")); }catch(e){}
@@ -10008,6 +10062,7 @@ function claimSubmit(){
       title:"Demande de certification envoyée",
       body:"Pour "+s.name+". Un humain la vérifie, tu seras prévenu ici même.",ts:Date.now()});}catch(e){}
   }).catch(function(e){
+    if(_fini)return; _fini=true;
     if(btn){btn.disabled=false;btn.textContent="Envoyer ma demande";}
     try{playSound("err");}catch(e2){}
     /* permission-denied ici veut dire une chose precise : un document existe
@@ -14288,7 +14343,7 @@ function renderShopClaims(){
     h+='<div class="cl-head">Demandes de commerçants'+(attente.length?' <span class="cl-count">'+attente.length+' en attente</span>':'')+'</div>';
     h+=attente.concat(reste).map(function(r){
       var enAttente=(r.status||"pending")==="pending";
-      var sid=String(r.storeId||r.docId).replace(/'/g,"\\'");
+      var sid=String(r.docId||r.storeId).replace(/'/g,"\\'");
       return '<div class="cl-card'+(enAttente?" hot":"")+'">'+
         '<div class="cl-top">'+
           '<div class="cl-name">'+sanitize(r.storeName||"(magasin sans nom)")+'</div>'+
@@ -14297,7 +14352,8 @@ function renderShopClaims(){
         '<div class="cl-line"><b>Contact</b> '+sanitize(r.contact||"—")+'</div>'+
         '<div class="cl-line"><b>Rôle</b> '+sanitize(r.role||"—")+'</div>'+
         (r.note?'<div class="cl-line"><b>Mot</b> '+sanitize(r.note)+'</div>':'')+
-        '<div class="cl-line quiet">Compte '+sanitize(r.byPseudo||"?")+' · magasin '+sanitize(String(r.storeId||""))+'</div>'+
+        '<div class="cl-line quiet">Compte '+sanitize(r.byPseudo||"?")+' · magasin '+sanitize(String(r.docId||""))+
+            (String(r.storeId||"")!==String(r.docId||"")?' <b style="color:#b91c1c">(le champ dit '+sanitize(String(r.storeId||""))+' — incoherent)</b>':'')+'</div>'+
         (r.reason?'<div class="cl-line quiet">Motif du refus : '+sanitize(r.reason)+'</div>':'')+
         '<div class="cl-acts">'+
           (enAttente
@@ -14339,7 +14395,9 @@ function admReprendrePhotos(){
   }).catch(function(e){ playSound("err"); toast("Échec : "+((e&&(e.code||e.message))||e)); });
 }
 function _admClaim(sid){
-  return (window._admClaims||[]).find(function(r){return String(r.storeId||r.docId)===String(sid);});
+  // Resolution par l'id du DOCUMENT : unique par construction. Resoudre par le
+  // champ storeId laissait deux demandes se confondre.
+  return (window._admClaims||[]).find(function(r){return String(r.docId)===String(sid);});
 }
 function admApproveClaim(sid){
   var c=_admClaim(sid); if(!c){toast("Demande introuvable");return;}
@@ -14381,7 +14439,9 @@ function admRevokeClaim(sid){
 function admOpenClaimStore(sid){
   var st=(window.STORES||[]).find(function(x){return String(x.fbId||x.id)===String(sid);});
   if(!st){toast("Ce magasin n'est pas chargé — ouvre sa zone sur la carte d'abord");return;}
-  try{openStoreDetail(st);}catch(e){ try{show("storedetail");}catch(e2){} }
+  // openStoreDetail(storeId) cherche dans STORES : lui passer l'OBJET ne
+  // trouvait jamais rien, le bouton ne faisait donc rien du tout.
+  try{openStoreDetail(String(st.id));}catch(e){ try{show("storedetail");}catch(e2){} }
 }
 function renderPhotoSuggestions(){
   var host=document.getElementById("admin-photo-suggestions");
