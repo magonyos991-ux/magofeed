@@ -5381,14 +5381,10 @@ function shareContent(title,text,url){
   }
   window.prompt("Copie ce lien :",url);
 }
-function shareDrink(){
-  if(!curSel)return;
-  shareContent("Magofeed \u00B7 "+curSel.name,"J'ai trouv\u00E9 \u00AB "+curSel.name+" \u00BB sur Magofeed \u2014 regarde les magasins qui l'ont pr\u00E8s de chez toi :",buildShareURL("drink",curSel.id));
-}
-function shareStore(){
-  if(!curStoreDetail)return;
-  shareContent("Magofeed \u00B7 "+curStoreDetail.name,"D\u00E9couvre les boissons dispo chez "+curStoreDetail.name+" sur Magofeed :",buildShareURL("store",curStoreDetail.id));
-}
+/* shareDrink et shareStore sont definis plus bas (recherche "drinkShareURL") :
+   ce sont ces versions-la qui s'executent. Les doublons qui vivaient ici ne
+   servaient qu'a egarer celui qui cherche pourquoi un partage ne fait pas ce
+   qu'il croit. */
 function handleDeepLink(){
   var h=location.hash||"";
   var m=h.match(/^#(drink|store)=(.+)$/);
@@ -6001,7 +5997,7 @@ function renderNearby(){
    sinon copie du lien. Message tout pret pour donner envie de cliquer. */
 function inviteFriend(){
   var url="https://magonyos991-ux.github.io/magofeed/";
-  var text="Tu cherches une boisson rare pres de chez toi ? \ud83e\udd64 Avec Magofeed tu vois direct ou l'acheter. C'est gratuit :";
+  var text="Tu cherches une boisson rare pres de chez toi ? Avec Magofeed tu vois direct ou l'acheter. C'est gratuit :";
   try{playSound("pop");}catch(e){}
   if(navigator.share){
     navigator.share({title:"Magofeed",text:text,url:url}).catch(function(){});
@@ -7273,7 +7269,7 @@ function submitAddDrinks(){
 function shareStore(){
   if(!curStoreDetail)return;
   var s=curStoreDetail;
-  var url=location.origin+location.pathname+"#store="+encodeURIComponent(s.fbId||s.id);
+  var url=storeShareURL(s);
   var n=(s.drinks||[]).length;
   var txt=""+s.name+" est sur Magofeed"+(n?" avec "+n+" boissons r\u00e9f\u00e9renc\u00e9es":"")+" !";
   if(navigator.share){navigator.share({title:"Magofeed \u00b7 "+s.name,text:txt,url:url}).catch(function(){});}
@@ -11773,6 +11769,29 @@ function exploreFlyToResult(r){
    C'est le canal de croissance : chaque trouvaille devient un lien TikTok/WhatsApp. */
 /* Base publique (sans le fichier terminal), pour construire les liens de partage.
    Ex : .../magofeed/index.html -> .../magofeed/  ;  .../magofeed/ -> inchang\u00e9. */
+/* ── APERCU DES LIENS PARTAGES ────────────────────────────────────────────
+   Coller un lien dans WhatsApp ou Instagram declenche une lecture de la page
+   en coulisses : c'est de la que sort la vignette (titre + photo). Magofeed
+   etant une application en UNE page, tous les liens donnaient la meme vignette
+   generique. Les boissons du catalogue du fichier ont donc leur page
+   pre-generee dans f/. Restent deux cas qu'on ne PEUT pas pre-generer :
+
+     - les boissons ajoutees par la communaute (elles vivent dans Firestore) ;
+     - les magasins.
+
+   Une petite fonction serveur fabrique leur page a la demande. Colle ci-dessous
+   l'adresse affichee par Firebase apres
+   « firebase deploy --only functions:fiche » — quelque chose comme
+   https://fiche-xxxxxxxx-ew.a.run.app
+
+   TANT QUE C'EST VIDE, rien ne change : on partage les liens d'avant. Aucun
+   risque a deployer l'app sans la fonction, ni la fonction sans l'app. */
+var MAGO_FICHE_URL="";
+function ficheURL(params){
+  var b=String(MAGO_FICHE_URL||"").trim();
+  if(!b)return null;
+  return b.replace(/\/+$/,"")+"/?"+params;
+}
 function shareBaseURL(){
   var p=location.pathname.replace(/[^/]*\.html?$/i,"");
   if(!/\/$/.test(p))p+="/";
@@ -11785,7 +11804,21 @@ function shareBaseURL(){
    on retombe proprement sur le lien profond #drink=<id> (aper\u00e7u g\u00e9n\u00e9rique). */
 function drinkShareURL(d){
   if(d&&!d.community)return shareBaseURL()+"f/"+d.id+".html";
+  // Boisson de la communaute : pas de page pre-generee possible. Si la fonction
+  // d'apercu est branchee, elle la fabrique a la demande ; sinon on retombe sur
+  // le lien profond, exactement comme avant.
+  var f=ficheURL("d="+encodeURIComponent(d.id));
+  if(f)return f;
   return location.origin+location.pathname+"#drink="+d.id;
+}
+/* Meme logique pour un magasin. Un commerçant qui partage sa propre fiche est
+   le meilleur ambassadeur possible : autant que le lien montre son enseigne et
+   ce qu'on y trouve, au lieu d'une adresse nue. */
+function storeShareURL(s){
+  var id=(s&&(s.fbId||s.id));
+  var f=ficheURL("s="+encodeURIComponent(id));
+  if(f)return f;
+  return location.origin+location.pathname+"#store="+encodeURIComponent(id);
 }
 function shareDrink(d){
   // Robuste aux deux appels du code : shareDrink(curSel) ET shareDrink() (bouton
@@ -11796,7 +11829,7 @@ function shareDrink(d){
   var url=drinkShareURL(d);
   // Accroche "ou trouver" : formulee comme une question a laquelle le lien repond,
   // c'est ce qui donne envie de cliquer depuis TikTok/insta/WhatsApp.
-  var text="O\u00f9 trouver \u00ab "+d.name+" \u00bb pr\u00e8s de chez toi ? \ud83e\udd64 Magofeed te montre les magasins qui l'ont \u2014 gratuit :";
+  var text="O\u00f9 trouver \u00ab "+d.name+" \u00bb pr\u00e8s de chez toi ? Magofeed te montre les magasins qui l'ont \u2014 gratuit :";
   if(navigator.share){
     navigator.share({title:"O\u00f9 trouver "+d.name+" \u00b7 Magofeed",text:text,url:url}).then(function(){
       if(awardOnce("share:"+d.id,24)){userStats.pts+=2;flyPts(2);updateProfileStats();toast("Partag\u00e9 \u00b7 +2 pts");if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);}

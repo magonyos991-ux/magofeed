@@ -15,6 +15,7 @@ Tout est **testable/déployable par toi**, jamais mis en prod sans essai.
 | `locate-stores.js` | Remplace le faux « +0 magasins » : localise de vrais commerces via OSM, sans stock inventé | Faible | Quand tu veux |
 | `points-serveur-PHASE2.js` | Points **validés côté serveur** (infalsifiables) + bases de la réputation | Moyen (change qui crédite les points) | Plus tard, en suivant la « Bascule Phase 2 » |
 | `anti-farm.js` | **Les faux stocks font perdre des points** : une annonce contredite par 2 personnes sur place est sanctionnée, et la sanction est ineffaçable | Faible (ne crédite rien, ne fait que retirer) | **Maintenant**, avec les règles |
+| `partage.js` | **Aperçu des liens partagés** : une vraie vignette (titre + photo) pour les boissons de la communauté et les magasins, qui n'ont pas de page pré-générée | Faible (ne lit que des données publiques) | Quand tu veux |
 
 ---
 
@@ -121,6 +122,47 @@ Côté console, un document apparaît dans `penalties`.
 **Pour lever une sanction** (erreur, faux signalements coordonnés) : Console
 Firestore → `users/{uid}` → mets `penalty` à la valeur voulue. Le client la
 relit au prochain lancement.
+
+## 5) Aperçu des liens partagés — `partage.js` (~10 min)
+
+Quand tu colles un lien dans WhatsApp, Instagram ou TikTok, l'application va lire
+la page en coulisses et fabrique la vignette (titre, description, photo) à partir
+de balises cachées. Magofeed étant une application en **une seule page**, tous les
+liens donnaient la même vignette générique. D'où le dossier `f/` : **571 pages
+pré-générées**, une par boisson du catalogue, chacune avec son vrai titre et sa
+vraie photo.
+
+Deux choses n'ont pas de page — et ce sont les plus partageables :
+
+- **les boissons ajoutées par la communauté**, qui vivent dans Firestore et ne
+  peuvent donc pas être pré-générées ;
+- **les magasins** — un commerçant qui partage sa propre fiche est le meilleur
+  ambassadeur possible.
+
+Cette fonction fabrique leur page **à la demande**. Les robots des réseaux
+sociaux lisent les balises et s'arrêtent là ; l'humain, lui, est redirigé vers
+l'app en une fraction de seconde. C'est exactement la technique des pages `f/`.
+
+1. Copie `partage.js` dans ton dossier `functions/`.
+2. Ajoute dans `index.js` : `exports.fiche = require("./partage").fiche;`
+3. Déploie : `firebase deploy --only functions:fiche`
+4. **Note l'adresse affichée à la fin du déploiement**, du genre
+   `Function URL (fiche(europe-west1)): https://fiche-xxxxxxxx-ew.a.run.app`
+5. Colle-la dans `index.html`, ligne `var MAGO_FICHE_URL="";` (cherche
+   `MAGO_FICHE_URL`), puis redéploie l'app.
+
+> **Tant que `MAGO_FICHE_URL` est vide, rien ne change** : l'app partage les liens
+> d'avant. Tu peux donc déployer la fonction sans toucher à l'app, ou l'inverse,
+> sans jamais rien casser.
+
+**Pour vérifier :** ouvre l'adresse de la fonction dans ton navigateur avec
+`?s=` suivi de l'identifiant d'un magasin — tu dois atterrir dans l'app. Puis
+colle ce même lien dans une conversation WhatsApp avec toi-même : la vignette
+doit afficher le nom du magasin.
+
+Un lien inconnu (boisson supprimée, identifiant bidon) ne renvoie jamais d'erreur :
+il affiche une vignette Magofeed générique et ouvre l'accueil. Un lien partagé qui
+affiche « erreur 404 » dans une conversation, c'est pire que pas de lien du tout.
 
 ## Bascule PHASE 2 — points infalsifiables (à faire quand tu es prêt)
 
