@@ -349,6 +349,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <button id="btn-propose" onclick="openProposeForm()" style="flex-shrink:0;display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:14px;border:none;background:#e67e22;color:#fff;font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit;box-shadow:0 5px 14px rgba(230,126,34,.3)"><span style="font-size:14px">＋</span> Proposer</button>
         </div>
       </div>
+      <div id="unfound" style="padding:0 20px 18px"></div>
       <div style="padding:0 20px 8px;display:flex;align-items:center;gap:7px"><span class="t-section" data-i18n="mostSearched" style="padding:0">Les plus recherchées</span></div>
       <div id="top-scanned" style="padding:0 20px 20px"></div>
       <div style="padding:0 20px 8px;display:flex;align-items:center;gap:7px"><span class="t-section" data-i18n="suggestionsT" style="padding:0">En attente de tes votes</span></div>
@@ -3232,7 +3233,7 @@ function _showRaw(s){
   try{moveNavPill(true);}catch(e){}
   try{showCoach(s);}catch(e){}
   if(s==="search"){try{renderList();}catch(e){}setTimeout(function(){var q=document.getElementById("q");if(q)q.focus();},transitioning?260:120);}
-  if(s==="discover"){renderDiscoveries();renderTopScanned();}
+  if(s==="discover"){renderDiscoveries();renderTopScanned();try{renderUnfound();}catch(e){}}
   if(s==="profile"){renderLeaderboard();refreshLeaderboard();renderStreak();}
   if(s==="admin")renderAdmin();
   if(s==="scan"){if(!scanActive)resetScanUI();renderScanHistory();}
@@ -4689,6 +4690,10 @@ function tagScanToStore(s){
     toast("D\u00e9j\u00e0 rattach\u00e9 \u00e0 "+sanitize(s.name));
   }
   trackStoreContribution(sid);
+  // Rattacher une boisson que des gens attendent rend le meme service qu'un
+  // « en stock » signale depuis la fiche : meme bonus. L'oubli faisait que le
+  // chemin le plus utile — repondre a une chasse — payait le moins.
+  if(ctx.drinkId!=null){try{maybeRewardHuntHelp(ctx.drinkId,s);}catch(e){}}
   updateProfileStats();
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
   playSound("win");
@@ -8428,22 +8433,33 @@ function _openActivityUI(){
   try{localStorage.setItem("magoActivitySeen",String(Date.now()));}catch(e){}
   refreshBell();
 }
+/* Un magasin a moins de 10 km liste-t-il cette boisson ? Exactement la regle
+   des alertes (voir checkWatches) : meme rayon, et un stock signale ABSENT ne
+   compte pas. Sortir cette regle ici evite qu'un ecran dise « introuvable »
+   pendant qu'un autre dit « trouvee ». */
+function magasinProcheAvec(did){
+  var best=null;
+  (STORES||[]).forEach(function(st){
+    if(!(st.drinks||[]).some(function(x){return Number(x)===Number(did);}))return;
+    if(((st.confirmations||{})[did]||0)<0)return;
+    var dist=null;
+    if(typeof userLat==="number"&&userLat&&typeof st.lat==="number"){
+      var dLa=(userLat-st.lat)*111000,dLo=(userLng-st.lng)*111000*Math.cos(st.lat*Math.PI/180);
+      dist=Math.sqrt(dLa*dLa+dLo*dLo);
+    }
+    if(dist!==null&&dist>10000)return;
+    if(!best||(dist!==null&&(best.dist===null||dist<best.dist)))best={store:st,dist:dist};
+  });
+  return best;
+}
 function checkWatches(){
   var fired=false;
   drinkWatches.forEach(function(w){
     if(w.triggered)return;
-    var best=null;
-    (STORES||[]).forEach(function(s){
-      if(!(s.drinks||[]).some(function(did){return Number(did)===Number(w.id);}))return;
-      if(((s.confirmations||{})[w.id]||0)<0)return; // signalee absente ici : jamais en notif
-      var dist=null;
-      if(typeof userLat==="number"&&userLat&&typeof s.lat==="number"){
-        var dLa=(userLat-s.lat)*111000,dLo=(userLng-s.lng)*111000*Math.cos(s.lat*Math.PI/180);
-        dist=Math.sqrt(dLa*dLa+dLo*dLo);
-      }
-      if(dist!==null&&dist>10000)return; // au-dela de 10 km : pas "pres de toi"
-      if(!best||(dist!==null&&(best.dist===null||dist<best.dist)))best={store:s,dist:dist};
-    });
+    // Meme regle que la section « Introuvables » : une seule fonction, donc
+    // impossible qu'un ecran annonce « trouvee » pendant que l'autre affiche
+    // « personne ne l'a trouvee ».
+    var best=magasinProcheAvec(w.id);
     if(best){
       w.triggered=true;
       w.storeId=best.store.id;
@@ -12303,6 +12319,103 @@ function drinkLocate(){
   lastScanContext={drinkId:curSel.id,from:"fiche"};
   openStorePicker();
 }
+/* ── INTROUVABLES PRES DE TOI ──────────────────────────────────────────────
+   Une carte pleine de boissons deja localisees ne donne rien a faire. Ce qui
+   fait sortir quelqu'un de chez lui, c'est un manque precis : « trois
+   personnes cherchent ca ici, personne ne l'a encore trouvee ». C'est une
+   mission, pas une liste.
+
+   REGLE ABSOLUE DE CETTE SECTION : ne jamais inventer la demande. On ne liste
+   QUE des boissons que quelqu'un cherche pour de vrai — une chasse ouverte
+   autour (Firestore) ou une de tes propres alertes. Sans demande reelle, la
+   section reste VIDE. Lister « tout ce qui n'a pas de magasin » donnerait, sur
+   une base jeune, la totalite du catalogue : un mur de faux manques, le meme
+   piege que le « +0 magasins » d'avant. */
+function introuvableJeLaiVue(did){
+  var d=(DRINKS||[]).find(function(x){return Number(x.id)===Number(did);});
+  if(!d){toast("Boisson introuvable");return;}
+  // On NE touche pas a curSel : on vient de l'onglet Decouvertes, pas d'une
+  // fiche. lastScanContext suffit au selecteur de magasin.
+  lastScanContext={drinkId:d.id,from:"introuvable"};
+  try{playSound("pop");}catch(e){}
+  openStorePicker();
+}
+/* La ligne entiere mene a la fiche : c'est la qu'on voit la photo en grand,
+   la carte, et le bouton de partage. Un bouton « partager » de plus dans une
+   ligne deja serree coupait le nom en deux — on prefere un tap de plus a un
+   nom illisible. */
+function introuvableOuvrir(did){
+  var d=(DRINKS||[]).find(function(x){return Number(x.id)===Number(did);});
+  if(d)try{pick(d);}catch(e){}
+}
+function renderUnfound(){
+  var host=document.getElementById("unfound");if(!host)return;
+  /* Tant que les magasins ne sont pas charges, TOUT parait introuvable. On se
+     tait plutot que d'annoncer un manque qui n'existe pas. */
+  if(!(window.STORES&&STORES.length)){host.innerHTML="";return;}
+  var demande={};
+  (drinkWatches||[]).forEach(function(w){
+    if(w.triggered)return;
+    demande[String(w.id)]={id:Number(w.id),chercheurs:1,moi:true};
+  });
+  _peindreIntrouvables(demande);
+  // Puis les chasses des AUTRES autour : c'est ce qui transforme « ma liste
+  // d'envies » en « la commu attend ca ici ».
+  if(window.fbLoadNearbyHunts){
+    window.fbLoadNearbyHunts(userLat,userLng,15).then(function(hunts){
+      (hunts||[]).forEach(function(h){
+        var k=String(h.drinkId);
+        var n=h.seekers||0;
+        if(demande[k]){demande[k].chercheurs=Math.max(demande[k].chercheurs,n);demande[k].moi=demande[k].moi||!!h.mine;}
+        else demande[k]={id:Number(h.drinkId),chercheurs:n,moi:!!h.mine};
+      });
+      _peindreIntrouvables(demande);
+    }).catch(function(){/* on garde l'affichage local */});
+  }
+}
+function _peindreIntrouvables(demande){
+  var host=document.getElementById("unfound");if(!host)return;
+  var lignes=Object.keys(demande).map(function(k){return demande[k];})
+    .filter(function(x){
+      var d=(DRINKS||[]).find(function(y){return Number(y.id)===Number(x.id);});
+      if(!d)return false;                       // fiche inconnue de cet appareil
+      if(magasinProcheAvec(x.id))return false;  // quelqu'un l'a deja trouvee ici
+      x.d=d;return true;
+    })
+    .sort(function(a,b){return b.chercheurs-a.chercheurs;})
+    .slice(0,5);
+  if(!lignes.length){host.innerHTML="";return;}
+  var besoinPhoto=false;
+  var corps=lignes.map(function(x){
+    var d=x.d;
+    if(!getCachedDrinkImage(d)){besoinPhoto=true;try{fetchVerifiedOFFImage(d);}catch(e){}}
+    var n=x.chercheurs;
+    var qui=(n>1)?(n+" personnes la cherchent"):(x.moi?"Tu la cherches":"1 personne la cherche");
+    return '<div class="unf-row" role="button" tabindex="0" '+
+      'aria-label="'+sanitize(d.name)+' — '+qui+', rien trouvé dans 10 km autour de toi. Ouvrir la fiche" '+
+      'onclick="introuvableOuvrir('+d.id+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();introuvableOuvrir('+d.id+');}">'+
+      '<span class="unf-thumb">'+drinkIconHTML(d)+'</span>'+
+      '<span class="unf-txt">'+
+        '<span class="unf-name">'+sanitize(d.name)+'</span>'+
+        '<span class="unf-sub">'+qui+'</span>'+
+      '</span>'+
+      '<button class="unf-go" onclick="event.stopPropagation();introuvableJeLaiVue('+d.id+')">Je l\'ai vue</button>'+
+    '</div>';
+  }).join("");
+  host.innerHTML='<div class="unf-card">'+
+    '<div class="unf-head">Personne ne les a encore trouvées ici</div>'+
+    '<div class="unf-lead">Si tu en vois une en rayon, dis-le : tout le monde qui la cherche est prévenu dans la seconde, et tu gagnes des points.</div>'+
+    corps+
+  '</div>';
+  // Les photos arrivent en asynchrone : on redessine UNE fois, et une seule.
+  if(besoinPhoto&&!window._unfReflow){
+    window._unfReflow=true;
+    setTimeout(function(){
+      window._unfReflow=false;
+      try{var e=document.getElementById("s-discover");if(e&&e.classList.contains("on"))_peindreIntrouvables(demande);}catch(err){}
+    },1800);
+  }
+}
 function renderDiscoveries(){
   var el=document.getElementById("disc-list");if(!el)return;el.innerHTML="";
   var T=LANGS[curLang];
@@ -14245,6 +14358,9 @@ try{
     if(curSel) renderStoreList();
     try{renderDeals();}catch(err){}
     try{renderNearby();}catch(err){}
+    // Les magasins viennent d'arriver : ce qui semblait introuvable ne l'est
+    // peut-etre plus. On redessine si on est sur l'onglet.
+    try{var _dv=document.getElementById("s-discover");if(_dv&&_dv.classList.contains("on"))renderUnfound();}catch(err){}
   });
   // Compte + points persistants Firebase
   window.addEventListener("fbUserStatsLoaded", function(e) {
