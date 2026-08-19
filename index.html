@@ -4352,14 +4352,44 @@ function startScan(){
         });
     }).catch(function(){hint.textContent="✕ Accès caméra refusé";});
 }
+/* ── COUPER LA CAMERA POUR DE BON ─────────────────────────────────────────
+   Une camera qu'on croit eteinte est LA cause classique de « l'app se relance
+   toute seule » sur iPhone : Safari voit un flux video vivant, la memoire ne
+   redescend jamais, et le systeme tue l'onglet.
+
+   Trois trous etaient ouverts ici :
+   1. « if(!scanActive)return » arrivait AVANT l'arret des pistes : camera
+      ouverte mais Quagga pas encore demarre (init lent, ou echec) = flux
+      jamais coupe.
+   2. On ne coupait que #scan-video. Quagga insere SON PROPRE <video> dans le
+      conteneur : ce flux-la survivait.
+   3. window._scanStream etait mis a null AVANT d'avoir arrete ses pistes —
+      on perdait la seule reference qui permettait de les couper.
+   On coupe donc tout ce qui vit, dans l'ordre, avant d'oublier quoi que ce soit. */
 function stopScan(){
   var sa=document.querySelector("#s-scan .scan-area");if(sa)sa.classList.remove("live");
   var tb=document.getElementById("scan-torch");if(tb)tb.style.display="none";
-  window._torchOn=false;window._scanStream=null;
-  if(!scanActive)return;
+  window._torchOn=false;
   try{Quagga.stop();quaggaRunning=false;Quagga.offDetected(onBarcodeDetected);}catch(e){}
-  var v=document.getElementById("scan-video");
-  if(v&&v.srcObject)v.srcObject.getTracks().forEach(function(t){t.stop();});
+  // a) le flux qu'on a ouvert nous-memes
+  try{
+    var st=window._scanStream;
+    if(st&&st.getTracks)st.getTracks().forEach(function(t){try{t.stop();}catch(e){}});
+  }catch(e){}
+  // b) TOUTES les videos de l'ecran scan, y compris celle que Quagga a creee
+  try{
+    var zone=document.getElementById("s-scan")||document;
+    zone.querySelectorAll("video").forEach(function(v){
+      try{
+        if(v.srcObject&&v.srcObject.getTracks)v.srcObject.getTracks().forEach(function(t){try{t.stop();}catch(e){}});
+        v.srcObject=null;
+        v.pause();
+        v.removeAttribute("src");
+        v.load();
+      }catch(e){}
+    });
+  }catch(e){}
+  window._scanStream=null;
   scanActive=false;
 }
 // Flash / torche : marche là où le navigateur l'autorise (Android). Sur iPhone,
