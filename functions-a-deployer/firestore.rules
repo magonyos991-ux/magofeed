@@ -235,6 +235,23 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // ── DEMANDE : ce que les gens cherchent, et ce qu'ils ne trouvent pas.
+    //    Ces documents ne contiennent AUCUN identifiant d'utilisateur : ce sont
+    //    des compteurs par (jour, zone d'environ 5 km, boisson). Personne ne
+    //    peut y lire le parcours de qui que ce soit — c'est pour ça qu'ils
+    //    peuvent être exploités, et même vendus agrégés, sans problème.
+    //    Lecture réservée à l'admin : c'est l'actif commercial de Magofeed,
+    //    inutile de l'offrir à un concurrent qui saurait lire une base.
+    //    ⚠️ LIMITE (comme les points) : le compteur est incrémenté par le
+    //    client, donc gonflable par quelqu'un de déterminé. Sans importance
+    //    pour une lecture interne ; à passer en Cloud Function le jour où ce
+    //    chiffre part chez un client payant.
+    match /demand/{id} {
+      allow read: if isAdmin();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+
     // ── Reliquat de l'ancien crawler : verrouillé.
     match /crawler/{id} { allow read: if isAdmin(); allow write: if false; }
 

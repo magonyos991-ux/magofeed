@@ -1919,6 +1919,63 @@ window.fbSubmitFeedback = async function(rating, text) {
     createdAt: serverTimestamp()
   });
 };
+/* ============================================================================
+   DEMANDE — ce que les gens cherchent, et surtout ce qu'ils ne trouvent PAS.
+   ----------------------------------------------------------------------------
+   POURQUOI. C'est le seul actif de Magofeed que personne d'autre ne possède :
+   « 40 personnes ont cherché du Mogu Mogu autour de Schaerbeek ce mois-ci, 31
+   n'ont rien trouvé ». Un importateur ou un night-shop peut agir là-dessus ;
+   aucune autre source ne le lui donnera. Jusqu'ici l'app ne l'enregistrait
+   nulle part : l'historique de recherche restait dans le téléphone. Chaque
+   jour sans cette collecte est une journée de demande perdue pour toujours.
+
+   CE QUI EST ÉCRIT — et rien de plus :
+     • la boisson cherchée ;
+     • une ZONE, pas une position : geohash de 5 caractères ≈ 5 km de côté.
+       On ne peut pas remonter à quelqu'un avec ça ;
+     • le jour (pas l'heure) ;
+     • trouvée ou non près de la personne.
+   AUCUN identifiant d'utilisateur. Le document est un COMPTEUR de quartier,
+   pas une trace de navigation : il est donc anonyme et agrégé par nature,
+   ce qui est exactement ce qu'il faut pour pouvoir l'exploiter sereinement.
+
+   LIMITE HONNÊTE : le compteur est incrémenté par le client. Quelqu'un de
+   déterminé pourrait le gonfler. Ce n'est pas grave pour une lecture interne ;
+   ça le devient le jour où ce chiffre part chez un client payant. À ce
+   moment-là, passer l'écriture par une Cloud Function (même approche que
+   POINTS-PHASE2-plan.md).
+   ============================================================================ */
+window.fbLogDemand = async function(drinkId, drinkName, zone, day, trouve) {
+  try {
+    await ensureAuthed();
+    // Un document par (jour, zone, boisson) : compact, lisible, et pas un
+    // document par recherche — Firestore facture chaque écriture.
+    var id = day + "_" + zone + "_" + drinkId;
+    await setDoc(doc(db, "demand", id), {
+      drinkId: Number(drinkId) || drinkId,
+      drinkName: String(drinkName || "").slice(0, 60),
+      zone: String(zone).slice(0, 12),
+      day: String(day).slice(0, 10),
+      recherches: increment(1),
+      trouvees: increment(trouve ? 1 : 0),
+      introuvables: increment(trouve ? 0 : 1),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (e) { console.warn("demand log:", e); }
+};
+
+/* Lecture pour le tableau admin. On lit les documents les plus récents ; le
+   regroupement par boisson se fait côté app, sur peu de lignes. */
+window.fbLoadDemand = async function(jours) {
+  try {
+    var depuis = new Date(Date.now() - (jours || 30) * 86400000).toISOString().slice(0, 10);
+    var snap = await getDocs(query(collection(db, "demand"), where("day", ">=", depuis), limit(1000)));
+    var rows = [];
+    snap.forEach(function(d) { rows.push(d.data()); });
+    return rows;
+  } catch (e) { console.warn("demand load:", e); return []; }
+};
+
 window.fbLoadFeedback = async function() {
   try {
     var snap = await getDocs(query(collection(db, "feedback"), limit(60)));
@@ -9034,6 +9091,33 @@ function exploreCityFromSearch(q){
     }
   },450);
 }
+/* Enregistre la demande UNE SEULE FOIS par boisson et par jour et par appareil.
+   Sans ce garde-fou, ouvrir puis refermer une fiche dix fois ferait dix
+   « recherches » : le chiffre qu'on veut vendre serait faux, et un chiffre
+   faux vaut moins que pas de chiffre du tout. */
+function logDemand(drink, trouve){
+  try{
+    if(!drink||!drink.id||!window.fbLogDemand)return;
+    var day=new Date().toISOString().slice(0,10);
+    var cle=drink.id+":"+day;
+    var vus={};
+    try{ vus=JSON.parse(localStorage.getItem("magoDemandVus")||"{}"); }catch(e){}
+    if(vus[cle])return;
+    // Zone de ~5 km (geohash 5 caracteres), jamais la position exacte.
+    // Sans GPS on enregistre quand meme : la boisson cherchee vaut la peine,
+    // meme sans savoir ou. "?" se filtre ensuite a la lecture.
+    var zone="?";
+    if(typeof userLat==="number"&&typeof userLng==="number"&&window.geohashForLocation){
+      zone=window.geohashForLocation(userLat,userLng,5);
+    }
+    vus[cle]=1;
+    // On ne garde que le jour courant : ce cache ne doit pas grossir sans fin.
+    var frais={}; Object.keys(vus).forEach(function(k){ if(k.indexOf(":"+day)!==-1)frais[k]=1; });
+    try{ localStorage.setItem("magoDemandVus",JSON.stringify(frais)); }catch(e){}
+    window.fbLogDemand(drink.id,drink.name,zone,day,!!trouve);
+  }catch(e){}
+}
+
 function renderStoreList(){
   if(!curSel)return;
   sanitizeAutoStores();
@@ -9054,6 +9138,10 @@ function renderStoreList(){
     });
     return;
   }
+  /* On enregistre ICI, et pas a l'ouverture de la fiche : a ce point precis,
+     l'elargissement Firestore a deja eu lieu, donc "introuvable" veut vraiment
+     dire introuvable — et c'est cette ligne-la qui a de la valeur. */
+  logDemand(curSel, allStores.length > 0);
   var brandsAvailable=Array.from(new Set(allStores.map(function(s){return s.brand;}).filter(Boolean))).sort();
   if(curBrandFilter&&brandsAvailable.indexOf(curBrandFilter)===-1)curBrandFilter=null;
   var stores=sortedStores(allStores);
@@ -13351,6 +13439,7 @@ function renderAdmin(){
   renderFounderDash();
   try{ renderNewcomers(); }catch(e){ console.warn("newcomers:",e); }
   renderContribFeed();
+  try{ renderDemandAdmin(); }catch(e){ console.warn("demand:",e); }
   renderFeedbackAdmin();
   renderPhotoSuggestions();
   renderFormatSuggestions();
@@ -13756,6 +13845,82 @@ function renderContribFeed(){
 }
 /* Avis des utilisateurs côté admin : note moyenne + derniers retours écrits.
    C'est le canal direct pour savoir quoi améliorer/retirer. */
+/* ============================================================================
+   TABLEAU DE LA DEMANDE (admin)
+   ----------------------------------------------------------------------------
+   Collecter sans jamais regarder ne sert à rien. Cet écran répond à la seule
+   question qui intéresse un importateur ou un commerçant :
+   « qu'est-ce que les gens cherchent chez moi, et que ne trouvent-ils pas ? »
+   La deuxième moitié est la plus vendable : une recherche sans résultat, c'est
+   une vente qui n'a pas eu lieu, et personne d'autre ne la mesure.
+   Le bouton « copier » sort le tout en texte brut, prêt à coller dans un
+   e-mail — c'est le pont entre la donnée et le premier euro.
+   ============================================================================ */
+function renderDemandAdmin(){
+  var host=document.getElementById("admin-demand");
+  if(!host){
+    host=document.createElement("div");
+    host.id="admin-demand";
+    var list=document.getElementById("admin-list");
+    if(list&&list.parentNode)list.parentNode.insertBefore(host,list);
+  }
+  host.innerHTML="";
+  if(!window.fbLoadDemand)return;
+  window.fbLoadDemand(30).then(function(rows){
+    if(!rows||!rows.length){
+      host.innerHTML='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:2px 0 6px">Demande (30 jours)</div>'+
+        '<div style="font-size:12px;color:var(--s3);margin-bottom:14px">Rien encore. Chaque fiche boisson ouverte alimentera ce tableau.</div>';
+      return;
+    }
+    var parBoisson={}, parZone={}, total=0, totalIntrouvable=0;
+    rows.forEach(function(r){
+      var n=r.recherches||0, ko=r.introuvables||0;
+      total+=n; totalIntrouvable+=ko;
+      var k=String(r.drinkId);
+      if(!parBoisson[k])parBoisson[k]={nom:r.drinkName||("Boisson "+r.drinkId),n:0,ko:0};
+      parBoisson[k].n+=n; parBoisson[k].ko+=ko;
+      if(r.zone&&r.zone!=="?"){ parZone[r.zone]=(parZone[r.zone]||0)+n; }
+    });
+    var top=Object.keys(parBoisson).map(function(k){return parBoisson[k];}).sort(function(a,b){return b.n-a.n;});
+    var manques=top.filter(function(d){return d.ko>0;}).sort(function(a,b){return b.ko-a.ko;});
+    var zones=Object.keys(parZone).map(function(z){return {z:z,n:parZone[z]};}).sort(function(a,b){return b.n-a.n;});
+
+    function bloc(titre,lignes){
+      if(!lignes.length)return "";
+      return '<div style="font-size:11.5px;font-weight:700;color:var(--s2);margin:12px 0 6px;text-transform:uppercase;letter-spacing:.04em">'+titre+'</div>'+
+        lignes.map(function(l){
+          return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">'+
+            '<span style="flex:1;min-width:0;font-size:13px;font-weight:600;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+l.g+'</span>'+
+            '<span style="font-size:12.5px;font-weight:800;color:'+(l.rouge?"#dc2626":"var(--s1)")+';flex-shrink:0">'+l.d+'</span></div>';
+        }).join("");
+    }
+    var pct=total?Math.round(100*totalIntrouvable/total):0;
+    host.innerHTML=
+      '<div style="display:flex;align-items:center;gap:8px;margin:2px 0 2px">'+
+        '<div style="flex:1;font-size:13px;font-weight:800;color:var(--s1)">Demande (30 jours)</div>'+
+        '<button id="demand-copy" style="padding:5px 11px;border-radius:999px;border:1.5px solid var(--border);background:var(--bg2);font-size:11.5px;font-weight:700;color:var(--s1);cursor:pointer">Copier</button>'+
+      '</div>'+
+      '<div style="font-size:12px;color:var(--s2);margin-bottom:2px">'+total+' recherche'+(total>1?"s":"")+
+        ' · <b style="color:'+(pct>40?"#dc2626":"var(--s1)")+'">'+pct+'% sans résultat</b></div>'+
+      bloc("Les plus cherchées", top.slice(0,8).map(function(d){return {g:sanitize(d.nom),d:d.n};}))+
+      bloc("Cherchées et introuvables", manques.slice(0,8).map(function(d){return {g:sanitize(d.nom),d:d.ko+"×",rouge:true};}))+
+      bloc("Zones les plus actives", zones.slice(0,5).map(function(z){return {g:"Zone "+z.z,d:z.n};}))+
+      '<div style="height:14px"></div>';
+
+    var btn=document.getElementById("demand-copy");
+    if(btn)btn.onclick=function(){
+      var txt="Magofeed — demande des 30 derniers jours\n"+
+        total+" recherches, "+pct+"% sans resultat\n\nLes plus cherchees :\n"+
+        top.slice(0,10).map(function(d,i){return "  "+(i+1)+". "+d.nom+" — "+d.n+" recherches"+(d.ko?", "+d.ko+" sans resultat":"");}).join("\n")+
+        "\n\nCherchees et introuvables :\n"+
+        manques.slice(0,10).map(function(d,i){return "  "+(i+1)+". "+d.nom+" — "+d.ko+" fois";}).join("\n");
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(txt).then(function(){toast("Copié — prêt à coller dans un e-mail");}).catch(function(){window.prompt("Copie :",txt);});
+      }else{ window.prompt("Copie :",txt); }
+    };
+  }).catch(function(e){ console.warn("demand admin:",e); });
+}
+
 function renderFeedbackAdmin(){
   var host=document.getElementById("admin-feedback");
   if(!host){
