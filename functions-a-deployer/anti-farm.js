@@ -73,7 +73,7 @@ async function prevenir(uid, perdus) {
   // In-app d'abord : c'est le canal qui marche toujours.
   try {
     await db.collection("userNotifs").add({
-      uid: String(uid),
+      to: String(uid),
       type: "penalty",
       title: "-" + perdus + " points",
       body: "Une boisson que tu avais annoncée en stock a été signalée absente par plusieurs personnes.",

@@ -165,21 +165,104 @@ service cloud.firestore {
     //    confirmations, prix, horaires…). MAIS écraser l'identité du magasin
     //    (name/brand/lat/lng/emoji) est réservé à son créateur (addedBy) ou à
     //    l'admin — sinon on pouvait renommer/déplacer le magasin d'un autre.
+    /* ⚠️ CERTIFICATION — la ligne la plus importante de ce fichier.
+     * 'certified', 'certifiedAt' et 'owner' portent la pastille BLEUE, celle
+     * que les visiteurs croient. Ils ne sont écrits que
+     * par l'administrateur (approbation d'une demande shopClaims). Sans cette
+     * interdiction, la console du navigateur suffisait à se certifier
+     * soi-même — et la pastille ne voulait plus rien dire.
+     * 'owner' commande aussi l'accès au tableau de bord commerçant : le
+     * laisser libre reviendrait à donner ce tableau à qui le demande.
+     *
+     * 'verifiedSource' reste LIBRE, volontairement : l'import automatique
+     * OpenStreetMap l'écrit ("catalogue enseigne (auto)") quand quelqu'un
+     * ouvre une ville encore vierge. Il ne porte donc AUCUNE confiance — c'est
+     * une note d'origine, pas une preuve. La pastille bleue ne dépend que de
+     * 'certified'.
+     */
+    function champsCertif() {
+      return ['certified','certifiedAt','owner'];
+    }
     match /stores/{id} {
       allow read: if true;
-      allow create: if isSignedIn();
+      allow create: if isAdmin()
+        || (isSignedIn() && !request.resource.data.keys().hasAny(champsCertif()));
       allow update: if isAdmin()
-        || (isSignedIn() && resource.data.addedBy == request.auth.uid)
-        || (isSignedIn() && !changed().hasAny(['name','brand','lat','lng','emoji']));
+        || (isSignedIn()
+            && !changed().hasAny(champsCertif())
+            && (resource.data.addedBy == request.auth.uid
+                || !changed().hasAny(['name','brand','lat','lng','emoji'])));
       allow delete: if isAdmin();
     }
     match /Stores/{id} {
       allow read: if true;
-      allow create: if isSignedIn();
+      allow create: if isAdmin()
+        || (isSignedIn() && !request.resource.data.keys().hasAny(champsCertif()));
       allow update: if isAdmin()
-        || (isSignedIn() && resource.data.addedBy == request.auth.uid)
-        || (isSignedIn() && !changed().hasAny(['name','brand','lat','lng','emoji']));
+        || (isSignedIn()
+            && !changed().hasAny(champsCertif())
+            && (resource.data.addedBy == request.auth.uid
+                || !changed().hasAny(['name','brand','lat','lng','emoji'])));
       allow delete: if isAdmin();
+    }
+
+    /* ── Demandes de certification d'un commerçant ────────────────────────
+     * Un document par magasin (id = storeId) : deux personnes ne peuvent pas
+     * revendiquer la même boutique en parallèle.
+     *
+     * Le demandeur peut CRÉER sa demande, jamais la décider : 'status' doit
+     * valoir 'pending' et 'by' doit être lui. Il peut relire la sienne (pour
+     * savoir où en est son dossier) mais pas celle des autres — le champ
+     * 'contact' contient un nom et un numéro de téléphone.
+     *
+     * Une demande déjà déposée ne peut pas être écrasée par quelqu'un d'autre :
+     * seul l'auteur d'une demande REFUSÉE peut en redéposer une.
+     */
+    function pasAnonyme() {
+      return isSignedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+    match /shopClaims/{storeId} {
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.by == request.auth.uid);
+
+      /* pasAnonyme() : l'identifiant d'un compte anonyme disparaît à la
+       * moindre réinstallation. Un magasin resterait attaché à un compte qui
+       * n'existe plus, et son vrai gérant perdrait son tableau de bord.
+       * exists(stores/...) : sans ça, on pouvait déposer des demandes sur des
+       * identifiants inventés et polluer l'administration sans limite.
+       */
+      allow create: if pasAnonyme()
+        && exists(/databases/$(database)/documents/stores/$(storeId))
+        && request.resource.data.by == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.storeId == storeId
+        && request.resource.data.contact is string
+        && request.resource.data.contact.size() <= 80;
+
+      /* Le RE-DÉPÔT après un refus. `storeId` est ré-ancré sur l'id du
+       * document : sans cette ligne, on pouvait repointer sa demande refusée
+       * vers une AUTRE boutique, y compris une déjà revendiquée. Deux demandes
+       * portaient alors le même storeId, et l'administrateur qui approuvait la
+       * carte du vrai commerçant exécutait celle de l'imposteur.
+       */
+      allow update: if isAdmin()
+        || (pasAnonyme()
+            && resource.data.by == request.auth.uid
+            && resource.data.status == 'rejected'
+            && request.resource.data.by == request.auth.uid
+            && request.resource.data.status == 'pending'
+            && request.resource.data.storeId == storeId);
+
+      /* Le demandeur peut effacer sa propre demande : elle contient son nom et
+       * son téléphone, le droit à l'effacement ne se discute pas. C'est aussi
+       * ce que fait la suppression de compte.
+       * Retirer une certification efface la demande (côté admin) : le magasin
+       * redevient revendicable, ce qu'il faut quand une boutique change de
+       * main.
+       */
+      allow delete: if isAdmin()
+        || (isSignedIn() && resource.data.by == request.auth.uid);
     }
 
     // ── Signalements : déposés par les connectés, lus par l'admin.
