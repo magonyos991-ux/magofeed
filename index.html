@@ -1986,6 +1986,56 @@ window.fbSubmitFeedback = async function(rating, text) {
    moment-là, passer l'écriture par une Cloud Function (même approche que
    POINTS-PHASE2-plan.md).
    ============================================================================ */
+/* ============================================================================
+   AUDIENCE D'UN MAGASIN — ce qu'un commerçant a le droit de savoir
+   ----------------------------------------------------------------------------
+   Un commerçant à qui on demande de faire certifier sa boutique pose toujours
+   la même question, et elle est légitime : « ça me rapporte quoi ? ». Sans
+   chiffre, la réponse est une promesse ; avec, c'est un constat.
+
+   Trois compteurs, par jour et par magasin, dans stores/{id}/stats/{jour} :
+     • vues         — quelqu'un a ouvert sa fiche
+     • itineraires  — quelqu'un a demandé le chemin pour y aller (le signal
+                      le plus proche d'une visite réelle)
+     • partages     — quelqu'un a envoyé sa fiche à quelqu'un d'autre
+
+   COMPTÉ EN PERSONNES, PAS EN CLICS : une seule fois par appareil, par jour et
+   par compteur. Dix ouvertures par le même téléphone ne sont pas dix clients
+   intéressés, et un chiffre gonflé se retourne contre celui qui le présente.
+
+   AUCUN identifiant d'utilisateur n'est écrit : ce sont des compteurs, pas un
+   registre de qui est passé. Le commerçant voit une audience, jamais des gens.
+
+   LIMITE HONNÊTE, la même que pour les points et la demande : l'incrément vient
+   du client, donc gonflable par quelqu'un de déterminé. Sans conséquence tant
+   que c'est indicatif ; à passer en Cloud Function le jour où ces chiffres
+   justifient une facture.
+   ============================================================================ */
+window.fbBumpStoreStat = async function(storeId, metrique, jour) {
+  try {
+    await ensureAuthed();
+    var champs = { jour: String(jour).slice(0, 10), updatedAt: serverTimestamp() };
+    champs[metrique] = increment(1);
+    await setDoc(doc(db, "stores", String(storeId), "stats", String(jour)), champs, { merge: true });
+  } catch (e) { console.warn("store stat:", e); }
+};
+
+/* Lecture réservée au propriétaire de la fiche (règles Firestore). Un magasin
+   inconnu ou non certifié renvoie simplement une liste vide : pas d'erreur
+   affichée, le tableau de bord se contente de ne rien montrer. */
+window.fbLoadStoreStats = async function(storeId, jours) {
+  try {
+    var depuis = new Date(Date.now() - ((jours || 30) - 1) * 86400000).toISOString().slice(0, 10);
+    var snap = await getDocs(query(
+      collection(db, "stores", String(storeId), "stats"),
+      where("jour", ">=", depuis), limit(120)
+    ));
+    var rows = [];
+    snap.forEach(function(d) { var x = d.data(); x.jour = x.jour || d.id; rows.push(x); });
+    return rows;
+  } catch (e) { console.warn("store stats load:", e); return []; }
+};
+
 window.fbLogDemand = async function(drinkId, drinkName, zone, day, trouve) {
   try {
     await ensureAuthed();
@@ -7788,6 +7838,7 @@ function submitAddDrinks(){
 function shareStore(){
   if(!curStoreDetail)return;
   var s=curStoreDetail;
+  bumpStoreStat(s,"partages");
   var url=storeShareURL(s);
   var n=(s.drinks||[]).length;
   var txt=""+s.name+" est sur Magofeed"+(n?" avec "+n+" boissons r\u00e9f\u00e9renc\u00e9es":"")+" !";
@@ -9376,6 +9427,27 @@ function exploreCityFromSearch(q){
     }
   },450);
 }
+/* Compte une interaction avec la fiche d'un magasin — une seule fois par
+   appareil, par jour et par compteur. C'est ce qui fait la différence entre
+   « 12 personnes ont regardé ta boutique » et « 12 clics », dont l'un des deux
+   se retourne contre toi dès que le commerçant y regarde de près. */
+function bumpStoreStat(store, metrique){
+  try{
+    if(!store||!window.fbBumpStoreStat)return;
+    var sid=store.fbId||store.id; if(!sid)return;
+    var jour=new Date().toISOString().slice(0,10);
+    var cle=sid+":"+metrique+":"+jour;
+    var vus={};
+    try{ vus=JSON.parse(localStorage.getItem("magoStoreStatVus")||"{}"); }catch(e){}
+    if(vus[cle])return;
+    vus[cle]=1;
+    // Purge des jours passes : ce cache ne doit pas grossir indefiniment.
+    var frais={}; Object.keys(vus).forEach(function(k){ if(k.indexOf(":"+jour)!==-1)frais[k]=1; });
+    try{ localStorage.setItem("magoStoreStatVus",JSON.stringify(frais)); }catch(e){}
+    window.fbBumpStoreStat(sid,metrique,jour);
+  }catch(e){}
+}
+
 /* Enregistre la demande UNE SEULE FOIS par boisson et par jour et par appareil.
    Sans ce garde-fou, ouvrir puis refermer une fiche dix fois ferait dix
    « recherches » : le chiffre qu'on veut vendre serait faux, et un chiffre
@@ -9651,6 +9723,7 @@ function closeStoreSheet(){document.getElementById("map-sheet-modal").style.disp
 function openStoreDetail(storeId){
   var s=STORES.find(function(x){return x.id===storeId||x.fbId===storeId;});
   if(!s)return;
+  bumpStoreStat(s,"vues");
   _stripAutoDrinks(s);
   // Ouvert depuis la carte Explorer : le "retour" doit REVENIR sur la carte, pas
   // sauter à l'accueil (l'écran sous l'overlay). On mémorise ce contexte et on
@@ -10137,6 +10210,46 @@ function merchantBoardHost(){
   anchor.parentNode.insertBefore(h,anchor.nextSibling);
   return h;
 }
+/* Carte « ta fiche » en tête du tableau de bord : l'audience réelle de la
+   boutique. C'est la réponse chiffrée au « ça me rapporte quoi ? » qu'un
+   commerçant pose quand on lui demande de faire certifier son magasin.
+   Réservée au propriétaire — les règles Firestore refusent la lecture aux
+   autres, et un refus se traduit ici par une carte simplement absente. */
+function renderStoreAudience(s){
+  var board=document.getElementById("sd-board"); if(!board||!s||!window.fbLoadStoreStats)return;
+  var sid=s.fbId||s.id; if(!sid)return;
+  window.fbLoadStoreStats(sid,30).then(function(rows){
+    if(!rows||!rows.length)return;
+    var jour7=new Date(Date.now()-6*86400000).toISOString().slice(0,10);
+    var t={vues:0,itineraires:0,partages:0}, sem={vues:0,itineraires:0,partages:0};
+    rows.forEach(function(r){
+      ["vues","itineraires","partages"].forEach(function(k){
+        var n=r[k]||0; t[k]+=n; if((r.jour||"")>=jour7)sem[k]+=n;
+      });
+    });
+    if(!t.vues&&!t.itineraires&&!t.partages)return;
+    function tuile(n,semaine,libelle){
+      return '<div class="mb-stat"><div class="mb-stat-n">'+n+'</div>'+
+        '<div class="mb-stat-l">'+libelle+'</div>'+
+        '<div class="mb-stat-w">'+(semaine?("+"+semaine+" cette semaine"):"\u2014")+'</div></div>';
+    }
+    // Le tableau peut avoir ete repeint entre-temps (la demande arrive vite) :
+    // on relit l'hote au lieu de reutiliser une reference peut-etre morte.
+    var hote=document.getElementById("sd-board"); if(!hote)return;
+    if(hote.querySelector(".mb-stats"))return;   // deja affichee
+    var carte=document.createElement("div");
+    carte.className="mb-card";
+    carte.innerHTML='<div class="mb-head">Ta fiche \u00b7 30 derniers jours</div>'+
+      '<div class="mb-stats">'+
+        tuile(t.vues,sem.vues,"personnes l\u2019ont vue")+
+        tuile(t.itineraires,sem.itineraires,"ont demand\u00e9 le chemin")+
+        tuile(t.partages,sem.partages,"l\u2019ont partag\u00e9e")+
+      '</div>'+
+      '<div class="mb-note">Compt\u00e9 en personnes, pas en clics : un m\u00eame t\u00e9l\u00e9phone ne compte qu\u2019une fois par jour.</div>';
+    hote.insertBefore(carte,hote.firstChild);
+  }).catch(function(){});
+}
+
 function renderMerchantBoard(s){
   var host=merchantBoardHost(); if(!host||!s)return;
   host.innerHTML='<div class="mb-card"><div class="mb-load">Lecture de la demande du quartier…</div></div>';
@@ -10219,6 +10332,9 @@ function _peindreBoard(s,hunts,rayon){
   }
   h+='</div>';
   host.innerHTML=h;
+  // L'audience se charge à part : elle vient de Firestore et ne doit pas
+  // retarder l'affichage de la demande, qui est déjà en mémoire.
+  try{ renderStoreAudience(s); }catch(e){}
 }
 /* Confirmer depuis le tableau de bord : exactement le meme chemin que le
    bouton de la liste (sdSetStock), donc meme sync Firestore et meme push aux
@@ -13499,6 +13615,9 @@ function clearRoute(){
 }
 function showRouteToStore(lat,lng,store){
   window._navDest=store||(STORES||[]).find(function(x){return x.lat===lat&&x.lng===lng;})||null;
+  /* Demander le chemin, c'est le signal le plus proche d'une visite reelle :
+     c'est celui qui vaut quelque chose pour un commercant. */
+  bumpStoreStat(window._navDest,"itineraires");
   if(typeof userLat!=="number"||!userLat){
     toast("Active ta position d'abord");playSound("err");
     openNavApp("https://www.google.com/maps/dir/?api=1&destination="+lat+","+lng);

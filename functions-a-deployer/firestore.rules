@@ -318,6 +318,27 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // ── AUDIENCE D'UNE FICHE MAGASIN : stores/{id}/stats/{jour}
+    //    Trois compteurs par jour — vues, itinéraires demandés, partages.
+    //    AUCUN identifiant d'utilisateur : le commerçant voit une audience,
+    //    jamais qui est passé chez lui.
+    //    LECTURE réservée au propriétaire certifié (champ owner) et à l'admin.
+    //    C'est un tableau de bord privé : le voisin d'en face n'a pas à lire
+    //    la fréquentation d'une boutique concurrente. Le get() coûte une
+    //    lecture de plus par requête — c'est le prix de la confidentialité, et
+    //    il est payé une fois par ouverture du tableau de bord, pas par jour lu.
+    //    ÉCRITURE ouverte aux connectés : c'est l'app de chaque visiteur qui
+    //    incrémente. ⚠️ Donc gonflable par quelqu'un de déterminé, comme les
+    //    points. Sans conséquence tant que le chiffre est indicatif ; à passer
+    //    en Cloud Function le jour où il justifie une facture.
+    match /stores/{storeId}/stats/{jour} {
+      allow read: if isAdmin()
+        || (isSignedIn()
+            && get(/databases/$(database)/documents/stores/$(storeId)).data.owner == request.auth.uid);
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+
     // ── DEMANDE : ce que les gens cherchent, et ce qu'ils ne trouvent pas.
     //    Ces documents ne contiennent AUCUN identifiant d'utilisateur : ce sont
     //    des compteurs par (jour, zone d'environ 5 km, boisson). Personne ne
