@@ -12602,10 +12602,18 @@ function exploreLoadStores(useCache){
   var radiusKm=Math.sqrt(dLa*dLa+dLo*dLo);
   if(!useCache&&radiusKm>30){
     if(status)status.textContent="Zoome pour voir les magasins";
+    /* On EFFACE les marqueurs de la vue precedente. Avant, ils restaient a
+       l'ecran, empiles les uns sur les autres en un gros tas noir au milieu de
+       la carte : on croyait voir des magasins la ou il n'y avait qu'un reste
+       d'affichage. */
+    try{ if(exploreLayer)exploreLayer.clearLayers(); }catch(eC){}
     // Vue trop large pour compter les magasins : on rafraichit l'en-tete pour
     // nommer l'endroit, mais JAMAIS en mode filtre boisson — annoncer
     // "0 en stock" sans avoir cherche serait un mensonge.
-    if(!exploreFilter){try{exploreSetHeader(0);}catch(e){}}
+    // null = "on ne sait pas encore", et non "0". Annoncer 0 sans avoir
+    // cherche est un mensonge ; garder l'ancien chiffre au-dessus d'une carte
+    // vide en est un autre.
+    if(!exploreFilter){try{exploreSetHeader(null,null);}catch(e){}}
     return;
   }
   var q;
@@ -12656,13 +12664,35 @@ function exploreLoadStores(useCache){
     try{checkWatches();}catch(e){}
     // Itineraire actif : on garde les autres magasins masques pour bien voir le
     // chemin (un moveend/zoomend du fitBounds relancait sinon l'affichage des pins).
-    if(window._routeLayer){try{exploreLayer.clearLayers();}catch(e){}return;}
+    if(window._routeLayer){
+      // Pendant un itineraire on masque les autres magasins. L'en-tete doit
+      // suivre : sinon il continuait d'annoncer "129 magasins" au-dessus d'une
+      // carte vide, ce qui est le pire des deux mondes.
+      try{exploreLayer.clearLayers();}catch(e){}
+      try{exploreSetHeader(null,null);}catch(e){}
+      return;
+    }
     // En-tete (nom boisson + compteurs) et filtres chips (En stock / Ouvert / < 1 km)
     var _drinkTotal=list.length;
     var _sureCount=exploreFilter?list.filter(function(s){var did=exploreFilter.drinkId;return storeVerifiedFor(s,did)||((s.confirmations||{})[did]||0)>0;}).length:undefined;
     // Enseignes presentes (vendeurs si une boisson est ciblee, sinon toutes) pour le selecteur.
     window._exploreBrands=Array.from(new Set(list.filter(function(s){return !exploreFilter||s._hasDrink;}).map(function(s){return s.brand;}).filter(Boolean))).sort();
     try{list=exploreApplyChips(list);}catch(eChip){}
+    /* ── Ce qu'on compte doit etre ce qu'on voit ──────────────────────────
+       fbQueryZone interroge un CERCLE dont le rayon est la demi-diagonale de
+       l'ecran : ce cercle deborde donc largement du rectangle affiche. A
+       Brooklyn, les magasins comptes etaient ceux de Manhattan, hors du cadre.
+       D'ou l'en-tete "129 magasins dans cette zone" au-dessus d'une carte
+       vide — le compteur ne mentait pas, il ne parlait pas de la meme zone.
+       On restreint donc au cadre reellement visible, avec une marge de 25 %
+       pour que les pins juste au bord ne disparaissent pas au moindre
+       glissement. */
+    try{
+      var _cadre=exploreMap.getBounds().pad(0.25);
+      list=list.filter(function(s){
+        return typeof s.lat==="number" && typeof s.lng==="number" && _cadre.contains([s.lat,s.lng]);
+      });
+    }catch(eB){}
     exploreLayer.clearLayers();
     var shown=0;
     /* Le plafond de 400 etait un pansement : il evitait le blocage en JETANT
@@ -12814,7 +12844,12 @@ function exploreGoCity(auto){
   if(!q){exploreCitySuggest();return;}
   var seq=(window._citySeq=(window._citySeq||0)+1);
   if(!auto)box.innerHTML=_cityBoxCard("Recherche de \u00AB "+sanitize(q)+" \u00BB\u2026");
-  fetchWithTimeout("https://nominatim.openstreetmap.org/search?format=json&limit=6&addressdetails=0&q="+encodeURIComponent(q),15000)
+  /* addressdetails=1 : sans lui, le PAYS n'est pas renvoye separement et on ne
+     pouvait que decouper display_name a l'aveugle — ce qui donnait « Oujda ·
+     Pachalik d'Oujda, Prefecture d'Oujda-Angad », des noms administratifs que
+     personne ne connait, et jamais « Maroc ».
+     accept-language=fr : « Maroc » plutot que « Morocco ». */
+  fetchWithTimeout("https://nominatim.openstreetmap.org/search?format=json&limit=8&addressdetails=1&accept-language=fr&q="+encodeURIComponent(q),15000)
     .then(function(r){return r.json();})
     .then(function(rows){
       if(seq!==window._citySeq)return; // une frappe plus recente a pris la main
@@ -12826,12 +12861,32 @@ function exploreGoCity(auto){
         setTimeout(function(){if(seq===window._citySeq)box.innerHTML="";},2500);
         return;
       }
+      /* Nominatim renvoie souvent la meme ville plusieurs fois (la commune, le
+         chef-lieu, la zone administrative...). Deux lignes « Oujda » a
+         l'identique n'aident personne a choisir : on ne garde que la premiere
+         de chaque (nom + pays). */
+      var _vues={};
+      rows=rows.filter(function(r){
+        var a=r.address||{};
+        var cle=(String(r.display_name||"").split(",")[0].trim().toLowerCase())+"|"+(a.country||"");
+        if(_vues[cle])return false;
+        _vues[cle]=1; return true;
+      }).slice(0,6);
       var wrap=document.createElement("div");
       wrap.style.cssText="background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);max-height:46vh;overflow-y:auto";
       rows.forEach(function(r){
         var parts=String(r.display_name||"").split(",");
         var main=parts[0].trim();
-        var sub=parts.slice(1,3).join(",").trim();
+        /* Le PAYS d'abord, toujours. C'est la seule information qui permet de
+           distinguer deux villes homonymes, et c'est precisement celle qui
+           manquait. La region ne vient qu'en complement, et seulement si elle
+           n'est pas deja le nom de la ville. */
+        var _ad=r.address||{};
+        var _pays=_ad.country||String(parts[parts.length-1]||"").trim();
+        var _region=_ad.state||_ad.region||_ad.county||"";
+        if(_region && _region.toLowerCase().indexOf(main.toLowerCase())!==-1)_region="";
+        var sub=[_region,_pays].filter(Boolean).join(" \u00b7 ");
+        if(!sub)sub=parts.slice(1,3).join(",").trim();   // repli si l'adresse est vide
         var row=document.createElement("div");
         row.setAttribute("role","button");row.setAttribute("tabindex","0");
         row.style.cssText="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;cursor:pointer;-webkit-tap-highlight-color:transparent";
@@ -13728,6 +13783,16 @@ function clearRoute(){
   try{if(window._navDestMarker&&exploreMap){exploreMap.removeLayer(window._navDestMarker);}}catch(e){}
   window._routeLayer=null;window._navDest=null;window._navDestMarker=null;
   var b=document.getElementById("route-banner");if(b)b.remove();
+  /* Retour EXACTEMENT la ou on etait. C'est la moindre des choses : la carte
+     s'est deplacee sans qu'on le lui demande, elle doit revenir sans qu'on ait
+     a le demander non plus. */
+  try{
+    var _va=window._vueAvantItineraire;
+    if(_va && exploreMap){
+      exploreMap.setView([_va.lat,_va.lng], _va.z, {animate:true, duration:.5});
+    }
+  }catch(e){}
+  window._vueAvantItineraire=null;
   // Réaffiche la feuille "liste des magasins" et la pastille de statut masquées
   // pendant l'itinéraire.
   var _sheetR=document.getElementById("explore-sheet");
@@ -13754,6 +13819,19 @@ function showRouteToStore(lat,lng,store){
     openNavApp("https://www.google.com/maps/dir/?api=1&destination="+lat+","+lng);
     return;
   }
+  /* On note OU on etait, mais SEULEMENT ici : au-dessus, sans position, la
+     fonction sort sans jamais deplacer la carte. Memoriser a cet endroit-la
+     laissait une vue en attente que personne ne viendrait restaurer — et qui
+     aurait teleporte la personne au prochain itineraire ferme.
+     Une seule memorisation : si un deuxieme itineraire est trace sans fermer
+     le premier, c'est bien la vue d'ORIGINE qu'il faut retrouver. */
+  try{
+    var _hv=document.getElementById("explore-map-host");
+    if(exploreMap && _hv && _hv.style.display!=="none" && !window._vueAvantItineraire){
+      var _cv=exploreMap.getCenter();
+      window._vueAvantItineraire={lat:_cv.lat,lng:_cv.lng,z:exploreMap.getZoom()};
+    }
+  }catch(e){}
   // On ouvre la carte SEULEMENT si elle n'est pas deja affichee, sinon le
   // recentrage/zoom ecraserait le cadrage de l'itineraire.
   var _hostR=document.getElementById("explore-map-host");
