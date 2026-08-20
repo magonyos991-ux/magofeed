@@ -9434,6 +9434,55 @@ function ensureLeaflet(onReady, onFail){
   // Delai de garde : onerror ne se declenche pas toujours (requete suspendue).
   setTimeout(function(){ finish(!!window.L); }, 9000);
 }
+/* ============================================================================
+   REGROUPEMENT DES MARQUEURS — le greffon qui empeche la carte de ramer.
+   ----------------------------------------------------------------------------
+   La carte Explorer dessinait un bloc HTML par magasin, et les reconstruisait
+   TOUS a chaque deplacement : jusqu'a 400 pins, soit ~1500 elements recrees a
+   chaque glissement de doigt. C'est de la que venaient les a-coups.
+
+   Regrouper, c'est ne pas dessiner ce qu'on ne peut pas lire : a distance,
+   400 pins colles les uns aux autres ne veulent rien dire, une pastille
+   « 47 magasins » si. On passe de 400 elements a une vingtaine.
+
+   Le greffon etait DEJA charge par l'app — mais seulement pour la carte d'une
+   boisson (initLeafletMap). La carte qu'on dezoome, elle, ne l'utilisait pas.
+
+   Ce chargeur rappelle TOUJOURS, meme si le CDN ne repond pas : dans ce cas on
+   retombe sur une carte sans regroupement, ce qui etait le comportement
+   d'avant. Une carte sans regroupement vaut mieux que pas de carte. */
+function ensureCluster(onDone){
+  if(!window.L){ onDone&&onDone(); return; }
+  if(window.L.markerClusterGroup){ onDone&&onDone(); return; }
+  if(!document.getElementById("leaflet-cluster-css")){
+    var lc=document.createElement("link");
+    lc.id="leaflet-cluster-css"; lc.rel="stylesheet";
+    lc.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css";
+    document.head.appendChild(lc);
+  }
+  var fini=false, go=function(){ if(fini)return; fini=true; onDone&&onDone(); };
+  var sc=document.createElement("script");
+  sc.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js";
+  sc.onload=go; sc.onerror=go;
+  document.head.appendChild(sc);
+  setTimeout(go,6000);   // jamais d'attente infinie
+}
+
+/* La pastille d'un groupe. Dessinee a la main plutot qu'avec le style par
+   defaut du greffon (des ronds bleus qui n'ont rien a voir avec le reste) :
+   elle grossit avec le nombre, sans jamais devenir illisible. */
+function exploreClusterIcon(cluster){
+  var n=cluster.getChildCount();
+  var taille=n<10?34:(n<50?40:(n<200?46:52));
+  return L.divIcon({
+    className:"",
+    html:'<div class="mago-cluster" style="width:'+taille+'px;height:'+taille+'px">'+
+         '<span>'+(n<1000?n:(Math.round(n/100)/10)+"k")+'</span></div>',
+    iconSize:[taille,taille],
+    iconAnchor:[taille/2,taille/2]
+  });
+}
+
 /* Nouvel essai apres un echec : on repart de zero. */
 function retryLeaflet(){
   window._leafletState=null;
@@ -12458,7 +12507,20 @@ function openExploreMap(opts){
       L.control.zoom({position:"bottomleft"}).addTo(exploreMap);
       var darkE=document.body.classList.contains("dark");
       L.tileLayer("https://{s}.basemaps.cartocdn.com/"+(darkE?"dark_all":"light_all")+"/{z}/{x}/{y}{r}.png",{maxZoom:20,subdomains:"abcd"}).addTo(exploreMap);
-      exploreLayer=L.layerGroup().addTo(exploreMap);
+      /* Regroupement si le greffon est la, sinon simple couche : la carte
+         s'affiche dans les deux cas. disableClusteringAtZoom : au-dela, on
+         est assez pres pour que chaque magasin merite son propre pin. */
+      exploreLayer=(window.L&&L.markerClusterGroup)
+        ? L.markerClusterGroup({
+            chunkedLoading:true,          // ajout par paquets : l'interface ne gele pas
+            maxClusterRadius:55,
+            disableClusteringAtZoom:17,
+            spiderfyOnMaxZoom:false,
+            showCoverageOnHover:false,
+            iconCreateFunction:exploreClusterIcon
+          })
+        : L.layerGroup();
+      exploreLayer.addTo(exploreMap);
       exploreMap.on("moveend zoomend",function(){
         try{renderInStockArrows();}catch(e){}
         clearTimeout(_exploreTimer);
@@ -12482,7 +12544,9 @@ function openExploreMap(opts){
       try{var _cc=exploreMap.getCenter();autoOsmForArea(_cc.lat,_cc.lng,exploreMap.getZoom());}catch(e){}
     },120);
   }
-  ensureLeaflet(build, exploreShowMapFailure);
+  // Le greffon de regroupement doit etre la AVANT de construire la couche,
+  // sinon la carte naitrait sans lui et il faudrait tout reconstruire.
+  ensureLeaflet(function(){ ensureCluster(build); }, exploreShowMapFailure);
 }
 /* La carte n'a pas pu se charger : on le DIT, avec une sortie. Un rectangle
    vide qui ne s'explique pas est la pire chose qu'on puisse afficher. */
@@ -12601,7 +12665,13 @@ function exploreLoadStores(useCache){
     try{list=exploreApplyChips(list);}catch(eChip){}
     exploreLayer.clearLayers();
     var shown=0;
-    list.slice(0,400).forEach(function(s){
+    /* Le plafond de 400 etait un pansement : il evitait le blocage en JETANT
+       des magasins, donc en mentant sur ce qu'il y a autour. Avec le
+       regroupement, le nombre d'elements dessines ne depend plus du nombre de
+       magasins mais du zoom — on peut donc tout montrer. Le plafond restant
+       (3000) ne protege plus l'affichage mais la memoire du telephone. */
+    var _lot=[];
+    list.slice(0,3000).forEach(function(s){
       if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
       var pc=brandColor(s.brand);
       var ini=((s.brand||s.name||"?").trim().charAt(0)||"?").toUpperCase();
@@ -12635,9 +12705,14 @@ function exploreLoadStores(useCache){
         showRouteToStore(s.lat,s.lng,s);
         playSound("pop");
       });
-      exploreLayer.addLayer(mk);
+      _lot.push(mk);
       shown++;
     });
+    /* addLayers (au pluriel) : le greffon calcule les groupes UNE fois pour
+       tout le lot. Ajouter les marqueurs un par un le forcerait a tout
+       recalculer a chaque ajout — c'est le piege classique. */
+    if(exploreLayer.addLayers)exploreLayer.addLayers(_lot);
+    else _lot.forEach(function(m){exploreLayer.addLayer(m);});
     try{renderExploreChips();exploreSetHeader(exploreFilter?withDrink:shown,_sureCount);}catch(eHdr){}
     try{renderExploreSheet(exploreFilter?list.filter(function(s){return s._hasDrink;}):list);}catch(eSheet){console.warn("exploreSheet:",eSheet);}
     try{renderInStockArrows();}catch(eArr){}
