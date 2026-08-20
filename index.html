@@ -14494,17 +14494,56 @@ function renderShopClaims(){
 }
 /* Le bouton n'apparait QUE s'il y a vraiment quelque chose a reprendre :
    un bouton qui ne fait rien quand on le tape use la confiance. */
-function _boutonReprise(){
-  var n=0;
+function _repriseCandidats(){
   try{
-    n=(window.STORES||[]).filter(function(s){
+    return (window.STORES||[]).filter(function(s){
       return s&&s.fbId&&s.certified!==true&&s.verifiedSource&&String(s.verifiedSource).indexOf("photos")!==-1;
-    }).length;
-  }catch(e){}
+    });
+  }catch(e){ return []; }
+}
+/* On NOMME ce qu'on propose de certifier. Un bouton « Certifier ces 3 » sans
+   dire lesquels demande de valider a l'aveugle — et certifier, c'est poser une
+   pastille que les visiteurs vont croire. Chaque magasin est donc liste avec de
+   quoi le reconnaitre, un bouton pour ouvrir sa fiche et verifier, et un bouton
+   pour le certifier seul. Le bouton groupe reste, mais en dessous. */
+function _boutonReprise(){
+  var liste=_repriseCandidats();
+  var n=liste.length;
   if(!n)return "";
+  var lignes=liste.slice(0,8).map(function(s){
+    var sid=String(s.fbId||s.id).replace(/'/g,"\\'");
+    var quoi=[s.brand||"",s.type||"",s.address||""].filter(Boolean).join(" · ");
+    var loin=(typeof s.dist==="number")?(typeof fmtDist==="function"?fmtDist(s.dist):Math.round(s.dist)+" m"):"";
+    var mDate=String(s.verifiedSource||"").match(/\(([^)]+)\)/);
+    var quand=mDate?mDate[1].trim():"";
+    return '<div class="rp-row">'+
+      '<div class="rp-txt">'+
+        '<div class="rp-name">'+sanitize(s.name||"(sans nom)")+'</div>'+
+        '<div class="rp-sub">'+sanitize(quoi||"magasin")+(loin?' · '+sanitize(loin):'')+(quand?' · rayon vérifié '+sanitize(quand):' · rayon vérifié')+'</div>'+
+      '</div>'+
+      '<button class="cl-btn" style="flex:none;min-width:0;padding:7px 11px" onclick="admOpenClaimStore(\''+sid+'\')">Voir</button>'+
+      '<button class="cl-btn ok" style="flex:none;min-width:0;padding:7px 11px" onclick="admCertifierUn(\''+sid+'\')">Certifier</button>'+
+    '</div>';
+  }).join("");
   return '<div class="cl-card"><div class="cl-name">Rayons photographiés à reprendre</div>'+
-    '<div class="cl-line">'+n+' magasin'+(n>1?'s':'')+' de cette zone '+(n>1?'ont':'a')+' un rayon photographié mais pas encore la pastille bleue.</div>'+
-    '<div class="cl-acts"><button class="cl-btn ok" onclick="admReprendrePhotos()">Certifier ces '+n+'</button></div></div>';
+    '<div class="cl-line">'+n+' magasin'+(n>1?'s':'')+' de cette zone '+(n>1?'ont':'a')+' un rayon photographié mais pas encore la pastille bleue. Ouvre la fiche pour vérifier avant de certifier.</div>'+
+    lignes+
+    (n>8?'<div class="cl-line quiet">…et '+(n-8)+' autre'+(n-8>1?'s':'')+'</div>':'')+
+    (n>1?'<div class="cl-acts"><button class="cl-btn" onclick="admReprendrePhotos()">Tout certifier ('+n+')</button></div>':'')+
+  '</div>';
+}
+/* Certifier UN magasin depuis la liste : meme chemin que la reprise groupee,
+   sur un seul element. */
+function admCertifierUn(sid){
+  var s=(window.STORES||[]).find(function(x){return String(x.fbId||x.id)===String(sid);});
+  if(!s){toast("Magasin introuvable");return;}
+  if(!confirm("Certifier « "+(s.name||sid)+" » ?\n\nLa pastille bleue apparaîtra pour tout le monde."))return;
+  window.fbCertifyPhotoStores([s]).then(function(k){
+    playSound(k?"win":"pop");
+    toast(k?"Magasin certifié":"Déjà certifié");
+    try{renderShopClaims();}catch(e){}
+    try{if(window.exploreMap&&typeof exploreLoadStores==="function")exploreLoadStores(true);}catch(e){}
+  }).catch(function(e){ playSound("err"); toast("Échec : "+((e&&(e.code||e.message))||e)); });
 }
 function admReprendrePhotos(){
   if(!window.fbCertifyPhotoStores){toast("Indisponible");return;}
