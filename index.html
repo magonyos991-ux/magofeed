@@ -2114,14 +2114,33 @@ window.fbAddReport = async function(storeId, drinkId, type) {
   try {
     var uid = null;
     try { var u = await ensureAuthed(); uid = u && u.uid; } catch(e) {}
-    await window.fbAddDoc(window.fbCollection(window.db, "reports"), {
+    /* Le magasin, ecrit DANS le signalement. Avant, le fil d'administration
+       le cherchait dans la memoire de l'app : hors de la zone chargee, la
+       ligne n'affichait ni nom ni lieu. Position arrondie a ~1 km, comme
+       partout ailleurs : assez pour dire la ville, pas assez pour une adresse. */
+    var st = null;
+    try {
+      st = (window.STORES || []).find(function(x) {
+        return String(x.id) === String(storeId) || String(x.fbId) === String(storeId);
+      });
+    } catch (e) {}
+    var extra = {};
+    if (st) {
+      if (st.name) extra.storeName = String(st.name).slice(0, 60);
+      if (typeof st.lat === "number" && typeof st.lng === "number") {
+        extra.lat = Math.round(st.lat * 100) / 100;
+        extra.lng = Math.round(st.lng * 100) / 100;
+      }
+    }
+    try { extra.tz = String(Intl.DateTimeFormat().resolvedOptions().timeZone || "").slice(0, 48); } catch (e) {}
+    await window.fbAddDoc(window.fbCollection(window.db, "reports"), Object.assign({
       storeId: storeId,
       drinkId: drinkId,
       type: type,
       by: uid || null,
       byPseudo: (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
       createdAt: window.fbServerTimestamp()
-    });
+    }, extra));
   } catch(e) {
     console.warn("Firebase report error:", e);
   }
@@ -2432,6 +2451,13 @@ window.fbHeartbeat = async function() {
       beat.lat = Math.round(window.userLat * 100) / 100;
       beat.lng = Math.round(window.userLng * 100) / 100;
     }
+    /* FUSEAU HORAIRE + LANGUE. Toujours disponibles, sans autorisation, et
+       bien plus grossiers qu'une position : Europe/Brussels ne dit pas ou
+       habite quelqu'un, il dit dans quel pays il se trouve. C'est justement ce
+       qu'il faut pour repondre a « d'ou viennent les gens ? » quand la
+       localisation est refusee — c'est-a-dire souvent. */
+    try { beat.tz = String(Intl.DateTimeFormat().resolvedOptions().timeZone || "").slice(0, 48); } catch (e) {}
+    try { beat.lang = String(navigator.language || "").slice(0, 12); } catch (e) {}
     await setDoc(doc(db, "presence", user.uid), beat, { merge: true });
   } catch (e) { /* règles pas encore publiées, ou hors-ligne : sans gravité */ }
 };
@@ -4633,14 +4659,44 @@ function startScan(){
         });
     }).catch(function(){hint.textContent="✕ Accès caméra refusé";});
 }
+/* ── COUPER LA CAMERA POUR DE BON ─────────────────────────────────────────
+   Une camera qu'on croit eteinte est LA cause classique de « l'app se relance
+   toute seule » sur iPhone : Safari voit un flux video vivant, la memoire ne
+   redescend jamais, et le systeme tue l'onglet.
+
+   Trois trous etaient ouverts ici :
+   1. « if(!scanActive)return » arrivait AVANT l'arret des pistes : camera
+      ouverte mais Quagga pas encore demarre (init lent, ou echec) = flux
+      jamais coupe.
+   2. On ne coupait que #scan-video. Quagga insere SON PROPRE <video> dans le
+      conteneur : ce flux-la survivait.
+   3. window._scanStream etait mis a null AVANT d'avoir arrete ses pistes —
+      on perdait la seule reference qui permettait de les couper.
+   On coupe donc tout ce qui vit, dans l'ordre, avant d'oublier quoi que ce soit. */
 function stopScan(){
   var sa=document.querySelector("#s-scan .scan-area");if(sa)sa.classList.remove("live");
   var tb=document.getElementById("scan-torch");if(tb)tb.style.display="none";
-  window._torchOn=false;window._scanStream=null;
-  if(!scanActive)return;
+  window._torchOn=false;
   try{Quagga.stop();quaggaRunning=false;Quagga.offDetected(onBarcodeDetected);}catch(e){}
-  var v=document.getElementById("scan-video");
-  if(v&&v.srcObject)v.srcObject.getTracks().forEach(function(t){t.stop();});
+  // a) le flux qu'on a ouvert nous-memes
+  try{
+    var st=window._scanStream;
+    if(st&&st.getTracks)st.getTracks().forEach(function(t){try{t.stop();}catch(e){}});
+  }catch(e){}
+  // b) TOUTES les videos de l'ecran scan, y compris celle que Quagga a creee
+  try{
+    var zone=document.getElementById("s-scan")||document;
+    zone.querySelectorAll("video").forEach(function(v){
+      try{
+        if(v.srcObject&&v.srcObject.getTracks)v.srcObject.getTracks().forEach(function(t){try{t.stop();}catch(e){}});
+        v.srcObject=null;
+        v.pause();
+        v.removeAttribute("src");
+        v.load();
+      }catch(e){}
+    });
+  }catch(e){}
+  window._scanStream=null;
   scanActive=false;
 }
 // Flash / torche : marche là où le navigateur l'autorise (Android). Sur iPhone,
@@ -14463,9 +14519,12 @@ function renderNewcomers(){
                 sanitize(u.pseudo) + (moi ? ' <span style="font-size:10px;font-weight:800;color:var(--s2)">(toi)</span>' : '') + '</div>' +
               '<div style="font-size:11px;color:var(--s2);margin-top:1px">' +
                 'arrivé ' + (_ago(u.createdAt) || "?") + (vu ? ' · vu ' + vu : ' · jamais revu') + '</div>' +
+              /* Position refusee = on n'est plus aveugle : le fuseau horaire
+                 du navigateur dit le pays sans rien demander a personne. */
               '<div class="nc-city" data-lat="' + (hasPos ? p.lat : "") + '" data-lng="' + (hasPos ? p.lng : "") + '" ' +
-                   'style="font-size:11.5px;font-weight:700;color:' + (hasPos ? "var(--s1)" : "var(--s3)") + ';margin-top:2px">' +
-                (hasPos ? "…" : "position non partagée") + '</div>' +
+                   'style="font-size:11.5px;font-weight:700;color:' + (hasPos ? "var(--s1)" : "var(--s2)") + ';margin-top:2px">' +
+                (hasPos ? "…" : (p.tz ? sanitize(_paysDuFuseau(p.tz)) + ' <span style="font-weight:600;color:var(--s3)">· fuseau, pas de position</span>'
+                                      : '<span style="color:var(--s3)">origine inconnue</span>')) + '</div>' +
             '</div>' +
             (hasPos ? '<button class="ghost-btn quiet" style="flex-shrink:0;padding:7px 11px;min-height:32px;font-size:11px" ' +
                       'onclick="ncShowOnMap(' + p.lat + ',' + p.lng + ')">Carte</button>' : '') +
@@ -14487,6 +14546,29 @@ function renderNewcomers(){
       var box = document.getElementById("nc-list");
       if (box) box.textContent = "Lecture impossible (" + ((e && e.message) || e) + ")";
     });
+}
+/* Un fuseau horaire (« Europe/Brussels ») dit le PAYS, jamais l'adresse. Pour
+   les fuseaux qu'on croisera vraiment, on affiche le nom du pays ; pour les
+   autres, on garde le fuseau brut plutot que d'inventer.
+   Attention : plusieurs pays partagent un fuseau (Europe/Paris couvre la
+   France et Monaco). On ecrit donc « France » et jamais « certifie France ». */
+var FUSEAU_PAYS={
+  "Europe/Brussels":"Belgique","Europe/Paris":"France","Europe/Amsterdam":"Pays-Bas",
+  "Europe/Luxembourg":"Luxembourg","Europe/Berlin":"Allemagne","Europe/Zurich":"Suisse",
+  "Europe/Madrid":"Espagne","Europe/Lisbon":"Portugal","Europe/Rome":"Italie",
+  "Europe/London":"Royaume-Uni","Europe/Dublin":"Irlande","Europe/Warsaw":"Pologne",
+  "Europe/Bucharest":"Roumanie","Europe/Istanbul":"Turquie","Europe/Kyiv":"Ukraine",
+  "Africa/Casablanca":"Maroc","Africa/Algiers":"Algérie","Africa/Tunis":"Tunisie",
+  "Africa/Kinshasa":"RD Congo","Africa/Lagos":"Nigeria","Africa/Abidjan":"Côte d\'Ivoire",
+  "Africa/Dakar":"Sénégal","Africa/Cairo":"Égypte",
+  "America/New_York":"États-Unis (Est)","America/Los_Angeles":"États-Unis (Ouest)",
+  "America/Chicago":"États-Unis (Centre)","America/Toronto":"Canada","America/Montreal":"Canada",
+  "Asia/Tokyo":"Japon","Asia/Seoul":"Corée du Sud","Asia/Shanghai":"Chine",
+  "Asia/Dubai":"Émirats","Asia/Bangkok":"Thaïlande","Asia/Kolkata":"Inde"
+};
+function _paysDuFuseau(tz){
+  if(!tz)return "";
+  return FUSEAU_PAYS[tz]||String(tz).replace(/_/g," ");
 }
 /* Voir sur la carte l'endroit (arrondi) d'ou quelqu'un se connecte. */
 function ncShowOnMap(lat, lng){
@@ -14645,11 +14727,15 @@ function renderContribFeed(){
     rows.slice(0,20).forEach(function(r){
       var d=DRINKS.find(function(x){return Number(x.id)===Number(r.drinkId);});
       var s=(STORES||[]).find(function(x){return String(x.id)===String(r.storeId)||String(x.fbId)===String(r.storeId);});
+      /* Le nom porte par le signalement lui-meme fait foi : le magasin peut ne
+         plus etre en memoire (autre ville, autre jour). */
+      var nomMagasin=r.storeName||(s&&s.name)||"";
       var who=r.byPseudo||"Anonyme";
       var mine=myPseudo&&who===myPseudo;
       var when="";
       try{var sec=r.createdAt&&r.createdAt.seconds;if(sec){var dt=new Date(sec*1000);when=dt.toLocaleDateString("fr-BE",{day:"numeric",month:"short"})+" "+dt.getHours()+"h"+String(dt.getMinutes()).padStart(2,"0");}}catch(e){}
       var col=_contribTypeColor(r.type);
+      var aLieu=(typeof r.lat==="number"&&typeof r.lng==="number");
       var card=document.createElement("div");
       card.style.cssText="background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;padding:10px 13px;margin-bottom:8px";
       card.innerHTML='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+
@@ -14657,10 +14743,37 @@ function renderContribFeed(){
         '<span style="font-size:10.5px;font-weight:800;color:#fff;background:'+col+';padding:2px 8px;border-radius:999px">'+_contribTypeLabel(r.type)+'</span>'+
         (when?'<span style="font-size:11px;color:var(--s3);margin-left:auto">'+when+'</span>':'')+
       '</div>'+
-      '<div style="font-size:12px;color:var(--s2);margin-top:5px">'+(r.type==="badstore"?(s?sanitize(s.name):"Lieu signalé")+" — signalé comme faux magasin":((d?sanitize(d.name):"Boisson #"+sanitize(String(r.drinkId||"?")))+(s?' · '+sanitize(s.name):'')))+'</div>';
+      '<div style="font-size:12px;color:var(--s2);margin-top:5px">'+(r.type==="badstore"?(nomMagasin?sanitize(nomMagasin):"Lieu signalé")+" — signalé comme faux magasin":((d?sanitize(d.name):"Boisson #"+sanitize(String(r.drinkId||"?")))+(nomMagasin?' · '+sanitize(nomMagasin):'')))+'</div>'+
+      /* OU. Le nom de la ville arrive en differe (une requete par ville,
+         espacees pour respecter OpenStreetMap). A defaut de position, le fuseau
+         donne au moins le pays. */
+      '<div class="ct-ville" data-lat="'+(aLieu?r.lat:"")+'" data-lng="'+(aLieu?r.lng:"")+'" '+
+        'style="font-size:11px;font-weight:700;color:var(--s3);margin-top:3px">'+
+        (aLieu?"…":(r.tz?sanitize(_paysDuFuseau(r.tz))+" · fuseau":"lieu inconnu"))+'</div>';
       host.appendChild(card);
     });
     var sep=document.createElement("div");sep.style.cssText="height:1px;background:var(--border);margin:6px 0 14px";host.appendChild(sep);
+    /* Resolution des villes, une par une et espacees d'une seconde :
+       OpenStreetMap n'accepte qu'une requete par seconde et bloque les
+       impatients. On dedoublonne d'abord — dix signalements dans le meme
+       magasin, c'est UNE requete, pas dix. */
+    (async function(){
+      var cells=[].slice.call(host.querySelectorAll(".ct-ville[data-lat]:not([data-lat=''])"));
+      var vus={};
+      for(var i=0;i<cells.length;i++){
+        var c=cells[i];
+        var la=parseFloat(c.getAttribute("data-lat")),ln=parseFloat(c.getAttribute("data-lng"));
+        if(!isFinite(la)||!isFinite(ln)){c.textContent="lieu inconnu";continue;}
+        var cle=la.toFixed(2)+","+ln.toFixed(2);
+        if(vus[cle]!==undefined){c.textContent=vus[cle];continue;}
+        var nom="";
+        try{nom=await reverseCity(la,ln);}catch(e){}
+        nom=nom||cle;
+        vus[cle]=nom;
+        c.textContent=nom;
+        if(i<cells.length-1)await new Promise(function(res){setTimeout(res,1100);});
+      }
+    })();
   }).catch(function(e){console.warn("contrib feed:",e);});
 }
 /* Avis des utilisateurs côté admin : note moyenne + derniers retours écrits.
@@ -14842,7 +14955,13 @@ function renderShopClaims(){
   window.fbLoadShopClaims().then(function(rows){
     if(seq!==window._clSeq)return;   // un rendu plus recent a pris la main
     if(rows&&rows.error){
-      host.innerHTML='<div class="cl-err">Demandes illisibles ('+sanitize(rows.error)+') — publie la règle shopClaims.</div>';
+      var attendu=String(rows.error||"").indexOf("permission")!==-1;
+      host.innerHTML='<div class="cl-'+(attendu?"info":"err")+'">'+
+        (attendu
+          ? '<b>Demandes de commerçants : pas encore actives.</b><br>'+
+            'La règle <i>shopClaims</i> n\'est pas publiée. Rien n\'est cassé — publie '+
+            'firestore.rules depuis PowerShell et ce message disparaîtra.'
+          : 'Demandes illisibles ('+sanitize(rows.error)+')')+'</div>';
       return;
     }
     if(!rows||!rows.length){ host.innerHTML=_boutonReprise(); return; }
@@ -14882,17 +15001,56 @@ function renderShopClaims(){
 }
 /* Le bouton n'apparait QUE s'il y a vraiment quelque chose a reprendre :
    un bouton qui ne fait rien quand on le tape use la confiance. */
-function _boutonReprise(){
-  var n=0;
+function _repriseCandidats(){
   try{
-    n=(window.STORES||[]).filter(function(s){
+    return (window.STORES||[]).filter(function(s){
       return s&&s.fbId&&s.certified!==true&&s.verifiedSource&&String(s.verifiedSource).indexOf("photos")!==-1;
-    }).length;
-  }catch(e){}
+    });
+  }catch(e){ return []; }
+}
+/* On NOMME ce qu'on propose de certifier. Un bouton « Certifier ces 3 » sans
+   dire lesquels demande de valider a l'aveugle — et certifier, c'est poser une
+   pastille que les visiteurs vont croire. Chaque magasin est donc liste avec de
+   quoi le reconnaitre, un bouton pour ouvrir sa fiche et verifier, et un bouton
+   pour le certifier seul. Le bouton groupe reste, mais en dessous. */
+function _boutonReprise(){
+  var liste=_repriseCandidats();
+  var n=liste.length;
   if(!n)return "";
+  var lignes=liste.slice(0,8).map(function(s){
+    var sid=String(s.fbId||s.id).replace(/'/g,"\\'");
+    var quoi=[s.brand||"",s.type||"",s.address||""].filter(Boolean).join(" · ");
+    var loin=(typeof s.dist==="number")?(typeof fmtDist==="function"?fmtDist(s.dist):Math.round(s.dist)+" m"):"";
+    var mDate=String(s.verifiedSource||"").match(/\(([^)]+)\)/);
+    var quand=mDate?mDate[1].trim():"";
+    return '<div class="rp-row">'+
+      '<div class="rp-txt">'+
+        '<div class="rp-name">'+sanitize(s.name||"(sans nom)")+'</div>'+
+        '<div class="rp-sub">'+sanitize(quoi||"magasin")+(loin?' · '+sanitize(loin):'')+(quand?' · rayon vérifié '+sanitize(quand):' · rayon vérifié')+'</div>'+
+      '</div>'+
+      '<button class="cl-btn" style="flex:none;min-width:0;padding:7px 11px" onclick="admOpenClaimStore(\''+sid+'\')">Voir</button>'+
+      '<button class="cl-btn ok" style="flex:none;min-width:0;padding:7px 11px" onclick="admCertifierUn(\''+sid+'\')">Certifier</button>'+
+    '</div>';
+  }).join("");
   return '<div class="cl-card"><div class="cl-name">Rayons photographiés à reprendre</div>'+
-    '<div class="cl-line">'+n+' magasin'+(n>1?'s':'')+' de cette zone '+(n>1?'ont':'a')+' un rayon photographié mais pas encore la pastille bleue.</div>'+
-    '<div class="cl-acts"><button class="cl-btn ok" onclick="admReprendrePhotos()">Certifier ces '+n+'</button></div></div>';
+    '<div class="cl-line">'+n+' magasin'+(n>1?'s':'')+' de cette zone '+(n>1?'ont':'a')+' un rayon photographié mais pas encore la pastille bleue. Ouvre la fiche pour vérifier avant de certifier.</div>'+
+    lignes+
+    (n>8?'<div class="cl-line quiet">…et '+(n-8)+' autre'+(n-8>1?'s':'')+'</div>':'')+
+    (n>1?'<div class="cl-acts"><button class="cl-btn" onclick="admReprendrePhotos()">Tout certifier ('+n+')</button></div>':'')+
+  '</div>';
+}
+/* Certifier UN magasin depuis la liste : meme chemin que la reprise groupee,
+   sur un seul element. */
+function admCertifierUn(sid){
+  var s=(window.STORES||[]).find(function(x){return String(x.fbId||x.id)===String(sid);});
+  if(!s){toast("Magasin introuvable");return;}
+  if(!confirm("Certifier « "+(s.name||sid)+" » ?\n\nLa pastille bleue apparaîtra pour tout le monde."))return;
+  window.fbCertifyPhotoStores([s]).then(function(k){
+    playSound(k?"win":"pop");
+    toast(k?"Magasin certifié":"Déjà certifié");
+    try{renderShopClaims();}catch(e){}
+    try{if(window.exploreMap&&typeof exploreLoadStores==="function")exploreLoadStores(true);}catch(e){}
+  }).catch(function(e){ playSound("err"); toast("Échec : "+((e&&(e.code||e.message))||e)); });
 }
 function admReprendrePhotos(){
   if(!window.fbCertifyPhotoStores){toast("Indisponible");return;}
