@@ -17,7 +17,7 @@ DRINKS = [
     ("ciao-energy",        "CIAO ENERGY",       "L'INTROUVABLE","Tout le monde en parle, personne ne la trouve","#3d3006", "#f2c94c"),
     ("jarritos",           "JARRITOS",          "MEXIQUE",      "Les sodas aux vrais fruits depuis 1950",       "#4a1e10", "#ff7a59"),
     ("sumol",              "SUMOL",             "PORTUGAL",     "L'ananas pétillant de Lisbonne",               "#4a3206", "#ffc24d"),
-    ("pocari-sweat",       "POCARI\nSWEAT",     "JAPON",        "La désaltérante n°1 du Japon",                 "#123c5c", "#6fc3e8"),
+    ("pocari-sweat",       "POCARI SWEAT",     "JAPON",        "La désaltérante n°1 du Japon",                 "#123c5c", "#6fc3e8"),
     ("vimto",              "VIMTO",             "ANGLETERRE",   "Le fruité culte de Manchester, depuis 1908",   "#2e1440", "#b57de8"),
     ("chupa-chups",        "CHUPA CHUPS","CORÉE",    "La sucette devenue soda",                      "#4a1c2e", "#ff8fb3"),
     ("generic",            "BOISSON\nDU JOUR",  "MAGOFEED",     "Les boissons rares près de chez toi",          "#2b2114", "#c69a57"),
@@ -45,7 +45,7 @@ html,body{width:1080px;height:1350px;overflow:hidden}
 .beam{position:absolute;left:-15%%;top:-30%%;width:70%%;height:160%%;transform:rotate(18deg);
   background:linear-gradient(90deg,transparent,%(accSoft12)s,transparent)}
 /* halo derriere la bouteille */
-.halo{position:absolute;left:50%%;top:56%%;width:940px;height:940px;transform:translate(-50%%,-50%%);
+.halo{position:absolute;left:50%%;top:58%%;width:940px;height:940px;transform:translate(-50%%,-50%%);
   background:radial-gradient(closest-side,%(accSoft35)s,%(accSoft10)s 55%%,transparent 72%%)}
 /* particules */
 .spark{position:absolute;border-radius:50%%;background:%(accent)s}
@@ -54,14 +54,14 @@ html,body{width:1080px;height:1350px;overflow:hidden}
   display:inline-flex;align-items:center;gap:14px;border-radius:999px;padding:16px 34px;
   font-size:29px;font-weight:700;letter-spacing:.28em;color:#17110a;background:%(accent)s;
   box-shadow:0 12px 40px %(accSoft35)s}
-/* nom geant DERRIERE la bouteille */
-.name{position:absolute;left:40px;right:40px;top:335px;z-index:2;text-align:center;
-  font-size:%(nameSize)spx;line-height:.92;font-weight:700;letter-spacing:-.02em;
-  color:%(accent)s;white-space:pre-line;opacity:.94;
-  text-shadow:0 0 110px %(accSoft45)s}
-/* la bouteille passe DEVANT le nom */
-.bottle{position:absolute;left:50%%;top:245px;transform:translateX(-50%%);z-index:4;
-  width:600px;height:880px;filter:drop-shadow(0 40px 70px rgba(0,0,0,.55))}
+/* nom geant ENTIEREMENT VISIBLE au-dessus de la bouteille */
+.name{position:absolute;left:40px;right:40px;top:196px;z-index:6;text-align:center;
+  font-size:%(nameSize)spx;line-height:.96;font-weight:700;letter-spacing:-.02em;
+  color:%(accent)s;white-space:pre-line;
+  text-shadow:0 0 110px %(accSoft45)s,0 8px 40px rgba(0,0,0,.5)}
+/* la bouteille commence SOUS le nom, rien ne se chevauche */
+.bottle{position:absolute;left:50%%;top:%(bottleTop)spx;transform:translateX(-50%%);z-index:4;
+  width:%(bottleW)spx;height:%(bottleH)spx;filter:drop-shadow(0 40px 70px rgba(0,0,0,.55))}
 .bottle svg{width:100%%;height:100%%}
 /* bandeau bas */
 .scrim{position:absolute;left:0;right:0;bottom:0;height:400px;z-index:5;pointer-events:none;background:linear-gradient(180deg,transparent,rgba(8,5,3,.72) 62%%)}
@@ -108,12 +108,17 @@ for slug, name, origin, fact, scene, acc in DRINKS:
     # nom sur 1 ligne = 150px ; 2 lignes = 118px ; tres long = plus petit
     lines = name.split("\n")
     longest = max(len(l) for l in lines)
-    size = 150 if longest <= 8 else (118 if longest <= 11 else 96)
+    size = 138 if longest <= 8 else (104 if longest <= 12 else 86)
+    nameH = int(size * len(lines) * 0.98)
+    bottleTop = 196 + nameH + 26
+    bottleH = 1092 - bottleTop
+    bottleW = int(bottleH * 900 / 1400)
     page = PAGE % {
         "fonts": FONTS, "scene": scene, "scLight": soft(lighter(scene,1.9), .55),
         "accent": acc, "accSoft45": soft(acc,.45), "accSoft35": soft(acc,.35),
         "accSoft12": soft(acc,.12), "accSoft10": soft(acc,.10),
         "name": name, "nameSize": size, "origin": origin, "fact": fact,
+        "bottleTop": bottleTop, "bottleH": bottleH, "bottleW": bottleW,
         "bottleSvg": bottle,
     }
     io.open(os.path.join(SP, "card-%s.html" % slug), "w", encoding="utf-8").write(page)
