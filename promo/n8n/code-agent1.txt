@@ -1,4 +1,10 @@
-// AGENT 1 (image) — choisit la boisson du jour dans le MENU (banque de cartes).
+// AGENT 1 (image) — LA BOISSON EST CHOISIE PAR LE CALENDRIER, PAS PAR L'IA.
+//
+// Avant, le modele choisissait dans le menu avec la consigne « pas deux fois
+// la meme ». Une consigne s'oublie : deux Pocari sont sortis la meme semaine.
+// Maintenant : rotation fixe sur 12 boissons, une par jour — une repetition
+// est MATHEMATIQUEMENT impossible en moins de 12 jours. L'IA ne decide plus
+// que de l'angle du texte (anecdote, question, defi...).
 const prev = $('Memoire et aiguillage').first().json;
 const MENU = [
   { slug: "guarana-antarctica", nom: "Guaraná Antarctica", info: "soda guarana, le prefere du Bresil depuis 1921" },
@@ -14,25 +20,31 @@ const MENU = [
   { slug: "vimto", nom: "Vimto", info: "boisson fruitee anglaise de Manchester, depuis 1908" },
   { slug: "chupa-chups", nom: "Chupa Chups Sparkling", info: "la sucette devenue soda petillant, Coree" }
 ];
-const menuTxt = MENU.map(m => "- " + m.slug + " : " + m.nom + " (" + m.info + ")").join("\n");
+// Ordre volontairement melange pour alterner les continents d'un jour a l'autre.
+const ORDRE = ["ramune","jarritos","milkis","guarana-antarctica","sumol","pocari-sweat",
+               "mogu-mogu","vimto","calpico","ciao-energy","inca-kola","chupa-chups"];
+const jour = Math.floor(Date.now() / 86400000);          // numero du jour (UTC)
+const slug = ORDRE[jour % ORDRE.length];
+const m = MENU.find(x => x.slug === slug);
 const prompt =
   "Tu es le responsable marketing de Magofeed, appli belge (Bruxelles) qui aide a TROUVER des boissons rares et exotiques SANS ALCOOL dans les magasins proches. Public familial, ton fun et curieux, langue: FRANCAIS.\n\n" +
-  "Choisis LA boisson du jour dans ce MENU (une boisson pas encore utilisee recemment, varie les continents) puis cree le post Instagram + Facebook:\n" + menuTxt + "\n\n" +
+  "LA BOISSON DU JOUR EST IMPOSEE (ne la change sous aucun pretexte) :\n" +
+  "- " + m.nom + " : " + m.info + "\n\n" +
+  "Cree le post Instagram + Facebook pour CETTE boisson.\n\n" +
   "REGLES ABSOLUES:\n" +
-  "- JAMAIS d'alcool, meme 0.0%. Univers 100% famille.\n" +
-  "- Sujet DIFFERENT de tous ceux deja publies (liste plus bas) — si une boisson du menu y figure deja, prends-en une autre.\n" +
-  "- Varie les angles: anecdote, le-savais-tu, question communaute, defi, comparaison.\n" +
+  "- JAMAIS d'alcool, meme 0.0%. Univers 100% famille. Aucun emoji.\n" +
+  "- La boisson ne change pas ; ce qui doit changer, c'est L'ANGLE. Regarde les posts deja publies ci-dessous : si cette boisson y figure, prends un angle RADICALEMENT different (anecdote historique, le-savais-tu, question communaute, defi, comparaison, souvenir d'enfance, recette d'accompagnement...).\n" +
   "- CTA vers l'appli: " + prev.appLink + "\n" +
   "- Instagram: accroche forte + 8-12 hashtags. Facebook: conversationnel, 2-4 hashtags.\n\n" +
-  "SUJETS DEJA PUBLIES (interdits): " + prev.usedTopicsList;
+  "POSTS DEJA PUBLIES (pour varier l'angle): " + prev.usedTopicsList;
 return [{ json: { claudeBody: {
   model: "claude-opus-5", max_tokens: 4000,
   output_config: { effort: "low", format: { type: "json_schema", schema: {
     "type": "object", "additionalProperties": false,
     "required": ["topic", "image_query", "caption_instagram", "caption_facebook"],
     "properties": {
-      "topic": {"type": "string", "description": "Sujet court et unique du post (inclut le nom de la boisson)"},
-      "image_query": {"type": "string", "enum": ["guarana-antarctica","ramune","calpico","mogu-mogu","inca-kola","milkis","ciao-energy","jarritos","sumol","pocari-sweat","vimto","chupa-chups"], "description": "slug EXACT de la boisson choisie dans le menu"},
+      "topic": {"type": "string", "description": "Sujet court et unique du post (inclut le nom de la boisson ET l'angle choisi)"},
+      "image_query": {"type": "string", "enum": [slug], "description": "slug de la boisson du jour (impose)"},
       "caption_instagram": {"type": "string", "description": "Legende Instagram: accroche forte, corps, CTA appli, 8-12 hashtags"},
       "caption_facebook": {"type": "string", "description": "Version Facebook conversationnelle, 2-4 hashtags, CTA appli"}
     }} } },
