@@ -848,6 +848,11 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
             <b>Coller une liste d'ids</b>
             <i>Remplit le rayon d'un coup à partir d'une liste de numéros de boissons</i>
           </button>
+          <button class="sd-adm" id="sd-adm-certif" onclick="adminBasculerCertif()">
+            <svg viewBox="0 0 24 24" fill="none"><path fill="currentColor" d="M12 2.4 4.4 5.9v6c0 4.6 3.2 8.5 7.6 9.7 4.4-1.2 7.6-5.1 7.6-9.7v-6L12 2.4z"/></svg>
+            <b id="sd-adm-certif-t">Certifier ce magasin</b>
+            <i id="sd-adm-certif-s">Pastille bleue visible par tout le monde</i>
+          </button>
           <button class="sd-adm danger" onclick="adminRemoveStore()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16M9.5 6.5V4.5h5v2M6.5 6.5l.9 13a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4l.9-13"/></svg>
             <b>Supprimer ce magasin</b>
@@ -1003,7 +1008,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
 <!-- Firebase SDK -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion, arrayRemove, deleteDoc, deleteField, startAt, endAt, startAfter, documentId, getCountFromServer, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion, arrayRemove, deleteDoc, deleteField, startAt, endAt, startAfter, documentId, getCountFromServer, getDocFromServer, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, browserPopupRedirectResolver, browserSessionPersistence, setPersistence, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, linkWithPopup, signInWithPopup, signInWithCredential, deleteUser, reauthenticateWithPopup, EmailAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, linkWithCredential } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getMessaging, getToken, onMessage, isSupported } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
@@ -2309,6 +2314,29 @@ window.fbMyShopClaim = async function(storeId) {
    (la zone regardee) : passer les 9000 documents couterait une fortune en
    lectures pour rien. A relancer d'une ville a l'autre — le bouton dit
    combien il en a repris. */
+/* Certifier un magasin precis. fbCertifyPhotoStores ne prend qu'une liste
+   filtree sur verifiedSource : elle ne sert pas quand l'administrateur decide
+   depuis la fiche, apres avoir verifie lui-meme. */
+/* Lit la pastille DIRECTEMENT sur le serveur, en contournant le cache
+   Firestore local. C'est le seul moyen de repondre a « est-ce que c'est
+   vraiment certifie » sans se faire mentir par une copie locale perimee. */
+window.fbStoreCertState = async function(storeId) {
+  var snap = await getDocFromServer(doc(db, "stores", String(storeId)));
+  if (!snap.exists()) return { existe: false, certified: false };
+  var d = snap.data() || {};
+  return { existe: true, certified: d.certified === true, owner: d.owner || null };
+};
+/* Certifier, PUIS relire le serveur. Une ecriture refusee par les regles ou
+   perdue en route ressemblait a un succes : le bouton disait « Magasin
+   certifie » et rien ne changeait. On ne renvoie true que si le serveur
+   confirme. */
+window.fbCertifyStore = async function(storeId) {
+  await setDoc(doc(db, "stores", String(storeId)),
+    { certified: true, certifiedAt: serverTimestamp() }, { merge: true });
+  var etat = await window.fbStoreCertState(storeId);
+  if (!etat.certified) throw new Error("le serveur n'a pas enregistre la certification");
+  return true;
+};
 window.fbCertifyPhotoStores = async function(list) {
   var cibles = (list || []).filter(function(s) {
     return s && s.fbId && s.certified !== true &&
@@ -2403,6 +2431,8 @@ window.fbRevokeCertification = async function(storeId) {
      alors qu'une boutique qui change de main doit pouvoir etre revendiquee.
      Effacer retire aussi le nom et le telephone d'un dossier devenu caduc. */
   try { await deleteDoc(doc(db, "shopClaims", String(storeId))); } catch (e) {}
+  var etat = await window.fbStoreCertState(storeId);
+  if (etat.certified) throw new Error("le serveur a garde la certification");
   return true;
 };
 /* Tableau de bord fondateur : les chiffres du jour en 5 comptages agreges
@@ -2490,6 +2520,12 @@ window.fbPresenceAll = async function() {
         pseudo: v.pseudo || null,
         lat: (typeof v.lat === "number") ? v.lat : null,
         lng: (typeof v.lng === "number") ? v.lng : null,
+        /* LE FUSEAU ETAIT ECRIT MAIS JAMAIS RELU. Cette fonction recopie champ
+           par champ ; tz et lang manquaient a la liste, donc l'ecran affichait
+           « origine inconnue » pour tout le monde sans position, alors que
+           l'information etait bien dans la base depuis le debut. */
+        tz: v.tz || null,
+        lang: v.lang || null,
         lastSeen: (v.lastSeen && v.lastSeen.toMillis) ? v.lastSeen.toMillis() : null
       };
     });
@@ -7901,6 +7937,36 @@ function shareStore(){
   if(navigator.share){navigator.share({title:"Magofeed \u00b7 "+s.name,text:txt,url:url}).catch(function(){});}
   else{try{navigator.clipboard.writeText(txt+" "+url);toast("Lien copi\u00e9 !");playSound("pop");}catch(e){prompt("Copie le lien :",url);}}
 }
+/* Poser ou retirer la pastille bleue depuis la fiche. Les deux chemins
+   existaient deja cote serveur (fbCertifyPhotoStores / fbRevokeCertification) :
+   on les branche simplement la ou on prend la decision. */
+function adminBasculerCertif(){
+  var s=curStoreDetail;
+  if(!s){toast("Ouvre d'abord un magasin");return;}
+  var sid=String(s.fbId||s.id);
+  var on=storeCertifie(s);
+  if(on){
+    if(!confirm("Retirer la certification de « "+(s.name||sid)+" » ?\n\nLa pastille bleue disparaît pour tout le monde."))return;
+    if(!window.fbRevokeCertification){toast("Indisponible");return;}
+    window.fbRevokeCertification(sid).then(function(){
+      s.certified=false; s.owner=null;
+      majCacheCertif();
+      playSound("pop"); toast("Certification retirée");
+      try{openStoreDetail(String(s.id));}catch(e){}
+      try{if(window.exploreMap&&typeof exploreLoadStores==="function")exploreLoadStores(true);}catch(e){}
+    }).catch(function(e){ playSound("err"); toast("Échec : "+((e&&(e.code||e.message))||e)); });
+    return;
+  }
+  if(!confirm("Certifier « "+(s.name||sid)+" » ?\n\nLa pastille bleue apparaîtra pour tout le monde. À ne faire qu'après avoir vérifié le rayon sur place."))return;
+  if(!window.fbCertifyStore){toast("Indisponible");return;}
+  window.fbCertifyStore(sid).then(function(){
+    s.certified=true;
+    majCacheCertif();
+    playSound("win"); toast("Magasin certifié");
+    try{openStoreDetail(String(s.id));}catch(e){}
+    try{if(window.exploreMap&&typeof exploreLoadStores==="function")exploreLoadStores(true);}catch(e){}
+  }).catch(function(e){ playSound("err"); toast("Échec : "+((e&&(e.code||e.message))||e)); });
+}
 function adminBatchAssignHere(){
   if(!isAdmin||!curStoreDetail)return;
   var s=curStoreDetail;
@@ -9825,6 +9891,34 @@ function closeStoreSheet(){document.getElementById("map-sheet-modal").style.disp
 /* ================================
    STORE DETAIL
 ================================ */
+/* Le bouton de certification affiche l'etat LOCAL tout de suite (instantane),
+   puis demande la verite au serveur et se corrige si les deux divergent. Sans
+   cette relecture, un cache perime faisait dire au bouton « Certifier » alors
+   que la pastille etait deja posee — et l'inverse. */
+function majBoutonCertif(s){
+  var bt=document.getElementById("sd-adm-certif");
+  if(!bt||!s)return;
+  var on=storeCertifie(s);
+  bt.classList.toggle("danger",on);
+  var t=document.getElementById("sd-adm-certif-t");
+  var u=document.getElementById("sd-adm-certif-s");
+  if(t)t.textContent=on?"Retirer la certification":"Certifier ce magasin";
+  if(u)u.textContent=on
+    ?"La pastille bleue disparaît et le tableau de bord du gérant se referme"
+    :"Pastille bleue visible par tout le monde — à ne poser qu'après vérification";
+  if(!window.fbStoreCertState)return;
+  var seq=(window._certSeq=(window._certSeq||0)+1);
+  window.fbStoreCertState(String(s.fbId||s.id)).then(function(et){
+    if(seq!==window._certSeq)return;      // une autre fiche a ete ouverte entre-temps
+    if(curStoreDetail!==s)return;
+    if(!!et.certified===!!storeCertifie(s))return;
+    s.certified=et.certified===true;
+    if(!s.certified)s.owner=null;
+    majCacheCertif();
+    majBoutonCertif(s);
+    try{renderStoreDetail();}catch(e){}
+  }).catch(function(){});
+}
 function openStoreDetail(storeId){
   var s=STORES.find(function(x){return x.id===storeId||x.fbId===storeId;});
   if(!s)return;
@@ -9843,6 +9937,11 @@ function openStoreDetail(storeId){
   curStoreDetailQuery="";curStoreDetailCat="Tous";
   var admTools=document.getElementById("sd-admin-tools");
   if(admTools)admTools.style.display=isAdmin?"block":"none";
+  /* L'etat de certification se lit et se change ICI, sur le magasin qu'on
+     regarde. La liste des demandes ne couvre que ceux passes par une demande
+     de commercant — un magasin certifie depuis la reprise des rayons n'y
+     apparait jamais, et sa pastille etait donc irretirable. */
+  if(isAdmin)try{ majBoutonCertif(s); }catch(e){}
   var admBadge=document.getElementById("sd-admin-badge");
   if(admBadge)admBadge.style.display=isAdmin?"inline-block":"none";
   var sdSearch=document.getElementById("sd-search");if(sdSearch)sdSearch.value="";
@@ -15192,15 +15291,26 @@ function _boutonReprise(){
     (n>1?'<div class="cl-acts"><button class="cl-btn" onclick="admReprendrePhotos()">Tout certifier ('+n+')</button></div>':'')+
   '</div>';
 }
-/* Certifier UN magasin depuis la liste : meme chemin que la reprise groupee,
-   sur un seul element. */
+/* LE CACHE EFFACAIT LA CERTIFICATION. Le cache localStorage des magasins
+   (6 h) etait reecrit apres 18 autres modifications, mais jamais apres une
+   certification : on posait la pastille, Firestore l'enregistrait, puis
+   l'app relancee servait le cache d'AVANT — magasin non certifie, toujours
+   dans « rayons a reprendre », et pas de pastille bleue. */
+function majCacheCertif(){
+  try{ if(window.fbTouchCache)window.fbTouchCache(); }catch(e){}
+}
+/* Certifier UN magasin depuis la liste. Passe par fbCertifyStore, qui relit
+   le serveur : une ecriture refusee se voit tout de suite. */
 function admCertifierUn(sid){
   var s=(window.STORES||[]).find(function(x){return String(x.fbId||x.id)===String(sid);});
   if(!s){toast("Magasin introuvable");return;}
   if(!confirm("Certifier « "+(s.name||sid)+" » ?\n\nLa pastille bleue apparaîtra pour tout le monde."))return;
-  window.fbCertifyPhotoStores([s]).then(function(k){
-    playSound(k?"win":"pop");
-    toast(k?"Magasin certifié":"Déjà certifié");
+  if(!window.fbCertifyStore){toast("Indisponible");return;}
+  window.fbCertifyStore(String(s.fbId||s.id)).then(function(){
+    s.certified=true;
+    majCacheCertif();
+    playSound("win");
+    toast("Magasin certifié");
     try{renderShopClaims();}catch(e){}
     try{if(window.exploreMap&&typeof exploreLoadStores==="function")exploreLoadStores(true);}catch(e){}
   }).catch(function(e){ playSound("err"); toast("Échec : "+((e&&(e.code||e.message))||e)); });
@@ -15208,6 +15318,7 @@ function admCertifierUn(sid){
 function admReprendrePhotos(){
   if(!window.fbCertifyPhotoStores){toast("Indisponible");return;}
   window.fbCertifyPhotoStores(window.STORES||[]).then(function(n){
+    majCacheCertif();
     playSound(n?"win":"pop");
     toast(n?(n+" magasin"+(n>1?"s":"")+" certifié"+(n>1?"s":"")):"Rien à reprendre dans cette zone");
     try{renderShopClaims();}catch(e){}
@@ -15230,6 +15341,7 @@ function admApproveClaim(sid){
     try{
       var st=(window.STORES||[]).find(function(x){return String(x.fbId||x.id)===String(sid);});
       if(st){st.certified=true;st.owner=c.by||null;}
+      majCacheCertif();
       if(window.exploreMap&&typeof exploreLoadStores==="function")exploreLoadStores(true);
     }catch(e){}
   }).catch(function(e){ playSound("err"); toast("Échec : "+((e&&(e.code||e.message))||e)); });
@@ -15251,6 +15363,7 @@ function admRevokeClaim(sid){
     try{
       var st=(window.STORES||[]).find(function(x){return String(x.fbId||x.id)===String(sid);});
       if(st){st.certified=false;st.owner=null;}
+      majCacheCertif();
       if(window.exploreMap&&typeof exploreLoadStores==="function")exploreLoadStores(true);
     }catch(e){}
     try{renderShopClaims();}catch(e){}
