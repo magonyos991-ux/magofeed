@@ -498,6 +498,11 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div class="set-txt"><div class="set-title" data-i18n="sounds">Effets sonores</div><div class="set-sub" data-i18n="soundsSub">Sons lors des interactions</div></div>
           <div id="sound-toggle" class="sw on" aria-hidden="true"><div id="sound-knob" class="sw-knob"></div></div>
         </div>
+        <div id="hunt-fab-row" class="set-row static sw-row" role="switch" aria-checked="true" tabindex="0" aria-label="Bouton de chasse flottant" onclick="toggleHuntFab()" onkeydown="if(event.key==='Enter'){toggleHuntFab();}">
+          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg></div>
+          <div class="set-txt"><div class="set-title">Bouton de chasse flottant</div><div class="set-sub">La pastille sur l'écran d'accueil — appui long dessus pour la masquer</div></div>
+          <div id="huntfab-toggle" class="sw on" aria-hidden="true"><div class="sw-knob"></div></div>
+        </div>
       </div>
       <div class="theme-row">
         <div class="theme-btn" id="tm-light" onclick="setMode('light')"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg> <span data-i18n="themeLight">Clair</span></div>
@@ -860,6 +865,26 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           </button>
         </div>
       </div>
+      <div id="sd-owner-tools" style="display:none">
+        <div class="sd-adm-title">Ton magasin — visible uniquement par toi</div>
+        <div class="sd-adm-row">
+          <button class="sd-adm" onclick="startRafale()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12z"/></svg>
+            <b>Scanner mon rayon (rafale)</b>
+            <i>Scanne tes boissons à la chaîne — elles apparaissent pour tes clients</i>
+          </button>
+          <button class="sd-adm" onclick="scanFridgeStart()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2.5" width="14" height="19" rx="2.5"/><path d="M5 10h14M8.5 6.2v1.6M8.5 13.5v3"/></svg>
+            <b>Scanner mon frigo</b>
+            <i>Une photo du frigo — toutes les boissons sont reconnues et ajoutées d'un coup</i>
+          </button>
+          <button class="sd-adm" onclick="ownerEditHours()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 1.8"/></svg>
+            <b>Modifier mes horaires</b>
+            <i>Le filtre « Ouvert » de la carte s'appuie dessus — garde-les justes</i>
+          </button>
+        </div>
+      </div>
       <div id="sd-mission" class="sd-mission"></div>
       <div id="sd-merchant" style="padding:0 20px"></div>
       <div style="padding:18px 20px calc(28px + env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center;gap:8px">
@@ -996,7 +1021,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       <div id="store-picker-list" style="overflow-y:auto;flex:1"></div>
     </div>
   </div>
-  <div id="img-zoom" role="dialog" aria-modal="true" aria-label="Photo du produit" style="display:none;position:fixed;inset:0;z-index:4000;background:rgba(12,10,8,.94);align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:20px" onclick="closeDrinkZoom()">
+  <div id="img-zoom" role="dialog" aria-modal="true" aria-label="Photo du produit" onclick="closeDrinkZoom()" style="display:none;position:fixed;inset:0;z-index:4000;background:rgba(12,10,8,.94);align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:20px" onclick="closeDrinkZoom()">
     <img id="img-zoom-pic" alt="" style="max-width:92vw;max-height:74vh;object-fit:contain;border-radius:18px;background:#fff">
     <div id="img-zoom-name" style="font-size:15px;font-weight:800;color:#fff;text-align:center"></div>
     <div id="img-zoom-credit" style="font-size:10.5px;font-weight:500;color:rgba(255,255,255,.55)">Photo : Open Food Facts (CC-BY-SA)</div>
@@ -6670,7 +6695,39 @@ function inviteFriend(){
    missions du jour a finir + chasses actives autour. Deplacable a la verticale
    (position memorisee en local). Tap = ouvre l'accueil sur les missions. */
 var MISSION_FAB_W=58;
+/* Le bouton flottant peut deranger : un appui long le masque, et il se
+   reaffiche depuis les Reglages — ou tout seul quand on lance une nouvelle
+   chasse, puisqu'a ce moment-la il redevient utile (c'est lui qui porte le
+   compteur des chasses). Masquer pour toujours un bouton qu'on vient de
+   rendre necessaire serait un piege. */
+function huntFabWanted(){ try{ return localStorage.getItem("magoHuntFab")!=="0"; }catch(e){ return true; } }
+function applyHuntFabSwitch(){
+  var on=huntFabWanted();
+  var t=document.getElementById("huntfab-toggle"); if(t)t.classList.toggle("on",on);
+  var r=document.getElementById("hunt-fab-row"); if(r)r.setAttribute("aria-checked",on?"true":"false");
+}
+function hideMissionFab(){
+  if(!confirm("Masquer le bouton de chasse ?\n\nTu peux le r\u00e9afficher dans R\u00e9glages, et il reviendra de lui-m\u00eame si tu lances une nouvelle chasse."))return;
+  try{localStorage.setItem("magoHuntFab","0");}catch(e){}
+  var f=document.getElementById("mission-fab"); if(f)f.remove();
+  applyHuntFabSwitch();
+  toast("Bouton masqu\u00e9 \u00b7 r\u00e9affichable dans R\u00e9glages");
+  playSound("pop");
+}
+function toggleHuntFab(){
+  if(huntFabWanted()){
+    try{localStorage.setItem("magoHuntFab","0");}catch(e){}
+    var f=document.getElementById("mission-fab"); if(f)f.remove();
+  }else{
+    try{localStorage.setItem("magoHuntFab","1");}catch(e){}
+    try{ensureMissionFab();}catch(e){}
+  }
+  applyHuntFabSwitch();
+  playSound("pop");
+}
 function ensureMissionFab(){
+  applyHuntFabSwitch();
+  if(!huntFabWanted())return null;
   var ex=document.getElementById("mission-fab");
   if(ex)return ex;
   var W=MISSION_FAB_W;
@@ -6689,11 +6746,17 @@ function ensureMissionFab(){
   fab.innerHTML='<svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 1.5px 1.5px rgba(0,0,0,.35))"><circle cx="12" cy="12" r="7.2" stroke="#fff" stroke-width="2"/><path d="M12 1.8v3.4M12 18.8v3.4M1.8 12h3.4M18.8 12h3.4" stroke="#fff" stroke-width="2"/><circle cx="12" cy="12" r="2.6" fill="#37d98c"/></svg>'+
     '<span id="mission-fab-badge" style="position:absolute;top:-4px;right:-4px;min-width:21px;height:21px;padding:0 5px;border-radius:11px;background:#e67e22;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2.5px solid var(--app-bg);box-shadow:0 2px 6px rgba(0,0,0,.25)">0</span>';
   document.body.appendChild(fab);
-  var sx=0,sy=0,ox=0,oy=0,moved=false,dragging=false,idleT=null;
+  var sx=0,sy=0,ox=0,oy=0,moved=false,dragging=false,idleT=null,lpT=null;
   function idle(){if(idleT)clearTimeout(idleT);fab.style.opacity="1";idleT=setTimeout(function(){fab.style.opacity="0.6";},2600);}
   function P(e){return (e.touches&&e.touches[0])?e.touches[0]:e;}
-  function down(e){dragging=true;moved=false;var p=P(e);sx=p.clientX;sy=p.clientY;ox=parseInt(fab.style.left,10)||0;oy=parseInt(fab.style.top,10)||0;fab.style.transition="opacity .2s ease";fab.style.cursor="grabbing";fab.style.opacity="1";if(idleT)clearTimeout(idleT);if(e.cancelable)e.preventDefault();}
-  function move(e){if(!dragging)return;var p=P(e);var dx=p.clientX-sx,dy=p.clientY-sy;if(Math.abs(dx)>4||Math.abs(dy)>4)moved=true;var w=window.innerWidth,h=window.innerHeight;fab.style.left=Math.max(8,Math.min(ox+dx,w-W-8))+"px";fab.style.top=Math.max(60,Math.min(oy+dy,h-140))+"px";if(e.cancelable)e.preventDefault();}
+  function down(e){dragging=true;moved=false;
+    /* Appui long (650 ms sans bouger) = proposer de masquer le bouton. Le
+       glissement pour le deplacer et le tap pour ouvrir restent inchanges :
+       des que le doigt bouge, le minuteur est annule. */
+    if(lpT)clearTimeout(lpT);
+    lpT=setTimeout(function(){ if(dragging&&!moved){ dragging=false; fab.style.cursor="grab"; hideMissionFab(); } },650);
+    var p=P(e);sx=p.clientX;sy=p.clientY;ox=parseInt(fab.style.left,10)||0;oy=parseInt(fab.style.top,10)||0;fab.style.transition="opacity .2s ease";fab.style.cursor="grabbing";fab.style.opacity="1";if(idleT)clearTimeout(idleT);if(e.cancelable)e.preventDefault();}
+  function move(e){if(!dragging)return;var p=P(e);var dx=p.clientX-sx,dy=p.clientY-sy;if(Math.abs(dx)>4||Math.abs(dy)>4){moved=true;if(lpT){clearTimeout(lpT);lpT=null;}}var w=window.innerWidth,h=window.innerHeight;fab.style.left=Math.max(8,Math.min(ox+dx,w-W-8))+"px";fab.style.top=Math.max(60,Math.min(oy+dy,h-140))+"px";if(e.cancelable)e.preventDefault();}
   function snap(){
     var w=window.innerWidth,h=window.innerHeight;
     var cx=(parseInt(fab.style.left,10)||0)+W/2;
@@ -6704,7 +6767,7 @@ function ensureMissionFab(){
     try{localStorage.setItem("magoFabSide",side);localStorage.setItem("magoFabTop",String(t));}catch(_){}
     idle();
   }
-  function up(){if(!dragging)return;dragging=false;fab.style.cursor="grab";if(moved){snap();}else{openMissions();idle();}}
+  function up(){if(lpT){clearTimeout(lpT);lpT=null;}if(!dragging)return;dragging=false;fab.style.cursor="grab";if(moved){snap();}else{openMissions();idle();}}
   fab.addEventListener("touchstart",down,{passive:false});
   fab.addEventListener("touchmove",move,{passive:false});
   fab.addEventListener("touchend",up);
@@ -6996,6 +7059,7 @@ function renderRecents(){
       '<div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.cat+' · '+d.brand+starSuffix(d)+'</div></div>'+
       '<span class="c3" style="font-size:18px">›</span>';
     div.onclick=function(){pick(d);};el.appendChild(div);
+    bindPhotoTap(div,d);
   });
 }
 /* Accueil "Bons plans" : donne une raison d'ouvrir l'app chaque semaine.
@@ -7153,6 +7217,7 @@ function renderSearchDefault(el){
       '<div style="flex:1;min-width:0"><div class="rname">'+d.name+'</div><div class="rsub">'+d.brand+' · '+d.cat+starSuffix(d)+'</div></div>'+
       '<span class="rfav" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();toggleFav('+d.id+',this);}" style="display:flex;align-items:center;padding:6px 4px;cursor:pointer">'+heartSVG(isFav,20)+'</span>';
     div.onclick=function(){pick(d);};a11yCard(div,d.name+", "+d.brand);el.appendChild(div);
+    bindPhotoTap(div,d);
   });
 }
 function renderList(){
@@ -7230,6 +7295,7 @@ function renderList(){
       '<div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.brand+' · '+d.cat+starSuffix(d)+'</div></div>'+
       '<span class="rfav" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();toggleFav('+d.id+',this);}" style="display:flex;align-items:center;padding:6px 4px;cursor:pointer">'+heartSVG(isFav,20)+'</span>';
     div.onclick=function(){pick(d);};a11yCard(div,d.name+", "+d.brand);el.appendChild(div);
+    bindPhotoTap(div,d);
   });
   if(f.length>_listLimit){
     var moreBtn=document.createElement("div");moreBtn.className="ritem";
@@ -7719,9 +7785,15 @@ function processImgQueue(){
 function offFullResURL(url){
   return url.replace(/\.(400|200|100)\.jpg(\?|$)/,".full.jpg$2");
 }
-function openDrinkZoom(){
-  if(!curSel)return;
-  var url=getCachedDrinkImage(curSel);
+/* La photo s'ouvre d'un TAP, depuis n'importe quelle vignette — plus besoin
+   de traverser « voir la fiche » puis un second tap. Et elle se referme d'un
+   tap n'importe ou, avec un fondu : ouvrir une photo doit etre aussi leger
+   que la regarder. Accepte la boisson en parametre pour etre appelable depuis
+   les listes de recherche, pas seulement depuis la fiche ouverte. */
+function openDrinkZoom(d){
+  d=d||curSel;
+  if(!d)return;
+  var url=getCachedDrinkImage(d);
   if(!url){toast("Photo pas encore disponible pour cette boisson");return;}
   var ov=document.getElementById("img-zoom");
   var pic=document.getElementById("img-zoom-pic");
@@ -7731,17 +7803,40 @@ function openDrinkZoom(){
     if(pic.src!==url){pic.onerror=null;pic.src=url;}
   };
   pic.src=full;
-  document.getElementById("img-zoom-name").textContent=curSel.name;
+  document.getElementById("img-zoom-name").textContent=d.name;
   ov.style.display="flex";
+  requestAnimationFrame(function(){ov.classList.add("in");});
   var closeBtn=document.getElementById("img-zoom-close");
   if(closeBtn)closeBtn.focus();
   playSound("pop");
 }
 function closeDrinkZoom(){
   var ov=document.getElementById("img-zoom");
-  if(ov)ov.style.display="none";
-  var pic=document.getElementById("img-zoom-pic");
-  if(pic)pic.src="";
+  if(!ov)return;
+  ov.classList.remove("in");
+  // On attend la fin du fondu avant de retirer l'overlay, sinon il disparait
+  // d'un coup et la fluidite promise n'existe que dans un sens.
+  setTimeout(function(){
+    ov.style.display="none";
+    var pic=document.getElementById("img-zoom-pic");
+    if(pic)pic.src="";
+  },230);
+}
+/* Branche la vignette d'une ligne de liste : si une photo existe en cache, le
+   tap sur la VIGNETTE l'ouvre en plein ecran ; le reste de la ligne continue
+   d'ouvrir la boisson. Sans photo, la vignette suit la ligne — un tap qui ne
+   fait rien est pire qu'un tap qui navigue. */
+function bindPhotoTap(row,d){
+  try{
+    var ph=row&&row.querySelector?row.querySelector(".rphoto"):null;
+    if(!ph||!d)return;
+    ph.onclick=function(e){
+      var url=(typeof getCachedDrinkImage==="function")?getCachedDrinkImage(d):null;
+      if(!url)return;
+      e.stopPropagation();
+      openDrinkZoom(d);
+    };
+  }catch(e){}
 }
 document.addEventListener("keydown",function(ev){
   if(ev.key==="Escape")closeDrinkZoom();
@@ -8847,6 +8942,16 @@ function toggleWatch(d){
     toast("Alerte activ\u00e9e \u00B7 rayon "+(Number(window.magoHuntRadius)||10)+" km \u00B7 chasse lanc\u00e9e pr\u00E8s de toi");
     // Chasse de zone : les gens autour verront que cette boisson est recherch\u00e9e
     if(window.fbJoinHunt)window.fbJoinHunt(d.id,d.name,d.emoji,userLat,userLng);
+    /* Le bouton flottant etait masque ? Lancer une chasse le reaffiche : c'est
+       lui qui porte le compteur des chasses actives, le laisser cache rendrait
+       invisible la chasse qu'on vient de lancer. Ici et seulement ici — sur le
+       GESTE de l'utilisateur, jamais sur une synchronisation automatique. */
+    try{
+      if(localStorage.getItem("magoHuntFab")==="0"){
+        localStorage.setItem("magoHuntFab","1");
+        ensureMissionFab();
+      }
+    }catch(e){}
     pushActivity({
       type:"hunt",
       title:"Chasse lanc\u00e9e \u00b7 "+d.name,
@@ -9935,8 +10040,21 @@ function openStoreDetail(storeId){
   storeDetailReturn=fromExplore?"__explore__":(current?current.id.replace("s-",""):"search");
   curStoreDetail=s;
   curStoreDetailQuery="";curStoreDetailCat="Tous";
+  // Fiche sans horaires : on tente OpenStreetMap en silence (voir
+  // enrichStoreHours pour les garde-fous d'attribution).
+  try{enrichStoreHours(s);}catch(e){}
   var admTools=document.getElementById("sd-admin-tools");
   if(admTools)admTools.style.display=isAdmin?"block":"none";
+  /* Le commerçant proprietaire (champ owner, pose a la certification) gere
+     SON magasin : remplir le rayon, corriger ses horaires. Il n'a ni la
+     certification ni la suppression — ces pouvoirs-la restent a l'admin.
+     L'admin, lui, a deja tout : pas la peine d'empiler les deux panneaux. */
+  var ownTools=document.getElementById("sd-owner-tools");
+  if(ownTools){
+    var _uid=null;
+    try{_uid=(window.fbAuth&&window.fbAuth.currentUser)?window.fbAuth.currentUser.uid:null;}catch(e){}
+    ownTools.style.display=(!isAdmin&&s.owner&&_uid&&s.owner===_uid)?"block":"none";
+  }
   /* L'etat de certification se lit et se change ICI, sur le magasin qu'on
      regarde. La liste des demandes ne couvre que ceux passes par une demande
      de commercant — un magasin certifie depuis la reprise des rayons n'y
@@ -9953,6 +10071,86 @@ function openStoreDetail(storeId){
    Une photo du frigo -> l'IA liste toutes les boissons -> correspondance au
    catalogue -> ajout groupe au magasin (confirmations + fraicheur seenAt).
    L'outil d'embarquement des night shops : 30 boissons en une photo. */
+/* Le commerçant corrige ses horaires lui-meme. C'est LA donnee qu'il connait
+   mieux que tout le monde, et c'est elle qui rend le filtre « Ouvert »
+   fiable. */
+function ownerEditHours(){
+  var s=curStoreDetail; if(!s)return;
+  var v=window.prompt("Tes horaires, comme tes clients doivent les lire.\nExemple : Lun-Sam 8h-20h \u00b7 Dim 9h-13h", s.hours||"");
+  if(v===null)return;
+  v=String(v).trim().slice(0,120);
+  s.hours=v||null;
+  if(window.fbSaveStore){
+    window.fbSaveStore(s.fbId||s.id,{hours:s.hours})
+      .then(function(){toast("Horaires enregistr\u00e9s");})
+      .catch(function(){toast("Enregistrement impossible \u2014 r\u00e9essaie");});
+  }
+  try{if(window.fbTouchCache)window.fbTouchCache();}catch(e){}
+  try{renderStoreDetail();}catch(e){}
+  playSound("pop");
+}
+
+/* ============================================================================
+   HORAIRES AUTOMATIQUES DEPUIS OPENSTREETMAP
+   ----------------------------------------------------------------------------
+   Le filtre « Ouvert » ne vaut que ce que valent les horaires. Beaucoup de
+   magasins n'en ont pas : ajoutes a la main, ou importes avant que l'import ne
+   les recupere. Or OpenStreetMap les possede souvent deja — renseignes par des
+   contributeurs locaux, sous forme STRUCTUREE (le meme format que l'import OSM
+   ecrit deja dans le champ hours).
+
+   C'est pour ca qu'il n'y a pas d'« agent IA » ici : la donnee existe, gratuite
+   et structuree, a 100 m du magasin. Un modele de langage qui fouillerait le
+   web pour la retrouver couterait de l'argent a chaque magasin et pourrait se
+   tromper de boutique ; interroger la base qui la contient deja ne coute rien
+   et ne peut pas halluciner.
+
+   Prudence sur l'attribution : on n'adopte les horaires que si le NOM
+   correspond, ou s'il n'y a qu'UN seul commerce dans le perimetre. Deux
+   boutiques cote a cote sans correspondance de nom -> on ne devine pas. De
+   mauvais horaires sont pires que pas d'horaires : quelqu'un se deplace.
+   Un magasin est tente au plus une fois par mois (magoHoursTried). */
+var _hoursBusy=false;
+function enrichStoreHours(s){
+  try{
+    if(_hoursBusy||!s||s.hours||typeof s.lat!=="number"||typeof s.lng!=="number")return;
+    var sid=String(s.fbId||s.id||""); if(!sid)return;
+    var seen={}; try{seen=JSON.parse(localStorage.getItem("magoHoursTried")||"{}");}catch(e){}
+    var now=Date.now(), MOIS=30*24*3600*1000;
+    if(seen[sid]&&(now-seen[sid])<MOIS)return;
+    seen[sid]=now;
+    var frais={}; Object.keys(seen).forEach(function(k){ if(now-seen[k]<MOIS)frais[k]=seen[k]; });
+    try{localStorage.setItem("magoHoursTried",JSON.stringify(frais));}catch(e){}
+    _hoursBusy=true;
+    var d=0.0009; // ~100 m
+    var bbox=(s.lat-d)+","+(s.lng-d)+","+(s.lat+d)+","+(s.lng+d);
+    var q='[out:json][timeout:20];(node["shop"]["opening_hours"]('+bbox+');way["shop"]["opening_hours"]('+bbox+'););out center 30;';
+    fetchWithTimeout("https://overpass-api.de/api/interpreter?data="+encodeURIComponent(q),25000)
+      .then(function(r){return r.json();})
+      .then(function(data){
+        var els=(data&&data.elements)||[];
+        var moi=normTxt(s.name||"");
+        var hit=null;
+        els.forEach(function(e){
+          var t=e.tags||{}; if(!t.opening_hours||hit)return;
+          var nom=normTxt(t.name||"");
+          if(nom&&moi&&(nom.indexOf(moi)!==-1||moi.indexOf(nom)!==-1))hit=t.opening_hours;
+        });
+        if(!hit&&els.length===1&&els[0].tags)hit=els[0].tags.opening_hours||null;
+        if(!hit)return;
+        hit=String(hit).slice(0,120);
+        s.hours=hit;
+        if(window.fbSaveStore)window.fbSaveStore(sid,{hours:hit}).catch(function(){});
+        try{if(window.fbTouchCache)window.fbTouchCache();}catch(e){}
+        try{
+          if(curStoreDetail&&String(curStoreDetail.fbId||curStoreDetail.id)===sid)renderStoreDetail();
+        }catch(e){}
+      })
+      .catch(function(){})
+      .then(function(){_hoursBusy=false;});
+  }catch(e){_hoursBusy=false;}
+}
+
 function scanFridgeStart(){
   if(!curStoreDetail){toast("Ouvre d'abord la fiche d'un magasin");return;}
   var inp=document.getElementById("fridge-file");
@@ -12365,7 +12563,18 @@ function exploreSetHeader(shown,sure){
       : ((shown==null)
         ? "Recherche des magasins\u2026"
         : (shown+" magasin"+(shown>1?"s":"")+(typeof sure==="number"?" · "+sure+" en stock":"")+" · voir la fiche"));
-    if(thumb){thumb.style.display="flex";try{if(curSel)thumb.innerHTML=drinkIconHTML(curSel);}catch(e){}}
+    if(thumb){thumb.style.display="flex";try{if(curSel)thumb.innerHTML=drinkIconHTML(curSel);}catch(e){}
+      /* Tap sur la vignette = la photo, tout de suite. Le reste de la barre
+         continue d'ouvrir la fiche. Sans photo en cache, on laisse le tap
+         suivre son cours vers la fiche plutot que de l'avaler. */
+      thumb.onclick=function(e){
+        if(!curSel)return;
+        var _u=(typeof getCachedDrinkImage==="function")?getCachedDrinkImage(curSel):null;
+        if(!_u)return;
+        e.stopPropagation();
+        openDrinkZoom(curSel);
+      };
+    }
     if(chev)chev.style.display="flex";
     if(btn){btn.style.background="var(--bg2)";btn.style.borderColor="var(--border)";}
   }else{
@@ -15827,6 +16036,7 @@ function renderFavs(){
     var div=document.createElement("div");div.className="ritem";
     div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div><div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.cat+starSuffix(d)+'</div></div><span style="cursor:pointer;display:flex" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Retirer des favoris">'+heartSVG(true,20)+'</span>';
     div.onclick=function(){pick(d);};a11yCard(div,d.name+", favori");el.appendChild(div);
+    bindPhotoTap(div,d);
   });
 }
 
