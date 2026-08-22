@@ -206,6 +206,21 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    /* ── Journal des recherches (taux de réponse) ─────────────────────────
+     * Anonyme par construction : boisson, zone arrondie, trouvé ou pas.
+     * Chacun peut AJOUTER une ligne (c'est l'app qui écrit), personne ne
+     * peut la relire sauf l'administrateur, et personne ne la modifie. */
+    match /searchLog/{id} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['d','n','lat','lng','ok','at'])
+        && request.resource.data.n is string
+        && request.resource.data.n.size() <= 80
+        && request.resource.data.ok is bool;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
     /* ── Demandes de certification d'un commerçant ────────────────────────
      * Un document par magasin (id = storeId) : deux personnes ne peuvent pas
      * revendiquer la même boutique en parallèle.

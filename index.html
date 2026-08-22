@@ -709,6 +709,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
             <b>• Compte</b> — un identifiant anonyme t'est attribué automatiquement à l'ouverture de l'app (Firebase Authentication) pour associer tes points de façon persistante. Si tu choisis de te connecter avec Google, ton nom, ta photo de profil et ton e-mail sont récupérés pour identifier ton compte.<br>
             <b>• Pseudo et statistiques</b> (signalements, confirmations, points) — stockés pour faire fonctionner le système communautaire et le classement.<br>
             <b>• Contributions</b> (confirmation de stock, signalement de rupture ou de contrefaçon) — enregistrées avec l'horodatage et le magasin concerné, sans lien direct avec ton identité civile.<br>
+            <b>• Statistiques de recherche anonymes</b> — quand tu ouvres la fiche d'une boisson, l'app enregistre la boisson, une zone arrondie (~1 km) et le fait qu'un magasin confirmé existait ou non. Aucun identifiant, aucune position exacte : ça sert uniquement à savoir quelles boissons manquent où.<br>
             <b>• Demande de certification commerçant</b> — si tu demandes la pastille bleue pour ta boutique, ton <b>nom, ton moyen de contact</b> (téléphone ou e-mail), ton rôle et le mot que tu nous laisses sont enregistrés, pour qu'un humain puisse vérifier que tu tiens bien ce magasin. Ces informations ne sont lisibles que par l'administrateur de Magofeed et par toi. Elles sont effacées si tu supprimes ton compte, si tu retires ta demande, ou si la certification est retirée.<br>
             <b>• Préférences locales</b> (favoris, historique de recherche, thème, langue, sons) — stockées uniquement dans le stockage local de ton navigateur (localStorage), jamais transmises à nos serveurs.
           </div>
@@ -2462,6 +2463,44 @@ window.fbRevokeCertification = async function(storeId) {
 };
 /* Tableau de bord fondateur : les chiffres du jour en 5 comptages agreges
    (getCountFromServer : ~1 lecture par tranche de 1000, quasi gratuit). */
+/* TAUX DE RÉPONSE — la question que rien ne mesurait : quand quelqu'un
+   cherche une boisson, est-ce qu'il la TROUVE ? Chaque ouverture de boisson
+   ecrit une ligne anonyme : boisson, zone arrondie (~1 km, comme le reste),
+   et s'il existait un magasin confirme. Aucun identifiant d'utilisateur :
+   la question porte sur la COUVERTURE, pas sur les gens. */
+window.fbLogSearch = async function(e) {
+  try {
+    await addDoc(collection(db, "searchLog"), {
+      d: Number(e.d) || 0,
+      n: String(e.n || "").slice(0, 80),
+      lat: (typeof e.lat === "number") ? e.lat : null,
+      lng: (typeof e.lng === "number") ? e.lng : null,
+      ok: e.ok === true,
+      at: serverTimestamp()
+    });
+  } catch (err) { /* regles pas encore publiees : sans gravite */ }
+};
+/* Agrege les 7 derniers jours : total, part de recherches satisfaites, et le
+   classement des boissons cherchees mais jamais trouvees — la liste de
+   courses du fondateur. */
+window.fbSearchStats = async function() {
+  try {
+    var t7 = Timestamp.fromMillis(Date.now() - 7 * 86400000);
+    var snap = await getDocs(query(collection(db, "searchLog"),
+      where("at", ">=", t7), orderBy("at", "desc"), limit(800)));
+    var total = 0, ok = 0, manque = {};
+    snap.forEach(function(x) {
+      var v = x.data() || {}; total++;
+      if (v.ok) { ok++; return; }
+      var k = String(v.d);
+      if (!manque[k]) manque[k] = { n: v.n || ("#" + k), c: 0 };
+      manque[k].c++;
+    });
+    var rate = total ? Math.round(100 * ok / total) : null;
+    var top = Object.values(manque).sort(function(a, b) { return b.c - a.c; }).slice(0, 10);
+    return { total: total, ok: ok, rate: rate, manque: top };
+  } catch (e) { return { error: String((e && (e.code || e.message)) || e) }; }
+};
 window.fbFounderStats = async function() {
   var midnight = new Date(); midnight.setHours(0, 0, 0, 0);
   var weekAgo = new Date(Date.now() - 7 * 86400000);
@@ -6323,6 +6362,27 @@ function pick(d){
   // on montre les magasins alentours en gris + la veille + "je sais ou la trouver").
   // Fini l'ancien ecran liste "Aucun magasin trouve" incoherent d'une boisson a l'autre.
   try{ setTimeout(function(){if(curSel&&curSel.id===d.id)openDrinkMapView();},60); }catch(eOpen){}
+  /* Taux de reponse : on note si la recherche pouvait aboutir ICI. Les
+     recherches de l'administrateur ne comptent pas (il teste tout le temps),
+     et une meme boisson n'est comptee qu'une fois par jour par appareil. */
+  try{
+    if(!isAdmin&&window.fbLogSearch&&window._fbReady){
+      var jour=Math.floor(Date.now()/86400000);
+      var vus={};try{vus=JSON.parse(localStorage.getItem("magoSrchVu")||"{}");}catch(e){}
+      if(vus[d.id]!==jour){
+        vus[d.id]=jour;
+        var ks=Object.keys(vus);if(ks.length>200)ks.slice(0,ks.length-200).forEach(function(k){delete vus[k];});
+        try{localStorage.setItem("magoSrchVu",JSON.stringify(vus));}catch(e){}
+        var trouve=(window.STORES||[]).some(function(st){
+          return (st.drinks||[]).indexOf(d.id)!==-1&&Number((st.confirmations||{})[d.id])>0;
+        });
+        window.fbLogSearch({d:d.id,n:d.name,
+          lat:(typeof userLat==="number"&&userLat)?Math.round(userLat*100)/100:null,
+          lng:(typeof userLng==="number"&&userLng)?Math.round(userLng*100)/100:null,
+          ok:trouve});
+      }
+    }
+  }catch(eLog){}
   playSound("pop");
 }
 /* ================================
@@ -14843,6 +14903,7 @@ function renderAdmin(){
   var el=document.getElementById("admin-list");if(!el)return;
   el.innerHTML="";
   renderFounderDash();
+  try{ renderSearchStats(); }catch(e){ console.warn("searchstats:",e); }
   try{ renderNewcomers(); }catch(e){ console.warn("newcomers:",e); }
   renderContribFeed();
   try{ renderDemandAdmin(); }catch(e){ console.warn("demand:",e); }
@@ -15109,6 +15170,52 @@ function ncShowOnMap(lat, lng){
     setTimeout(function(){
       try { if (window.exploreMap) exploreMap.setView([Number(lat), Number(lng)], 12); } catch (e) {}
     }, t);
+  });
+}
+/* Le tableau qui repond a « est-ce que les gens trouvent ? » : pourcentage
+   de recherches satisfaites sur 7 jours, et les boissons cherchees sans
+   magasin confirme — c'est la liste des rayons a aller remplir. */
+function renderSearchStats(){
+  var host=document.getElementById("search-stats");
+  if(!host){
+    host=document.createElement("div");
+    host.id="search-stats";
+    var fd=document.getElementById("founder-dash");
+    if(fd&&fd.parentNode)fd.parentNode.insertBefore(host,fd.nextSibling);
+    else{var list=document.getElementById("admin-list");if(list&&list.parentNode)list.parentNode.insertBefore(host,list);}
+  }
+  host.innerHTML="";
+  if(!window.fbSearchStats)return;
+  window.fbSearchStats().then(function(st){
+    if(!st||st.error){
+      host.innerHTML='<div class="cl-card"><div class="cl-name">Taux de réponse</div>'+
+        '<div class="cl-line">'+(st&&st.error&&String(st.error).indexOf("permission")!==-1
+          ?"Publie les nouvelles règles Firestore pour activer la mesure."
+          :"Indisponible pour le moment.")+'</div></div>';
+      return;
+    }
+    if(!st.total){
+      host.innerHTML='<div class="cl-card"><div class="cl-name">Taux de réponse (7 jours)</div>'+
+        '<div class="cl-line">Aucune recherche enregistrée pour l’instant — les lignes apparaîtront au fil des ouvertures de boissons.</div></div>';
+      return;
+    }
+    var col=st.rate>=60?"#16a34a":(st.rate>=30?"#e67e22":"#dc2626");
+    var h='<div class="cl-card"><div class="cl-name">Taux de réponse (7 jours)</div>'+
+      '<div style="display:flex;align-items:baseline;gap:10px;margin:6px 0 2px">'+
+        '<div style="font-size:34px;font-weight:800;color:'+col+'">'+st.rate+'%</div>'+
+        '<div class="cl-line" style="margin:0">'+st.ok+' recherche'+(st.ok>1?'s':'')+' satisfaite'+(st.ok>1?'s':'')+' sur '+st.total+'</div>'+
+      '</div>';
+    if(st.manque&&st.manque.length){
+      h+='<div class="cl-line" style="margin-top:10px;font-weight:800;color:var(--s1)">Cherchées mais jamais trouvées — les rayons à remplir :</div>';
+      st.manque.forEach(function(m){
+        h+='<div class="rp-row"><div class="rp-txt"><div class="rp-name">'+sanitize(m.n)+'</div></div>'+
+           '<div class="cl-line" style="margin:0;flex:none;font-weight:800">'+m.c+'×</div></div>';
+      });
+    } else {
+      h+='<div class="cl-line" style="margin-top:8px">Toutes les recherches de la semaine ont trouvé au moins un magasin confirmé.</div>';
+    }
+    h+='</div>';
+    host.innerHTML=h;
   });
 }
 function renderFounderDash(){
