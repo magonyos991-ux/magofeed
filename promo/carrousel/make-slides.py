@@ -24,17 +24,20 @@ LINEUP = [
     ("mountain-dew", 745, 600,  2, 4),
     ("chupa-chups",  935, 500,  4, 3),
 ]
-def etal():
-    out=['<div style="position:absolute;left:50%;bottom:52px;width:960px;height:70px;'
-         'transform:translateX(-50%);z-index:2;border-radius:50%;'
-         'background:radial-gradient(closest-side,rgba(23,17,10,.22),transparent 70%)"></div>']
+def etal(scale=1.0, baseline=96):
+    sh=int(70*scale)
+    out=['<div style="position:absolute;left:50%%;bottom:%dpx;width:%dpx;height:%dpx;'
+         'transform:translateX(-50%%);z-index:2;border-radius:50%%;'
+         'background:radial-gradient(closest-side,rgba(23,17,10,.22),transparent 70%%)"></div>'
+         % (baseline-44*scale, int(960*scale), sh)]
     for slug,cx,h,rot,z in LINEUP:
-        w=int(h*900/1400)
+        h=int(h*scale); w=int(h*900/1400)
+        cx=int(540+(cx-540)*scale)
         left=int(cx-w/2)
-        out.append('<div class="bt" style="position:absolute;left:%dpx;bottom:96px;width:%dpx;height:%dpx;'
+        out.append('<div class="bt" style="position:absolute;left:%dpx;bottom:%dpx;width:%dpx;height:%dpx;'
                    'z-index:%d;transform:rotate(%ddeg);transform-origin:50%% 100%%;'
-                   'filter:drop-shadow(0 24px 38px rgba(23,17,10,.28))">%s</div>'
-                   % (left,w,h,z+2,rot,bottle_svg(slug)))
+                   'filter:drop-shadow(0 %dpx %dpx rgba(23,17,10,.28))">%s</div>'
+                   % (left,baseline,w,h,z+2,rot,int(24*scale),int(38*scale),bottle_svg(slug)))
     return '<div style="position:absolute;inset:0;z-index:3">'+"".join(out)+"</div>"
 
 BASE = u"""<!doctype html><html><head><meta charset="utf-8"><style>
@@ -51,9 +54,13 @@ html,body{width:1080px;height:1350px;overflow:hidden}
 .chip{position:absolute;left:50%%;top:64px;transform:translateX(-50%%);z-index:6;
   display:inline-flex;align-items:center;gap:12px;border-radius:999px;padding:14px 30px;
   font-size:25px;font-weight:700;letter-spacing:.3em;color:#f4f0e9;background:#17110a}
-.step{position:absolute;left:50%%;top:132px;transform:translateX(-50%%);z-index:6;
-  font-size:26px;font-weight:700;letter-spacing:.34em;color:#a8895c}
-.title{position:absolute;left:70px;right:70px;top:176px;z-index:6;text-align:center;
+.num{position:absolute;left:50%%;top:118px;transform:translateX(-50%%);z-index:6;
+  width:66px;height:66px;border-radius:50%%;background:#c69a57;color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:700;
+  box-shadow:0 10px 26px rgba(198,154,87,.4)}
+.pshadow{position:absolute;left:50%%;top:1226px;width:520px;height:52px;transform:translateX(-50%%);
+  z-index:3;border-radius:50%%;background:radial-gradient(closest-side,rgba(23,17,10,.24),transparent 70%%)}
+.title{position:absolute;left:70px;right:70px;top:206px;z-index:6;text-align:center;
   font-size:%(titleSize)spx;line-height:1.02;font-weight:700;letter-spacing:-.015em;color:#17110a}
 .sub{position:absolute;left:120px;right:120px;top:%(subTop)spx;z-index:6;text-align:center;
   font-size:33px;font-weight:500;line-height:1.4;color:#5c5142}
@@ -118,49 +125,51 @@ SLIDES = [
           + etal()),
     swipe=FLECHE, page=0),
   # 2 — etape 1
-  dict(step=u"ÉTAPE 1 / 3", titleSize=78, subTop=294, phoneTop=470, tilt=0, extraCss="",
-    body=(u'<div class="step">ÉTAPE 1 / 3</div>'
-          u'<div class="title">CHERCHE TA BOISSON</div>'
+  dict(step=u"ÉTAPE 1 / 3", titleSize=78, subTop=316, phoneTop=480, tilt=0, extraCss="",
+    body=(u'<div class="num">1</div>'
+          u'<div class="title">CHERCHE TA BOISSON</div><div class="pshadow"></div>'
+          + '<div class="bt" style="position:absolute;left:640px;bottom:104px;width:232px;height:360px;z-index:3;transform:rotate(10deg);transform-origin:50% 100%;filter:drop-shadow(0 20px 30px rgba(23,17,10,.25))">'+bottle_svg('mountain-dew')+'</div>'
           u'<div class="sub">Tape son nom — sodas japonais, mexicains, coréens… le catalogue mondial est déjà dedans.</div>'
           + phone("recherche", 470)),
     swipe=FLECHE, page=1),
   # 3 — etape 2
-  dict(step=u"ÉTAPE 2 / 3", titleSize=78, subTop=294, phoneTop=470, tilt=0, extraCss="",
-    body=(u'<div class="step">ÉTAPE 2 / 3</div>'
-          u'<div class="title">LA CARTE S’OUVRE</div>'
+  dict(step=u"ÉTAPE 2 / 3", titleSize=78, subTop=316, phoneTop=480, tilt=0, extraCss="",
+    body=(u'<div class="num">2</div>'
+          u'<div class="title">LA CARTE S’OUVRE</div><div class="pshadow"></div>'
           u'<div class="sub">Les magasins autour de toi s’affichent. Pin vert = rayon confirmé récemment.</div>'
           + phone("carte", 470, 0, "left:179px;top:354px;width:95px;height:95px")),
     swipe=FLECHE, page=2),
   # 4 — etape 3
-  dict(step=u"ÉTAPE 3 / 3", titleSize=78, subTop=294, phoneTop=470, tilt=0, extraCss="",
-    body=(u'<div class="step">ÉTAPE 3 / 3</div>'
-          u'<div class="title">APPUIE SUR « Y ALLER »</div>'
+  dict(step=u"ÉTAPE 3 / 3", titleSize=78, subTop=316, phoneTop=480, tilt=0, extraCss="",
+    body=(u'<div class="num">3</div>'
+          u'<div class="title">APPUIE SUR « Y ALLER »</div><div class="pshadow"></div>'
           u'<div class="sub">L’itinéraire s’ouvre dans Maps ou Waze. Trouvée ? Confirme — tu aides le suivant.</div>'
           + phone("fiche", 470, 0, "left:31px;top:215px;width:294px;height:70px;border-radius:26px")),
     swipe=FLECHE, page=3),
   # 5 — CTA
   dict(step="", titleSize=96, subTop=0, phoneTop=0, tilt=0, extraCss="""
-.title{top:330px;font-size:100px}
-.cta-sub{position:absolute;left:110px;right:110px;top:600px;z-index:6;text-align:center;
-  font-size:38px;font-weight:600;line-height:1.45;color:#5c5142}
-.url{position:absolute;left:50%;top:830px;transform:translateX(-50%);z-index:6;
+.title{top:296px;font-size:96px}
+.cta-sub{position:absolute;left:110px;right:110px;top:552px;z-index:6;text-align:center;
+  font-size:36px;font-weight:600;color:#5c5142}
+.url{position:absolute;left:50%;top:650px;transform:translateX(-50%);z-index:6;
   padding:24px 42px;border-radius:999px;background:#17110a;color:#f4f0e9;
   font-size:28px;font-weight:700;letter-spacing:.02em;white-space:nowrap}
-.bio{position:absolute;left:0;right:0;top:966px;z-index:6;text-align:center;
-  font-size:30px;font-weight:700;letter-spacing:.22em;color:#a8895c}
-.mlogo{position:absolute;left:50%;top:150px;transform:translateX(-50%);z-index:6;width:120px;height:120px}
+.bio{position:absolute;left:0;right:0;top:780px;z-index:6;text-align:center;
+  font-size:28px;font-weight:700;letter-spacing:.22em;color:#a8895c}
+.mlogo{position:absolute;left:50%;top:146px;transform:translateX(-50%);z-index:6;width:110px;height:110px}
 """,
     body=(u'<svg class="mlogo" viewBox="0 0 200 200"><path d="M42 158V60l58 68 58-68v98" fill="none" stroke="#17110a" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/><circle cx="100" cy="88" r="19" fill="none" stroke="#c69a57" stroke-width="10"/></svg>'
           u'<div class="title">GRATUIT.<br>SANS COMPTE.</div>'
-          u'<div class="cta-sub">Dans ton navigateur, en cinq secondes.<br>Et chaque boisson trouvée aide le suivant à la trouver aussi.</div>'
+          u'<div class="cta-sub">Dans ton navigateur, en cinq secondes.</div>'
           u'<div class="url">magonyos991-ux.github.io/magofeed</div>'
-          u'<div class="bio">LE LIEN EST DANS LA BIO</div>'),
+          u'<div class="bio">LE LIEN EST DANS LA BIO</div>'
+          + etal(0.56, 48)),
     swipe="", page=4),
 ]
 
 import sys
 for i, sl in enumerate(SLIDES, 1):
-    wm = ('<div class="wm"><svg viewBox="0 0 200 200"><path d="M42 158V60l58 68 58-68v98" fill="none" stroke="#8a7a5f" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/><circle cx="100" cy="88" r="19" fill="none" stroke="#c69a57" stroke-width="10"/></svg>MAGOFEED</div>') if i == 5 else ""
+    wm = ('<div class="wm"><svg viewBox="0 0 200 200"><path d="M42 158V60l58 68 58-68v98" fill="none" stroke="#8a7a5f" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/><circle cx="100" cy="88" r="19" fill="none" stroke="#c69a57" stroke-width="10"/></svg>MAGOFEED</div>') if False else ""
     page = BASE % dict(fonts=FONTS, titleSize=sl["titleSize"], subTop=sl["subTop"],
                        phoneTop=sl["phoneTop"], tilt=sl["tilt"], extraCss=sl["extraCss"],
                        body=sl["body"], swipe=sl["swipe"], pager=pager(sl["page"]), wmHtml=wm)
