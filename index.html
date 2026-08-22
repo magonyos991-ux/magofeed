@@ -4992,9 +4992,39 @@ function renderWhereFound(ctx){
   host.appendChild(skip);
   host.style.display="block";
 }
+/* Le selecteur « Ou as-tu vu cette boisson ? » ne lisait QUE la liste en
+   memoire. Si le chargement au demarrage avait echoue (cache vide, reseau
+   capricieux), il affichait « Aucun magasin autour » alors que le magasin
+   existe dans Firestore a 200 m — et la recherche par nom cherchait dans le
+   meme vide. D'ou le « des fois ca marche, des fois non ». On interroge
+   desormais Firestore autour de soi a l'ouverture (au plus une fois toutes
+   les 2 minutes), et les magasins trouves rejoignent la liste. */
+function pickerFetchZone(){
+  try{
+    if(!window.fbQueryZone)return;
+    if(typeof userLat!=="number"||!userLat)return;
+    var now=Date.now();
+    if(window._pickerZoneTs&&(now-window._pickerZoneTs)<120000)return;
+    window._pickerZoneTs=now;
+    window.fbQueryZone(userLat,userLng,10).then(function(list){
+      list=list||[];
+      var connus={};
+      (STORES||[]).forEach(function(x){connus[String(x.fbId||x.id)]=1;});
+      var ajouts=0;
+      list.forEach(function(x){
+        var k=String(x.fbId||x.id);
+        if(!connus[k]){STORES.push(x);connus[k]=1;ajouts++;}
+      });
+      if(ajouts){
+        try{renderStorePicker();}catch(e){}
+      }
+    }).catch(function(){});
+  }catch(e){}
+}
 function openStorePicker(){
   var ov=document.getElementById("store-picker");if(!ov)return;
   ov.style.display="block";
+  pickerFetchZone();
   var q=document.getElementById("store-picker-q");
   if(q){q.value="";}
   renderStorePicker();
@@ -5027,7 +5057,17 @@ function togglePickerMapFull(){
     wrap.style.background="var(--app-bg)";
     inner.style.height="100%";
     inner.style.borderRadius="0";
-    if(btn){btn.textContent="\u2715";btn.setAttribute("aria-label","R\u00E9duire la carte");}
+    /* En plein ecran, la croix restait a 10 px du bord... du TELEPHONE : pile
+       sous l'horloge et l'encoche iPhone, la ou les taps ne passent pas. On la
+       descend sous la zone systeme, on la grossit (44 px = minimum tactile) et
+       on la met au-dessus des couches de la carte. */
+    if(btn){
+      btn.textContent="\u2715";
+      btn.setAttribute("aria-label","R\u00E9duire la carte");
+      btn.style.top="calc(env(safe-area-inset-top, 12px) + 12px)";
+      btn.style.width="46px";btn.style.height="46px";
+      btn.style.fontSize="20px";btn.style.zIndex="4100";
+    }
   }else{
     wrap.style.position="relative";
     wrap.style.inset="";
@@ -5036,7 +5076,13 @@ function togglePickerMapFull(){
     wrap.style.background="";
     inner.style.height="36vh";
     inner.style.borderRadius="14px";
-    if(btn){btn.textContent="\u26F6";btn.setAttribute("aria-label","Agrandir la carte");}
+    if(btn){
+      btn.textContent="\u26F6";
+      btn.setAttribute("aria-label","Agrandir la carte");
+      btn.style.top="10px";
+      btn.style.width="38px";btn.style.height="38px";
+      btn.style.fontSize="16px";btn.style.zIndex="1000";
+    }
   }
   if(window._pickerMap){setTimeout(function(){try{window._pickerMap.invalidateSize();}catch(e){}},60);}
   playSound("pop");
@@ -5296,6 +5342,9 @@ function renderStorePicker(){
   // Bouton "Ajouter" TOUJOURS en haut : plus besoin de scroller tout en bas.
   el.appendChild(addRow());
   if(!list.length){
+    // Rien en memoire : dernier recours, on redemande la zone a Firestore
+    // (la garde de 2 minutes empeche toute boucle).
+    pickerFetchZone();
     el.insertAdjacentHTML("beforeend",'<div style="text-align:center;padding:16px;font-size:13px;color:var(--s3)">Aucun magasin autour \u2014 ajoute-le ci-dessus</div>');
     return;
   }
@@ -5521,7 +5570,7 @@ function renderBrandKinChoice(kin,best,code,p){
     };
     row.onkeydown=function(ev){if(ev.key==="Enter")row.onclick();};
   });
-  btn.textContent=(kin.length===1?"Non \u2014 c'est un nouveau produit":"Aucun des deux \u2014 nouveau produit");
+  btn.textContent=(kin.length===1?"Non \u2014 c'est un nouveau produit":(kin.length===2?"Aucun des deux \u2014 nouveau produit":"Aucun de ceux-l\u00e0 \u2014 nouveau produit"));
   btn.style.background="#e67e22";btn.style.display="block";
   btn.onclick=function(){addDiscovery(best.name,best.brand,code,best.cat);};
   recordScan(code,best.name,best.brand,best.cat,"off");
@@ -5735,6 +5784,7 @@ function onBarcodeDetected(r){
           lnk2.onclick=function(){openCatalogLinkPicker(code);};
           lnk2.onkeydown=function(ev){if(ev.key==="Enter")openCatalogLinkPicker(code);};
           btn.parentNode.insertBefore(lnk2,btn.nextSibling);
+          window._lastUnknownCode={code:String(code),ts:Date.now()};
           renderWhereFound({pendingBarcode:code});
           playSound("win");
         } else {
@@ -5762,6 +5812,10 @@ function onBarcodeDetected(r){
           lnk.onclick=function(){openCatalogLinkPicker(code);};
           lnk.onkeydown=function(ev){if(ev.key==="Enter")openCatalogLinkPicker(code);};
           btn.parentNode.insertBefore(lnk,btn.nextSibling);
+          /* On retient ce code orphelin : si la personne passe par la
+             proposition PHOTO dans le quart d'heure, il deviendra l'identite
+             de la decouverte — et son prochain scan la reconnaitra. */
+          window._lastUnknownCode={code:String(code),ts:Date.now()};
         }
       }).catch(function(){
         res.className="scan-result notfound";
@@ -5793,7 +5847,12 @@ function openCatalogLinkPicker(code){
     var q=normTxt(input.value.trim());
     list.innerHTML="";
     if(q.length<2)return;
-    var hits=DRINKS.filter(function(d){return fuzzyHit(d.name,q)||fuzzyHit(d.brand,q);}).slice(0,6);
+    /* Le texte exact d'abord (tape « elle » -> toutes les Elle & Vire), le
+       flou apres, et 12 resultats au lieu de 6 : avec 570 boissons, six lignes
+       cachaient des variantes et forcaient a deviner l'orthographe exacte. */
+    var exacts=DRINKS.filter(function(d){return normTxt(d.name+" "+d.brand).indexOf(q)!==-1;});
+    var flous=DRINKS.filter(function(d){return exacts.indexOf(d)===-1&&(fuzzyHit(d.name,q)||fuzzyHit(d.brand,q));});
+    var hits=exacts.concat(flous).slice(0,12);
     if(!hits.length){list.innerHTML='<div style="font-size:12px;color:var(--s3);text-align:center;padding:8px">Aucune boisson trouv\u00E9e</div>';return;}
     hits.forEach(function(d){
       var row=document.createElement("div");
@@ -11982,6 +12041,17 @@ function submitProposal(){
   var aiAuto=!!(ai&&ai.confidence>=85&&window.fbConfirmAiDrink&&
     name.toLowerCase()===String(ai.name||"").trim().toLowerCase());
   var id="m"+Date.now();
+  /* L'identite d'une decouverte, c'est son code-barre : c'est comme ca que le
+     scanner la retrouve. Une decouverte nee d'une PHOTO recevait un identifiant
+     synthetique — scanner son vrai code ne la trouvait donc jamais, et il
+     fallait la relier a la main. Si un code vient d'echouer au scan (moins de
+     15 minutes), il DEVIENT l'identite de la proposition photo : le prochain
+     scan de ce code la reconnaitra directement. */
+  var _orphelin=window._lastUnknownCode;
+  if(_orphelin&&_orphelin.code&&(Date.now()-_orphelin.ts)<15*60*1000){
+    id=String(_orphelin.code);
+    window._lastUnknownCode=null;
+  }
   var d={id:id,name:sanitize(name),brand:sanitize(brand),votes:1,cat:(ai&&ai.cat)||"",foundIn:[],hasPhoto:true,manualProposal:true};
   DISCOVERIES.unshift(d);
   markVotedDiscovery(id);
