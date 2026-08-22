@@ -10,6 +10,28 @@ def b64(name):
 
 CAPS = {"recherche": b64("capt-1-recherche.png"), "carte": b64("capt-2-carte.png"), "fiche": b64("capt-3-fiche.png")}
 
+def bottle_svg(slug):
+    return io.open(os.path.join(SP, "bottles", "bottle-%s.svg" % slug), encoding="utf-8").read()
+
+# Rangee de 6 boissons qui se chevauchent legerement, tailles et inclinaisons
+# variees : l'etal d'un rayon de reve. (left, bottom, hauteur, rotation, z)
+LINEUP = [
+    ("vimto",        60,  -40, 560, -7, 1),
+    ("guarana-antarctica", 235, -20, 600, -3, 2),
+    ("ramune",       420, -30, 640,  0, 3),
+    ("mountain-dew", 590, -20, 600,  4, 2),
+    ("chupa-chups",  770, -45, 540,  8, 1),
+    ("jarritos",     880, -25, 580, 11, 1),
+]
+def etal():
+    out=[]
+    for slug,left,bottom,h,rot,z in LINEUP:
+        w=int(h*900/1400)
+        out.append('<div class="bt" style="position:absolute;left:%dpx;bottom:%dpx;width:%dpx;height:%dpx;'
+                   'z-index:%d;transform:rotate(%ddeg);filter:drop-shadow(0 30px 45px rgba(23,17,10,.3))">%s</div>'
+                   % (left,bottom,w,h,z+2,rot,bottle_svg(slug)))
+    return '<div style="position:absolute;inset:0;z-index:3">'+"".join(out)+"</div>"
+
 BASE = u"""<!doctype html><html><head><meta charset="utf-8"><style>
 %(fonts)s
 *{margin:0;padding:0;box-sizing:border-box}
@@ -42,10 +64,13 @@ html,body{width:1080px;height:1350px;overflow:hidden}
 /* annotation */
 .mark{position:absolute;z-index:7;border:6px solid #c69a57;border-radius:999px;
   box-shadow:0 0 0 6px rgba(198,154,87,.25),0 10px 30px rgba(23,17,10,.2)}
-.swipe{position:absolute;right:70px;bottom:64px;z-index:6;display:flex;align-items:center;gap:14px;
-  font-size:28px;font-weight:700;letter-spacing:.14em;color:#17110a}
+.bt svg{width:100%%;height:100%%;display:block}
+.swipe{position:absolute;right:56px;bottom:56px;z-index:9;display:flex;align-items:center;gap:14px;
+  font-size:28px;font-weight:700;letter-spacing:.14em;color:#17110a;
+  background:rgba(244,240,233,.92);padding:16px 26px;border-radius:999px;
+  box-shadow:0 10px 30px rgba(23,17,10,.15)}
 .swipe svg{width:46px;height:46px}
-.pager{position:absolute;left:70px;bottom:64px;z-index:6;display:flex;gap:10px;align-items:center}
+.pager{position:absolute;left:70px;bottom:64px;z-index:9;display:flex;gap:10px;align-items:center}
 .pager i{width:12px;height:12px;border-radius:50%%;background:#c9bda6}
 .pager i.on{background:#17110a;width:30px;border-radius:99px}
 .wm{position:absolute;left:50%%;bottom:62px;transform:translateX(-50%%);z-index:6;display:flex;align-items:center;gap:12px;
@@ -84,8 +109,8 @@ SLIDES = [
   font-size:36px;font-weight:600;color:#5c5142}
 """,
     body=(u'<div class="title">TROUVE TA BOISSON<br>INTROUVABLE</div>'
-          u'<div class="cover-sub">Le mode d’emploi en 3 étapes</div>'
-          + phone("recherche", 540, -5, None, 430)),
+          u'<div class="cover-sub">Ramune, Guaraná, Mountain Dew…<br>Le mode d’emploi en 3 étapes</div>'
+          + etal()),
     swipe=FLECHE, page=0),
   # 2 — etape 1
   dict(step=u"ÉTAPE 1 / 3", titleSize=78, subTop=294, phoneTop=470, tilt=0, extraCss="",
