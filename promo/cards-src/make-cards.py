@@ -20,6 +20,7 @@ DRINKS = [
     ("pocari-sweat",       "POCARI SWEAT",     "JAPON",        "La désaltérante n°1 du Japon",                 "#2456a8", "#6fc3e8", "w"),
     ("vimto",              "VIMTO",             "ANGLETERRE",   "Le fruité culte de Manchester, depuis 1908",   "#7a2d9e", "#b57de8", "w"),
     ("chupa-chups",        "CHUPA CHUPS","CORÉE",    "La sucette devenue soda",                      "#f06292", "#ff8fb3", "w"),
+    ("mountain-dew",       "MOUNTAIN DEW",      "ÉTATS-UNIS",   "Le soda vert le plus culte d'Amérique",        "#3fa51e", "#c8f26a", "w"),
     ("generic",            "BOISSON\nDU JOUR",  "",             "Les boissons rares près de chez toi",          "#3a2c18", "#c69a57", "w"),
 ]
 
