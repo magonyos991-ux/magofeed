@@ -16,20 +16,25 @@ def bottle_svg(slug):
 # Rangee de 6 boissons qui se chevauchent legerement, tailles et inclinaisons
 # variees : l'etal d'un rayon de reve. (left, bottom, hauteur, rotation, z)
 LINEUP = [
-    ("vimto",        60,  -40, 560, -7, 1),
-    ("guarana-antarctica", 235, -20, 600, -3, 2),
-    ("ramune",       420, -30, 640,  0, 3),
-    ("mountain-dew", 590, -20, 600,  4, 2),
-    ("chupa-chups",  770, -45, 540,  8, 1),
-    ("jarritos",     880, -25, 580, 11, 1),
+    # (slug, centre x, hauteur, rotation, z) — pieds sur la meme ligne de sol,
+    # produit ENTIER visible, le plus grand au centre comme une photo de famille.
+    ("vimto",        150, 500, -4, 3),
+    ("guarana-antarctica", 335, 560, -2, 4),
+    ("ramune",       540, 640,  0, 5),
+    ("mountain-dew", 745, 600,  2, 4),
+    ("chupa-chups",  935, 500,  4, 3),
 ]
 def etal():
-    out=[]
-    for slug,left,bottom,h,rot,z in LINEUP:
+    out=['<div style="position:absolute;left:50%;bottom:52px;width:960px;height:70px;'
+         'transform:translateX(-50%);z-index:2;border-radius:50%;'
+         'background:radial-gradient(closest-side,rgba(23,17,10,.22),transparent 70%)"></div>']
+    for slug,cx,h,rot,z in LINEUP:
         w=int(h*900/1400)
-        out.append('<div class="bt" style="position:absolute;left:%dpx;bottom:%dpx;width:%dpx;height:%dpx;'
-                   'z-index:%d;transform:rotate(%ddeg);filter:drop-shadow(0 30px 45px rgba(23,17,10,.3))">%s</div>'
-                   % (left,bottom,w,h,z+2,rot,bottle_svg(slug)))
+        left=int(cx-w/2)
+        out.append('<div class="bt" style="position:absolute;left:%dpx;bottom:96px;width:%dpx;height:%dpx;'
+                   'z-index:%d;transform:rotate(%ddeg);transform-origin:50%% 100%%;'
+                   'filter:drop-shadow(0 24px 38px rgba(23,17,10,.28))">%s</div>'
+                   % (left,w,h,z+2,rot,bottle_svg(slug)))
     return '<div style="position:absolute;inset:0;z-index:3">'+"".join(out)+"</div>"
 
 BASE = u"""<!doctype html><html><head><meta charset="utf-8"><style>
