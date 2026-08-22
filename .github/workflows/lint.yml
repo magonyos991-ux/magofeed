@@ -1,0 +1,31 @@
+# Filet de sécurité du code — s'exécute avant tout déploiement.
+#
+# Ce projet n'a pas de bundler : rien ne relit le code à notre place. Deux bugs
+# bien réels sont passés en production faute de cette étape — une fonction et
+# une table de correspondance déclarées chacune deux fois, la seconde écrasant
+# silencieusement la première. ESLint les voit en une seconde (no-redeclare).
+#
+# Volontairement limité aux règles qui attrapent des BUGS, jamais du style :
+# voir eslint.config.mjs pour le détail et le pourquoi.
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  eslint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # --no-save : le dépôt n'a volontairement pas de package.json (cf. .gitignore),
+      # même approche que le workflow de déploiement.
+      - name: Install ESLint
+        run: npm install eslint@9.15.0 eslint-plugin-html@8.1.2 --no-save
+      - name: Lint
+        run: npx eslint .

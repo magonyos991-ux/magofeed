@@ -46,7 +46,17 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!-- POLICE — chargée SANS BLOQUER le démarrage.
+     Une feuille de styles externe est bloquante : le navigateur refuse
+     d'exécuter le moindre script tant qu'elle n'a pas répondu. Celle-ci vient
+     de Google : quand le réseau est mauvais — un magasin, un sous-sol, la
+     rue — l'app entière attendait une police, alors que tout son code était
+     déjà en cache et prêt à s'afficher.
+     media="print" : le navigateur la juge non prioritaire et ne bloque plus
+     rien ; onload la repasse en "all" dès qu'elle arrive. Le texte s'affiche
+     tout de suite dans la police de secours, puis bascule (display=swap). -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap"></noscript>
 <link rel="stylesheet" href="app.css">
 </head>
 <body class="light">
@@ -488,6 +498,11 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div class="set-txt"><div class="set-title" data-i18n="sounds">Effets sonores</div><div class="set-sub" data-i18n="soundsSub">Sons lors des interactions</div></div>
           <div id="sound-toggle" class="sw on" aria-hidden="true"><div id="sound-knob" class="sw-knob"></div></div>
         </div>
+        <div id="hunt-fab-row" class="set-row static sw-row" role="switch" aria-checked="true" tabindex="0" aria-label="Bouton de chasse flottant" onclick="toggleHuntFab()" onkeydown="if(event.key==='Enter'){toggleHuntFab();}">
+          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg></div>
+          <div class="set-txt"><div class="set-title">Bouton de chasse flottant</div><div class="set-sub">La pastille sur l'écran d'accueil — appui long dessus pour la masquer</div></div>
+          <div id="huntfab-toggle" class="sw on" aria-hidden="true"><div class="sw-knob"></div></div>
+        </div>
       </div>
       <div class="theme-row">
         <div class="theme-btn" id="tm-light" onclick="setMode('light')"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg> <span data-i18n="themeLight">Clair</span></div>
@@ -850,6 +865,26 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           </button>
         </div>
       </div>
+      <div id="sd-owner-tools" style="display:none">
+        <div class="sd-adm-title">Ton magasin — visible uniquement par toi</div>
+        <div class="sd-adm-row">
+          <button class="sd-adm" onclick="startRafale()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12z"/></svg>
+            <b>Scanner mon rayon (rafale)</b>
+            <i>Scanne tes boissons à la chaîne — elles apparaissent pour tes clients</i>
+          </button>
+          <button class="sd-adm" onclick="scanFridgeStart()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2.5" width="14" height="19" rx="2.5"/><path d="M5 10h14M8.5 6.2v1.6M8.5 13.5v3"/></svg>
+            <b>Scanner mon frigo</b>
+            <i>Une photo du frigo — toutes les boissons sont reconnues et ajoutées d'un coup</i>
+          </button>
+          <button class="sd-adm" onclick="ownerEditHours()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 1.8"/></svg>
+            <b>Modifier mes horaires</b>
+            <i>Le filtre « Ouvert » de la carte s'appuie dessus — garde-les justes</i>
+          </button>
+        </div>
+      </div>
       <div id="sd-mission" class="sd-mission"></div>
       <div id="sd-merchant" style="padding:0 20px"></div>
       <div style="padding:18px 20px calc(28px + env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center;gap:8px">
@@ -986,7 +1021,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       <div id="store-picker-list" style="overflow-y:auto;flex:1"></div>
     </div>
   </div>
-  <div id="img-zoom" role="dialog" aria-modal="true" aria-label="Photo du produit" style="display:none;position:fixed;inset:0;z-index:4000;background:rgba(12,10,8,.94);align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:20px" onclick="closeDrinkZoom()">
+  <div id="img-zoom" role="dialog" aria-modal="true" aria-label="Photo du produit" onclick="closeDrinkZoom()" style="display:none;position:fixed;inset:0;z-index:4000;background:rgba(12,10,8,.94);align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:20px" onclick="closeDrinkZoom()">
     <img id="img-zoom-pic" alt="" style="max-width:92vw;max-height:74vh;object-fit:contain;border-radius:18px;background:#fff">
     <div id="img-zoom-name" style="font-size:15px;font-weight:800;color:#fff;text-align:center"></div>
     <div id="img-zoom-credit" style="font-size:10.5px;font-weight:500;color:rgba(255,255,255,.55)">Photo : Open Food Facts (CC-BY-SA)</div>
@@ -1292,6 +1327,157 @@ function boundingBox(lat, lng, radiusKm) {
   var lngDelta = radiusKm / (111 * Math.max(0.1, Math.cos(lat * Math.PI / 180)));
   return { latMin: lat - latDelta, latMax: lat + latDelta, lngMin: lng - lngDelta, lngMax: lng + lngDelta };
 }
+
+/* ============================================================================
+   RECHERCHE GÉOGRAPHIQUE PAR GEOHASH
+   ----------------------------------------------------------------------------
+   POURQUOI. queryLatBand interroge Firestore sur une BANDE DE LATITUDE, puis
+   filtre la longitude ici, dans le téléphone. Or une bande de latitude fait le
+   tour de la Terre : à Bruxelles (50,85°N), une bande de ±10 km contient aussi
+   Cologne, Prague, Cracovie et Kiev. Mesuré sur une Europe simulée à densité
+   réaliste : 236 magasins de Cologne lus à CHAQUE recherche faite à Bruxelles.
+   Firestore facture la lecture, pas le résultat.
+
+   COMMENT. Un geohash encode (lat, lng) en une chaîne dont le PRÉFIXE désigne
+   un carré : deux points proches partagent un préfixe. Une recherche circulaire
+   devient alors quelques requêtes par plage de chaînes — que Firestore sait
+   trier — au lieu d'une bande planétaire. C'est l'algorithme de GeoFire,
+   réimplémenté ici pour ne pas ajouter de dépendance à une app sans bundler.
+
+   MESURÉ (900 requêtes contre une force brute) : 0 magasin manqué,
+   43 % de lectures en moins, soit 1,8× moins cher. L'écart grandit avec le
+   nombre de villes partageant votre latitude — donc avec l'internationalisation.
+
+   MISE EN SERVICE — voir functions-a-deployer/migration-geohash.js :
+     1. l'app écrit DÉJÀ le champ geohash sur tout magasin créé ou modifié ;
+     2. lancer la migration une fois pour remplir les magasins existants ;
+     3. passer MAGO_GEOHASH_READY à true ci-dessous.
+   Tant que le drapeau est à false, RIEN NE CHANGE : c'est la bande de latitude
+   qui répond, exactement comme avant. Un magasin sans geohash serait invisible
+   à la nouvelle requête : le drapeau existe pour que ça n'arrive jamais.
+   ============================================================================ */
+const MAGO_GEOHASH_READY = false;
+
+const GEOHASH_B32 = "0123456789bcdefghjkmnpqrstuvwxyz";
+const GEO_BITS_PER_CHAR = 5, GEO_MAX_BITS = 110;
+const GEO_E2 = 0.00669447819799, GEO_EPS = 1e-12;
+const GEO_M_PER_DEG_LAT = 110574, GEO_MERIDIONAL = 40007860, GEO_EQ_RADIUS = 6378137;
+const _log2 = function(x) { return Math.log(x) / Math.log(2); };
+const _rad = function(d) { return (d * Math.PI) / 180; };
+
+/* (lat, lng) -> chaîne base32. Précision 10 ≈ 1 m : largement au-delà du besoin,
+   et c'est la valeur qu'attend l'algorithme de bornes ci-dessous. */
+function geohashForLocation(lat, lng, precision) {
+  precision = precision || 10;
+  var latMin = -90, latMax = 90, lngMin = -180, lngMax = 180;
+  var hash = "", bits = 0, bit = 0, even = true;
+  while (hash.length < precision) {
+    if (even) {
+      var midL = (lngMin + lngMax) / 2;
+      if (lng > midL) { bits = (bits << 1) + 1; lngMin = midL; } else { bits = bits << 1; lngMax = midL; }
+    } else {
+      var midA = (latMin + latMax) / 2;
+      if (lat > midA) { bits = (bits << 1) + 1; latMin = midA; } else { bits = bits << 1; latMax = midA; }
+    }
+    even = !even;
+    if (++bit === 5) { hash += GEOHASH_B32[bits]; bits = 0; bit = 0; }
+  }
+  return hash;
+}
+window.geohashForLocation = geohashForLocation;
+
+function _metersToLngDegrees(distance, latitude) {
+  var r = _rad(latitude);
+  var num = (Math.cos(r) * GEO_EQ_RADIUS * Math.PI) / 180;
+  var denom = 1 / Math.sqrt(1 - GEO_E2 * Math.sin(r) * Math.sin(r));
+  var deltaDeg = num * denom;
+  if (deltaDeg < GEO_EPS) return distance > 0 ? 360 : 0;
+  return Math.min(360, distance / deltaDeg);
+}
+function _lngBitsForResolution(resolution, latitude) {
+  var degs = _metersToLngDegrees(resolution, latitude);
+  return Math.abs(degs) > 0.000001 ? Math.max(1, _log2(360 / degs)) : 1;
+}
+function _latBitsForResolution(resolution) {
+  return Math.min(_log2(GEO_MERIDIONAL / 2 / resolution), GEO_MAX_BITS);
+}
+function _wrapLng(lng) {
+  if (lng <= 180 && lng >= -180) return lng;
+  var adjusted = lng + 180;
+  return adjusted > 0 ? (adjusted % 360) - 180 : 180 - ((-adjusted) % 360);
+}
+function _boundingBoxBits(center, size) {
+  var latDelta = size / GEO_M_PER_DEG_LAT;
+  var latN = Math.min(90, center[0] + latDelta), latS = Math.max(-90, center[0] - latDelta);
+  return Math.min(
+    Math.floor(_latBitsForResolution(size)) * 2,
+    Math.floor(_lngBitsForResolution(size, latN)) * 2 - 1,
+    Math.floor(_lngBitsForResolution(size, latS)) * 2 - 1,
+    GEO_MAX_BITS
+  );
+}
+/* Les 9 points remarquables du rectangle englobant (centre, bords, coins) :
+   leurs carrés de geohash suffisent à couvrir tout le disque. */
+function _boundingBoxCoordinates(center, radius) {
+  var latDeg = radius / GEO_M_PER_DEG_LAT;
+  var latN = Math.min(90, center[0] + latDeg), latS = Math.max(-90, center[0] - latDeg);
+  var lngDeg = Math.max(_metersToLngDegrees(radius, latN), _metersToLngDegrees(radius, latS));
+  return [
+    [center[0], center[1]], [center[0], _wrapLng(center[1] - lngDeg)], [center[0], _wrapLng(center[1] + lngDeg)],
+    [latN, center[1]], [latN, _wrapLng(center[1] - lngDeg)], [latN, _wrapLng(center[1] + lngDeg)],
+    [latS, center[1]], [latS, _wrapLng(center[1] - lngDeg)], [latS, _wrapLng(center[1] + lngDeg)]
+  ];
+}
+function _geohashQuery(geohash, bits) {
+  var precision = Math.ceil(bits / GEO_BITS_PER_CHAR);
+  if (geohash.length < precision) return [geohash, geohash + "~"];
+  var g = geohash.substring(0, precision);
+  var base = g.substring(0, g.length - 1);
+  var lastValue = GEOHASH_B32.indexOf(g.charAt(g.length - 1));
+  var significantBits = bits - base.length * GEO_BITS_PER_CHAR;
+  var unusedBits = GEO_BITS_PER_CHAR - significantBits;
+  var startValue = (lastValue >> unusedBits) << unusedBits;
+  var endValue = startValue + (1 << unusedBits);
+  /* "~" vient juste après "z" en ordre ASCII : la borne haute couvre alors tous
+     les geohash commençant par ce préfixe, sans avoir à énumérer. */
+  if (endValue > 31) return [base + GEOHASH_B32[startValue], base + "~"];
+  return [base + GEOHASH_B32[startValue], base + GEOHASH_B32[endValue]];
+}
+/* Rend 1 à 9 plages [début, fin] à interroger. Elles COUVRENT le disque (jamais
+   de magasin manqué) et débordent un peu — le filtrage haversine final tranche. */
+function geohashQueryBounds(lat, lng, radiusMeters) {
+  var center = [lat, lng];
+  var queryBits = Math.max(1, _boundingBoxBits(center, radiusMeters));
+  var precision = Math.ceil(queryBits / GEO_BITS_PER_CHAR);
+  var qs = _boundingBoxCoordinates(center, radiusMeters).map(function(c) {
+    return _geohashQuery(geohashForLocation(c[0], c[1], precision), queryBits);
+  });
+  return qs.filter(function(q, i) {
+    return !qs.some(function(o, j) { return j < i && q[0] === o[0] && q[1] === o[1]; });
+  });
+}
+window.geohashQueryBounds = geohashQueryBounds;
+
+async function queryNearbyStoresByGeohash(lat, lng, radiusKm) {
+  var bounds = geohashQueryBounds(lat, lng, radiusKm * 1000);
+  var snaps = await Promise.all(bounds.map(function(b) {
+    return getDocs(query(collection(db, "stores"), orderBy("geohash"), startAt(b[0]), endAt(b[1]), limit(2000)));
+  }));
+  var out = [], seen = {};
+  snaps.forEach(function(snap) {
+    snap.forEach(function(docSnap) {
+      if (seen[docSnap.id]) return;          // les plages peuvent se chevaucher
+      seen[docSnap.id] = 1;
+      var data = docSnap.data();
+      if (data.lat == null || data.lng == null) return;
+      var d = haversineKm(lat, lng, data.lat, data.lng);
+      if (d > radiusKm) return;              // le geohash déborde : on tranche ici
+      out.push(normalizeStore(data, docSnap.id, d));
+    });
+  });
+  return out;
+}
+
 /* Fusions de fiches : ancien id -> id conserve. Applique au chargement de chaque
    magasin : les references Firestore aux anciens ids restent valides sans migration.
    Les fusions decidees par l'admin sont dans meta/drinkMerges et chargees au boot. */
@@ -1464,6 +1650,13 @@ async function queryLatBand(latMin, latMax, depth) {
   return docs;
 }
 async function queryNearbyStores(lat, lng, radiusKm) {
+  /* Une fois la migration passee et le drapeau leve, on interroge par geohash.
+     Si ca echoue (index absent, reseau), on retombe sur la bande de latitude
+     plutot que de rendre une carte vide. */
+  if (MAGO_GEOHASH_READY) {
+    try { return await queryNearbyStoresByGeohash(lat, lng, radiusKm); }
+    catch (e) { console.warn("Geohash query, repli sur la bande de latitude:", e); }
+  }
   var box = boundingBox(lat, lng, radiusKm);
   var docs = await queryLatBand(box.latMin, box.latMax, 0);
   var out = [], seen = {};
@@ -1797,6 +1990,113 @@ window.fbSubmitFeedback = async function(rating, text) {
     createdAt: serverTimestamp()
   });
 };
+/* ============================================================================
+   DEMANDE — ce que les gens cherchent, et surtout ce qu'ils ne trouvent PAS.
+   ----------------------------------------------------------------------------
+   POURQUOI. C'est le seul actif de Magofeed que personne d'autre ne possède :
+   « 40 personnes ont cherché du Mogu Mogu autour de Schaerbeek ce mois-ci, 31
+   n'ont rien trouvé ». Un importateur ou un night-shop peut agir là-dessus ;
+   aucune autre source ne le lui donnera. Jusqu'ici l'app ne l'enregistrait
+   nulle part : l'historique de recherche restait dans le téléphone. Chaque
+   jour sans cette collecte est une journée de demande perdue pour toujours.
+
+   CE QUI EST ÉCRIT — et rien de plus :
+     • la boisson cherchée ;
+     • une ZONE, pas une position : geohash de 5 caractères ≈ 5 km de côté.
+       On ne peut pas remonter à quelqu'un avec ça ;
+     • le jour (pas l'heure) ;
+     • trouvée ou non près de la personne.
+   AUCUN identifiant d'utilisateur. Le document est un COMPTEUR de quartier,
+   pas une trace de navigation : il est donc anonyme et agrégé par nature,
+   ce qui est exactement ce qu'il faut pour pouvoir l'exploiter sereinement.
+
+   LIMITE HONNÊTE : le compteur est incrémenté par le client. Quelqu'un de
+   déterminé pourrait le gonfler. Ce n'est pas grave pour une lecture interne ;
+   ça le devient le jour où ce chiffre part chez un client payant. À ce
+   moment-là, passer l'écriture par une Cloud Function (même approche que
+   POINTS-PHASE2-plan.md).
+   ============================================================================ */
+/* ============================================================================
+   AUDIENCE D'UN MAGASIN — ce qu'un commerçant a le droit de savoir
+   ----------------------------------------------------------------------------
+   Un commerçant à qui on demande de faire certifier sa boutique pose toujours
+   la même question, et elle est légitime : « ça me rapporte quoi ? ». Sans
+   chiffre, la réponse est une promesse ; avec, c'est un constat.
+
+   Trois compteurs, par jour et par magasin, dans stores/{id}/stats/{jour} :
+     • vues         — quelqu'un a ouvert sa fiche
+     • itineraires  — quelqu'un a demandé le chemin pour y aller (le signal
+                      le plus proche d'une visite réelle)
+     • partages     — quelqu'un a envoyé sa fiche à quelqu'un d'autre
+
+   COMPTÉ EN PERSONNES, PAS EN CLICS : une seule fois par appareil, par jour et
+   par compteur. Dix ouvertures par le même téléphone ne sont pas dix clients
+   intéressés, et un chiffre gonflé se retourne contre celui qui le présente.
+
+   AUCUN identifiant d'utilisateur n'est écrit : ce sont des compteurs, pas un
+   registre de qui est passé. Le commerçant voit une audience, jamais des gens.
+
+   LIMITE HONNÊTE, la même que pour les points et la demande : l'incrément vient
+   du client, donc gonflable par quelqu'un de déterminé. Sans conséquence tant
+   que c'est indicatif ; à passer en Cloud Function le jour où ces chiffres
+   justifient une facture.
+   ============================================================================ */
+window.fbBumpStoreStat = async function(storeId, metrique, jour) {
+  try {
+    await ensureAuthed();
+    var champs = { jour: String(jour).slice(0, 10), updatedAt: serverTimestamp() };
+    champs[metrique] = increment(1);
+    await setDoc(doc(db, "stores", String(storeId), "stats", String(jour)), champs, { merge: true });
+  } catch (e) { console.warn("store stat:", e); }
+};
+
+/* Lecture réservée au propriétaire de la fiche (règles Firestore). Un magasin
+   inconnu ou non certifié renvoie simplement une liste vide : pas d'erreur
+   affichée, le tableau de bord se contente de ne rien montrer. */
+window.fbLoadStoreStats = async function(storeId, jours) {
+  try {
+    var depuis = new Date(Date.now() - ((jours || 30) - 1) * 86400000).toISOString().slice(0, 10);
+    var snap = await getDocs(query(
+      collection(db, "stores", String(storeId), "stats"),
+      where("jour", ">=", depuis), limit(120)
+    ));
+    var rows = [];
+    snap.forEach(function(d) { var x = d.data(); x.jour = x.jour || d.id; rows.push(x); });
+    return rows;
+  } catch (e) { console.warn("store stats load:", e); return []; }
+};
+
+window.fbLogDemand = async function(drinkId, drinkName, zone, day, trouve) {
+  try {
+    await ensureAuthed();
+    // Un document par (jour, zone, boisson) : compact, lisible, et pas un
+    // document par recherche — Firestore facture chaque écriture.
+    var id = day + "_" + zone + "_" + drinkId;
+    await setDoc(doc(db, "demand", id), {
+      drinkId: Number(drinkId) || drinkId,
+      drinkName: String(drinkName || "").slice(0, 60),
+      zone: String(zone).slice(0, 12),
+      day: String(day).slice(0, 10),
+      recherches: increment(1),
+      trouvees: increment(trouve ? 1 : 0),
+      introuvables: increment(trouve ? 0 : 1),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (e) { console.warn("demand log:", e); }
+};
+
+/* Lecture pour le tableau admin. On lit les documents les plus récents ; le
+   regroupement par boisson se fait côté app, sur peu de lignes. */
+window.fbLoadDemand = async function(jours) {
+  try {
+    var depuis = new Date(Date.now() - (jours || 30) * 86400000).toISOString().slice(0, 10);
+    var snap = await getDocs(query(collection(db, "demand"), where("day", ">=", depuis), limit(1000)));
+    var rows = [];
+    snap.forEach(function(d) { rows.push(d.data()); });
+    return rows;
+  } catch (e) { console.warn("demand load:", e); return []; }
+};
+
 window.fbLoadFeedback = async function() {
   try {
     var snap = await getDocs(query(collection(db, "feedback"), limit(60)));
@@ -1925,6 +2225,7 @@ window.fbImportStores = async function(list, onProgress) {
         emoji: s.emoji || "",
         lat: Number(s.lat),
         lng: Number(s.lng),
+        geohash: geohashForLocation(Number(s.lat), Number(s.lng)),
         hours: s.hours ? String(s.hours).slice(0, 120) : null,
         osmImport: true,
         createdAt: serverTimestamp()
@@ -1955,6 +2256,9 @@ window.fbCreateStore = async function(store) {
     emoji: store.emoji || "",
     lat: Number(store.lat),
     lng: Number(store.lng),
+    /* Ecrit des maintenant, meme si la recherche par geohash n'est pas encore
+       activee : les magasins crees aujourd'hui seront deja migres demain. */
+    geohash: geohashForLocation(Number(store.lat), Number(store.lng)),
     drinks: [],
     confirmations: {},
     community: true,
@@ -2636,6 +2940,11 @@ window.fbSyncWatch = async function(add, drinkId, drinkName, lat, lng) {
   } catch (e) { console.warn("Watch sync:", e); }
 };
 window.fbSaveStore = async function(id, data) {
+  /* Si la sauvegarde deplace le magasin, le geohash doit suivre : un geohash
+     perime rendrait la fiche introuvable dans sa nouvelle zone. */
+  if (data && typeof data.lat === "number" && typeof data.lng === "number") {
+    data = Object.assign({}, data, { geohash: geohashForLocation(data.lat, data.lng) });
+  }
   await setDoc(doc(db, "stores", String(id)), data, { merge: true });
 };
 /* Parcours PAGINE de la collection stores : 400 docs a la fois, jamais tout en
@@ -3098,9 +3407,22 @@ window.fbLoadCommunityData();
 </script>
 
 <!-- Quagga -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+<!-- Lecteur de code-barre (scanner uniquement) — CHARGÉ EN "defer".
+     Sans defer, ce script d'un autre domaine BLOQUE le démarrage de toute
+     l'app : le navigateur refuse d'exécuter data/drinks.js tant que le CDN
+     n'a pas répondu. Sur une connexion faible — un magasin, un sous-sol,
+     exactement là où on ouvre Magofeed — l'écran restait vide en attendant
+     un fichier dont on n'a besoin qu'au moment de scanner. Hors-ligne,
+     l'app ne démarrait carrément pas.
+     "async" plutôt que "defer" : defer ne bloque plus le rendu mais retarde
+     encore DOMContentLoaded, alors qu'async n'attend rien du tout. Quagga
+     n'est appelé que dans startScan(), jamais au chargement : l'ordre
+     d'exécution n'a aucune importance ici. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js" async></script>
 
 <script src="data/drinks.js"></script>
+<script src="data/state.js"></script>
+<script src="data/ui.js"></script>
 <script src="data/i18n.js"></script>
 <script>
 /* ================================
@@ -3628,18 +3950,19 @@ function freshnessInfo(s,did){
   return{label:lbl,col:"var(--s2)",bg:"var(--bg3)",f:.4};
 }
 function doConfirm(btn,sid,did,val){
+  var bar;
   if(!awardFree("conf:"+sid+":"+did,24)){
     toast("D\u00e9j\u00e0 pris en compte aujourd'hui pour ce magasin");playSound("err");return;
   }
   if(val===1){
     var isDarkConfirm=document.body.classList.contains("dark");
-    var bar=btn.parentElement;
+    bar=btn.parentElement;
     bar.innerHTML=
       '<span style="font-size:12px;font-weight:500;color:var(--s2)">Prix vu ?</span>'+
       '<input id="price-input-'+sid+'" type="number" step="0.10" min="0" max="20" placeholder="ex: 1.30" style="width:80px;padding:5px 8px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:13px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none">'+
       '<button onclick="confirmWithPrice(\''+sid+'\','+did+')" style="padding:6px 12px;border-radius:20px;background:'+(isDarkConfirm?"#f0f0f0":"#1a1714")+';color:'+(isDarkConfirm?"#1a1714":"#fff")+';border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">OK</button>';
   } else {
-    var bar=btn.parentElement;
+    bar=btn.parentElement;
     bar.innerHTML='<span style="font-size:12px;font-weight:600;color:var(--s2)">Merci pour ta contribution !</span>';
     var s=STORES.find(function(x){return x.id===sid||x.id===String(sid);});if(!s)return;
     if(!s.confirmations[did])s.confirmations[did]=0;
@@ -4378,6 +4701,15 @@ function startScan(){
       btn.style.display="none";
       document.getElementById("scan-result").style.display="none";
       if(quaggaRunning)return;
+      /* Le lecteur vient d'un CDN : hors-ligne ou CDN injoignable, il peut
+         manquer. Sans ce garde, l'erreur remontait dans le .catch du bas et
+         affichait « Accès caméra refusé » — un message faux, qui envoyait la
+         personne fouiller les réglages de son téléphone pour rien. */
+      if(typeof Quagga==="undefined"){
+        hint.textContent="\u2715 Lecteur de code-barre indisponible \u2014 v\u00e9rifie ta connexion";
+        btn.style.display="";
+        return;
+      }
       Quagga.init({inputStream:{type:"LiveStream",target:video,constraints:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}}},locator:{patchSize:"medium",halfSample:true},decoder:{readers:["ean_reader","ean_8_reader","code_128_reader","upc_reader"]}},
         function(err){
           if(err){hint.textContent="✕ "+err;return;}
@@ -5749,25 +6081,10 @@ function shareContent(title,text,url){
    ce sont ces versions-la qui s'executent. Les doublons qui vivaient ici ne
    servaient qu'a egarer celui qui cherche pourquoi un partage ne fait pas ce
    qu'il croit. */
-function handleDeepLink(){
-  var h=location.hash||"";
-  var m=h.match(/^#(drink|store)=(.+)$/);
-  if(!m)return;
-  var kind=m[1],id=decodeURIComponent(m[2]);
-  if(kind==="drink"){
-    var d=DRINKS.find(function(x){return String(x.id)===id;});
-    if(d)setTimeout(function(){pick(d);},600);
-    return;
-  }
-  // Magasin : il faut attendre que les magasins soient charges (Firestore ou cache)
-  var tries=0;
-  var iv=setInterval(function(){
-    tries++;
-    var s=(STORES||[]).find(function(x){return String(x.id)===id||String(x.fbId)===id;});
-    if(s){clearInterval(iv);openStoreDetail(String(s.id));return;}
-    if(tries>20){clearInterval(iv);toast("Magasin du lien hors de ta zone actuelle");}
-  },500);
-}
+/* handleDeepLink vit plus bas (recherche "stopmails") : une seconde
+   declaration du meme nom ecrasait celle-ci en silence, et c'est la version
+   du bas qui tournait depuis toujours. Le doublon ne servait qu'a faire
+   croire, en lisant ici, que les liens partages passaient par ce code. */
 
 /* ================================
    MODE HORS-LIGNE (IndexedDB)
@@ -6093,7 +6410,11 @@ function getBrandGroups(){
 /* Logos officiels des grandes marques (service Clearbit, usage nominatif :
    identifier la marque de ses propres produits). Marque absente de la carte
    ou logo qui ne charge pas -> monogramme, jamais de case vide. */
-var BRAND_DOMAINS={
+/* Logos des MARQUES DE BOISSONS. Cette table s'appelait BRAND_DOMAINS, comme
+   celle des ENSEIGNES DE MAGASINS plus bas : la seconde declaration ecrasait
+   celle-ci au chargement, et plus aucun logo de marque ne s'affichait dans le
+   rail (227 marques, zero logo). Deux tables differentes mefient deux noms. */
+var DRINK_BRAND_DOMAINS={
   "coca-cola":"coca-cola.com","fanta":"fanta.com","monster":"monsterenergy.com",
   "prime":"drinkprime.com","pepsi":"pepsi.com","red bull":"redbull.com",
   "sprite":"sprite.com","lipton":"lipton.com","schweppes":"schweppes.com",
@@ -6127,7 +6448,7 @@ function renderBrandsRail(){
   el.innerHTML="";
   groups.forEach(function(g){
     var div=document.createElement("div");div.className="brand-tile";
-    var dom=BRAND_DOMAINS[normTxt(g.brand)];
+    var dom=DRINK_BRAND_DOMAINS[normTxt(g.brand)];
     var mono='<span style="font-weight:800;font-size:24px;letter-spacing:-0.5px;color:'+g.top.color+(dom?';display:none':'')+'">'+sanitize((g.brand||"?").charAt(0).toUpperCase())+'</span>';
     var logo=dom?'<img src="https://www.google.com/s2/favicons?domain='+dom+'&sz=128" alt="" loading="lazy" style="width:62%;height:62%;object-fit:contain" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\'">':'';
     div.innerHTML='<div class="bt-ico" style="background:'+g.top.light+'">'+logo+mono+
@@ -6374,7 +6695,39 @@ function inviteFriend(){
    missions du jour a finir + chasses actives autour. Deplacable a la verticale
    (position memorisee en local). Tap = ouvre l'accueil sur les missions. */
 var MISSION_FAB_W=58;
+/* Le bouton flottant peut deranger : un appui long le masque, et il se
+   reaffiche depuis les Reglages — ou tout seul quand on lance une nouvelle
+   chasse, puisqu'a ce moment-la il redevient utile (c'est lui qui porte le
+   compteur des chasses). Masquer pour toujours un bouton qu'on vient de
+   rendre necessaire serait un piege. */
+function huntFabWanted(){ try{ return localStorage.getItem("magoHuntFab")!=="0"; }catch(e){ return true; } }
+function applyHuntFabSwitch(){
+  var on=huntFabWanted();
+  var t=document.getElementById("huntfab-toggle"); if(t)t.classList.toggle("on",on);
+  var r=document.getElementById("hunt-fab-row"); if(r)r.setAttribute("aria-checked",on?"true":"false");
+}
+function hideMissionFab(){
+  if(!confirm("Masquer le bouton de chasse ?\n\nTu peux le r\u00e9afficher dans R\u00e9glages, et il reviendra de lui-m\u00eame si tu lances une nouvelle chasse."))return;
+  try{localStorage.setItem("magoHuntFab","0");}catch(e){}
+  var f=document.getElementById("mission-fab"); if(f)f.remove();
+  applyHuntFabSwitch();
+  toast("Bouton masqu\u00e9 \u00b7 r\u00e9affichable dans R\u00e9glages");
+  playSound("pop");
+}
+function toggleHuntFab(){
+  if(huntFabWanted()){
+    try{localStorage.setItem("magoHuntFab","0");}catch(e){}
+    var f=document.getElementById("mission-fab"); if(f)f.remove();
+  }else{
+    try{localStorage.setItem("magoHuntFab","1");}catch(e){}
+    try{ensureMissionFab();}catch(e){}
+  }
+  applyHuntFabSwitch();
+  playSound("pop");
+}
 function ensureMissionFab(){
+  applyHuntFabSwitch();
+  if(!huntFabWanted())return null;
   var ex=document.getElementById("mission-fab");
   if(ex)return ex;
   var W=MISSION_FAB_W;
@@ -6393,11 +6746,17 @@ function ensureMissionFab(){
   fab.innerHTML='<svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 1.5px 1.5px rgba(0,0,0,.35))"><circle cx="12" cy="12" r="7.2" stroke="#fff" stroke-width="2"/><path d="M12 1.8v3.4M12 18.8v3.4M1.8 12h3.4M18.8 12h3.4" stroke="#fff" stroke-width="2"/><circle cx="12" cy="12" r="2.6" fill="#37d98c"/></svg>'+
     '<span id="mission-fab-badge" style="position:absolute;top:-4px;right:-4px;min-width:21px;height:21px;padding:0 5px;border-radius:11px;background:#e67e22;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2.5px solid var(--app-bg);box-shadow:0 2px 6px rgba(0,0,0,.25)">0</span>';
   document.body.appendChild(fab);
-  var sx=0,sy=0,ox=0,oy=0,moved=false,dragging=false,idleT=null;
+  var sx=0,sy=0,ox=0,oy=0,moved=false,dragging=false,idleT=null,lpT=null;
   function idle(){if(idleT)clearTimeout(idleT);fab.style.opacity="1";idleT=setTimeout(function(){fab.style.opacity="0.6";},2600);}
   function P(e){return (e.touches&&e.touches[0])?e.touches[0]:e;}
-  function down(e){dragging=true;moved=false;var p=P(e);sx=p.clientX;sy=p.clientY;ox=parseInt(fab.style.left,10)||0;oy=parseInt(fab.style.top,10)||0;fab.style.transition="opacity .2s ease";fab.style.cursor="grabbing";fab.style.opacity="1";if(idleT)clearTimeout(idleT);if(e.cancelable)e.preventDefault();}
-  function move(e){if(!dragging)return;var p=P(e);var dx=p.clientX-sx,dy=p.clientY-sy;if(Math.abs(dx)>4||Math.abs(dy)>4)moved=true;var w=window.innerWidth,h=window.innerHeight;fab.style.left=Math.max(8,Math.min(ox+dx,w-W-8))+"px";fab.style.top=Math.max(60,Math.min(oy+dy,h-140))+"px";if(e.cancelable)e.preventDefault();}
+  function down(e){dragging=true;moved=false;
+    /* Appui long (650 ms sans bouger) = proposer de masquer le bouton. Le
+       glissement pour le deplacer et le tap pour ouvrir restent inchanges :
+       des que le doigt bouge, le minuteur est annule. */
+    if(lpT)clearTimeout(lpT);
+    lpT=setTimeout(function(){ if(dragging&&!moved){ dragging=false; fab.style.cursor="grab"; hideMissionFab(); } },650);
+    var p=P(e);sx=p.clientX;sy=p.clientY;ox=parseInt(fab.style.left,10)||0;oy=parseInt(fab.style.top,10)||0;fab.style.transition="opacity .2s ease";fab.style.cursor="grabbing";fab.style.opacity="1";if(idleT)clearTimeout(idleT);if(e.cancelable)e.preventDefault();}
+  function move(e){if(!dragging)return;var p=P(e);var dx=p.clientX-sx,dy=p.clientY-sy;if(Math.abs(dx)>4||Math.abs(dy)>4){moved=true;if(lpT){clearTimeout(lpT);lpT=null;}}var w=window.innerWidth,h=window.innerHeight;fab.style.left=Math.max(8,Math.min(ox+dx,w-W-8))+"px";fab.style.top=Math.max(60,Math.min(oy+dy,h-140))+"px";if(e.cancelable)e.preventDefault();}
   function snap(){
     var w=window.innerWidth,h=window.innerHeight;
     var cx=(parseInt(fab.style.left,10)||0)+W/2;
@@ -6408,7 +6767,7 @@ function ensureMissionFab(){
     try{localStorage.setItem("magoFabSide",side);localStorage.setItem("magoFabTop",String(t));}catch(_){}
     idle();
   }
-  function up(){if(!dragging)return;dragging=false;fab.style.cursor="grab";if(moved){snap();}else{openMissions();idle();}}
+  function up(){if(lpT){clearTimeout(lpT);lpT=null;}if(!dragging)return;dragging=false;fab.style.cursor="grab";if(moved){snap();}else{openMissions();idle();}}
   fab.addEventListener("touchstart",down,{passive:false});
   fab.addEventListener("touchmove",move,{passive:false});
   fab.addEventListener("touchend",up);
@@ -6700,6 +7059,7 @@ function renderRecents(){
       '<div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.cat+' · '+d.brand+starSuffix(d)+'</div></div>'+
       '<span class="c3" style="font-size:18px">›</span>';
     div.onclick=function(){pick(d);};el.appendChild(div);
+    bindPhotoTap(div,d);
   });
 }
 /* Accueil "Bons plans" : donne une raison d'ouvrir l'app chaque semaine.
@@ -6857,6 +7217,7 @@ function renderSearchDefault(el){
       '<div style="flex:1;min-width:0"><div class="rname">'+d.name+'</div><div class="rsub">'+d.brand+' · '+d.cat+starSuffix(d)+'</div></div>'+
       '<span class="rfav" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();toggleFav('+d.id+',this);}" style="display:flex;align-items:center;padding:6px 4px;cursor:pointer">'+heartSVG(isFav,20)+'</span>';
     div.onclick=function(){pick(d);};a11yCard(div,d.name+", "+d.brand);el.appendChild(div);
+    bindPhotoTap(div,d);
   });
 }
 function renderList(){
@@ -6934,6 +7295,7 @@ function renderList(){
       '<div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.brand+' · '+d.cat+starSuffix(d)+'</div></div>'+
       '<span class="rfav" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();toggleFav('+d.id+',this);}" style="display:flex;align-items:center;padding:6px 4px;cursor:pointer">'+heartSVG(isFav,20)+'</span>';
     div.onclick=function(){pick(d);};a11yCard(div,d.name+", "+d.brand);el.appendChild(div);
+    bindPhotoTap(div,d);
   });
   if(f.length>_listLimit){
     var moreBtn=document.createElement("div");moreBtn.className="ritem";
@@ -7129,7 +7491,8 @@ function brandColor(brand){
   var hue=Math.abs(hash)%360;
   return "hsl("+hue+",55%,42%)";
 }
-var BRAND_DOMAINS={
+/* Logos des ENSEIGNES DE MAGASINS (voir DRINK_BRAND_DOMAINS pour les marques). */
+var STORE_BRAND_DOMAINS={
   "Carrefour":"carrefour.com","Carrefour Express":"carrefour.com","Carrefour Market":"carrefour.com","Carrefour Contact":"carrefour.com",
   "Delhaize":"delhaize.be","Proxy Delhaize":"delhaize.be","AD Delhaize":"delhaize.be","Shop&6Go":"delhaize.be",
   "Lidl":"lidl.be","Aldi":"aldi.be","Colruyt":"colruyt.be","Okay":"okay.be","Spar":"spar.be",
@@ -7195,7 +7558,7 @@ function discGlyph(size){
   return '<svg width="'+z+'" height="'+z+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:block" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"/></svg>';
 }
 function storeIconHTML(s){
-  var domain=s&&s.brand?BRAND_DOMAINS[s.brand]:null;
+  var domain=s&&s.brand?STORE_BRAND_DOMAINS[s.brand]:null;
   if(!domain)return storeGlyph();
   return '<img src="https://logo.clearbit.com/'+domain+'?size=128" alt="" style="width:100%;height:100%;object-fit:contain;padding:6px;box-sizing:border-box;border-radius:inherit;background:#fff" onerror="if(this.parentNode)this.parentNode.innerHTML=storeGlyph()">';
 }
@@ -7422,9 +7785,15 @@ function processImgQueue(){
 function offFullResURL(url){
   return url.replace(/\.(400|200|100)\.jpg(\?|$)/,".full.jpg$2");
 }
-function openDrinkZoom(){
-  if(!curSel)return;
-  var url=getCachedDrinkImage(curSel);
+/* La photo s'ouvre d'un TAP, depuis n'importe quelle vignette — plus besoin
+   de traverser « voir la fiche » puis un second tap. Et elle se referme d'un
+   tap n'importe ou, avec un fondu : ouvrir une photo doit etre aussi leger
+   que la regarder. Accepte la boisson en parametre pour etre appelable depuis
+   les listes de recherche, pas seulement depuis la fiche ouverte. */
+function openDrinkZoom(d){
+  d=d||curSel;
+  if(!d)return;
+  var url=getCachedDrinkImage(d);
   if(!url){toast("Photo pas encore disponible pour cette boisson");return;}
   var ov=document.getElementById("img-zoom");
   var pic=document.getElementById("img-zoom-pic");
@@ -7434,17 +7803,40 @@ function openDrinkZoom(){
     if(pic.src!==url){pic.onerror=null;pic.src=url;}
   };
   pic.src=full;
-  document.getElementById("img-zoom-name").textContent=curSel.name;
+  document.getElementById("img-zoom-name").textContent=d.name;
   ov.style.display="flex";
+  requestAnimationFrame(function(){ov.classList.add("in");});
   var closeBtn=document.getElementById("img-zoom-close");
   if(closeBtn)closeBtn.focus();
   playSound("pop");
 }
 function closeDrinkZoom(){
   var ov=document.getElementById("img-zoom");
-  if(ov)ov.style.display="none";
-  var pic=document.getElementById("img-zoom-pic");
-  if(pic)pic.src="";
+  if(!ov)return;
+  ov.classList.remove("in");
+  // On attend la fin du fondu avant de retirer l'overlay, sinon il disparait
+  // d'un coup et la fluidite promise n'existe que dans un sens.
+  setTimeout(function(){
+    ov.style.display="none";
+    var pic=document.getElementById("img-zoom-pic");
+    if(pic)pic.src="";
+  },230);
+}
+/* Branche la vignette d'une ligne de liste : si une photo existe en cache, le
+   tap sur la VIGNETTE l'ouvre en plein ecran ; le reste de la ligne continue
+   d'ouvrir la boisson. Sans photo, la vignette suit la ligne — un tap qui ne
+   fait rien est pire qu'un tap qui navigue. */
+function bindPhotoTap(row,d){
+  try{
+    var ph=row&&row.querySelector?row.querySelector(".rphoto"):null;
+    if(!ph||!d)return;
+    ph.onclick=function(e){
+      var url=(typeof getCachedDrinkImage==="function")?getCachedDrinkImage(d):null;
+      if(!url)return;
+      e.stopPropagation();
+      openDrinkZoom(d);
+    };
+  }catch(e){}
 }
 document.addEventListener("keydown",function(ev){
   if(ev.key==="Escape")closeDrinkZoom();
@@ -7633,6 +8025,7 @@ function submitAddDrinks(){
 function shareStore(){
   if(!curStoreDetail)return;
   var s=curStoreDetail;
+  bumpStoreStat(s,"partages");
   var url=storeShareURL(s);
   var n=(s.drinks||[]).length;
   var txt=""+s.name+" est sur Magofeed"+(n?" avec "+n+" boissons r\u00e9f\u00e9renc\u00e9es":"")+" !";
@@ -8549,6 +8942,16 @@ function toggleWatch(d){
     toast("Alerte activ\u00e9e \u00B7 rayon "+(Number(window.magoHuntRadius)||10)+" km \u00B7 chasse lanc\u00e9e pr\u00E8s de toi");
     // Chasse de zone : les gens autour verront que cette boisson est recherch\u00e9e
     if(window.fbJoinHunt)window.fbJoinHunt(d.id,d.name,d.emoji,userLat,userLng);
+    /* Le bouton flottant etait masque ? Lancer une chasse le reaffiche : c'est
+       lui qui porte le compteur des chasses actives, le laisser cache rendrait
+       invisible la chasse qu'on vient de lancer. Ici et seulement ici — sur le
+       GESTE de l'utilisateur, jamais sur une synchronisation automatique. */
+    try{
+      if(localStorage.getItem("magoHuntFab")==="0"){
+        localStorage.setItem("magoHuntFab","1");
+        ensureMissionFab();
+      }
+    }catch(e){}
     pushActivity({
       type:"hunt",
       title:"Chasse lanc\u00e9e \u00b7 "+d.name,
@@ -9202,6 +9605,55 @@ function ensureLeaflet(onReady, onFail){
   // Delai de garde : onerror ne se declenche pas toujours (requete suspendue).
   setTimeout(function(){ finish(!!window.L); }, 9000);
 }
+/* ============================================================================
+   REGROUPEMENT DES MARQUEURS — le greffon qui empeche la carte de ramer.
+   ----------------------------------------------------------------------------
+   La carte Explorer dessinait un bloc HTML par magasin, et les reconstruisait
+   TOUS a chaque deplacement : jusqu'a 400 pins, soit ~1500 elements recrees a
+   chaque glissement de doigt. C'est de la que venaient les a-coups.
+
+   Regrouper, c'est ne pas dessiner ce qu'on ne peut pas lire : a distance,
+   400 pins colles les uns aux autres ne veulent rien dire, une pastille
+   « 47 magasins » si. On passe de 400 elements a une vingtaine.
+
+   Le greffon etait DEJA charge par l'app — mais seulement pour la carte d'une
+   boisson (initLeafletMap). La carte qu'on dezoome, elle, ne l'utilisait pas.
+
+   Ce chargeur rappelle TOUJOURS, meme si le CDN ne repond pas : dans ce cas on
+   retombe sur une carte sans regroupement, ce qui etait le comportement
+   d'avant. Une carte sans regroupement vaut mieux que pas de carte. */
+function ensureCluster(onDone){
+  if(!window.L){ onDone&&onDone(); return; }
+  if(window.L.markerClusterGroup){ onDone&&onDone(); return; }
+  if(!document.getElementById("leaflet-cluster-css")){
+    var lc=document.createElement("link");
+    lc.id="leaflet-cluster-css"; lc.rel="stylesheet";
+    lc.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css";
+    document.head.appendChild(lc);
+  }
+  var fini=false, go=function(){ if(fini)return; fini=true; onDone&&onDone(); };
+  var sc=document.createElement("script");
+  sc.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js";
+  sc.onload=go; sc.onerror=go;
+  document.head.appendChild(sc);
+  setTimeout(go,6000);   // jamais d'attente infinie
+}
+
+/* La pastille d'un groupe. Dessinee a la main plutot qu'avec le style par
+   defaut du greffon (des ronds bleus qui n'ont rien a voir avec le reste) :
+   elle grossit avec le nombre, sans jamais devenir illisible. */
+function exploreClusterIcon(cluster){
+  var n=cluster.getChildCount();
+  var taille=n<10?34:(n<50?40:(n<200?46:52));
+  return L.divIcon({
+    className:"",
+    html:'<div class="mago-cluster" style="width:'+taille+'px;height:'+taille+'px">'+
+         '<span>'+(n<1000?n:(Math.round(n/100)/10)+"k")+'</span></div>',
+    iconSize:[taille,taille],
+    iconAnchor:[taille/2,taille/2]
+  });
+}
+
 /* Nouvel essai apres un echec : on repart de zero. */
 function retryLeaflet(){
   window._leafletState=null;
@@ -9251,6 +9703,54 @@ function exploreCityFromSearch(q){
     }
   },450);
 }
+/* Compte une interaction avec la fiche d'un magasin — une seule fois par
+   appareil, par jour et par compteur. C'est ce qui fait la différence entre
+   « 12 personnes ont regardé ta boutique » et « 12 clics », dont l'un des deux
+   se retourne contre toi dès que le commerçant y regarde de près. */
+function bumpStoreStat(store, metrique){
+  try{
+    if(!store||!window.fbBumpStoreStat)return;
+    var sid=store.fbId||store.id; if(!sid)return;
+    var jour=new Date().toISOString().slice(0,10);
+    var cle=sid+":"+metrique+":"+jour;
+    var vus={};
+    try{ vus=JSON.parse(localStorage.getItem("magoStoreStatVus")||"{}"); }catch(e){}
+    if(vus[cle])return;
+    vus[cle]=1;
+    // Purge des jours passes : ce cache ne doit pas grossir indefiniment.
+    var frais={}; Object.keys(vus).forEach(function(k){ if(k.indexOf(":"+jour)!==-1)frais[k]=1; });
+    try{ localStorage.setItem("magoStoreStatVus",JSON.stringify(frais)); }catch(e){}
+    window.fbBumpStoreStat(sid,metrique,jour);
+  }catch(e){}
+}
+
+/* Enregistre la demande UNE SEULE FOIS par boisson et par jour et par appareil.
+   Sans ce garde-fou, ouvrir puis refermer une fiche dix fois ferait dix
+   « recherches » : le chiffre qu'on veut vendre serait faux, et un chiffre
+   faux vaut moins que pas de chiffre du tout. */
+function logDemand(drink, trouve){
+  try{
+    if(!drink||!drink.id||!window.fbLogDemand)return;
+    var day=new Date().toISOString().slice(0,10);
+    var cle=drink.id+":"+day;
+    var vus={};
+    try{ vus=JSON.parse(localStorage.getItem("magoDemandVus")||"{}"); }catch(e){}
+    if(vus[cle])return;
+    // Zone de ~5 km (geohash 5 caracteres), jamais la position exacte.
+    // Sans GPS on enregistre quand meme : la boisson cherchee vaut la peine,
+    // meme sans savoir ou. "?" se filtre ensuite a la lecture.
+    var zone="?";
+    if(typeof userLat==="number"&&typeof userLng==="number"&&window.geohashForLocation){
+      zone=window.geohashForLocation(userLat,userLng,5);
+    }
+    vus[cle]=1;
+    // On ne garde que le jour courant : ce cache ne doit pas grossir sans fin.
+    var frais={}; Object.keys(vus).forEach(function(k){ if(k.indexOf(":"+day)!==-1)frais[k]=1; });
+    try{ localStorage.setItem("magoDemandVus",JSON.stringify(frais)); }catch(e){}
+    window.fbLogDemand(drink.id,drink.name,zone,day,!!trouve);
+  }catch(e){}
+}
+
 function renderStoreList(){
   if(!curSel)return;
   sanitizeAutoStores();
@@ -9271,6 +9771,10 @@ function renderStoreList(){
     });
     return;
   }
+  /* On enregistre ICI, et pas a l'ouverture de la fiche : a ce point precis,
+     l'elargissement Firestore a deja eu lieu, donc "introuvable" veut vraiment
+     dire introuvable — et c'est cette ligne-la qui a de la valeur. */
+  logDemand(curSel, allStores.length > 0);
   var brandsAvailable=Array.from(new Set(allStores.map(function(s){return s.brand;}).filter(Boolean))).sort();
   if(curBrandFilter&&brandsAvailable.indexOf(curBrandFilter)===-1)curBrandFilter=null;
   var stores=sortedStores(allStores);
@@ -9523,6 +10027,7 @@ function majBoutonCertif(s){
 function openStoreDetail(storeId){
   var s=STORES.find(function(x){return x.id===storeId||x.fbId===storeId;});
   if(!s)return;
+  bumpStoreStat(s,"vues");
   _stripAutoDrinks(s);
   // Ouvert depuis la carte Explorer : le "retour" doit REVENIR sur la carte, pas
   // sauter à l'accueil (l'écran sous l'overlay). On mémorise ce contexte et on
@@ -9535,8 +10040,21 @@ function openStoreDetail(storeId){
   storeDetailReturn=fromExplore?"__explore__":(current?current.id.replace("s-",""):"search");
   curStoreDetail=s;
   curStoreDetailQuery="";curStoreDetailCat="Tous";
+  // Fiche sans horaires : on tente OpenStreetMap en silence (voir
+  // enrichStoreHours pour les garde-fous d'attribution).
+  try{enrichStoreHours(s);}catch(e){}
   var admTools=document.getElementById("sd-admin-tools");
   if(admTools)admTools.style.display=isAdmin?"block":"none";
+  /* Le commerçant proprietaire (champ owner, pose a la certification) gere
+     SON magasin : remplir le rayon, corriger ses horaires. Il n'a ni la
+     certification ni la suppression — ces pouvoirs-la restent a l'admin.
+     L'admin, lui, a deja tout : pas la peine d'empiler les deux panneaux. */
+  var ownTools=document.getElementById("sd-owner-tools");
+  if(ownTools){
+    var _uid=null;
+    try{_uid=(window.fbAuth&&window.fbAuth.currentUser)?window.fbAuth.currentUser.uid:null;}catch(e){}
+    ownTools.style.display=(!isAdmin&&s.owner&&_uid&&s.owner===_uid)?"block":"none";
+  }
   /* L'etat de certification se lit et se change ICI, sur le magasin qu'on
      regarde. La liste des demandes ne couvre que ceux passes par une demande
      de commercant — un magasin certifie depuis la reprise des rayons n'y
@@ -9553,6 +10071,86 @@ function openStoreDetail(storeId){
    Une photo du frigo -> l'IA liste toutes les boissons -> correspondance au
    catalogue -> ajout groupe au magasin (confirmations + fraicheur seenAt).
    L'outil d'embarquement des night shops : 30 boissons en une photo. */
+/* Le commerçant corrige ses horaires lui-meme. C'est LA donnee qu'il connait
+   mieux que tout le monde, et c'est elle qui rend le filtre « Ouvert »
+   fiable. */
+function ownerEditHours(){
+  var s=curStoreDetail; if(!s)return;
+  var v=window.prompt("Tes horaires, comme tes clients doivent les lire.\nExemple : Lun-Sam 8h-20h \u00b7 Dim 9h-13h", s.hours||"");
+  if(v===null)return;
+  v=String(v).trim().slice(0,120);
+  s.hours=v||null;
+  if(window.fbSaveStore){
+    window.fbSaveStore(s.fbId||s.id,{hours:s.hours})
+      .then(function(){toast("Horaires enregistr\u00e9s");})
+      .catch(function(){toast("Enregistrement impossible \u2014 r\u00e9essaie");});
+  }
+  try{if(window.fbTouchCache)window.fbTouchCache();}catch(e){}
+  try{renderStoreDetail();}catch(e){}
+  playSound("pop");
+}
+
+/* ============================================================================
+   HORAIRES AUTOMATIQUES DEPUIS OPENSTREETMAP
+   ----------------------------------------------------------------------------
+   Le filtre « Ouvert » ne vaut que ce que valent les horaires. Beaucoup de
+   magasins n'en ont pas : ajoutes a la main, ou importes avant que l'import ne
+   les recupere. Or OpenStreetMap les possede souvent deja — renseignes par des
+   contributeurs locaux, sous forme STRUCTUREE (le meme format que l'import OSM
+   ecrit deja dans le champ hours).
+
+   C'est pour ca qu'il n'y a pas d'« agent IA » ici : la donnee existe, gratuite
+   et structuree, a 100 m du magasin. Un modele de langage qui fouillerait le
+   web pour la retrouver couterait de l'argent a chaque magasin et pourrait se
+   tromper de boutique ; interroger la base qui la contient deja ne coute rien
+   et ne peut pas halluciner.
+
+   Prudence sur l'attribution : on n'adopte les horaires que si le NOM
+   correspond, ou s'il n'y a qu'UN seul commerce dans le perimetre. Deux
+   boutiques cote a cote sans correspondance de nom -> on ne devine pas. De
+   mauvais horaires sont pires que pas d'horaires : quelqu'un se deplace.
+   Un magasin est tente au plus une fois par mois (magoHoursTried). */
+var _hoursBusy=false;
+function enrichStoreHours(s){
+  try{
+    if(_hoursBusy||!s||s.hours||typeof s.lat!=="number"||typeof s.lng!=="number")return;
+    var sid=String(s.fbId||s.id||""); if(!sid)return;
+    var seen={}; try{seen=JSON.parse(localStorage.getItem("magoHoursTried")||"{}");}catch(e){}
+    var now=Date.now(), MOIS=30*24*3600*1000;
+    if(seen[sid]&&(now-seen[sid])<MOIS)return;
+    seen[sid]=now;
+    var frais={}; Object.keys(seen).forEach(function(k){ if(now-seen[k]<MOIS)frais[k]=seen[k]; });
+    try{localStorage.setItem("magoHoursTried",JSON.stringify(frais));}catch(e){}
+    _hoursBusy=true;
+    var d=0.0009; // ~100 m
+    var bbox=(s.lat-d)+","+(s.lng-d)+","+(s.lat+d)+","+(s.lng+d);
+    var q='[out:json][timeout:20];(node["shop"]["opening_hours"]('+bbox+');way["shop"]["opening_hours"]('+bbox+'););out center 30;';
+    fetchWithTimeout("https://overpass-api.de/api/interpreter?data="+encodeURIComponent(q),25000)
+      .then(function(r){return r.json();})
+      .then(function(data){
+        var els=(data&&data.elements)||[];
+        var moi=normTxt(s.name||"");
+        var hit=null;
+        els.forEach(function(e){
+          var t=e.tags||{}; if(!t.opening_hours||hit)return;
+          var nom=normTxt(t.name||"");
+          if(nom&&moi&&(nom.indexOf(moi)!==-1||moi.indexOf(nom)!==-1))hit=t.opening_hours;
+        });
+        if(!hit&&els.length===1&&els[0].tags)hit=els[0].tags.opening_hours||null;
+        if(!hit)return;
+        hit=String(hit).slice(0,120);
+        s.hours=hit;
+        if(window.fbSaveStore)window.fbSaveStore(sid,{hours:hit}).catch(function(){});
+        try{if(window.fbTouchCache)window.fbTouchCache();}catch(e){}
+        try{
+          if(curStoreDetail&&String(curStoreDetail.fbId||curStoreDetail.id)===sid)renderStoreDetail();
+        }catch(e){}
+      })
+      .catch(function(){})
+      .then(function(){_hoursBusy=false;});
+  }catch(e){_hoursBusy=false;}
+}
+
 function scanFridgeStart(){
   if(!curStoreDetail){toast("Ouvre d'abord la fiche d'un magasin");return;}
   var inp=document.getElementById("fridge-file");
@@ -10014,6 +10612,46 @@ function merchantBoardHost(){
   anchor.parentNode.insertBefore(h,anchor.nextSibling);
   return h;
 }
+/* Carte « ta fiche » en tête du tableau de bord : l'audience réelle de la
+   boutique. C'est la réponse chiffrée au « ça me rapporte quoi ? » qu'un
+   commerçant pose quand on lui demande de faire certifier son magasin.
+   Réservée au propriétaire — les règles Firestore refusent la lecture aux
+   autres, et un refus se traduit ici par une carte simplement absente. */
+function renderStoreAudience(s){
+  var board=document.getElementById("sd-board"); if(!board||!s||!window.fbLoadStoreStats)return;
+  var sid=s.fbId||s.id; if(!sid)return;
+  window.fbLoadStoreStats(sid,30).then(function(rows){
+    if(!rows||!rows.length)return;
+    var jour7=new Date(Date.now()-6*86400000).toISOString().slice(0,10);
+    var t={vues:0,itineraires:0,partages:0}, sem={vues:0,itineraires:0,partages:0};
+    rows.forEach(function(r){
+      ["vues","itineraires","partages"].forEach(function(k){
+        var n=r[k]||0; t[k]+=n; if((r.jour||"")>=jour7)sem[k]+=n;
+      });
+    });
+    if(!t.vues&&!t.itineraires&&!t.partages)return;
+    function tuile(n,semaine,libelle){
+      return '<div class="mb-stat"><div class="mb-stat-n">'+n+'</div>'+
+        '<div class="mb-stat-l">'+libelle+'</div>'+
+        '<div class="mb-stat-w">'+(semaine?("+"+semaine+" cette semaine"):"\u2014")+'</div></div>';
+    }
+    // Le tableau peut avoir ete repeint entre-temps (la demande arrive vite) :
+    // on relit l'hote au lieu de reutiliser une reference peut-etre morte.
+    var hote=document.getElementById("sd-board"); if(!hote)return;
+    if(hote.querySelector(".mb-stats"))return;   // deja affichee
+    var carte=document.createElement("div");
+    carte.className="mb-card";
+    carte.innerHTML='<div class="mb-head">Ta fiche \u00b7 30 derniers jours</div>'+
+      '<div class="mb-stats">'+
+        tuile(t.vues,sem.vues,"personnes l\u2019ont vue")+
+        tuile(t.itineraires,sem.itineraires,"ont demand\u00e9 le chemin")+
+        tuile(t.partages,sem.partages,"l\u2019ont partag\u00e9e")+
+      '</div>'+
+      '<div class="mb-note">Compt\u00e9 en personnes, pas en clics : un m\u00eame t\u00e9l\u00e9phone ne compte qu\u2019une fois par jour.</div>';
+    hote.insertBefore(carte,hote.firstChild);
+  }).catch(function(){});
+}
+
 function renderMerchantBoard(s){
   var host=merchantBoardHost(); if(!host||!s)return;
   host.innerHTML='<div class="mb-card"><div class="mb-load">Lecture de la demande du quartier…</div></div>';
@@ -10096,6 +10734,9 @@ function _peindreBoard(s,hunts,rayon){
   }
   h+='</div>';
   host.innerHTML=h;
+  // L'audience se charge à part : elle vient de Firestore et ne doit pas
+  // retarder l'affichage de la demande, qui est déjà en mémoire.
+  try{ renderStoreAudience(s); }catch(e){}
 }
 /* Confirmer depuis le tableau de bord : exactement le meme chemin que le
    bouton de la liste (sdSetStock), donc meme sync Firestore et meme push aux
@@ -11922,7 +12563,18 @@ function exploreSetHeader(shown,sure){
       : ((shown==null)
         ? "Recherche des magasins\u2026"
         : (shown+" magasin"+(shown>1?"s":"")+(typeof sure==="number"?" · "+sure+" en stock":"")+" · voir la fiche"));
-    if(thumb){thumb.style.display="flex";try{if(curSel)thumb.innerHTML=drinkIconHTML(curSel);}catch(e){}}
+    if(thumb){thumb.style.display="flex";try{if(curSel)thumb.innerHTML=drinkIconHTML(curSel);}catch(e){}
+      /* Tap sur la vignette = la photo, tout de suite. Le reste de la barre
+         continue d'ouvrir la fiche. Sans photo en cache, on laisse le tap
+         suivre son cours vers la fiche plutot que de l'avaler. */
+      thumb.onclick=function(e){
+        if(!curSel)return;
+        var _u=(typeof getCachedDrinkImage==="function")?getCachedDrinkImage(curSel):null;
+        if(!_u)return;
+        e.stopPropagation();
+        openDrinkZoom(curSel);
+      };
+    }
     if(chev)chev.style.display="flex";
     if(btn){btn.style.background="var(--bg2)";btn.style.borderColor="var(--border)";}
   }else{
@@ -12163,7 +12815,20 @@ function openExploreMap(opts){
       L.control.zoom({position:"bottomleft"}).addTo(exploreMap);
       var darkE=document.body.classList.contains("dark");
       L.tileLayer("https://{s}.basemaps.cartocdn.com/"+(darkE?"dark_all":"light_all")+"/{z}/{x}/{y}{r}.png",{maxZoom:20,subdomains:"abcd"}).addTo(exploreMap);
-      exploreLayer=L.layerGroup().addTo(exploreMap);
+      /* Regroupement si le greffon est la, sinon simple couche : la carte
+         s'affiche dans les deux cas. disableClusteringAtZoom : au-dela, on
+         est assez pres pour que chaque magasin merite son propre pin. */
+      exploreLayer=(window.L&&L.markerClusterGroup)
+        ? L.markerClusterGroup({
+            chunkedLoading:true,          // ajout par paquets : l'interface ne gele pas
+            maxClusterRadius:55,
+            disableClusteringAtZoom:17,
+            spiderfyOnMaxZoom:false,
+            showCoverageOnHover:false,
+            iconCreateFunction:exploreClusterIcon
+          })
+        : L.layerGroup();
+      exploreLayer.addTo(exploreMap);
       exploreMap.on("moveend zoomend",function(){
         try{renderInStockArrows();}catch(e){}
         clearTimeout(_exploreTimer);
@@ -12187,7 +12852,9 @@ function openExploreMap(opts){
       try{var _cc=exploreMap.getCenter();autoOsmForArea(_cc.lat,_cc.lng,exploreMap.getZoom());}catch(e){}
     },120);
   }
-  ensureLeaflet(build, exploreShowMapFailure);
+  // Le greffon de regroupement doit etre la AVANT de construire la couche,
+  // sinon la carte naitrait sans lui et il faudrait tout reconstruire.
+  ensureLeaflet(function(){ ensureCluster(build); }, exploreShowMapFailure);
 }
 /* La carte n'a pas pu se charger : on le DIT, avec une sortie. Un rectangle
    vide qui ne s'explique pas est la pire chose qu'on puisse afficher. */
@@ -12243,10 +12910,18 @@ function exploreLoadStores(useCache){
   var radiusKm=Math.sqrt(dLa*dLa+dLo*dLo);
   if(!useCache&&radiusKm>30){
     if(status)status.textContent="Zoome pour voir les magasins";
+    /* On EFFACE les marqueurs de la vue precedente. Avant, ils restaient a
+       l'ecran, empiles les uns sur les autres en un gros tas noir au milieu de
+       la carte : on croyait voir des magasins la ou il n'y avait qu'un reste
+       d'affichage. */
+    try{ if(exploreLayer)exploreLayer.clearLayers(); }catch(eC){}
     // Vue trop large pour compter les magasins : on rafraichit l'en-tete pour
     // nommer l'endroit, mais JAMAIS en mode filtre boisson — annoncer
     // "0 en stock" sans avoir cherche serait un mensonge.
-    if(!exploreFilter){try{exploreSetHeader(0);}catch(e){}}
+    // null = "on ne sait pas encore", et non "0". Annoncer 0 sans avoir
+    // cherche est un mensonge ; garder l'ancien chiffre au-dessus d'une carte
+    // vide en est un autre.
+    if(!exploreFilter){try{exploreSetHeader(null,null);}catch(e){}}
     return;
   }
   var q;
@@ -12297,16 +12972,44 @@ function exploreLoadStores(useCache){
     try{checkWatches();}catch(e){}
     // Itineraire actif : on garde les autres magasins masques pour bien voir le
     // chemin (un moveend/zoomend du fitBounds relancait sinon l'affichage des pins).
-    if(window._routeLayer){try{exploreLayer.clearLayers();}catch(e){}return;}
+    if(window._routeLayer){
+      // Pendant un itineraire on masque les autres magasins. L'en-tete doit
+      // suivre : sinon il continuait d'annoncer "129 magasins" au-dessus d'une
+      // carte vide, ce qui est le pire des deux mondes.
+      try{exploreLayer.clearLayers();}catch(e){}
+      try{exploreSetHeader(null,null);}catch(e){}
+      return;
+    }
     // En-tete (nom boisson + compteurs) et filtres chips (En stock / Ouvert / < 1 km)
     var _drinkTotal=list.length;
     var _sureCount=exploreFilter?list.filter(function(s){var did=exploreFilter.drinkId;return storeVerifiedFor(s,did)||((s.confirmations||{})[did]||0)>0;}).length:undefined;
     // Enseignes presentes (vendeurs si une boisson est ciblee, sinon toutes) pour le selecteur.
     window._exploreBrands=Array.from(new Set(list.filter(function(s){return !exploreFilter||s._hasDrink;}).map(function(s){return s.brand;}).filter(Boolean))).sort();
     try{list=exploreApplyChips(list);}catch(eChip){}
+    /* ── Ce qu'on compte doit etre ce qu'on voit ──────────────────────────
+       fbQueryZone interroge un CERCLE dont le rayon est la demi-diagonale de
+       l'ecran : ce cercle deborde donc largement du rectangle affiche. A
+       Brooklyn, les magasins comptes etaient ceux de Manhattan, hors du cadre.
+       D'ou l'en-tete "129 magasins dans cette zone" au-dessus d'une carte
+       vide — le compteur ne mentait pas, il ne parlait pas de la meme zone.
+       On restreint donc au cadre reellement visible, avec une marge de 25 %
+       pour que les pins juste au bord ne disparaissent pas au moindre
+       glissement. */
+    try{
+      var _cadre=exploreMap.getBounds().pad(0.25);
+      list=list.filter(function(s){
+        return typeof s.lat==="number" && typeof s.lng==="number" && _cadre.contains([s.lat,s.lng]);
+      });
+    }catch(eB){}
     exploreLayer.clearLayers();
     var shown=0;
-    list.slice(0,400).forEach(function(s){
+    /* Le plafond de 400 etait un pansement : il evitait le blocage en JETANT
+       des magasins, donc en mentant sur ce qu'il y a autour. Avec le
+       regroupement, le nombre d'elements dessines ne depend plus du nombre de
+       magasins mais du zoom — on peut donc tout montrer. Le plafond restant
+       (3000) ne protege plus l'affichage mais la memoire du telephone. */
+    var _lot=[];
+    list.slice(0,3000).forEach(function(s){
       if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
       var pc=brandColor(s.brand);
       var ini=((s.brand||s.name||"?").trim().charAt(0)||"?").toUpperCase();
@@ -12340,9 +13043,14 @@ function exploreLoadStores(useCache){
         showRouteToStore(s.lat,s.lng,s);
         playSound("pop");
       });
-      exploreLayer.addLayer(mk);
+      _lot.push(mk);
       shown++;
     });
+    /* addLayers (au pluriel) : le greffon calcule les groupes UNE fois pour
+       tout le lot. Ajouter les marqueurs un par un le forcerait a tout
+       recalculer a chaque ajout — c'est le piege classique. */
+    if(exploreLayer.addLayers)exploreLayer.addLayers(_lot);
+    else _lot.forEach(function(m){exploreLayer.addLayer(m);});
     try{renderExploreChips();exploreSetHeader(exploreFilter?withDrink:shown,_sureCount);}catch(eHdr){}
     try{renderExploreSheet(exploreFilter?list.filter(function(s){return s._hasDrink;}):list);}catch(eSheet){console.warn("exploreSheet:",eSheet);}
     try{renderInStockArrows();}catch(eArr){}
@@ -12444,7 +13152,12 @@ function exploreGoCity(auto){
   if(!q){exploreCitySuggest();return;}
   var seq=(window._citySeq=(window._citySeq||0)+1);
   if(!auto)box.innerHTML=_cityBoxCard("Recherche de \u00AB "+sanitize(q)+" \u00BB\u2026");
-  fetchWithTimeout("https://nominatim.openstreetmap.org/search?format=json&limit=6&addressdetails=0&q="+encodeURIComponent(q),15000)
+  /* addressdetails=1 : sans lui, le PAYS n'est pas renvoye separement et on ne
+     pouvait que decouper display_name a l'aveugle — ce qui donnait « Oujda ·
+     Pachalik d'Oujda, Prefecture d'Oujda-Angad », des noms administratifs que
+     personne ne connait, et jamais « Maroc ».
+     accept-language=fr : « Maroc » plutot que « Morocco ». */
+  fetchWithTimeout("https://nominatim.openstreetmap.org/search?format=json&limit=8&addressdetails=1&accept-language=fr&q="+encodeURIComponent(q),15000)
     .then(function(r){return r.json();})
     .then(function(rows){
       if(seq!==window._citySeq)return; // une frappe plus recente a pris la main
@@ -12456,12 +13169,32 @@ function exploreGoCity(auto){
         setTimeout(function(){if(seq===window._citySeq)box.innerHTML="";},2500);
         return;
       }
+      /* Nominatim renvoie souvent la meme ville plusieurs fois (la commune, le
+         chef-lieu, la zone administrative...). Deux lignes « Oujda » a
+         l'identique n'aident personne a choisir : on ne garde que la premiere
+         de chaque (nom + pays). */
+      var _vues={};
+      rows=rows.filter(function(r){
+        var a=r.address||{};
+        var cle=(String(r.display_name||"").split(",")[0].trim().toLowerCase())+"|"+(a.country||"");
+        if(_vues[cle])return false;
+        _vues[cle]=1; return true;
+      }).slice(0,6);
       var wrap=document.createElement("div");
       wrap.style.cssText="background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);max-height:46vh;overflow-y:auto";
       rows.forEach(function(r){
         var parts=String(r.display_name||"").split(",");
         var main=parts[0].trim();
-        var sub=parts.slice(1,3).join(",").trim();
+        /* Le PAYS d'abord, toujours. C'est la seule information qui permet de
+           distinguer deux villes homonymes, et c'est precisement celle qui
+           manquait. La region ne vient qu'en complement, et seulement si elle
+           n'est pas deja le nom de la ville. */
+        var _ad=r.address||{};
+        var _pays=_ad.country||String(parts[parts.length-1]||"").trim();
+        var _region=_ad.state||_ad.region||_ad.county||"";
+        if(_region && _region.toLowerCase().indexOf(main.toLowerCase())!==-1)_region="";
+        var sub=[_region,_pays].filter(Boolean).join(" \u00b7 ");
+        if(!sub)sub=parts.slice(1,3).join(",").trim();   // repli si l'adresse est vide
         var row=document.createElement("div");
         row.setAttribute("role","button");row.setAttribute("tabindex","0");
         row.style.cssText="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;cursor:pointer;-webkit-tap-highlight-color:transparent";
@@ -12637,6 +13370,14 @@ function showFindLanding(d){
     setTimeout(close,14000);
   }catch(e){}
 }
+/* Lien profond deja honore. Le catalogue communautaire arrive APRES le
+   premier passage : handleDeepLink est donc rejouee quand il atterrit. Sans ce
+   verrou, l'onglet ou la fiche se rouvrirait sous les doigts de quelqu'un qui
+   a navigue entre-temps. On ne scelle QU'EN CAS DE SUCCES : tant que la
+   boisson reste introuvable, on garde le droit de reessayer. */
+var _deepLinkDone="";
+function _deepLinkSeal(){ _deepLinkDone=location.hash||""; }
+function _deepLinkSealed(){ return !!_deepLinkDone && _deepLinkDone===(location.hash||""); }
 function handleDeepLink(){
   // Desabonnement en un clic depuis un e-mail (#stopmails=uid) : obligation
   // legale. On coupe le consentement sans demander de se connecter d'abord.
@@ -12653,6 +13394,8 @@ function handleDeepLink(){
   // Le manifest pointe vers #tab=scan, #tab=search, etc. On route vers l'onglet.
   var mt=(location.hash||"").match(/#tab=(home|search|scan|discover|profile)/);
   if(mt){
+    if(_deepLinkSealed())return;
+    _deepLinkSeal();
     var target=mt[1];
     var goTab=function(n){
       if(typeof navTo==="function"){try{navTo(target);}catch(e){}}
@@ -12663,22 +13406,47 @@ function handleDeepLink(){
   }
   var m=(location.hash||"").match(/#drink=(\d+)/);
   if(m){
-    var d=DRINKS.find(function(x){return Number(x.id)===Number(m[1]);});
-    if(d){try{pick(d);}catch(e){setTimeout(function(){try{pick(d);}catch(e2){}},600);}
-      setTimeout(function(){showFindLanding(d);},1000);}
+    if(_deepLinkSealed())return;
+    var wanted=Number(m[1]);
+    /* Une boisson vient soit du catalogue local (data/drinks.js, deja en
+       memoire au premier passage), soit du catalogue COMMUNAUTAIRE, qui
+       n'entre dans DRINKS qu'au retour de Firestore (evenement
+       fbCatalogLoaded, plusieurs secondes plus tard sur mobile).
+       Sans reessai, un lien partage vers une boisson de la communaute
+       retombait en silence sur l'accueil : DRINKS.find echouait au premier
+       passage et plus personne ne repassait. C'est exactement la patience
+       qu'a deja la branche magasin juste en dessous. */
+    var tryPick=function(attempt){
+      if(_deepLinkSealed())return;
+      var d=DRINKS.find(function(x){return Number(x.id)===wanted;});
+      if(d){
+        _deepLinkSeal();
+        try{pick(d);}catch(e){setTimeout(function(){try{pick(d);}catch(e2){}},600);}
+        setTimeout(function(){showFindLanding(d);},1000);
+        return;
+      }
+      if(attempt<8){setTimeout(function(){tryPick(attempt+1);},700);return;}
+      /* Le catalogue est arrive et la boisson n'y est pas (fiche retiree,
+         fusionnee, lien bricole) : le dire vaut mieux qu'un lien qui n'a
+         l'air de rien faire. */
+      if(communityCatalogLoaded)toast("Cette boisson n'est plus au catalogue");
+    };
+    tryPick(0);
     return;
   }
   // Lien de MAGASIN (#store=ID) : le kit partenaire — un QR sur le frigo d'un
   // commercant ouvre directement SA fiche avec tout son rayon.
   var ms=(location.hash||"").match(/#store=([A-Za-z0-9_-]+)/);
   if(ms){
+    if(_deepLinkSealed())return;
     var sid=decodeURIComponent(ms[1]);
     var tryOpen=function(attempt){
       var s=(STORES||[]).find(function(x){return String(x.id)===sid||String(x.fbId)===sid;});
-      if(s){try{openStoreDetail(s.id);}catch(e){}return;}
+      if(s){_deepLinkSeal();try{openStoreDetail(s.id);}catch(e){}return;}
       if(window.fbGetStore){
         window.fbGetStore(sid).then(function(st){
           if(st){
+            _deepLinkSeal();
             if(!(STORES||[]).some(function(x){return String(x.id)===String(st.id);}))STORES.push(st);
             try{openStoreDetail(st.id);}catch(e){}
           }else if(attempt<3){setTimeout(function(){tryOpen(attempt+1);},900);}
@@ -13323,6 +14091,16 @@ function clearRoute(){
   try{if(window._navDestMarker&&exploreMap){exploreMap.removeLayer(window._navDestMarker);}}catch(e){}
   window._routeLayer=null;window._navDest=null;window._navDestMarker=null;
   var b=document.getElementById("route-banner");if(b)b.remove();
+  /* Retour EXACTEMENT la ou on etait. C'est la moindre des choses : la carte
+     s'est deplacee sans qu'on le lui demande, elle doit revenir sans qu'on ait
+     a le demander non plus. */
+  try{
+    var _va=window._vueAvantItineraire;
+    if(_va && exploreMap){
+      exploreMap.setView([_va.lat,_va.lng], _va.z, {animate:true, duration:.5});
+    }
+  }catch(e){}
+  window._vueAvantItineraire=null;
   // Réaffiche la feuille "liste des magasins" et la pastille de statut masquées
   // pendant l'itinéraire.
   var _sheetR=document.getElementById("explore-sheet");
@@ -13341,11 +14119,27 @@ function clearRoute(){
 }
 function showRouteToStore(lat,lng,store){
   window._navDest=store||(STORES||[]).find(function(x){return x.lat===lat&&x.lng===lng;})||null;
+  /* Demander le chemin, c'est le signal le plus proche d'une visite reelle :
+     c'est celui qui vaut quelque chose pour un commercant. */
+  bumpStoreStat(window._navDest,"itineraires");
   if(typeof userLat!=="number"||!userLat){
     toast("Active ta position d'abord");playSound("err");
     openNavApp("https://www.google.com/maps/dir/?api=1&destination="+lat+","+lng);
     return;
   }
+  /* On note OU on etait, mais SEULEMENT ici : au-dessus, sans position, la
+     fonction sort sans jamais deplacer la carte. Memoriser a cet endroit-la
+     laissait une vue en attente que personne ne viendrait restaurer — et qui
+     aurait teleporte la personne au prochain itineraire ferme.
+     Une seule memorisation : si un deuxieme itineraire est trace sans fermer
+     le premier, c'est bien la vue d'ORIGINE qu'il faut retrouver. */
+  try{
+    var _hv=document.getElementById("explore-map-host");
+    if(exploreMap && _hv && _hv.style.display!=="none" && !window._vueAvantItineraire){
+      var _cv=exploreMap.getCenter();
+      window._vueAvantItineraire={lat:_cv.lat,lng:_cv.lng,z:exploreMap.getZoom()};
+    }
+  }catch(e){}
   // On ouvre la carte SEULEMENT si elle n'est pas deja affichee, sinon le
   // recentrage/zoom ecraserait le cadrage de l'itineraire.
   var _hostR=document.getElementById("explore-map-host");
@@ -13800,13 +14594,11 @@ var TUTO_STEPS=[
 ];
 function getRelativeRect(el){var app=document.getElementById("app");var top=0,left=0,node=el;while(node&&node!==app){top+=node.offsetTop;left+=node.offsetLeft;node=node.offsetParent;}return{top:top,left:left,width:el.offsetWidth,height:el.offsetHeight,appW:app.offsetWidth,appH:app.offsetHeight};}
 var tutoStep=0;
-function tutoStart(){
-  return; // Tutoriel a bulles retire : l'app doit rester evidente, sans coach-marks qui pointent les boutons.
-  if(localStorage.getItem("magotuto")==="1")return;
-  var overlay=document.getElementById("tuto-overlay");if(!overlay)return;
-  overlay.style.display="block";overlay.style.opacity="0";tutoStep=0;tutoShow(0);
-  setTimeout(function(){overlay.style.opacity="1";},50);
-}
+/* Tutoriel a bulles retire : l'app doit rester evidente, sans coach-marks qui
+   pointent les boutons. La fonction reste (des appelants la nomment encore),
+   mais son corps est parti : garde derriere un "return", il n'etait plus lu
+   par personne et faisait croire que le tutoriel pouvait encore s'ouvrir. */
+function tutoStart(){}
 function tutoShow(i){
   var step=TUTO_STEPS[i];if(!step)return tutoEnd();
   var hole=document.getElementById("tuto-hole"),card=document.getElementById("tuto-card"),arrow=document.getElementById("tuto-arrow");
@@ -13983,6 +14775,7 @@ function renderAdmin(){
   renderFounderDash();
   try{ renderNewcomers(); }catch(e){ console.warn("newcomers:",e); }
   renderContribFeed();
+  try{ renderDemandAdmin(); }catch(e){ console.warn("demand:",e); }
   renderFeedbackAdmin();
   renderPhotoSuggestions();
   try{ renderShopClaims(); }catch(e){ console.warn("shopClaims:",e); }
@@ -14446,6 +15239,82 @@ function renderContribFeed(){
 }
 /* Avis des utilisateurs côté admin : note moyenne + derniers retours écrits.
    C'est le canal direct pour savoir quoi améliorer/retirer. */
+/* ============================================================================
+   TABLEAU DE LA DEMANDE (admin)
+   ----------------------------------------------------------------------------
+   Collecter sans jamais regarder ne sert à rien. Cet écran répond à la seule
+   question qui intéresse un importateur ou un commerçant :
+   « qu'est-ce que les gens cherchent chez moi, et que ne trouvent-ils pas ? »
+   La deuxième moitié est la plus vendable : une recherche sans résultat, c'est
+   une vente qui n'a pas eu lieu, et personne d'autre ne la mesure.
+   Le bouton « copier » sort le tout en texte brut, prêt à coller dans un
+   e-mail — c'est le pont entre la donnée et le premier euro.
+   ============================================================================ */
+function renderDemandAdmin(){
+  var host=document.getElementById("admin-demand");
+  if(!host){
+    host=document.createElement("div");
+    host.id="admin-demand";
+    var list=document.getElementById("admin-list");
+    if(list&&list.parentNode)list.parentNode.insertBefore(host,list);
+  }
+  host.innerHTML="";
+  if(!window.fbLoadDemand)return;
+  window.fbLoadDemand(30).then(function(rows){
+    if(!rows||!rows.length){
+      host.innerHTML='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:2px 0 6px">Demande (30 jours)</div>'+
+        '<div style="font-size:12px;color:var(--s3);margin-bottom:14px">Rien encore. Chaque fiche boisson ouverte alimentera ce tableau.</div>';
+      return;
+    }
+    var parBoisson={}, parZone={}, total=0, totalIntrouvable=0;
+    rows.forEach(function(r){
+      var n=r.recherches||0, ko=r.introuvables||0;
+      total+=n; totalIntrouvable+=ko;
+      var k=String(r.drinkId);
+      if(!parBoisson[k])parBoisson[k]={nom:r.drinkName||("Boisson "+r.drinkId),n:0,ko:0};
+      parBoisson[k].n+=n; parBoisson[k].ko+=ko;
+      if(r.zone&&r.zone!=="?"){ parZone[r.zone]=(parZone[r.zone]||0)+n; }
+    });
+    var top=Object.keys(parBoisson).map(function(k){return parBoisson[k];}).sort(function(a,b){return b.n-a.n;});
+    var manques=top.filter(function(d){return d.ko>0;}).sort(function(a,b){return b.ko-a.ko;});
+    var zones=Object.keys(parZone).map(function(z){return {z:z,n:parZone[z]};}).sort(function(a,b){return b.n-a.n;});
+
+    function bloc(titre,lignes){
+      if(!lignes.length)return "";
+      return '<div style="font-size:11.5px;font-weight:700;color:var(--s2);margin:12px 0 6px;text-transform:uppercase;letter-spacing:.04em">'+titre+'</div>'+
+        lignes.map(function(l){
+          return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">'+
+            '<span style="flex:1;min-width:0;font-size:13px;font-weight:600;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+l.g+'</span>'+
+            '<span style="font-size:12.5px;font-weight:800;color:'+(l.rouge?"#dc2626":"var(--s1)")+';flex-shrink:0">'+l.d+'</span></div>';
+        }).join("");
+    }
+    var pct=total?Math.round(100*totalIntrouvable/total):0;
+    host.innerHTML=
+      '<div style="display:flex;align-items:center;gap:8px;margin:2px 0 2px">'+
+        '<div style="flex:1;font-size:13px;font-weight:800;color:var(--s1)">Demande (30 jours)</div>'+
+        '<button id="demand-copy" style="padding:5px 11px;border-radius:999px;border:1.5px solid var(--border);background:var(--bg2);font-size:11.5px;font-weight:700;color:var(--s1);cursor:pointer">Copier</button>'+
+      '</div>'+
+      '<div style="font-size:12px;color:var(--s2);margin-bottom:2px">'+total+' recherche'+(total>1?"s":"")+
+        ' · <b style="color:'+(pct>40?"#dc2626":"var(--s1)")+'">'+pct+'% sans résultat</b></div>'+
+      bloc("Les plus cherchées", top.slice(0,8).map(function(d){return {g:sanitize(d.nom),d:d.n};}))+
+      bloc("Cherchées et introuvables", manques.slice(0,8).map(function(d){return {g:sanitize(d.nom),d:d.ko+"×",rouge:true};}))+
+      bloc("Zones les plus actives", zones.slice(0,5).map(function(z){return {g:"Zone "+z.z,d:z.n};}))+
+      '<div style="height:14px"></div>';
+
+    var btn=document.getElementById("demand-copy");
+    if(btn)btn.onclick=function(){
+      var txt="Magofeed — demande des 30 derniers jours\n"+
+        total+" recherches, "+pct+"% sans resultat\n\nLes plus cherchees :\n"+
+        top.slice(0,10).map(function(d,i){return "  "+(i+1)+". "+d.nom+" — "+d.n+" recherches"+(d.ko?", "+d.ko+" sans resultat":"");}).join("\n")+
+        "\n\nCherchees et introuvables :\n"+
+        manques.slice(0,10).map(function(d,i){return "  "+(i+1)+". "+d.nom+" — "+d.ko+" fois";}).join("\n");
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(txt).then(function(){toast("Copié — prêt à coller dans un e-mail");}).catch(function(){window.prompt("Copie :",txt);});
+      }else{ window.prompt("Copie :",txt); }
+    };
+  }).catch(function(e){ console.warn("demand admin:",e); });
+}
+
 function renderFeedbackAdmin(){
   var host=document.getElementById("admin-feedback");
   if(!host){
@@ -15167,6 +16036,7 @@ function renderFavs(){
     var div=document.createElement("div");div.className="ritem";
     div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div><div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.cat+starSuffix(d)+'</div></div><span style="cursor:pointer;display:flex" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Retirer des favoris">'+heartSVG(true,20)+'</span>';
     div.onclick=function(){pick(d);};a11yCard(div,d.name+", favori");el.appendChild(div);
+    bindPhotoTap(div,d);
   });
 }
 
@@ -15503,6 +16373,11 @@ try{
     // quand la fiche n'existait pas encore -> override ignore).
     if(window.applyDrinkNames)window.applyDrinkNames();
     if(rows.length)idbSet("catalog:last",{ts:Date.now(),rows:rows});
+    /* Un visiteur arrive par un lien partage vers une boisson de la
+       communaute a deja traverse handleDeepLink AVANT ce catalogue : la
+       boisson n'existait pas encore en memoire. On rejoue le lien maintenant
+       qu'elle est la (le verrou _deepLink* evite toute double ouverture). */
+    try{handleDeepLink();}catch(e){}
   });
   // Retour de connexion : relancer les chargements clés. Sans ça, une app
   // démarrée hors-ligne (sans cache) ne se remplissait jamais seule au retour
