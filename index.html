@@ -4196,7 +4196,7 @@ var BADGE_INFO={
   star:{what:"Le badge de prestige.",why:"Tes points, c'est la somme de tout ce que tu apportes à Magofeed. Plus il brille, plus tu comptes pour la communauté.",unit:"points"},
   founder:{what:"Le badge unique du créateur.",why:"Magofeed existe grâce à cette personne. Un badge qui ne se gagne pas — il se mérite en bâtissant.",unit:""}
 };
-function showBadgeInfo(def,tier){
+function showBadgeInfo(def,tier,qui){
   if(document.getElementById("badge-info"))return;
   var info=BADGE_INFO[def.key]||{};
   var col=tier?TIER_COLORS[tier-1]:"var(--s3)";
@@ -4215,7 +4215,7 @@ function showBadgeInfo(def,tier){
       }).join("")+'</div>';
     var nextTh=def.tiers[Math.min(tier,def.tiers.length-1)];
     var maxed=tier>=def.tiers.length;
-    progressHtml+='<div style="font-size:12.5px;font-weight:800;color:'+(maxed?"#c69a57":"var(--s2)")+';margin-top:10px;text-align:center">'+(maxed?("Palier maximum atteint · "+def.value+" "+(info.unit||"")):("Toi : "+def.value+" / "+nextTh+" "+(info.unit||"")))+'</div>';
+    progressHtml+='<div style="font-size:12.5px;font-weight:800;color:'+(maxed?"#c69a57":"var(--s2)")+';margin-top:10px;text-align:center">'+(maxed?("Palier maximum atteint · "+def.value+" "+(info.unit||"")):((qui?sanitize(qui):"Toi")+" : "+def.value+" / "+nextTh+" "+(info.unit||"")))+'</div>';
   }
   var ov=document.createElement("div");
   ov.id="badge-info";
@@ -4227,7 +4227,7 @@ function showBadgeInfo(def,tier){
       '<div style="font-size:11.5px;font-weight:800;color:'+(tier?col:"var(--s3)")+';text-transform:uppercase;letter-spacing:.5px">'+tierLabel+'</div></div>'+
     '</div>'+
     (info.what?'<div style="font-size:14px;font-weight:800;color:var(--s1);margin-bottom:5px">'+info.what+'</div>':'')+
-    '<div style="font-size:13.5px;color:var(--s2);line-height:1.55">'+(info.why||"")+'</div>'+
+    '<div style="font-size:13.5px;color:var(--s2);line-height:1.55">'+(qui?"":(info.why||""))+'</div>'+
     progressHtml+
     '<button id="badge-info-close" style="width:100%;margin-top:18px;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">Fermer</button>'+
   '</div>';
@@ -4302,7 +4302,7 @@ function publicBadges(st){
   var out=[];
   defs.forEach(function(d){
     var t=0;d.tiers.forEach(function(th){if(d.value>=th)t++;});
-    if(t>0)out.push({key:d.key,name:d.name,tier:t});
+    if(t>0)out.push({key:d.key,name:d.name,tier:t,tiers:d.tiers,value:d.value});
   });
   return out;
 }
@@ -6523,7 +6523,13 @@ function getBrandGroups(){
     map[k].top=map[k].drinks[0];
     return map[k];
   });
-  groups.sort(function(a,b){return b.drinks.length-a.drinks.length||a.brand.localeCompare(b.brand);});
+  groups.sort(function(a,b){
+    // « Autre » (boissons sans marque) ferme toujours la marche : ce n'est
+    // pas une marque, il n'a rien a faire entre Fanta et Red Bull.
+    if(a.brand==="Autre")return 1;
+    if(b.brand==="Autre")return -1;
+    return b.drinks.length-a.drinks.length||a.brand.localeCompare(b.brand);
+  });
   return groups;
 }
 /* Logos officiels des grandes marques (service Clearbit, usage nominatif :
@@ -6533,6 +6539,37 @@ function getBrandGroups(){
    celle des ENSEIGNES DE MAGASINS plus bas : la seconde declaration ecrasait
    celle-ci au chargement, et plus aucun logo de marque ne s'affichait dans le
    rail (227 marques, zero logo). Deux tables differentes mefient deux noms. */
+/* Mini-logos DESSINÉS des grandes marques. Les favicons Google servaient des
+   icônes de sites web, pas des logos (carré noir pour Coca-Cola, « L » pour
+   Lipton...) : on dessine nous-mêmes, couleurs de la marque, trait simplifié,
+   zéro requête réseau. Marque absente de la table -> monogramme. */
+function _mini(bg,inner){return '<svg viewBox="0 0 48 48" style="width:100%;height:100%;display:block"><rect width="48" height="48" rx="15" fill="'+bg+'"/>'+inner+'</svg>';}
+var BRAND_MINI={
+ "coca-cola":_mini("#e0161f",'<path d="M5 27c8-8 14 6 22 1 6-4 10-5 16-3" fill="none" stroke="#fff" stroke-width="4.4" stroke-linecap="round"/>'),
+ "fanta":_mini("#ff7a00",'<text x="19" y="34" font-family="system-ui,sans-serif" font-size="30" font-weight="800" font-style="italic" fill="#fff" text-anchor="middle">F</text><path d="M30 12c5-3 9-2 11 1-4 2-8 2-11-1z" fill="#2f9e44"/>'),
+ "sprite":_mini("#19a54a",'<text x="22" y="34" font-family="system-ui,sans-serif" font-size="30" font-weight="800" font-style="italic" fill="#fff" text-anchor="middle">S</text><circle cx="36" cy="13" r="5" fill="#ffd21e"/>'),
+ "pepsi":_mini("#eef2f6",'<circle cx="24" cy="24" r="15" fill="#fff"/><path d="M9.5 21A15 15 0 0 1 38 18c-10-2-20 1-28.5 3z" fill="#d92332"/><path d="M38.5 27A15 15 0 0 1 10 30c10 2 20-1 28.5-3z" fill="#0e4595"/>'),
+ "7up":_mini("#00923f",'<text x="26" y="33" font-family="system-ui,sans-serif" font-size="24" font-weight="800" fill="#fff" text-anchor="middle">7up</text><circle cx="12" cy="15" r="4.5" fill="#e03131"/>'),
+ "dr pepper":_mini("#71131c",'<text x="24" y="31" font-family="system-ui,sans-serif" font-size="17" font-weight="800" font-style="italic" fill="#fff" text-anchor="middle">Dr&#160;P</text>'),
+ "monster":_mini("#111",'<path d="M15 10c2 8-1 16 1 27M24 8c1 9-1 19 0 30M33 10c-2 8 1 16-1 27" fill="none" stroke="#6fbe44" stroke-width="4" stroke-linecap="round"/>'),
+ "red bull":_mini("#d8dce4",'<path d="M0 0h24v24H0zM24 24h24v24H24z" fill="#0b3d91" opacity=".92"/><circle cx="24" cy="24" r="8.5" fill="#ffd21e"/>'),
+ "prime":_mini("#0d0d0d",'<text x="24" y="29" font-family="system-ui,sans-serif" font-size="11.5" font-weight="800" fill="#fff" text-anchor="middle" letter-spacing="1.5">PRIME</text>'),
+ "lipton":_mini("#ffd400",'<rect x="14" y="14" width="20" height="20" rx="4" transform="rotate(45 24 24)" fill="#e03131"/><text x="24" y="30" font-family="system-ui,sans-serif" font-size="17" font-weight="800" fill="#fff" text-anchor="middle">L</text>'),
+ "schweppes":_mini("#123a30",'<text x="24" y="33" font-family="system-ui,sans-serif" font-size="26" font-weight="800" font-style="italic" fill="#e8bd7a" text-anchor="middle">S</text><circle cx="14" cy="12" r="2" fill="#e8bd7a"/><circle cx="24" cy="9" r="2.4" fill="#e8bd7a"/><circle cx="34" cy="12" r="2" fill="#e8bd7a"/>'),
+ "arizona":_mini("#8fd7c6",'<text x="24" y="33" font-family="system-ui,sans-serif" font-size="26" font-weight="800" fill="#a4243b" text-anchor="middle">A</text><circle cx="36" cy="12" r="4" fill="#f5a0b5"/>'),
+ "capri-sun":_mini("#c9ced8",'<circle cx="24" cy="20" r="9" fill="#ff8c1a"/><path d="M4 36c6-5 12 3 20 0s14-4 20 0v12H4z" fill="#1560bd" opacity=".9"/>'),
+ "orangina":_mini("#0d2f6e",'<circle cx="24" cy="27" r="11" fill="#ff8c1a"/><path d="M24 15c1-4 4-6 8-6-1 4-4 6-8 6z" fill="#2f9e44"/>'),
+ "vimto":_mini("#5c2a8a",'<text x="24" y="35" font-family="system-ui,sans-serif" font-size="30" font-weight="800" fill="#fff" text-anchor="middle">V</text>'),
+ "jarritos":_mini("#f97316",'<path d="M21 8h6v3l-1 2v6c3 1 5 4 5 8v10a5 5 0 0 1-5 5h-4a5 5 0 0 1-5-5V27c0-4 2-7 5-8v-6l-1-2z" fill="#fff" opacity=".95"/>'),
+ "evian":_mini("#f7f7f4",'<path d="M6 30l7-9 5 6 7-11 6 8 5-6 6 12" fill="none" stroke="#e0161f" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>'),
+ "volvic":_mini("#f4f2e8",'<path d="M10 36L24 12l14 24z" fill="#f97316"/><path d="M6 38h36" stroke="#2f9e44" stroke-width="4" stroke-linecap="round"/>'),
+ "perrier":_mini("#0e7a3e",'<ellipse cx="24" cy="24" rx="15" ry="11" fill="none" stroke="#ffd21e" stroke-width="2.6"/><text x="24" y="30" font-family="system-ui,sans-serif" font-size="17" font-weight="800" font-style="italic" fill="#fff" text-anchor="middle">P</text>'),
+ "mountain dew":_mini("#0f260c",'<text x="24" y="21" font-family="system-ui,sans-serif" font-size="11" font-weight="800" font-style="italic" fill="#fff" text-anchor="middle">MTN</text><text x="24" y="36" font-family="system-ui,sans-serif" font-size="15" font-weight="800" font-style="italic" fill="#e03131" text-anchor="middle">DEW</text>'),
+ "chupa chups":_mini("#ff5f8f",'<circle cx="24" cy="24" r="13" fill="#ffd21e"/><circle cx="24" cy="10.5" r="4.5" fill="#ffd21e"/><circle cx="24" cy="37.5" r="4.5" fill="#ffd21e"/><circle cx="10.5" cy="24" r="4.5" fill="#ffd21e"/><circle cx="37.5" cy="24" r="4.5" fill="#ffd21e"/><circle cx="14" cy="14" r="4" fill="#ffd21e"/><circle cx="34" cy="14" r="4" fill="#ffd21e"/><circle cx="14" cy="34" r="4" fill="#ffd21e"/><circle cx="34" cy="34" r="4" fill="#ffd21e"/>'),
+ "mogu mogu":_mini("#ff9bb0",'<rect x="14" y="16" width="20" height="20" rx="5" fill="#fff" transform="rotate(-6 24 26)"/><rect x="19" y="7" width="10" height="6" rx="2" fill="#2f9e44"/>'),
+ "ramune":_mini("#2f6fc4",'<circle cx="24" cy="24" r="12" fill="#cfeafd"/><ellipse cx="19" cy="19" rx="4.5" ry="3" fill="#fff" transform="rotate(-24 19 19)"/>'),
+ "oasis":_mini("#1a9e4b",'<circle cx="18" cy="28" r="8" fill="#ff8c1a"/><circle cx="31" cy="26" r="6.5" fill="#e03131"/><path d="M24 12c2-5 6-7 11-7-1 5-5 8-11 7z" fill="#0d5c2a"/>')
+};
 var DRINK_BRAND_DOMAINS={
   "coca-cola":"coca-cola.com","fanta":"fanta.com","monster":"monsterenergy.com",
   "prime":"drinkprime.com","pepsi":"pepsi.com","red bull":"redbull.com",
@@ -6567,10 +6604,9 @@ function renderBrandsRail(){
   el.innerHTML="";
   groups.forEach(function(g){
     var div=document.createElement("div");div.className="brand-tile";
-    var dom=DRINK_BRAND_DOMAINS[normTxt(g.brand)];
-    var mono='<span style="font-weight:800;font-size:24px;letter-spacing:-0.5px;color:'+g.top.color+(dom?';display:none':'')+'">'+sanitize((g.brand||"?").charAt(0).toUpperCase())+'</span>';
-    var logo=dom?'<img src="https://www.google.com/s2/favicons?domain='+dom+'&sz=128" alt="" loading="lazy" style="width:62%;height:62%;object-fit:contain" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\'">':'';
-    div.innerHTML='<div class="bt-ico" style="background:'+g.top.light+'">'+logo+mono+
+    var mini=BRAND_MINI[normTxt(g.brand)];
+    var mono='<span style="font-weight:800;font-size:24px;letter-spacing:-0.5px;color:'+g.top.color+'">'+sanitize((g.brand||"?").charAt(0).toUpperCase())+'</span>';
+    div.innerHTML='<div class="bt-ico" style="background:'+(mini?"transparent":g.top.light)+(mini?";border:none":"")+'">'+(mini||mono)+
       '<span class="bt-count">'+g.drinks.length+'</span></div>'+
       '<div class="bt-name">'+sanitize(g.brand)+'</div>';
     div.onclick=function(){openBrand(g.brand);};
@@ -14847,8 +14883,10 @@ function initSplash(){
    pseudo par defaut de tout le monde : chaque nouvel utilisateur croyait
    etre sur le compte du fondateur et le classement devenait illisible. */
 function generatePseudo(){
-  var animaux=["Panda","Tigre","Colibri","Renard","Loutre","Fennec","Koala","Lynx","Gecko","Toucan"];
-  var boissons=["P\u00E9tillant","Glac\u00E9","Tropical","Fruit\u00E9","Vitamin\u00E9","Givr\u00E9","Exotique","Sucr\u00E9"];
+  /* Des noms qu'on a envie de garder : animaux au caractere marque + mots
+     epicenes (qui s'accordent avec tout, pas de « Panthere Dore »). */
+  var animaux=["Jaguar","Panth\u00E8re","Faucon","Loup","Cobra","Lynx","Ph\u00E9nix","Puma","Condor","Orque","Grizzly","Tigre"];
+  var boissons=["Nocturne","Solaire","\u00C9clair","Sauvage","N\u00E9on","Cosmique","Polaire","Ultra","Mystique","Turbo","Magn\u00E9tique","Supr\u00EAme"];
   var a=animaux[Math.floor(Math.random()*animaux.length)];
   var b=boissons[Math.floor(Math.random()*boissons.length)];
   return a+" "+b+" "+String(Math.floor(100+Math.random()*900));
@@ -16238,6 +16276,7 @@ function timeAgoShort(ts){
   return "il y a "+Math.round(j/30)+" mois";
 }
 function openUserProfile(u){
+  var ppBadges=publicBadges(u);
   var body=document.getElementById("userprofile-body");if(!body)return;
   var av=avatarHTML(u.avatar,76)||'<span style="font-size:30px;font-weight:800;color:#fff">'+sanitize((u.pseudo||"?").charAt(0).toUpperCase())+'</span>';
   var seen=timeAgoShort(u.updatedAt);
@@ -16258,12 +16297,13 @@ function openUserProfile(u){
     statCell((u.signals||0),"signalements")+
   '</div>'+
   (function(){
-    var pb=publicBadges(u);
-    if(!pb.length)return "";
+    if(!ppBadges.length)return "";
+    /* Chaque badge est un BOUTON : taper dessus ouvre la meme fiche que sur
+       son propre profil (paliers, progression), au nom du joueur regarde. */
     return '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px">Ses badges</div>'+
-      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px">'+pb.map(function(b){
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px">'+ppBadges.map(function(b,i){
         var ring=(TIER_COLORS&&TIER_COLORS[b.tier-1])||"var(--border)";
-        return '<div style="display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--bg2);border:1.5px solid '+ring+'"><span style="display:flex;color:'+ring+'">'+badgeIcon(b.key,16,ring)+'</span><span style="font-size:11.5px;font-weight:800;color:var(--s1)">'+b.name+(TIER_NAMES&&b.tier>1?' '+TIER_NAMES[b.tier-1]:'')+'</span></div>';
+        return '<button data-pb="'+i+'" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--bg2);border:1.5px solid '+ring+';cursor:pointer;font:inherit" aria-label="Badge '+b.name+', voir le detail"><span style="display:flex;color:'+ring+'">'+badgeIcon(b.key,16,ring)+'</span><span style="font-size:11.5px;font-weight:800;color:var(--s1)">'+b.name+(TIER_NAMES&&b.tier>1?' '+TIER_NAMES[b.tier-1]:'')+'</span></button>';
       }).join("")+'</div>';
   })()+
   '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px" data-i18n="hisFavs">Ses boissons pr\u00E9f\u00E9r\u00E9es</div>'+
@@ -16281,6 +16321,16 @@ function openUserProfile(u){
       box.appendChild(row);
     });
   }
+  try{
+    body.querySelectorAll("[data-pb]").forEach(function(bt){
+      bt.onclick=function(){
+        var b=ppBadges[Number(bt.getAttribute("data-pb"))];
+        if(!b)return;
+        try{playSound("pop");}catch(e){}
+        showBadgeInfo({key:b.key,name:b.name,tiers:b.tiers,value:b.value},b.tier,u.pseudo||"Ce joueur");
+      };
+    });
+  }catch(e){}
   show("userprofile");
 }
 var _userSearchTimer=null;
