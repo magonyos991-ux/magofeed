@@ -9388,18 +9388,21 @@ function _openActivityUI(){
   ov.style.cssText="position:fixed;inset:0;z-index:10001;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px)";
   var card=document.createElement("div");
   card.id="act-card";
-  card.style.cssText="width:100%;max-width:440px;max-height:82vh;display:flex;flex-direction:column;background:var(--app-bg);border-radius:24px 24px 0 0;padding:18px 20px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28);animation:fbSheetUp .5s cubic-bezier(.3,1.38,.44,1) both";
-  card.innerHTML='<div style="width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 14px;flex-shrink:0"></div>'+
-    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-shrink:0">'+
-      '<div style="font-size:18px;font-weight:800;color:var(--s1)">Activité</div>'+
-      (_activity.length?'<div id="act-clear" role="button" tabindex="0" style="font-size:12px;font-weight:700;color:var(--s3);cursor:pointer">Tout effacer</div>':'')+
+  /* C'est la CARTE qui defile, pas une liste imbriquee dedans. Un conteneur
+     de defilement place dans un conteneur flex est le grand classique des
+     feuilles qui ne bougent pas sur iPhone — et aucun navigateur de bureau
+     ne reproduit le probleme, donc on ne le corrige pas, on l'elimine.
+     L'en-tete reste visible grace a position:sticky. */
+  card.style.cssText="width:100%;max-width:440px;height:82vh;max-height:82vh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;background:var(--app-bg);border-radius:24px 24px 0 0;padding:0 20px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28);animation:fbSheetUp .5s cubic-bezier(.3,1.38,.44,1) both";
+  card.innerHTML='<div id="act-sticky" style="position:sticky;top:0;z-index:2;background:var(--app-bg);margin:0 -20px;padding:16px 20px 10px">'+
+      '<div id="act-grab" style="padding:2px 0 12px;cursor:grab;touch-action:none"><div style="width:44px;height:5px;border-radius:3px;background:var(--border);margin:0 auto"></div></div>'+
+      '<div id="act-head" style="display:flex;align-items:center;justify-content:space-between;touch-action:none">'+
+        '<div style="font-size:18px;font-weight:800;color:var(--s1)">Activité</div>'+
+        (_activity.length?'<div id="act-clear" role="button" tabindex="0" style="font-size:12px;font-weight:700;color:var(--s3);cursor:pointer">Tout effacer</div>':'')+
+      '</div>'+
     '</div>'+
-    /* min-height:0 est OBLIGATOIRE : un enfant de conteneur flex refuse par
-       defaut de retrecir sous la taille de son contenu (min-height:auto), donc
-       overflow-y ne s'active jamais et la liste deborde sans defiler — le
-       symptome exact sur iPhone. overscroll-behavior evite en prime que le
-       geste emporte la page derriere. */
-    '<div id="act-list" style="overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1 1 auto;min-height:0;overscroll-behavior:contain;touch-action:pan-y"></div>';
+    /* La liste ne defile plus elle-meme : c'est la carte qui s'en charge. */
+    '<div id="act-list" style="padding-top:4px"></div>';
   ov.appendChild(card);
   document.body.appendChild(ov);
   // Le fond de page ne doit plus « rebondir » derriere la feuille : c'est ce
@@ -9416,13 +9419,21 @@ function _openActivityUI(){
      glissait — on voyait le fond du navigateur. */
   (function(){
     var y0=null,dy=0,pid=null;
-    var lst=null;
+    /* Le geste de fermeture part UNIQUEMENT de la poignee et du titre.
+       Avant, il etait branche sur toute la carte et s'armait des que la liste
+       etait en haut — c'est-a-dire des l'ouverture : le premier glissement
+       etait vole a la liste, qui ne defilait donc jamais. */
+    var zone=function(t){
+      if(!t||!t.closest)return false;
+      if(t.closest("button,.swp-fg,#act-list"))return false;
+      return !!(t.closest("#act-grab")||t.closest("#act-head"));
+    };
     card.addEventListener("pointerdown",function(e){
-      lst=document.getElementById("act-list");
-      // On ne prend le geste que si la liste est deja en haut : sinon on
-      // volerait son defilement.
-      if(lst&&lst.contains(e.target)&&lst.scrollTop>0)return;
-      if(e.target&&e.target.closest&&e.target.closest("button,.swp-fg"))return;
+      if(!zone(e.target))return;
+      /* Pas de condition sur le defilement : la poignee et le titre portent
+         touch-action:none, ils ne peuvent donc pas faire defiler la carte —
+         il n'y a aucun geste a leur voler. Exiger d'etre en haut rendait la
+         poignee morte des qu'on avait descendu la liste. */
       pid=e.pointerId;y0=e.clientY;dy=0;card.style.transition="none";
     });
     card.addEventListener("pointermove",function(e){
