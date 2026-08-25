@@ -5088,27 +5088,48 @@ function renderWhereFound(ctx){
    meme vide. D'ou le « des fois ca marche, des fois non ». On interroge
    desormais Firestore autour de soi a l'ouverture (au plus une fois toutes
    les 2 minutes), et les magasins trouves rejoignent la liste. */
-function pickerFetchZone(){
+/* Combien de magasins connus sont VRAIMENT autour de nous ? Sans ca, on ne
+   peut pas distinguer « la liste est vide parce qu'on n'a pas encore
+   cherche » de « la liste est vide parce qu'il n'y a rien ». Les deux
+   meritent un message different — et un seul des deux est une raison de se
+   taire. */
+function pickerNbAutour(){
+  if(typeof userLat!=="number"||!userLat)return (STORES||[]).length;
+  var n=0;
+  (STORES||[]).forEach(function(s){
+    if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
+    if(typeof _distM==="function"&&_distM(userLat,userLng,s.lat,s.lng)<=12000)n++;
+  });
+  return n;
+}
+function pickerFetchZone(force){
   try{
     if(!window.fbQueryZone)return;
     if(typeof userLat!=="number"||!userLat)return;
+    if(window._pickerZoneEnCours)return;
     var now=Date.now();
-    if(window._pickerZoneTs&&(now-window._pickerZoneTs)<120000)return;
+    /* Le verrou de 2 minutes evitait de matraquer Firestore. Mais il bloquait
+       aussi la SEULE tentative qui compte : celle qui suit une liste vide.
+       Resultat, « Aucun magasin autour » restait affiche deux minutes alors
+       qu'un magasin existait a 200 m. On ignore donc le verrou quand on n'a
+       encore rien autour de soi. */
+    if(!force && pickerNbAutour()>0 && window._pickerZoneTs && (now-window._pickerZoneTs)<120000)return;
     window._pickerZoneTs=now;
-    window.fbQueryZone(userLat,userLng,10).then(function(list){
+    window._pickerZoneEnCours=true;
+    try{renderStorePicker();}catch(e){}          // affiche « Recherche… » tout de suite
+    window.fbQueryZone(userLat,userLng,12).then(function(list){
       list=list||[];
       var connus={};
       (STORES||[]).forEach(function(x){connus[String(x.fbId||x.id)]=1;});
-      var ajouts=0;
       list.forEach(function(x){
         var k=String(x.fbId||x.id);
-        if(!connus[k]){STORES.push(x);connus[k]=1;ajouts++;}
+        if(!connus[k]){STORES.push(x);connus[k]=1;}
       });
-      if(ajouts){
-        try{renderStorePicker();}catch(e){}
-      }
-    }).catch(function(){});
-  }catch(e){}
+    }).catch(function(){}).then(function(){
+      window._pickerZoneEnCours=false;
+      try{renderStorePicker();}catch(e){}         // dans TOUS les cas on repeint
+    });
+  }catch(e){ window._pickerZoneEnCours=false; }
 }
 function openStorePicker(){
   var ov=document.getElementById("store-picker");if(!ov)return;
@@ -5408,8 +5429,25 @@ function pickerFilteredList(){
   var q=(document.getElementById("store-picker-q")||{}).value||"";
   var list=(STORES||[]).slice();
   if(q){
-    var exact=list.filter(function(s){return normTxt((s.name||"")+" "+(s.brand||"")+" "+(s.address||"")).indexOf(normTxt(q))!==-1;});
-    list=exact.length?exact:list.filter(function(s){return fuzzyIncludes(q,(s.name||"")+" "+(s.brand||"")+" "+(s.address||""));});
+    var nq=normTxt(q);
+    /* Trois cercles, du plus sur au plus large : ce qui COMMENCE par ce qu'on
+       tape (« a » -> Aldi, Action), puis ce qui le contient, puis
+       l'approximatif. Avant, tout etait mele : taper « a » remontait
+       n'importe quel magasin contenant un « a » quelque part, et les Aldi
+       se perdaient au milieu. */
+    var debut=[],dedans=[],flou=[];
+    list.forEach(function(s){
+      var nom=normTxt(s.name||""),marque=normTxt(s.brand||"");
+      var tout=nom+" "+marque+" "+normTxt(s.address||"");
+      if(nom.indexOf(nq)===0||marque.indexOf(nq)===0){debut.push(s);return;}
+      // un mot du nom qui commence par la saisie compte aussi ("night" -> "Night Shop")
+      if(nom.split(" ").some(function(m){return m.indexOf(nq)===0;})){debut.push(s);return;}
+      if(tout.indexOf(nq)!==-1){dedans.push(s);return;}
+      if(fuzzyIncludes(q,tout))flou.push(s);
+    });
+    var parDist=function(a,b){return (a.dist||1e9)-(b.dist||1e9);};
+    debut.sort(parDist);dedans.sort(parDist);flou.sort(parDist);
+    return debut.concat(dedans).concat(flou);
   }
   list.sort(function(a,b){return (a.dist||1e9)-(b.dist||1e9);});
   return list;
@@ -5431,8 +5469,13 @@ function renderStorePicker(){
   // Bouton "Ajouter" TOUJOURS en haut : plus besoin de scroller tout en bas.
   el.appendChild(addRow());
   if(!list.length){
-    // Rien en memoire : dernier recours, on redemande la zone a Firestore
-    // (la garde de 2 minutes empeche toute boucle).
+    /* On ne dit « aucun magasin » QUE si on a fini de chercher. Tant que la
+       requete tourne, on le dit — annoncer le vide avant d'avoir regarde,
+       c'est le mensonge qui a fait perdre du temps a tout le monde. */
+    if(window._pickerZoneEnCours){
+      el.insertAdjacentHTML("beforeend",'<div style="text-align:center;padding:16px;font-size:13px;color:var(--s3)">Recherche des magasins autour de toi\u2026</div>');
+      return;
+    }
     pickerFetchZone();
     el.insertAdjacentHTML("beforeend",'<div style="text-align:center;padding:16px;font-size:13px;color:var(--s3)">Aucun magasin autour \u2014 ajoute-le ci-dessus</div>');
     return;
@@ -8715,7 +8758,8 @@ function drinkCardPhotoHTML(d){
 function centerMapOnUser(){
   if(!window._leafletMap)return;
   if(userLat){
-    window._leafletMap.setView([userLat,userLng],15);
+    try{ window._leafletMap.flyTo([userLat,userLng],15,{duration:1,easeLinearity:0.22}); }
+    catch(e){ window._leafletMap.setView([userLat,userLng],15); }
     haptic("pop");
   } else {
     toast("Active le GPS pour te centrer");
@@ -9420,8 +9464,14 @@ function _openActivityUI(){
        etait vole a la liste, qui ne defilait donc jamais. */
     var zone=function(t){
       if(!t||!t.closest)return false;
-      if(t.closest("button,.swp-fg,#act-list"))return false;
-      return !!(t.closest("#act-grab")||t.closest("#act-head"));
+      if(t.closest("button,.swp-fg"))return false;
+      /* La poignee et le titre : toujours. La LISTE aussi, mais seulement
+         quand la carte est deja tout en haut — c'est le geste qu'attend
+         n'importe qui : on tire la feuille vers le bas depuis n'importe ou.
+         Ailleurs (liste descendue), le glissement appartient au defilement,
+         sinon on lui volerait son geste comme avant. */
+      if(t.closest("#act-grab")||t.closest("#act-head"))return true;
+      return card.scrollTop<=0;
     };
     card.addEventListener("pointerdown",function(e){
       if(!zone(e.target))return;
@@ -9435,6 +9485,10 @@ function _openActivityUI(){
       if(pid===null||e.pointerId!==pid||y0===null)return;
       var d=e.clientY-y0;
       if(d<0)return;                       // vers le haut : rien a faire
+      /* Depuis la liste, on n'attrape le geste qu'au-dela de 12 px : en deca,
+         c'est peut-etre un debut de defilement, et le lui voler donnerait une
+         liste qui refuse de bouger. */
+      if(d<12 && !e.target.closest("#act-grab") && !e.target.closest("#act-head") && card.scrollTop>0)return;
       if(d>8){try{card.setPointerCapture(pid);}catch(_){}}
       dy=d;card.style.transform="translateY("+d+"px)";
     });
@@ -12581,7 +12635,18 @@ function exploreCenterUser(){
     window._explorePlace="";window._exploreFreeMove=false;
     var _q=document.getElementById("explore-city-q");if(_q)_q.value="";
     var _c=document.getElementById("explore-city-clear");if(_c)_c.style.display="none";
-    try{exploreMap.setView([userLat,userLng],16);}catch(e){}
+    /* flyTo au lieu de setView : la carte VOLE jusqu'a toi au lieu d'y sauter.
+       On voit le chemin parcouru, on comprend ou on etait et ou on va — c'est
+       exactement ce que font les applis de livraison. La duree s'adapte : un
+       recentrage de 200 m ne merite pas la meme animation qu'un retour depuis
+       la Pologne. */
+    try{
+      var _d=(typeof _distM==="function")?_distM(exploreMap.getCenter().lat,exploreMap.getCenter().lng,userLat,userLng):0;
+      var _dur=Math.max(0.6,Math.min(2.2,0.6+(_d/1000)*0.02));   // 0,6 s de base, +20 ms par km, plafonne a 2,2 s
+      exploreMap.flyTo([userLat,userLng],16,{duration:_dur,easeLinearity:0.22});
+    }catch(e){
+      try{exploreMap.setView([userLat,userLng],16);}catch(e2){}   // repli : au moins on y arrive
+    }
   }
   else toast("Active ta position d'abord");
 }
