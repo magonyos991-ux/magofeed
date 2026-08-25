@@ -30,7 +30,33 @@ const ORDRE = ["ramune","jarritos","milkis","guarana-antarctica","sumol","pocari
    meme boisson le meme jour, et chaque boisson revient tous les 6 jours. */
 const jour = Math.floor(Date.now() / 86400000);          // numero du jour (UTC)
 const creneau = new Date().getUTCHours() >= 15 ? 1 : 0;  // 19h Bruxelles = apres 15h UTC
-const slug = ORDRE[(jour * 2 + creneau) % ORDRE.length];
+let idx = (jour * 2 + creneau) % ORDRE.length;
+
+/* SECOND VERROU : la memoire des posts deja publies.
+   La rotation par calendrier suffit pour les passages automatiques, mais elle
+   redonne la meme boisson si le workflow est relance a la main dans le meme
+   creneau (un test « Execute workflow », par exemple). On regarde donc la
+   liste des sujets deja publies : si la boisson du calendrier y figure, on
+   avance d'un cran, autant de fois qu'il le faut. Un doublon devient
+   impossible, meme en cas de relance manuelle. */
+const dejaTxt = String(prev.usedTopicsList || "").toLowerCase();
+const sansAccent = (t) => String(t).toLowerCase()
+  .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const dejaHay = sansAccent(dejaTxt);
+const dejaPubliee = (s) => {
+  const item = MENU.find(x => x.slug === s);
+  if (!item) return false;
+  /* On compare sur le PREMIER MOT du nom (ramune, jarritos, guarana, pocari,
+     mountain, chupa...), distinctif pour chacune des treize boissons. Chercher
+     le nom complet echouait des que le modele ecrivait « Chupa Chups » sans
+     « Sparkling » : la boisson passait pour inedite et revenait en double. */
+  const cle = sansAccent(item.nom).split(/\s+/)[0];
+  return cle.length >= 4 && dejaHay.includes(cle);
+};
+for (let tour = 0; tour < ORDRE.length && dejaPubliee(ORDRE[idx]); tour++) {
+  idx = (idx + 1) % ORDRE.length;
+}
+const slug = ORDRE[idx];
 const m = MENU.find(x => x.slug === slug);
 const prompt =
   "Tu es le responsable marketing de Magofeed, appli belge (Bruxelles) qui aide a TROUVER des boissons rares et exotiques SANS ALCOOL dans les magasins proches. Public familial, ton fun et curieux, langue: FRANCAIS.\n\n" +

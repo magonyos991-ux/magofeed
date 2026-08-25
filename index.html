@@ -2552,6 +2552,23 @@ window.fbHeartbeat = async function() {
        localisation est refusee — c'est-a-dire souvent. */
     try { beat.tz = String(Intl.DateTimeFormat().resolvedOptions().timeZone || "").slice(0, 48); } catch (e) {}
     try { beat.lang = String(navigator.language || "").slice(0, 12); } catch (e) {}
+    /* ROBOT OU HUMAIN ? Les liens partages sur Instagram, Facebook et TikTok
+       sont visites par les robots d'apercu de ces plateformes, qui tournent
+       dans des centres de donnees americains (fuseau America/Los_Angeles par
+       defaut) et executent le JavaScript de la page : ils creent donc de vraies
+       sessions anonymes. Sans ce reperage, ils se comptent comme des visiteurs
+       et le tableau de bord ment. On note trois indices SANS rien identifier
+       de personnel — un navigateur pilote, l'absence totale d'ecran tactile
+       sur un mobile, un ecran de taille impossible. */
+    try {
+      var indices = 0;
+      if (navigator.webdriver) indices += 2;
+      if (!("ontouchstart" in window) && navigator.maxTouchPoints === 0
+          && /Mobile|Android|iPhone/i.test(navigator.userAgent || "")) indices += 2;
+      if (screen && (screen.width < 200 || screen.height < 200)) indices += 1;
+      if (!navigator.languages || !navigator.languages.length) indices += 1;
+      beat.bot = indices >= 2;
+    } catch (e) {}
     await setDoc(doc(db, "presence", user.uid), beat, { merge: true });
   } catch (e) { /* règles pas encore publiées, ou hors-ligne : sans gravité */ }
 };
@@ -2590,6 +2607,7 @@ window.fbPresenceAll = async function() {
            l'information etait bien dans la base depuis le debut. */
         tz: v.tz || null,
         lang: v.lang || null,
+        bot: v.bot === true,
         lastSeen: (v.lastSeen && v.lastSeen.toMillis) ? v.lastSeen.toMillis() : null
       };
     });
@@ -3572,6 +3590,38 @@ function setAccent(d){accentColor=d?d.color:"#1a1714";accentLight=d?d.light:"#f0
    (« il ne me demande meme pas la localisation »).
    navigator.permissions manque sur les vieux Safari : on repond alors
    "inconnu" au lieu de deviner. */
+/* Marche a suivre quand la localisation a ete refusee une fois : seul
+   l'utilisateur peut la reactiver, dans les reglages de son telephone. */
+function expliquerGeoRefusee(){
+  if(document.getElementById("geo-help"))return;
+  var ov=document.createElement("div");
+  ov.id="geo-help";
+  ov.style.cssText="position:fixed;inset:0;z-index:100001;background:rgba(12,10,8,.6);display:flex;align-items:center;justify-content:center;padding:20px;touch-action:manipulation";
+  var iOS=/iPad|iPhone|iPod/.test(navigator.userAgent||"");
+  var pas=iOS
+    ? '<b>Réglages</b> de l\'iPhone → descends jusqu\'à <b>Magofeed</b> (ou <b>Safari</b> si tu l\'ouvres dans le navigateur) → <b>Position</b> → <b>Lorsque l\'app est active</b>.'
+    : 'Appuie sur le <b>cadenas</b> à gauche de l\'adresse du site → <b>Autorisations</b> → <b>Position</b> → <b>Autoriser</b>.';
+  ov.innerHTML='<div style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:22px;max-width:360px;width:100%;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.45)">'+
+    '<div style="font-size:19px;font-weight:800;color:var(--s1);margin-bottom:8px">La position est bloquée</div>'+
+    '<div style="font-size:13.5px;color:var(--s2);line-height:1.55;margin-bottom:14px">Tu l\'as refusée une fois, et un site web ne peut plus la redemander tout seul. Il faut la réactiver ici :</div>'+
+    '<div style="font-size:13.5px;color:var(--s1);line-height:1.6;background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;padding:13px;margin-bottom:16px">'+pas+'</div>'+
+    '<div style="font-size:12.5px;color:var(--s3);line-height:1.5;margin-bottom:16px">En attendant, tu peux explorer n\'importe quelle ville sur la carte sans donner ta position.</div>'+
+    '<div style="display:flex;gap:8px">'+
+      '<button id="geo-help-x" type="button" style="flex:1;padding:14px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-weight:700;font-size:14px;cursor:pointer;touch-action:manipulation">Fermer</button>'+
+      '<button id="geo-help-map" type="button" style="flex:1.2;padding:14px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);font-weight:700;font-size:14px;cursor:pointer;touch-action:manipulation">Explorer une ville</button>'+
+    '</div></div>';
+  document.body.appendChild(ov);
+  var fermer=function(){try{ov.remove();}catch(e){}};
+  var brancher=function(el,action){
+    if(!el)return;
+    var fait=false;
+    var go=function(ev){if(fait)return;fait=true;try{ev.preventDefault();ev.stopPropagation();}catch(e){}action();};
+    el.addEventListener("click",go); el.addEventListener("touchend",go,{passive:false});
+  };
+  brancher(ov.querySelector("#geo-help-x"),fermer);
+  brancher(ov.querySelector("#geo-help-map"),function(){fermer();try{openExploreMap();}catch(e){}});
+  ov.addEventListener("click",function(e){if(e.target===ov)fermer();});
+}
 function geoEtat(cb){
   try{
     if(navigator.permissions&&navigator.permissions.query){
@@ -6757,7 +6807,18 @@ function renderNearby(){
     b1.setAttribute("role","button");b1.setAttribute("tabindex","0");b1.setAttribute("aria-label","Activer ma position");
     b1.style.cssText="flex:1;text-align:center;padding:11px;border-radius:13px;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;cursor:pointer";
     b1.textContent="Activer ma position";
-    b1.onclick=function(){playSound("pop");try{initGPS();}catch(e){}toast("Recherche de ta position\u2026");};
+    /* Une permission REFUSEE ne peut plus etre redemandee par une page web :
+       le navigateur ne rouvrira jamais la fenetre. Faire semblant de chercher
+       (« Recherche de ta position... ») etait un mensonge poli. On explique
+       ou la reactiver, pour de vrai. */
+    b1.onclick=function(){
+      playSound("pop");
+      geoEtat(function(etat){
+        if(etat==="denied"){ expliquerGeoRefusee(); return; }
+        try{initGPS();}catch(e){}
+        toast("Recherche de ta position\u2026");
+      });
+    };
     b1.onkeydown=function(ev){if(ev.key==="Enter"){b1.onclick();}};
     var b2=document.createElement("div");
     b2.setAttribute("role","button");b2.setAttribute("tabindex","0");b2.setAttribute("aria-label","Explorer une ville sur la carte");
@@ -9322,13 +9383,21 @@ function _openActivityUI(){
   ov.style.cssText="position:fixed;inset:0;z-index:10001;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px)";
   var card=document.createElement("div");
   card.id="act-card";
-  card.style.cssText="width:100%;max-width:440px;max-height:82vh;display:flex;flex-direction:column;background:var(--app-bg);border-radius:24px 24px 0 0;padding:18px 20px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28);animation:fbSheetUp .5s cubic-bezier(.3,1.38,.44,1) both";
-  card.innerHTML='<div style="width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 14px;flex-shrink:0"></div>'+
-    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-shrink:0">'+
-      '<div style="font-size:18px;font-weight:800;color:var(--s1)">Activité</div>'+
-      (_activity.length?'<div id="act-clear" role="button" tabindex="0" style="font-size:12px;font-weight:700;color:var(--s3);cursor:pointer">Tout effacer</div>':'')+
+  /* C'est la CARTE qui defile, pas une liste imbriquee dedans. Un conteneur
+     de defilement place dans un conteneur flex est le grand classique des
+     feuilles qui ne bougent pas sur iPhone — et aucun navigateur de bureau
+     ne reproduit le probleme, donc on ne le corrige pas, on l'elimine.
+     L'en-tete reste visible grace a position:sticky. */
+  card.style.cssText="width:100%;max-width:440px;height:82vh;max-height:82vh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;background:var(--app-bg);border-radius:24px 24px 0 0;padding:0 20px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28);animation:fbSheetUp .5s cubic-bezier(.3,1.38,.44,1) both";
+  card.innerHTML='<div id="act-sticky" style="position:sticky;top:0;z-index:2;background:var(--app-bg);margin:0 -20px;padding:16px 20px 10px">'+
+      '<div id="act-grab" style="padding:2px 0 12px;cursor:grab;touch-action:none"><div style="width:44px;height:5px;border-radius:3px;background:var(--border);margin:0 auto"></div></div>'+
+      '<div id="act-head" style="display:flex;align-items:center;justify-content:space-between;touch-action:none">'+
+        '<div style="font-size:18px;font-weight:800;color:var(--s1)">Activité</div>'+
+        (_activity.length?'<div id="act-clear" role="button" tabindex="0" style="font-size:12px;font-weight:700;color:var(--s3);cursor:pointer">Tout effacer</div>':'')+
+      '</div>'+
     '</div>'+
-    '<div id="act-list" style="overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1"></div>';
+    /* La liste ne defile plus elle-meme : c'est la carte qui s'en charge. */
+    '<div id="act-list" style="padding-top:4px"></div>';
   ov.appendChild(card);
   document.body.appendChild(ov);
   // Le fond de page ne doit plus « rebondir » derriere la feuille : c'est ce
@@ -9345,13 +9414,21 @@ function _openActivityUI(){
      glissait — on voyait le fond du navigateur. */
   (function(){
     var y0=null,dy=0,pid=null;
-    var lst=null;
+    /* Le geste de fermeture part UNIQUEMENT de la poignee et du titre.
+       Avant, il etait branche sur toute la carte et s'armait des que la liste
+       etait en haut — c'est-a-dire des l'ouverture : le premier glissement
+       etait vole a la liste, qui ne defilait donc jamais. */
+    var zone=function(t){
+      if(!t||!t.closest)return false;
+      if(t.closest("button,.swp-fg,#act-list"))return false;
+      return !!(t.closest("#act-grab")||t.closest("#act-head"));
+    };
     card.addEventListener("pointerdown",function(e){
-      lst=document.getElementById("act-list");
-      // On ne prend le geste que si la liste est deja en haut : sinon on
-      // volerait son defilement.
-      if(lst&&lst.contains(e.target)&&lst.scrollTop>0)return;
-      if(e.target&&e.target.closest&&e.target.closest("button,.swp-fg"))return;
+      if(!zone(e.target))return;
+      /* Pas de condition sur le defilement : la poignee et le titre portent
+         touch-action:none, ils ne peuvent donc pas faire defiler la carte —
+         il n'y a aucun geste a leur voler. Exiger d'etre en haut rendait la
+         poignee morte des qu'on avait descendu la liste. */
       pid=e.pointerId;y0=e.clientY;dy=0;card.style.transition="none";
     });
     card.addEventListener("pointermove",function(e){
@@ -14360,8 +14437,23 @@ function showRouteToStore(lat,lng,store){
      c'est celui qui vaut quelque chose pour un commercant. */
   bumpStoreStat(window._navDest,"itineraires");
   if(typeof userLat!=="number"||!userLat){
-    toast("Active ta position d'abord");playSound("err");
-    openNavApp("https://www.google.com/maps/dir/?api=1&destination="+lat+","+lng);
+    /* Sans position, on ne peut pas tracer de chemin — mais partir dans
+       Google Maps sans rien demander est une sortie brutale de l'app que
+       personne n'a demandee. On ouvre la FICHE du magasin : c'est la, et
+       la seulement, qu'on choisit Google Maps ou Waze. */
+    playSound("pop");
+    var _sid=(window._navDest&&(window._navDest.id||window._navDest.fbId));
+    if(_sid!=null){
+      try{
+        var _h=document.getElementById("explore-map-host");
+        if(_h&&_h.style.display!=="none"){
+          _h.classList.remove("in");_h.style.display="none";
+          window._cameFromExplore=true;
+        }
+      }catch(e){}
+      try{openStoreDetail(String(_sid));}catch(e){}
+    }
+    toast("Active ta position pour l'itinéraire dans l'app");
     return;
   }
   /* On note OU on etait, mais SEULEMENT ici : au-dessus, sans position, la
@@ -15224,8 +15316,9 @@ function renderNewcomers(){
                  du navigateur dit le pays sans rien demander a personne. */
               '<div class="nc-city" data-lat="' + (hasPos ? p.lat : "") + '" data-lng="' + (hasPos ? p.lng : "") + '" ' +
                    'style="font-size:11.5px;font-weight:700;color:' + (hasPos ? "var(--s1)" : "var(--s2)") + ';margin-top:2px">' +
-                (hasPos ? "…" : (p.tz ? sanitize(_paysDuFuseau(p.tz)) + ' <span style="font-weight:600;color:var(--s3)">· fuseau, pas de position</span>'
-                                      : '<span style="color:var(--s3)">origine inconnue</span>')) + '</div>' +
+                (p.bot ? '<span style="color:#dc2626;font-weight:800">robot d\'aperçu</span> <span style="font-weight:600;color:var(--s3)">· lien partagé sur un réseau</span>'
+                       : (hasPos ? "…" : (p.tz ? sanitize(_paysDuFuseau(p.tz)) + ' <span style="font-weight:600;color:var(--s3)">· fuseau, pas de position</span>'
+                                      : '<span style="color:var(--s3)">origine inconnue</span>'))) + '</div>' +
             '</div>' +
             (hasPos ? '<button class="ghost-btn quiet" style="flex-shrink:0;padding:7px 11px;min-height:32px;font-size:11px" ' +
                       'onclick="ncShowOnMap(' + p.lat + ',' + p.lng + ')">Carte</button>' : '') +
@@ -15409,7 +15502,12 @@ function showFounderRecap(s){
   try{dateStr=new Date().toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});}catch(e){dateStr="Aujourd'hui";}
   var ov=document.createElement("div");
   ov.id="founder-recap";
-  ov.style.cssText="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px";
+  /* Au-dessus de TOUTES les autres couches (feuilles de diagnostic et
+     d'installation montent a 100000), et gestes tactiles autorises : une
+     feuille restee ouverte laisse « touch-action:none » sur le body, ce qui
+     empeche iOS de synthetiser le clic sur les boutons. */
+  try{document.body.classList.remove("sheet-open");}catch(e){}
+  ov.style.cssText="position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;touch-action:manipulation";
   var n=function(v){return v==null?"–":v;};
   ov.innerHTML=
     '<div style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:22px;max-width:360px;width:100%;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.45)">'+
@@ -15426,14 +15524,29 @@ function showFounderRecap(s){
       '</div>'+
       '<div style="font-size:13px;color:var(--s2);line-height:1.5;margin-bottom:18px">'+_recapMessage(s)+'</div>'+
       '<div style="display:flex;gap:8px">'+
-        '<button id="recap-close" style="flex:1;padding:12px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-weight:700;font-size:14px;cursor:pointer">Fermer</button>'+
-        '<button id="recap-dash" style="flex:1.2;padding:12px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);font-weight:700;font-size:14px;cursor:pointer">Tableau de bord</button>'+
+        '<button id="recap-close" type="button" style="flex:1;padding:14px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-weight:700;font-size:14px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent">Fermer</button>'+
+        '<button id="recap-dash" type="button" style="flex:1.2;padding:14px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);font-weight:700;font-size:14px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent">Tableau de bord</button>'+
       '</div>'+
     '</div>';
   document.body.appendChild(ov);
-  var close=function(){ov.remove();};
-  var cb=document.getElementById("recap-close");if(cb)cb.onclick=close;
-  var dbtn=document.getElementById("recap-dash");if(dbtn)dbtn.onclick=function(){close();showAdmin();};
+  var close=function(){try{ov.remove();}catch(e){}};
+  /* On cherche DANS l'overlay (jamais dans tout le document) et on ecoute le
+     toucher EN PLUS du clic : sur iOS, certains contextes n'emettent pas de
+     clic apres un appui, et le bouton semblait alors mort. */
+  var brancher=function(el,action){
+    if(!el)return;
+    var fait=false;
+    var lancer=function(ev){
+      if(fait)return; fait=true;
+      try{ev.preventDefault();ev.stopPropagation();}catch(e){}
+      try{playSound("pop");}catch(e){}
+      action();
+    };
+    el.addEventListener("click",lancer);
+    el.addEventListener("touchend",lancer,{passive:false});
+  };
+  brancher(ov.querySelector("#recap-close"),close);
+  brancher(ov.querySelector("#recap-dash"),function(){close();try{showAdmin();}catch(e){}});
   ov.addEventListener("click",function(e){if(e.target===ov)close();});
 }
 function maybeFounderRecap(){
