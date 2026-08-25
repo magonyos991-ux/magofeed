@@ -24,42 +24,58 @@ const MENU = [
 // Ordre volontairement melange pour alterner les continents d'un jour a l'autre.
 const ORDRE = ["ramune","jarritos","milkis","guarana-antarctica","sumol","pocari-sweat",
                "mountain-dew","mogu-mogu","vimto","calpico","ciao-energy","inca-kola","chupa-chups"];
-/* Le workflow poste DEUX images par jour (13h et 19h). Une rotation par jour
-   aurait donne la meme boisson aux deux posts. On avance donc d'un cran par
-   CRENEAU : 13h = creneau pair, 19h = creneau impair. Jamais deux fois la
-   meme boisson le meme jour, et chaque boisson revient tous les 6 jours. */
-const jour = Math.floor(Date.now() / 86400000);          // numero du jour (UTC)
-/* TROIS creneaux par jour, pas deux. Le declencheur tire a 9h, 13h et 19h
-   (Bruxelles). Le premier code ne distinguait que « avant 15h UTC » et
-   « apres » : 9h (7h UTC) et 13h (11h UTC) tombaient donc dans le MEME
-   creneau, et sortaient la meme boisson — c'est exactement ce qu'on a vu
-   avec deux Milkis d'affilee. Les bornes tiennent l'ete (UTC+2) comme
-   l'hiver (UTC+1) : 7h/8h, 11h/12h, 17h/18h. */
+/* ══ CHOIX DE LA BOISSON — TROIS VERROUS SUPERPOSES ══════════════════════
+   Objectif : un doublon doit etre IMPOSSIBLE, pas seulement improbable.
+
+   Verrou 1 — l'identifiant d'execution. n8n donne a chaque passage un
+     numero unique et croissant. Deux passages, meme lances a la meme
+     seconde, ne peuvent donc pas tomber sur la meme boisson. C'est ce qui
+     manquait : le calendrier seul donnait le meme resultat a deux passages
+     partageant un creneau (le cas des deux Milkis), et la memoire ne
+     rattrapait rien puisqu'elle n'est ecrite qu'en FIN de chaine — deux
+     passages simultanes lisent la meme memoire.
+
+   Verrou 2 — le calendrier, en repli si l'identifiant manque : trois
+     creneaux par jour (9h, 13h, 19h Bruxelles), bornes valables l'ete
+     (UTC+2) comme l'hiver (UTC+1).
+
+   Verrou 3 — la memoire des sujets deja publies : on avance tant que la
+     boisson visee y figure. On y cherche le premier mot du nom ET le slug,
+     pour resister aux variantes d'ecriture du modele (« Mtn Dew »,
+     « Chupa Chups » sans « Sparkling »...).
+   ═══════════════════════════════════════════════════════════════════════ */
+const jour = Math.floor(Date.now() / 86400000);
 const hUTC = new Date().getUTCHours();
 const creneau = hUTC < 10 ? 0 : (hUTC < 15 ? 1 : 2);
-let idx = (jour * 3 + creneau) % ORDRE.length;
 
-/* SECOND VERROU : la memoire des posts deja publies.
-   La rotation par calendrier suffit pour les passages automatiques, mais elle
-   redonne la meme boisson si le workflow est relance a la main dans le meme
-   creneau (un test « Execute workflow », par exemple). On regarde donc la
-   liste des sujets deja publies : si la boisson du calendrier y figure, on
-   avance d'un cran, autant de fois qu'il le faut. Un doublon devient
-   impossible, meme en cas de relance manuelle. */
-const dejaTxt = String(prev.usedTopicsList || "").toLowerCase();
+let base = NaN;
+try { base = Number(String($execution.id).replace(/\D/g, "")); } catch (e) {}
+if (!Number.isFinite(base) || base <= 0) base = jour * 3 + creneau;
+let idx = ((base % ORDRE.length) + ORDRE.length) % ORDRE.length;
+
 const sansAccent = (t) => String(t).toLowerCase()
   .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-const dejaHay = sansAccent(dejaTxt);
-const dejaPubliee = (s) => {
-  const item = MENU.find(x => x.slug === s);
-  if (!item) return false;
-  /* On compare sur le PREMIER MOT du nom (ramune, jarritos, guarana, pocari,
-     mountain, chupa...), distinctif pour chacune des treize boissons. Chercher
-     le nom complet echouait des que le modele ecrivait « Chupa Chups » sans
-     « Sparkling » : la boisson passait pour inedite et revenait en double. */
-  const cle = sansAccent(item.nom).split(/\s+/)[0];
-  return cle.length >= 4 && dejaHay.includes(cle);
+const dejaHay = sansAccent(prev.usedTopicsList || "");
+/* Table d'ALIAS, ecrite a la main plutot que devinee. Le modele redige les
+   sujets librement : il ecrit « Mtn Dew » pour Mountain Dew, « Calpis » pour
+   Calpico, « Chupa Chups » sans « Sparkling ». Une heuristique sur le premier
+   mot laissait passer ces variantes, et la boisson repassait en double. */
+const CLES = {
+  "ramune":             ["ramune"],
+  "jarritos":           ["jarritos"],
+  "milkis":             ["milkis"],
+  "guarana-antarctica": ["guarana", "antarctica"],
+  "sumol":              ["sumol"],
+  "pocari-sweat":       ["pocari"],
+  "mountain-dew":       ["mountain dew", "mountain", "mtn dew"],
+  "mogu-mogu":          ["mogu"],
+  "vimto":              ["vimto"],
+  "calpico":            ["calpico", "calpis"],
+  "ciao-energy":        ["ciao energy"],
+  "inca-kola":          ["inca kola", "inca"],
+  "chupa-chups":        ["chupa"]
 };
+const dejaPubliee = (s) => (CLES[s] || []).some(k => dejaHay.includes(k));
 for (let tour = 0; tour < ORDRE.length && dejaPubliee(ORDRE[idx]); tour++) {
   idx = (idx + 1) % ORDRE.length;
 }
