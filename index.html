@@ -6620,15 +6620,10 @@ var BRAND_MINI={
  "ramune":_mini("#2f6fc4",'<circle cx="24" cy="24" r="12" fill="#cfeafd"/><ellipse cx="19" cy="19" rx="4.5" ry="3" fill="#fff" transform="rotate(-24 19 19)"/>'),
  "oasis":_mini("#1a9e4b",'<circle cx="18" cy="28" r="8" fill="#ff8c1a"/><circle cx="31" cy="26" r="6.5" fill="#e03131"/><path d="M24 12c2-5 6-7 11-7-1 5-5 8-11 7z" fill="#0d5c2a"/>')
 };
-var DRINK_BRAND_DOMAINS={
-  "coca-cola":"coca-cola.com","fanta":"fanta.com","monster":"monsterenergy.com",
-  "prime":"drinkprime.com","pepsi":"pepsi.com","red bull":"redbull.com",
-  "sprite":"sprite.com","lipton":"lipton.com","schweppes":"schweppes.com",
-  "7up":"7up.com","dr pepper":"drpepper.com","arizona":"drinkarizona.com",
-  "capri-sun":"capri-sun.com","vimto":"vimto.co.uk","rubicon":"rubicondrinks.com",
-  "orangina":"orangina.fr","tropico":"tropico.fr","evian":"evian.com",
-  "volvic":"volvic.com","perrier":"perrier.com","jarritos":"jarritos.com"
-};
+/* Les logos des marques passent par BRAND_MINI (SVG intégrés, juste au-dessus) :
+   pas de requête vers un service externe, et un rendu identique hors-ligne.
+   L'ancienne table de domaines n'était plus lue par personne — retirée plutôt
+   que laissée à dormir, comme le doublon BRAND_DOMAINS qui l'avait précédée. */
 var brandLetterFilter=null;
 function _brandLetter(b){
   var c=(normTxt(b||"").charAt(0)||"#").toUpperCase();
@@ -7707,7 +7702,7 @@ function brandColor(brand){
   var hue=Math.abs(hash)%360;
   return "hsl("+hue+",55%,42%)";
 }
-/* Logos des ENSEIGNES DE MAGASINS (voir DRINK_BRAND_DOMAINS pour les marques). */
+/* Logos des ENSEIGNES DE MAGASINS (les marques, elles, passent par BRAND_MINI). */
 var STORE_BRAND_DOMAINS={
   "Carrefour":"carrefour.com","Carrefour Express":"carrefour.com","Carrefour Market":"carrefour.com","Carrefour Contact":"carrefour.com",
   "Delhaize":"delhaize.be","Proxy Delhaize":"delhaize.be","AD Delhaize":"delhaize.be","Shop&6Go":"delhaize.be",
@@ -10019,9 +10014,13 @@ function renderStoreList(){
   var maxPrice=curBudget||null;
   if(maxPrice){stores=stores.filter(function(s){var p=getStorePrice(s,curSel.id);return !p||p<=maxPrice;});}
 
+  /* Le meilleur prix connu rejoint les badges d'en-tete : c'est l'information
+     qu'on cherche en premier quand on sait deja ou la boisson se trouve. */
+  var _stats=priceStats(curSel.id,allStores);
   document.getElementById("res-badges").innerHTML=
     '<span class="rbadge">'+stores.length+' magasin'+(stores.length>1?"s":"")+'</span>'+
-    '<span class="rbadge">'+open+' ouvert'+(open>1?"s":"")+'</span>';
+    '<span class="rbadge">'+open+' ouvert'+(open>1?"s":"")+'</span>'+
+    (_stats?'<span class="rbadge price">d\u00e8s '+fmtPrix(_stats.min)+'</span>':"");
 
   var el=document.getElementById("store-list");
   var isDark=document.body.classList.contains("dark");
@@ -10061,7 +10060,7 @@ function renderStoreList(){
       '<span style="font-size:11px;font-weight:800;color:#e67e22;flex-shrink:0">Activer</span>'+
     '</div></div>'
   ):"";
-  el.innerHTML=stores.length?stockBanner+mapCta+renderSortBar()+advToggle+advWrap:advToggle+advWrap+
+  el.innerHTML=stores.length?priceBarHTML(_stats)+stockBanner+mapCta+renderSortBar()+advToggle+advWrap:advToggle+advWrap+
     '<div style="padding:22px 20px 8px;text-align:center">'+
       '<div style="font-size:36px;line-height:1;margin-bottom:8px"></div>'+
       '<div style="font-size:15.5px;font-weight:800;color:var(--s1);margin-bottom:5px">'+(watched?"Alerte activ\u00E9e pour cette boisson":"Personne ne l\'a signal\u00E9e par ici\u2026 pour l\'instant")+'</div>'+
@@ -10095,6 +10094,11 @@ function renderStoreList(){
     var trust=Math.round(Math.min(confs*20,100)*frF);
     var storePriceVal=getStorePrice(s,sid);
     var storePrice=storePriceVal?storePriceVal.toFixed(2)+"€":null;
+    /* Pastille « le moins cher » sur la carte concernee — mais seulement s'il
+       y a de quoi comparer ET un ecart reel. Coller l'etiquette sur le seul
+       prix connu, ou sur deux prix identiques, serait mensonger. */
+    var estMoinsCher=!!(_stats&&_stats.n>1&&_stats.ecart>=0.05&&storePriceVal!=null&&
+                        Math.abs(storePriceVal-_stats.min)<0.001);
     var storeIdStr=String(s.id);
     // Statut stock de CETTE boisson dans CE magasin, rendu tres visible :
     // barre d'accent coloree a gauche + pastille pres du nom.
@@ -10115,7 +10119,7 @@ function renderStoreList(){
           '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">'+
             '<div class="store-name">'+sanitize(s.name)+'</div>'+
             '<span style="flex-shrink:0;display:inline-flex;align-items:center;gap:3px;padding:2px 9px;border-radius:999px;background:'+stBg+';color:'+stTxt+';font-size:10px;font-weight:800;letter-spacing:.2px;white-space:nowrap">'+stIco+' '+stLbl+'</span>'+
-            (storePrice?'<span style="font-size:12px;font-weight:800;color:var(--s1);background:var(--bg2);padding:2px 8px;border-radius:999px">'+storePrice+'</span>':'<span style="font-size:11px;color:var(--s3);font-weight:500">Prix inconnu</span>')+
+            (storePrice?'<span class="pchip'+(estMoinsCher?' best':'')+'">'+storePrice+(estMoinsCher?' \u00b7 le moins cher':'')+'</span>':'<span style="font-size:11px;color:var(--s3);font-weight:500">Prix inconnu</span>')+
           '</div>'+
           '<div class="store-meta"><span>'+dist+'</span><span>·</span>'+
           (storeOpenState(s)!==null?'<span class="status" style="background:'+(storeOpenState(s)?"#f0fdf4":"#fef2f2")+';color:'+(storeOpenState(s)?"#15803d":"#b91c1c")+'">'+openLabel(s)+(s.hours?" · "+s.hours:"")+'</span>':'<span class="status" style="background:var(--bg3);color:var(--s2)">Horaires inconnus</span>')+'</div>'+
@@ -10150,6 +10154,73 @@ function renderStoreList(){
     if(storeRow)a11yCard(storeRow,s.name+", "+dist+(s.open?", ouvert":", fermé"));
     el.appendChild(div);
   });
+}
+
+/* ============================================================================
+   COMPARATEUR DE PRIX
+   ----------------------------------------------------------------------------
+   Les prix etaient DEJA collectes — a la confirmation de stock et au scan,
+   stockes par magasin dans s.prices, avec un historique horodate. Ils
+   n'etaient affiches nulle part sauf en petit sur chaque carte : impossible
+   de savoir, d'un coup d'oeil, ou une boisson coute le moins cher.
+
+   POURQUOI CA COMPTE : « ou la trouver » est une question qu'on se pose une
+   fois par mois. « ou l'avoir moins cher » se pose a CHAQUE achat. C'est la
+   difference entre une app qu'on ouvre une fois et une app qu'on garde.
+
+   On n'invente rien : s'il n'y a qu'un seul prix connu, on ne parle pas
+   d'ecart ; s'il n'y en a aucun, on ne montre pas la barre du tout. Une
+   fausse economie ferait se deplacer quelqu'un pour rien.
+   ============================================================================ */
+function priceStats(drinkId,stores){
+  try{
+    var pts=[];
+    (stores||[]).forEach(function(s){
+      var p=getStorePrice(s,drinkId);
+      if(typeof p==="number"&&p>0&&p<100)pts.push({s:s,p:p});
+    });
+    if(!pts.length)return null;
+    pts.sort(function(a,b){return a.p-b.p;});
+    var somme=pts.reduce(function(t,x){return t+x.p;},0);
+    return {
+      n:pts.length,
+      min:pts[0].p, max:pts[pts.length-1].p,
+      moy:somme/pts.length,
+      moinsCher:pts[0].s,
+      plusCher:pts[pts.length-1].s,
+      ecart:pts[pts.length-1].p-pts[0].p
+    };
+  }catch(e){ return null; }
+}
+function fmtPrix(v){ return v.toFixed(2).replace(".",",")+" €"; }
+
+/* La barre en tete de liste : le meilleur prix, chez qui, et ce qu'on economise
+   par rapport au plus cher. Un seul prix connu -> on l'affiche sans parler
+   d'economie. Aucun -> la fonction rend une chaine vide et rien ne s'affiche. */
+function priceBarHTML(st){
+  if(!st)return "";
+  var nom=sanitize(st.moinsCher.name||"ce magasin");
+  if(st.n===1){
+    return '<div class="pricebar solo">'+
+      '<span class="pb-ico">'+fmtPrix(st.min)+'</span>'+
+      '<span class="pb-txt"><b>'+nom+'</b><i>seul prix connu \u00b7 ajoute-en d\u2019autres en confirmant le stock</i></span>'+
+    '</div>';
+  }
+  var eco=st.ecart;
+  /* Ecart negligeable : annoncer « moins cher chez X » serait faux, il n'y a
+     pas de moins cher. On dit simplement le prix pratique. */
+  if(eco<0.05){
+    return '<div class="pricebar solo">'+
+      '<span class="pb-ico">'+fmtPrix(st.min)+'</span>'+
+      '<span class="pb-txt"><b>M\u00eame prix partout</b>'+
+        '<i>'+st.n+' prix compar\u00e9s \u00b7 pas la peine de chercher moins cher</i></span>'+
+    '</div>';
+  }
+  return '<div class="pricebar">'+
+    '<span class="pb-ico">'+fmtPrix(st.min)+'</span>'+
+    '<span class="pb-txt"><b>Moins cher chez '+nom+'</b>'+
+      '<i>jusqu\u2019\u00e0 '+fmtPrix(eco)+' d\u2019\u00e9cart \u00b7 '+st.n+' prix compar\u00e9s</i></span>'+
+  '</div>';
 }
 
 function getStorePrice(s,drinkId){
