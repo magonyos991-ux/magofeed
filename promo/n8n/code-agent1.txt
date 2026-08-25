@@ -29,8 +29,15 @@ const ORDRE = ["ramune","jarritos","milkis","guarana-antarctica","sumol","pocari
    CRENEAU : 13h = creneau pair, 19h = creneau impair. Jamais deux fois la
    meme boisson le meme jour, et chaque boisson revient tous les 6 jours. */
 const jour = Math.floor(Date.now() / 86400000);          // numero du jour (UTC)
-const creneau = new Date().getUTCHours() >= 15 ? 1 : 0;  // 19h Bruxelles = apres 15h UTC
-let idx = (jour * 2 + creneau) % ORDRE.length;
+/* TROIS creneaux par jour, pas deux. Le declencheur tire a 9h, 13h et 19h
+   (Bruxelles). Le premier code ne distinguait que « avant 15h UTC » et
+   « apres » : 9h (7h UTC) et 13h (11h UTC) tombaient donc dans le MEME
+   creneau, et sortaient la meme boisson — c'est exactement ce qu'on a vu
+   avec deux Milkis d'affilee. Les bornes tiennent l'ete (UTC+2) comme
+   l'hiver (UTC+1) : 7h/8h, 11h/12h, 17h/18h. */
+const hUTC = new Date().getUTCHours();
+const creneau = hUTC < 10 ? 0 : (hUTC < 15 ? 1 : 2);
+let idx = (jour * 3 + creneau) % ORDRE.length;
 
 /* SECOND VERROU : la memoire des posts deja publies.
    La rotation par calendrier suffit pour les passages automatiques, mais elle
