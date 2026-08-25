@@ -13376,6 +13376,19 @@ function exploreLoadStores(useCache){
   q.then(function(list){
     list=list||[];
     list.forEach(_stripAutoDrinks);           // retire les inventaires inventés
+    /* Distance recalculee depuis MA position pour chaque magasin. Sans ca,
+       deux incoherences : certains magasins n'avaient aucune distance (celle
+       posee a la requete vient du centre de la CARTE, pas de moi), et un
+       magasin garde par le filtre « 1 km » pouvait afficher « 3,2 km » —
+       parce que les deux nombres ne parlaient pas du meme point de depart.
+       Le filtre mesure depuis moi : l'affichage doit faire pareil. */
+    if(typeof userLat==="number"&&userLat&&typeof _distM==="function"){
+      list.forEach(function(s){
+        if(typeof s.lat==="number"&&typeof s.lng==="number"){
+          s.dist=Math.round(_distM(userLat,userLng,s.lat,s.lng));
+        }
+      });
+    }
     if(!useCache)window._exploreRawList=list;
     // Zone du monde encore vierge (Dakar, Tokyo...) : au lieu d'afficher le
     // vide, on declenche la decouverte OpenStreetMap automatique — avant, ce
@@ -13432,6 +13445,22 @@ function exploreLoadStores(useCache){
     // Enseignes presentes (vendeurs si une boisson est ciblee, sinon toutes) pour le selecteur.
     window._exploreBrands=Array.from(new Set(list.filter(function(s){return !exploreFilter||s._hasDrink;}).map(function(s){return s.brand;}).filter(Boolean))).sort();
     try{list=exploreApplyChips(list);}catch(eChip){}
+    /* ── Le compteur doit parler de ce qui reste APRÈS les filtres ────────
+       withDrink et _sureCount etaient calcules AVANT exploreApplyChips :
+       regler la distance sur 1 km masquait bien les magasins lointains, mais
+       l'en-tete continuait d'annoncer le total d'avant. On voyait donc
+       « 4 magasins » au-dessus de 2 pastilles, et on en concluait — a juste
+       titre — que le filtre ne marchait pas. Il marchait ; c'est le chiffre
+       qui mentait. On recompte donc ici, sur la liste filtree. */
+    if(exploreFilter){
+      var _did2=exploreFilter.drinkId;
+      withDrink=list.filter(function(s){
+        return s._hasDrink||(s.drinks||[]).some(function(id){return Number(id)===Number(_did2);});
+      }).length;
+      _sureCount=list.filter(function(s){
+        return storeVerifiedFor(s,_did2)||((s.confirmations||{})[_did2]||0)>0;
+      }).length;
+    }
     /* ── Ce qu'on compte doit etre ce qu'on voit ──────────────────────────
        fbQueryZone interroge un CERCLE dont le rayon est la demi-diagonale de
        l'ecran : ce cercle deborde donc largement du rectangle affiche. A
