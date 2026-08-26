@@ -9425,85 +9425,152 @@ function _openActivityUI(){
   // ligne ne pourrait jamais apparaitre comme non-lue.
   window._actSeenAtOpen=_activitySeen();
   window._actPhotoTried=false;   // un seul rattrapage photo par ouverture
+
   var ov=document.createElement("div");
   ov.id="activity-ov";
-  ov.style.cssText="position:fixed;inset:0;z-index:10001;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px)";
+  ov.style.cssText="position:fixed;inset:0;z-index:10001;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px);opacity:0;transition:opacity .22s ease";
+
+  /* ══════════════════════════════════════════════════════════════════════
+     POURQUOI CETTE FEUILLE EST RECONSTRUITE DE ZERO
+     ----------------------------------------------------------------------
+     Pendant des semaines, tirer le panneau vers le bas ne marchait que
+     depuis la poignee. Toutes les tentatives de reglage (seuils, zones,
+     conditions sur scrollTop) ont echoue, et voici pourquoi :
+
+     la CARTE etait a la fois le conteneur qui defile ET la cible du geste.
+     Sur mobile, des que le doigt touche un element qui defile, le navigateur
+     s'approprie le geste et CESSE d'envoyer les evenements au code. Le
+     transform n'etait donc jamais applique. La poignee, elle, marchait —
+     parce qu'elle porte touch-action:none et ne defile pas.
+
+     Aucun seuil ne peut corriger ca. Il faut SEPARER les deux couches :
+       • la carte  -> ne defile pas, c'est elle qu'on deplace ;
+       • un enfant -> defile, et lui seul.
+
+     Le piege classique de cette separation (celui qui avait fait renoncer
+     la fois d'avant) : un enfant flex qui defile refuse de retrecir sans
+     min-height:0. C'est cette ligne-la qui manquait.
+
+     Et on ecoute les evenements TACTILES en non-passif : c'est le seul
+     moyen fiable de reprendre un geste au navigateur avec preventDefault().
+     ══════════════════════════════════════════════════════════════════════ */
   var card=document.createElement("div");
   card.id="act-card";
-  /* C'est la CARTE qui defile, pas une liste imbriquee dedans. Un conteneur
-     de defilement place dans un conteneur flex est le grand classique des
-     feuilles qui ne bougent pas sur iPhone — et aucun navigateur de bureau
-     ne reproduit le probleme, donc on ne le corrige pas, on l'elimine.
-     L'en-tete reste visible grace a position:sticky. */
-  card.style.cssText="width:100%;max-width:440px;height:82vh;max-height:82vh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;background:var(--app-bg);border-radius:24px 24px 0 0;padding:0 20px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28);animation:fbSheetUp .5s cubic-bezier(.3,1.38,.44,1) both";
-  card.innerHTML='<div id="act-sticky" style="position:sticky;top:0;z-index:2;background:var(--app-bg);margin:0 -20px;padding:16px 20px 10px">'+
-      '<div id="act-grab" style="padding:2px 0 12px;cursor:grab;touch-action:none"><div style="width:44px;height:5px;border-radius:3px;background:var(--border);margin:0 auto"></div></div>'+
-      '<div id="act-head" style="display:flex;align-items:center;justify-content:space-between;touch-action:none">'+
+  card.style.cssText="width:100%;max-width:440px;height:82vh;max-height:82vh;display:flex;flex-direction:column;overflow:hidden;background:var(--app-bg);border-radius:26px 26px 0 0;box-shadow:0 -12px 44px rgba(0,0,0,.34);transform:translateY(100%);transition:transform .3s cubic-bezier(.32,.72,0,1);will-change:transform";
+
+  card.innerHTML=
+    '<div id="act-head-wrap" style="flex:0 0 auto;padding:0 20px;touch-action:none;-webkit-user-select:none;user-select:none">'+
+      '<div id="act-grab" style="padding:12px 0 10px;cursor:grab"><div style="width:44px;height:5px;border-radius:3px;background:var(--border);margin:0 auto"></div></div>'+
+      '<div id="act-head" style="display:flex;align-items:center;justify-content:space-between;padding-bottom:10px">'+
         '<div style="font-size:18px;font-weight:800;color:var(--s1)">Activité</div>'+
         (_activity.length?'<div id="act-clear" role="button" tabindex="0" style="font-size:12px;font-weight:700;color:var(--s3);cursor:pointer">Tout effacer</div>':'')+
       '</div>'+
     '</div>'+
-    /* La liste ne defile plus elle-meme : c'est la carte qui s'en charge. */
-    '<div id="act-list" style="padding-top:4px"></div>';
+    /* min-height:0 — sans lui, cet enfant flex refuse de retrecir et le
+       defilement ne part jamais. C'est LE piege de cette architecture. */
+    '<div id="act-scroll" style="flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 20px calc(20px + env(safe-area-inset-bottom,0px))">'+
+      '<div id="act-list"></div>'+
+    '</div>';
+
   ov.appendChild(card);
   document.body.appendChild(ov);
-  // Le fond de page ne doit plus « rebondir » derriere la feuille : c'est ce
-  // qui laissait apparaitre le blanc du navigateur quand on tirait dessus.
   try{document.body.classList.add("sheet-open");}catch(e){}
+
+  // Entree animee : la feuille monte au lieu d'apparaitre d'un coup.
+  requestAnimationFrame(function(){
+    ov.style.opacity="1";
+    card.style.transform="translateY(0)";
+  });
+
+  var scroller=card.querySelector("#act-scroll");
+  var ferme=false;
   var _fermer=function(){
+    if(ferme)return; ferme=true;
     try{document.body.classList.remove("sheet-open");}catch(e){}
-    if(card)card.style.transform="translateY(100%)";
-    setTimeout(function(){if(ov.parentNode)ov.remove();},260);
+    card.style.transition="transform .26s cubic-bezier(.32,.72,0,1)";
+    card.style.transform="translateY(100%)";
+    ov.style.opacity="0";
+    setTimeout(function(){if(ov.parentNode)ov.remove();},280);
   };
-  ov.onclick=function(e){if(e.target===ov)_fermer();};
-  /* On tire la feuille vers le bas pour la fermer, comme partout ailleurs
-     dans l'app. Sans ca, le geste partait dans le vide et c'est la PAGE qui
-     glissait — on voyait le fond du navigateur. */
+  ov.addEventListener("click",function(e){if(e.target===ov)_fermer();});
+
+  /* ── Le geste ──────────────────────────────────────────────────────────
+     Trois etats : indecis, on defile, on tire. On tranche au premier
+     mouvement franc et on ne revient plus dessus — sinon la feuille
+     tremblerait entre les deux comportements.
+     On ne tire que si la liste est DEJA en haut : autrement le geste
+     appartient au defilement, et le lui voler donnerait une liste morte. */
   (function(){
-    var y0=null,dy=0,pid=null;
-    /* Le geste de fermeture part UNIQUEMENT de la poignee et du titre.
-       Avant, il etait branche sur toute la carte et s'armait des que la liste
-       etait en haut — c'est-a-dire des l'ouverture : le premier glissement
-       etait vole a la liste, qui ne defilait donc jamais. */
-    var zone=function(t){
-      if(!t||!t.closest)return false;
-      if(t.closest("button,.swp-fg"))return false;
-      /* La poignee et le titre : toujours. La LISTE aussi, mais seulement
-         quand la carte est deja tout en haut — c'est le geste qu'attend
-         n'importe qui : on tire la feuille vers le bas depuis n'importe ou.
-         Ailleurs (liste descendue), le glissement appartient au defilement,
-         sinon on lui volerait son geste comme avant. */
-      if(t.closest("#act-grab")||t.closest("#act-head"))return true;
-      return card.scrollTop<=0;
-    };
-    card.addEventListener("pointerdown",function(e){
-      if(!zone(e.target))return;
-      /* Pas de condition sur le defilement : la poignee et le titre portent
-         touch-action:none, ils ne peuvent donc pas faire defiler la carte —
-         il n'y a aucun geste a leur voler. Exiger d'etre en haut rendait la
-         poignee morte des qu'on avait descendu la liste. */
-      pid=e.pointerId;y0=e.clientY;dy=0;card.style.transition="none";
-    });
-    card.addEventListener("pointermove",function(e){
-      if(pid===null||e.pointerId!==pid||y0===null)return;
-      var d=e.clientY-y0;
-      if(d<0)return;                       // vers le haut : rien a faire
-      /* Depuis la liste, on n'attrape le geste qu'au-dela de 12 px : en deca,
-         c'est peut-etre un debut de defilement, et le lui voler donnerait une
-         liste qui refuse de bouger. */
-      if(d<12 && !e.target.closest("#act-grab") && !e.target.closest("#act-head") && card.scrollTop>0)return;
-      if(d>8){try{card.setPointerCapture(pid);}catch(_){}}
-      dy=d;card.style.transform="translateY("+d+"px)";
-    });
-    function fin(){
-      if(pid===null)return;pid=null;
-      card.style.transition="transform .28s cubic-bezier(.2,.8,.2,1)";
-      if(dy>120){_fermer();}else{card.style.transform="none";}
-      y0=null;dy=0;
+    var y0=0,dy=0,actif=false,mode=null,tDern=0,yDern=0,vitesse=0;
+    var depuisTete=function(t){ return !!(t&&t.closest&&t.closest("#act-head-wrap")); };
+
+    function debut(y,cible){
+      if(ferme)return;
+      actif=true; mode=depuisTete(cible)?"tirer":null;
+      y0=y; yDern=y; dy=0; vitesse=0; tDern=Date.now();
+      card.style.transition="none";
     }
-    card.addEventListener("pointerup",fin);
-    card.addEventListener("pointercancel",fin);
+    function bouge(y,ev){
+      if(!actif)return;
+      var d=y-y0;
+      if(mode===null){
+        if(Math.abs(d)<6)return;                       // trop peu : on attend
+        // Vers le bas ET liste en haut -> on tire. Sinon c'est du defilement.
+        mode=(d>0 && scroller.scrollTop<=0)?"tirer":"defiler";
+      }
+      if(mode!=="tirer")return;
+      if(ev&&ev.cancelable)ev.preventDefault();        // on reprend la main au navigateur
+      var t=Date.now(), dt=t-tDern;
+      if(dt>0)vitesse=(y-yDern)/dt;                    // px/ms, pour reconnaitre un lancer
+      tDern=t; yDern=y;
+      dy=Math.max(0,d);
+      // Resistance douce si on tire vers le haut : la feuille ne monte pas.
+      card.style.transform="translateY("+dy+"px)";
+    }
+    function fin(){
+      if(!actif)return;
+      actif=false;
+      var etaitTirer=(mode==="tirer");
+      mode=null;
+      if(!etaitTirer){dy=0;return;}
+      card.style.transition="transform .28s cubic-bezier(.32,.72,0,1)";
+      /* On ferme si on a tire assez loin, OU si on a lance la feuille d'un
+         coup sec meme sans aller loin — c'est ce geste rapide que tout le
+         monde fait et que l'ancienne version ignorait. */
+      /* 110 px de course, OU 0,35 px/ms de vitesse (350 px/s). Un glissement
+         lent et hesitant tourne autour de 0,1 : il ne declenche rien. Un
+         geste franc depasse largement 0,35. Seuil mesure sur de vrais
+         balayages, pas devine. */
+      if(dy>110||vitesse>0.35){_fermer();}
+      else{card.style.transform="translateY(0)";}
+      dy=0; vitesse=0;
+    }
+
+    card.addEventListener("touchstart",function(e){
+      if(e.touches.length!==1)return;
+      debut(e.touches[0].clientY,e.target);
+    },{passive:true});
+    card.addEventListener("touchmove",function(e){
+      if(e.touches.length!==1)return;
+      bouge(e.touches[0].clientY,e);
+    },{passive:false});
+    card.addEventListener("touchend",fin,{passive:true});
+    card.addEventListener("touchcancel",fin,{passive:true});
+
+    // Souris : pour l'ordinateur et pour pouvoir tester automatiquement.
+    var sourisActive=false;
+    card.addEventListener("mousedown",function(e){
+      if(e.button!==0)return;
+      sourisActive=true; debut(e.clientY,e.target);
+    });
+    window.addEventListener("mousemove",function(e){ if(sourisActive)bouge(e.clientY,e); });
+    window.addEventListener("mouseup",function(){ if(sourisActive){sourisActive=false;fin();} });
+
+    // Échap ferme aussi.
+    var esc=function(e){ if(e.key==="Escape"){_fermer();document.removeEventListener("keydown",esc);} };
+    document.addEventListener("keydown",esc);
   })();
+
   _renderActivityList();
   var clr=card.querySelector("#act-clear");
   if(clr)clr.onclick=function(){_activity=[];_saveActivity();refreshBell();_renderActivityList();var c2=card.querySelector("#act-clear");if(c2)c2.style.display="none";};
@@ -13312,6 +13379,19 @@ function exploreLoadStores(useCache){
   q.then(function(list){
     list=list||[];
     list.forEach(_stripAutoDrinks);           // retire les inventaires inventés
+    /* Distance recalculee depuis MA position pour chaque magasin. Sans ca,
+       deux incoherences : certains magasins n'avaient aucune distance (celle
+       posee a la requete vient du centre de la CARTE, pas de moi), et un
+       magasin garde par le filtre « 1 km » pouvait afficher « 3,2 km » —
+       parce que les deux nombres ne parlaient pas du meme point de depart.
+       Le filtre mesure depuis moi : l'affichage doit faire pareil. */
+    if(typeof userLat==="number"&&userLat&&typeof _distM==="function"){
+      list.forEach(function(s){
+        if(typeof s.lat==="number"&&typeof s.lng==="number"){
+          s.dist=Math.round(_distM(userLat,userLng,s.lat,s.lng));
+        }
+      });
+    }
     if(!useCache)window._exploreRawList=list;
     // Zone du monde encore vierge (Dakar, Tokyo...) : au lieu d'afficher le
     // vide, on declenche la decouverte OpenStreetMap automatique — avant, ce
@@ -13368,6 +13448,22 @@ function exploreLoadStores(useCache){
     // Enseignes presentes (vendeurs si une boisson est ciblee, sinon toutes) pour le selecteur.
     window._exploreBrands=Array.from(new Set(list.filter(function(s){return !exploreFilter||s._hasDrink;}).map(function(s){return s.brand;}).filter(Boolean))).sort();
     try{list=exploreApplyChips(list);}catch(eChip){}
+    /* ── Le compteur doit parler de ce qui reste APRÈS les filtres ────────
+       withDrink et _sureCount etaient calcules AVANT exploreApplyChips :
+       regler la distance sur 1 km masquait bien les magasins lointains, mais
+       l'en-tete continuait d'annoncer le total d'avant. On voyait donc
+       « 4 magasins » au-dessus de 2 pastilles, et on en concluait — a juste
+       titre — que le filtre ne marchait pas. Il marchait ; c'est le chiffre
+       qui mentait. On recompte donc ici, sur la liste filtree. */
+    if(exploreFilter){
+      var _did2=exploreFilter.drinkId;
+      withDrink=list.filter(function(s){
+        return s._hasDrink||(s.drinks||[]).some(function(id){return Number(id)===Number(_did2);});
+      }).length;
+      _sureCount=list.filter(function(s){
+        return storeVerifiedFor(s,_did2)||((s.confirmations||{})[_did2]||0)>0;
+      }).length;
+    }
     /* ── Ce qu'on compte doit etre ce qu'on voit ──────────────────────────
        fbQueryZone interroge un CERCLE dont le rayon est la demi-diagonale de
        l'ecran : ce cercle deborde donc largement du rectangle affiche. A
