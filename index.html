@@ -3008,6 +3008,16 @@ window.fbSaveStore = async function(id, data) {
    memoire. L'ancienne version faisait getDocs() de la collection entiere ->
    crash memoire sur iPhone ("Un probleme recurrent est survenu"). Idempotent :
    relancer apres un crash reprend/complete sans doublons (arrayUnion). */
+/* Version SERVEUR du remplissage : la Cloud Function parcourt la collection
+   avec l'Admin SDK — pas de quota client, pas d'ecran allume. Renvoie
+   {parcourus, modifies, counts}. Echoue si la fonction n'est pas deployee :
+   l'app retombe alors sur le parcours local ci-dessous. */
+window.fbRemplirEnseignesServeur = async function(sets) {
+  var fns = getFunctions(app, "europe-west1");
+  var call = httpsCallable(fns, "remplirEnseignes", { timeout: 540000 });
+  var r = await call({ sets: sets });
+  return r.data;
+};
 window.fbFillEnseignes = async function(sets) {
   const counts = {};
   const norm = s => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -8647,7 +8657,31 @@ function adminFillEnseignes(){
   var sets=buildChainSets();
   Object.keys(sets).forEach(function(k){sets[k]=sets[k].filter(function(v,i,a){return a.indexOf(v)===i;});});
   if(!confirm("Remplissage int\u00E9gral (BE + FR) :\n\u2022 Carrefour "+sets.carrefour.length+" \u00B7 Delhaize "+sets.delhaize.length+" \u00B7 Colruyt "+sets.colruyt.length+"\n\u2022 Auchan "+sets.auchan.length+" \u00B7 Leclerc "+sets.leclerc.length+" \u00B7 Intermarch\u00E9 "+sets.intermarche.length+"\n\u2022 Monoprix "+sets.monoprix.length+" \u00B7 U "+sets.coursesu.length+" \u00B7 Cora "+sets.cora.length+" \u00B7 Franprix "+sets.franprix.length+" \u00B7 Albert Heijn "+sets.albertheijn.length+"\n\nSur TOUS les magasins de ces enseignes. Lancer ?"))return;
-  toast("Remplissage en cours\u2026 (peut prendre 1-2 min, laisse l'\u00e9cran allum\u00e9)");
+  toast("Remplissage lanc\u00e9 c\u00f4t\u00e9 serveur\u2026 tu peux quitter l'\u00e9cran");
+  /* SERVEUR D'ABORD : depuis l'import mondial, la collection compte des
+     dizaines de milliers de magasins — la parcourir depuis le telephone
+     prenait des heures et mangeait le quota de lectures. La Cloud Function
+     fait pareil en quelques dizaines de secondes. Si elle n'est pas (encore)
+     deployee, on retombe sur l'ancien parcours local. */
+  if(window.fbRemplirEnseignesServeur){
+    window.fbRemplirEnseignesServeur(sets).then(function(r){
+      playSound("win");
+      var det=Object.keys(r.counts||{}).map(function(k){return k+" "+r.counts[k];}).join(" \u00b7 ");
+      toast("\u2713 "+r.modifies+" magasins remplis ("+r.parcourus+" parcourus) \u2014 "+det);
+    }).catch(function(e){
+      var code=String((e&&(e.code||e.message))||e);
+      if(code.indexOf("not-found")!==-1||code.indexOf("internal")!==-1){
+        toast("Fonction serveur absente \u2014 parcours local\u2026 garde l'\u00e9cran allum\u00e9");
+        window.onFillProgress=function(p){toast("Remplissage\u2026 "+p+" magasins parcourus");};
+        window.fbFillEnseignes(sets).then(function(counts){
+          window.onFillProgress=null;
+          var msg=Object.keys(counts).map(function(k){return counts[k]+" "+k;}).join(", ");
+          playSound("win");toast("\u2713 Rempli : "+(msg||"aucun magasin trouv\u00e9"));
+        }).catch(function(e2){playSound("err");toast("\u00c9chec : "+((e2&&e2.message)||e2));});
+      } else { playSound("err"); toast("\u00c9chec : "+code); }
+    });
+    return;
+  }
   window.onFillProgress=function(p){toast("Remplissage\u2026 "+p+" magasins parcourus");};
   window.fbFillEnseignes(sets).then(function(counts){
     window.onFillProgress=null;
