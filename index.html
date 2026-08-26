@@ -7874,6 +7874,25 @@ function rankBadge(i){
   if(!c)return '<div style="width:26px;text-align:center;font-size:12px;font-weight:800;color:var(--s2);flex-shrink:0">'+(i+1)+'</div>';
   return '<div style="width:26px;height:26px;border-radius:50%;background:'+c[0]+';color:'+c[1]+';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;flex-shrink:0">'+(i+1)+'</div>';
 }
+/* ═══ DESSINS PAR DEFAUT ══════════════════════════════════════════════════
+   Les bouteilles dessinees des posts Instagram (promo/cards-src/bottles/)
+   deviennent le visuel PAR DEFAUT de toutes les boissons de leur marque qui
+   n'ont pas encore de vraie photo. Servies par le site, mises en cache par le
+   service worker, et remplacees automatiquement des qu'une photo Open Food
+   Facts verifiee est trouvee — le dessin n'est jamais qu'un interimaire. */
+var BOTTLE_ART={
+  "ramune":"ramune","guarana antarctica":"guarana-antarctica","calpico":"calpico",
+  "mogu mogu":"mogu-mogu","inca kola":"inca-kola","milkis":"milkis",
+  "jarritos":"jarritos","sumol":"sumol","pocari sweat":"pocari-sweat",
+  "vimto":"vimto","chupa chups":"chupa-chups","mountain dew":"mountain-dew"
+};
+function drinkArtURL(d){
+  if(!d||!d.brand)return null;
+  var b=normTxt(d.brand);
+  if(b==="ciao")return d.cat==="Energy"?"promo/cards-src/bottles/bottle-ciao-energy.svg":null;
+  var slug=BOTTLE_ART[b];
+  return slug?("promo/cards-src/bottles/bottle-"+slug+".svg"):null;
+}
 function drinkCanSVG(d,emojiSize){
   var c=d.color||"#e67e22";
   var top=shadeHex(c,0.35),dark=shadeHex(c,-0.25);
@@ -7898,7 +7917,12 @@ function getCachedDrinkImage(d){
 function drinkIconHTML(d){
   if(!d)return"";
   var url=getCachedDrinkImage(d);
-  if(!url)return drinkCanSVG(d,15);
+  if(!url){
+    var art=drinkArtURL(d);
+    if(art)return '<img src="'+art+'" alt="" loading="lazy" style="width:100%;height:100%;object-fit:contain;padding:9%;box-sizing:border-box" onerror="this.remove()">'
+      +'<span style="position:absolute;inset:0;display:none"></span>';
+    return drinkCanSVG(d,15);
+  }
   return '<img src="'+url+'" alt="" style="width:100%;height:100%;object-fit:contain;background:#fff;padding:7%;box-sizing:border-box;border-radius:inherit" onerror="if(this.parentNode)this.parentNode.innerHTML=window._genBottle">';
 }
 /* Verification stricte du produit OpenFoodFacts avant d'accepter sa photo :
@@ -8752,6 +8776,9 @@ function refreshDrinkVisual(d){
 function drinkCardPhotoHTML(d){
   var url=getCachedDrinkImage(d);
   if(!url){
+    var art=drinkArtURL(d);
+    if(art)return '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:'+(d.light||"#f6f1e7")+'">'
+      +'<img src="'+art+'" alt="" loading="lazy" style="max-width:78%;max-height:88%;object-fit:contain" onerror="this.remove()"></div>';
     return '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">'+drinkCanSVG(d,16)+'</div>';
   }
   var canLayer='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:1">'+drinkCanSVG(d,16)+'</div>';
@@ -14988,9 +15015,12 @@ function parseOSMHours(str){
   });
   return ok?rules:null;
 }
-function heuristicHours(name){
-  var n=(name||"").toLowerCase();
-  if(/night|nuit|24\/24/.test(n))return[{days:[0,1,2,3,4,5,6],ranges:[[18*60,4*60]]}];
+function heuristicHours(name,type){
+  /* Un night shop s'appelle rarement « Night Shop » : il s'appelle « Chez
+     Ali » et c'est son TYPE qui dit night shop. Ne regarder que le nom
+     faisait dire « ferme » a 1h du matin a une boutique ouverte jusqu'a 3h. */
+  var n=((name||"")+" "+(type||"")).toLowerCase();
+  if(/night|nuit|avond|24\/24|24h/.test(n))return[{days:[0,1,2,3,4,5,6],ranges:[[18*60,4*60]]}];
   if(/lidl|aldi|colruyt|delhaize|carrefour|intermarch|okay|spar\b|proxy|match\b|cora\b|leclerc|auchan|casino\b|monoprix|franprix/.test(n))
     return[{days:[1,2,3,4,5,6],ranges:[[8*60,20*60]]},{days:[0],ranges:[[8*60,13*60]]}];
   if(/press|kiosque|librairie|tabac|journaux|dagblad/.test(n))
@@ -14999,7 +15029,7 @@ function heuristicHours(name){
 }
 function storeOpenState(s,at){
   var now=at||(window.__forceNow?new Date(window.__forceNow):new Date());
-  var rules=parseOSMHours(s.hours)||heuristicHours(s.name);
+  var rules=parseOSMHours(s.hours)||heuristicHours(s.name,s.type);
   if(!rules)return null; // horaires inconnus : pas de mensonge
   var day=now.getDay(),t=now.getHours()*60+now.getMinutes();
   var open=false;
