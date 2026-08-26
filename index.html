@@ -5222,7 +5222,7 @@ function ensurePickerMap(cb){
     var center=[userLat||50.8466,userLng||4.3528];
     window._pickerMap=L.map("store-picker-map",{zoomControl:false,attributionControl:false}).setView(center,13);
     var darkP=document.body.classList.contains("dark");
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/"+(darkP?"dark_all":"light_all")+"/{z}/{x}/{y}{r}.png",{maxZoom:20,subdomains:"abcd"}).addTo(window._pickerMap);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,className:darkP?"tuiles-sombres":"",attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(window._pickerMap);
     window._pickerMarkers=L.layerGroup().addTo(window._pickerMap);
     window._pickerMap.on("click",function(e){onPickerMapClick(e.latlng);});
     if(userLat){
@@ -8778,9 +8778,12 @@ function initLeafletMap(lat,lng){
   map.dragging.disable();
   map.scrollWheelZoom.disable();
   var dark=document.body.classList.contains("dark");
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/"+(dark?"dark_all":"light_all")+"/{z}/{x}/{y}{r}.png",{
-    maxZoom:20,subdomains:"abcd",
-    attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  /* Carto a ferme son acces gratuit (« API KEY REQUIRED » imprime sur chaque
+     tuile) : OpenStreetMap, gratuit et sans cle, le remplace. Le sombre est
+     rendu par un filtre CSS — OSM n'a pas de variante nocturne. */
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{
+    maxZoom:19,className:dark?"tuiles-sombres":"",
+    attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map);
 
   // Pin position utilisateur
@@ -13193,7 +13196,7 @@ function openExploreMap(opts){
       exploreMap=L.map("explore-map",{zoomControl:false,doubleClickZoom:true,touchZoom:true,tap:true});
       L.control.zoom({position:"bottomleft"}).addTo(exploreMap);
       var darkE=document.body.classList.contains("dark");
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/"+(darkE?"dark_all":"light_all")+"/{z}/{x}/{y}{r}.png",{maxZoom:20,subdomains:"abcd"}).addTo(exploreMap);
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,className:darkE?"tuiles-sombres":"",attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(exploreMap);
       /* Regroupement si le greffon est la, sinon simple couche : la carte
          s'affiche dans les deux cas. disableClusteringAtZoom : au-dela, on
          est assez pres pour que chaque magasin merite son propre pin. */
@@ -14540,6 +14543,22 @@ function showRouteToStore(lat,lng,store){
   if(!exploreMap||!_hostR||_hostR.style.display==="none"){
     openExploreMap({center:{lat:(lat+userLat)/2,lng:(lng+userLng)/2}});
   }
+  /* A l'autre bout du monde (Dubai explore depuis Bruxelles), calculer un
+     chemin pieton n'a aucun sens et l'echec ejectait vers Google Maps. Au-dela
+     de 50 km, on ouvre la FICHE du magasin : tout se passe dans l'app. */
+  var _dKm=(function(){var a=(userLat-lat)*111,b=(userLng-lng)*111*Math.cos(lat*Math.PI/180);return Math.sqrt(a*a+b*b);})();
+  if(_dKm>50){
+    playSound("pop");
+    var _sidLoin=(window._navDest&&(window._navDest.id||window._navDest.fbId));
+    if(_sidLoin!=null){
+      try{
+        var _hl=document.getElementById("explore-map-host");
+        if(_hl&&_hl.style.display!=="none"){_hl.classList.remove("in");_hl.style.display="none";window._cameFromExplore=true;}
+      }catch(e){}
+      try{openStoreDetail(String(_sidLoin));}catch(e){}
+    }
+    return;
+  }
   toast("Calcul du chemin\u2026");
   var url="https://routing.openstreetmap.de/routed-foot/route/v1/foot/"+userLng+","+userLat+";"+lng+","+lat+"?overview=full&geometries=geojson";
   fetch(url).then(function(r){return r.json();}).then(function(d){
@@ -14630,8 +14649,18 @@ function showRouteToStore(lat,lng,store){
     wait();
   }).catch(function(e){
     console.warn("route:",e);
-    toast("Trac\u00e9 indisponible \u2014 ouverture GPS");
-    openNavApp("https://www.google.com/maps/dir/?api=1&travelmode=walking&destination="+lat+","+lng);
+    /* Le calcul a echoue (service ferme, zone non couverte) : on reste DANS
+       l'app et on ouvre la fiche — jamais d'ejection vers Google Maps sans
+       que la personne l'ait demande. */
+    toast("Trac\u00e9 indisponible \u2014 voici la fiche du magasin");
+    var _sidKo=(window._navDest&&(window._navDest.id||window._navDest.fbId));
+    if(_sidKo!=null){
+      try{
+        var _hk=document.getElementById("explore-map-host");
+        if(_hk&&_hk.style.display!=="none"){_hk.classList.remove("in");_hk.style.display="none";window._cameFromExplore=true;}
+      }catch(e2){}
+      try{openStoreDetail(String(_sidKo));}catch(e2){}
+    }
   });
 }
 
