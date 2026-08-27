@@ -3012,6 +3012,14 @@ window.fbSaveStore = async function(id, data) {
    avec l'Admin SDK — pas de quota client, pas d'ecran allume. Renvoie
    {parcourus, modifies, counts}. Echoue si la fonction n'est pas deployee :
    l'app retombe alors sur le parcours local ci-dessous. */
+/* Import serveur des horaires reels (OpenStreetMap, jeu belge publie avec
+   le site). Voir functions-a-deployer/importer-horaires.js. */
+window.fbImporterHoraires = async function() {
+  var fns = getFunctions(app, "europe-west1");
+  var call = httpsCallable(fns, "importerHoraires", { timeout: 540000 });
+  var r = await call({});
+  return r.data;
+};
 window.fbRemplirEnseignesServeur = async function(sets) {
   var fns = getFunctions(app, "europe-west1");
   var call = httpsCallable(fns, "remplirEnseignes", { timeout: 540000 });
@@ -8709,6 +8717,11 @@ function openAdminSheet(){
     '<div id="ash-photo" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Corriger la photo</div>'+
     '<div id="ash-zone" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Importer magasins de la zone (monde entier)</div>'+
     '<div id="ash-fill" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Remplissage enseignes (auto)</div>'+
+    '<div id="ash-hours" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px">'+
+      '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>'+
+      '<div><div style="font-size:13.5px;font-weight:800;color:var(--s1)">Importer les horaires (OSM)</div>'+
+      '<div style="font-size:11px;color:var(--s2)">Les vrais horaires belges, écrits sur chaque magasin côté serveur</div></div>'+
+    '</div>'+
     '<div id="ash-clean" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Purger Lidl / Aldi / Match</div>'+
     '<div id="ash-dedup" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Nettoyer doublons classement</div>'+
     '<div id="ash-rename" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Renommer / corriger le nom</div>'+
@@ -8725,6 +8738,19 @@ function openAdminSheet(){
   bind("ash-photo",adminFixPhoto);
   bind("ash-zone",function(){var sheet=document.getElementById("admin-sheet");if(sheet)sheet.remove();openOsmImport();});
   bind("ash-fill",adminFillEnseignes);
+  bind("ash-hours",function(){
+    if(!window.fbImporterHoraires){toast("Fonction serveur pas encore déployée");return;}
+    if(!confirm("Écrire les horaires réels (OpenStreetMap, Belgique) sur tous les magasins qui n'en ont pas ?"))return;
+    toast("Import des horaires lancé côté serveur…");
+    window.fbImporterHoraires().then(function(r){
+      playSound("win");
+      toast("\u2713 "+r.ecrits+" horaires écrits ("+r.parcourus+" magasins parcourus, "+r.dansLeJeu+" horaires dans le jeu belge)");
+    }).catch(function(e){
+      var c=String((e&&(e.code||e.message))||e);
+      playSound("err");
+      toast(c.indexOf("not-found")!==-1?"Déploie d'abord la fonction importerHoraires":"Échec : "+c);
+    });
+  });
   bind("ash-clean",adminCleanUnverified);
   bind("ash-dedup",adminCleanDuplicateUsers);
   bind("ash-rename",adminRenameDrink);
