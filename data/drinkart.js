@@ -324,11 +324,11 @@ ART["chupa chups"]=function(d){
   // Lignes du parfum
   var ftxt='';
   var y0=lines.length===1?263:255;
-  for(var t=0;t<lines.length;t++){
-    var len=lines[t].length;
+  for(var li=0;li<lines.length;li++){
+    var len=lines[li].length;
     var est=len*fs*0.7+(len-1)*ls;
     var tfit=est>88?' textLength="88" lengthAdjust="spacingAndGlyphs"':'';
-    ftxt+='<text x="120" y="'+(y0+t*fs*1.18)+'" text-anchor="middle" font-size="'+fs+'" font-weight="800" letter-spacing="'+ls+'" fill="'+tc+'"'+tfit+'>'+esc(lines[t])+'</text>';
+    ftxt+='<text x="120" y="'+(y0+li*fs*1.18)+'" text-anchor="middle" font-size="'+fs+'" font-weight="800" letter-spacing="'+ls+'" fill="'+tc+'"'+tfit+'>'+esc(lines[li])+'</text>';
   }
   return '<svg viewBox="0 0 240 360" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">'
   +'<defs>'
@@ -1474,8 +1474,8 @@ ART["tango"]=function(d){
   var pts=[];
   for(var k=0;k<n;k++){
     var rr=RO[k]+((id*13+k*7)%9)-4;
-    var a=-Math.PI/2 + k*2*Math.PI/n + AJ[k] + rot;
-    pts.push([cx+rr*Math.cos(a)*0.8, cy+rr*Math.sin(a)*1.04, a]);
+    var ang=-Math.PI/2 + k*2*Math.PI/n + AJ[k] + rot;
+    pts.push([cx+rr*Math.cos(ang)*0.8, cy+rr*Math.sin(ang)*1.04, ang]);
   }
   var sp='M'+pts[0][0].toFixed(1)+','+pts[0][1].toFixed(1);
   for(var k2=0;k2<n;k2++){
@@ -1837,7 +1837,7 @@ ART["vimto"]=function(d){
   }
 
   /* ============ BOUTEILLE VERRE GALBEE (defaut) ============ */
-  var body='M107,48 L133,48 C133,70 133,85 134,100 C138,122 158,132 164,152 C167,170 163,185 162,205 C161,235 166,260 168,288 C169,308 163,318 152,323 C142,327 131,328 120,328 C109,328 98,327 88,323 C77,318 71,308 72,288 C74,260 79,235 78,205 C77,185 73,170 76,152 C82,132 102,122 106,100 C107,85 107,70 107,48 Z';
+  body='M107,48 L133,48 C133,70 133,85 134,100 C138,122 158,132 164,152 C167,170 163,185 162,205 C161,235 166,260 168,288 C169,308 163,318 152,323 C142,327 131,328 120,328 C109,328 98,327 88,323 C77,318 71,308 72,288 C74,260 79,235 78,205 C77,185 73,170 76,152 C82,132 102,122 106,100 C107,85 107,70 107,48 Z';
   return '<svg viewBox="0 0 240 360" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">'
   +'<defs>'+lisGrad+lblGrad
   // liquide pourpre profond
