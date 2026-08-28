@@ -1641,14 +1641,24 @@ async function queryLatBand(latMin, latMax, depth) {
     limit(2000)
   );
   var snap = await getDocs(q);
-  if (snap.size >= 2000 && depth < 6) {
+  /* La profondeur etait de 6 : 2^6 x 2000 = 128 000 documents concatenes dans
+     un seul tableau, pour une carte qui en dessine deux cents. Et comme cette
+     requete ne borne QUE la latitude (la longitude n'est filtree qu'apres
+     telechargement, plus bas), la bande fait le tour de la Terre : depuis
+     Bruxelles elle ramene l'Allemagne, la Pologne, l'Ukraine, le Kazakhstan.
+     C'est de la que vient la memoire qui explose — pas des marqueurs.
+     A 1, le pire cas tombe a 4000 documents. Le vrai remede reste la requete
+     par geohash, deja ecrite et testee : il ne manque que la migration. */
+  if (snap.size >= 2000 && depth < 1) {
     var mid = (latMin + latMax) / 2;
     var a = await queryLatBand(latMin, mid, depth + 1);
     var b = await queryLatBand(mid, latMax, depth + 1);
     return a.concat(b);
   }
+  /* On ne garde que ce qu'on lit. Un QueryDocumentSnapshot retient les
+     structures internes du SDK ; un objet nu pese plusieurs fois moins. */
   var docs = [];
-  snap.forEach(function(d) { docs.push(d); });
+  snap.forEach(function(d) { docs.push({ id: d.id, _d: d.data() }); });
   return docs;
 }
 async function queryNearbyStores(lat, lng, radiusKm) {
@@ -1665,7 +1675,7 @@ async function queryNearbyStores(lat, lng, radiusKm) {
   docs.forEach(function(docSnap) {
     if (seen[docSnap.id]) return; // frontiere de bande : un doc peut arriver 2x
     seen[docSnap.id] = 1;
-    var data = docSnap.data();
+    var data = docSnap._d;
     if (data.lng == null || data.lng < box.lngMin || data.lng > box.lngMax) return;
     var d = haversineKm(lat, lng, data.lat, data.lng);
     if (d > radiusKm) return;
@@ -5265,9 +5275,9 @@ function ensurePickerMap(cb){
   if(window._pickerMap){setTimeout(function(){window._pickerMap.invalidateSize();cb&&cb();},180);return;}
   function build(){
     var center=[userLat||50.8466,userLng||4.3528];
-    window._pickerMap=L.map("store-picker-map",{zoomControl:false,attributionControl:false}).setView(center,13);
+    window._pickerMap=L.map("store-picker-map",{zoomControl:false}).setView(center,13);
     var darkP=document.body.classList.contains("dark");
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,className:darkP?"tuiles-sombres":"",attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(window._pickerMap);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,keepBuffer:1,updateWhenZooming:false,className:darkP?"tuiles-sombres":"",attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(window._pickerMap);
     window._pickerMarkers=L.layerGroup().addTo(window._pickerMap);
     window._pickerMap.on("click",function(e){onPickerMapClick(e.latlng);});
     if(userLat){
@@ -9063,7 +9073,7 @@ function initLeafletMap(lat,lng){
      tuile) : OpenStreetMap, gratuit et sans cle, le remplace. Le sombre est
      rendu par un filtre CSS — OSM n'a pas de variante nocturne. */
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{
-    maxZoom:19,className:dark?"tuiles-sombres":"",
+    maxZoom:19,keepBuffer:1,updateWhenZooming:false,className:dark?"tuiles-sombres":"",
     attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map);
 
@@ -13604,14 +13614,32 @@ function openExploreMap(opts){
       exploreMap=L.map("explore-map",{zoomControl:false,doubleClickZoom:true,touchZoom:true,tap:true});
       L.control.zoom({position:"bottomleft"}).addTo(exploreMap);
       var darkE=document.body.classList.contains("dark");
-      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,className:darkE?"tuiles-sombres":"",attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(exploreMap);
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,keepBuffer:1,updateWhenZooming:false,className:darkE?"tuiles-sombres":"",attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(exploreMap);
       /* Regroupement si le greffon est la, sinon simple couche : la carte
          s'affiche dans les deux cas. disableClusteringAtZoom : au-dela, on
          est assez pres pour que chaque magasin merite son propre pin. */
       exploreLayer=(window.L&&L.markerClusterGroup)
         ? L.markerClusterGroup({
             chunkedLoading:true,          // ajout par paquets : l'interface ne gele pas
-            maxClusterRadius:55,
+            /* Le rayon etait fixe a 55 px jusqu'au zoom 17 : a l'echelle d'une
+               ville, TOUT se regroupait et on ne voyait que des bulles de
+               comptage, jamais les magasins. C'est ce qui donnait l'aspect
+               grumeleux au lieu du semis de points d'Uber Eats.
+               Un point de palier 0 coute 1 noeud DOM contre 5 pour un pin
+               complet : on peut donc en montrer beaucoup. On ne regroupe plus
+               que ce qui se chevauche vraiment, palier par palier. */
+            maxClusterRadius:function(zoom){
+              /* Aux paliers larges, l'eclaircissement par grille garantit deja
+                 qu'aucun marqueur n'en recouvre un autre : regrouper par-dessus
+                 ne ferait que remplacer un semis lisible par des bulles de
+                 comptage. On ne regroupe donc qu'a partir du palier « rue »,
+                 la ou les pins complets peuvent vraiment se chevaucher. */
+              if(zoom<=14)return 1;       // pratiquement desactive
+              return 46;                  // pins complets de 30 px
+            },
+            /* Remis a 17 : a 16, les pins complets et leurs bulles de prix
+               se chevauchaient en tas illisibles. Entre 15 et 16, c'est le
+               regroupement qui degage la vue. */
             disableClusteringAtZoom:17,
             spiderfyOnMaxZoom:false,
             showCoverageOnHover:false,
@@ -13853,10 +13881,15 @@ function exploreLoadStores(useCache){
     if(!exploreFilter){try{exploreSetHeader(null,null);}catch(e){}}
     return;
   }
+  /* Un panoramique en trois coups de pouce mettait trois requetes en vol, et
+     les trois repeignaient la carte. Le motif du jeton existe deja pour les
+     requetes Firestore (window._fbQuerySeq) : on l'applique au rendu. */
+  var _seq = (window._exploreSeq = (window._exploreSeq || 0) + 1);
   var q;
   if(useCache&&window._exploreRawList){q=Promise.resolve(window._exploreRawList);}
-  else{if(status)status.textContent="Chargement\u2026";q=window.fbQueryZone?window.fbQueryZone(cLat,cLng,Math.min(radiusKm,25)):Promise.resolve(STORES||[]);}
+  else{if(status)status.textContent="Chargement\u2026";q=window.fbQueryZone?window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12)):Promise.resolve(STORES||[]);}
   q.then(function(list){
+    if(_seq!==window._exploreSeq)return;      // un mouvement plus recent a pris la main
     list=list||[];
     list.forEach(_stripAutoDrinks);           // retire les inventaires inventés
     /* Distance recalculee depuis MA position pour chaque magasin. Sans ca,
@@ -13966,8 +13999,52 @@ function exploreLoadStores(useCache){
        regroupement, le nombre d'elements dessines ne depend plus du nombre de
        magasins mais du zoom — on peut donc tout montrer. Le plafond restant
        (3000) ne protege plus l'affichage mais la memoire du telephone. */
-    var _lot=[];
-    list.slice(0,3000).forEach(function(s){
+    /* Le palier de detail se decide une seule fois, avant la boucle : appeler
+       getZoom() 800 fois couterait plus cher que tout le reste. */
+    var _zNiv=14; try{_zNiv=exploreMap.getZoom();}catch(eZ){}
+    var _palier=_zNiv<=12?0:(_zNiv<=14?1:2);
+    /* ECLAIRCISSEMENT PAR GRILLE, aux paliers larges seulement.
+       A l'echelle d'une ville, deux magasins distants de 20 m tombent sur le
+       meme pixel : en dessiner un par-dessus l'autre ne montre rien de plus,
+       ca ne fait que payer des noeuds DOM. On decoupe donc l'ecran en cellules
+       et on ne garde que le magasin le plus informatif de chaque cellule —
+       stock confirme d'abord, puis certifie, puis vendeur.
+       Ce n'est pas cacher des magasins : c'est dessiner ce qui est dessinable a
+       cette echelle. Le compteur de l'en-tete continue d'annoncer le VRAI
+       nombre, et des le zoom suivant tout reapparait. */
+    var _pourCarte=list;
+    if(_palier<2&&list.length>60){
+      try{
+        var _cell=_palier===0?34:42, _grille={}, _rang=function(x){
+          var _d=exploreFilter?exploreFilter.drinkId:null;
+          if(_d&&(storeVerifiedFor(x,_d)||((x.confirmations||{})[_d]||0)>0))return 3;
+          if(storeCertifie(x))return 2;
+          if(!exploreFilter||x._hasDrink)return 1;
+          return 0;
+        };
+        list.forEach(function(x){
+          if(typeof x.lat!=="number"||typeof x.lng!=="number")return;
+          var pt=exploreMap.latLngToContainerPoint([x.lat,x.lng]);
+          var k=Math.round(pt.x/_cell)+":"+Math.round(pt.y/_cell);
+          var cur=_grille[k];
+          if(!cur||_rang(x)>_rang(cur))_grille[k]=x;
+        });
+        var _clair=[];
+        Object.keys(_grille).forEach(function(k){_clair.push(_grille[k]);});
+        if(_clair.length)_pourCarte=_clair;
+      }catch(eG){}
+    }
+    /* Seuls les MARQUEURS sont eclaircis. La liste du bas et les compteurs
+       continuent de parler de tous les magasins de la zone : sinon la carte
+       dirait « 25 magasins » la ou il y en a 800. */
+    var _lot=[], _avant=0;
+    /* Les plus proches d'abord, pour que les six mis en avant soient ceux qui
+       servent vraiment — pas les six premiers du tableau. */
+    if(_palier<2&&typeof userLat==="number"&&userLat&&typeof _distM==="function"){
+      try{ _pourCarte=_pourCarte.slice().sort(function(a,b){
+        return _distM(userLat,userLng,a.lat,a.lng)-_distM(userLat,userLng,b.lat,b.lng);}); }catch(eS){}
+    }
+    _pourCarte.slice(0,3000).forEach(function(s){
       if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
       var pc=brandColor(s.brand);
       var ini=((s.brand||s.name||"?").trim().charAt(0)||"?").toUpperCase();
@@ -13979,6 +14056,13 @@ function exploreLoadStores(useCache){
       // vend & confirme = vert coche ; vend = point de marque ; ne vend pas = gris (contexte alentour)
       // + BLEU : magasin certifie. Independant du vert, donc cumulable.
       var certif=storeCertifie(s);
+      /* « Mis en avant » facon Uber Eats : quelques marqueurs lisibles au
+         milieu d'un semis de points. Si TOUS les magasins sûrs passaient en
+         gros, il n'y aurait plus aucun contraste — c'est justement ce que
+         l'eclaircissement produit, puisqu'il retient les meilleurs de chaque
+         cellule. On plafonne donc a six, les plus proches d'abord. */
+      var _enAvant=(sure||certif)&&_avant<6;
+      if(_enAvant)_avant++;
       var cls="mago-pin"+(closed?" closed":"")+(sure?" sure":"")+(certif?" certif":"");
       var badge=(sure?'<span class="pin-check">✓</span>':"")+(certif?pinCertifBadge():"");
       var ctx=(exploreFilter&&!hasDrink)?"opacity:.4;filter:grayscale(1)":"";
@@ -13987,13 +14071,33 @@ function exploreLoadStores(useCache){
       var priceTag="";
       if(exploreFilter&&hasDrink&&did){
         var _pv=(typeof getStorePrice==="function")?getStorePrice(s,did):null;
-        var _zoomOK=false;try{_zoomOK=exploreMap.getZoom()>=15;}catch(ez){}
-        if(_pv!=null&&_zoomOK){
+        /* Le prix ne s'affiche qu'une fois vraiment proche : a 15, les
+           bulles se recouvraient les unes les autres et ne se lisaient plus. */
+        var _zPrix=false; try{_zPrix=exploreMap.getZoom()>=16;}catch(ez){}
+        if(_pv!=null&&_palier===2&&_zPrix){
           var _ptxt=(_pv.toFixed(2).replace(/\.?0+$/,""))+"€";
           priceTag='<div style="position:absolute;left:50%;top:-15px;transform:translateX(-50%);background:#fff;color:#12100e;font-size:10.5px;font-weight:800;line-height:1;padding:3px 7px;border-radius:999px;white-space:nowrap;box-shadow:0 2px 7px rgba(0,0,0,.32);border:1px solid rgba(0,0,0,.08);z-index:5">'+_ptxt+'</div>';
         }
       }
-      var mk=L.marker([s.lat,s.lng],{icon:L.divIcon({className:"",html:'<div class="'+cls+'" style="position:relative;--pc:'+pc+';width:30px;height:39px;'+ctx+'">'+priceTag+'<div class="mago-pin-head" style="width:30px;height:30px;font-size:12px">'+ini+badge+'</div><div class="mago-pin-tip" style="width:11px;height:11px;bottom:2px"></div></div>',iconSize:[30,39],iconAnchor:[15,39]}),zIndexOffset:sure?600:(certif?450:(hasDrink?300:0))});
+      /* NIVEAU DE DETAIL SELON LE ZOOM.
+         Un pin complet coute 4 a 6 noeuds DOM. A l'echelle d'une ville ils sont
+         de toute facon illisibles : autant ne pas les fabriquer. On garde le pin
+         riche pour la rue, un point avec l'initiale pour le quartier, et un
+         simple point pour la ville — sauf les magasins qui meritent d'etre vus
+         de loin (stock confirme ou certifie), qui gardent une pastille lisible.
+         Le marqueur reste un divIcon a tous les paliers : le menu par appui
+         long a toujours un element DOM ou s'accrocher. */
+      var _ico;
+      if(_palier===0){
+        _ico=_enAvant
+          ? L.divIcon({className:"",html:'<div class="mago-dot fort'+(closed?" closed":"")+'" style="--pc:'+pc+';'+ctx+'">'+(sure?"✓":"")+'</div>',iconSize:[16,16],iconAnchor:[8,8]})
+          : L.divIcon({className:"",html:'<div class="mago-dot" style="--pc:'+pc+';'+ctx+'"></div>',iconSize:[9,9],iconAnchor:[4,4]});
+      } else if(_palier===1){
+        _ico=L.divIcon({className:"",html:'<div class="mago-dot moyen'+(closed?" closed":"")+(sure?" sure":"")+(certif?" certif":"")+'" style="--pc:'+pc+';'+ctx+'">'+ini+'</div>',iconSize:[20,20],iconAnchor:[10,10]});
+      } else {
+        _ico=L.divIcon({className:"",html:'<div class="'+cls+'" style="position:relative;--pc:'+pc+';width:30px;height:39px;'+ctx+'">'+priceTag+'<div class="mago-pin-head" style="width:30px;height:30px;font-size:12px">'+ini+badge+'</div><div class="mago-pin-tip" style="width:11px;height:11px;bottom:2px"></div></div>',iconSize:[30,39],iconAnchor:[15,39]});
+      }
+      var mk=L.marker([s.lat,s.lng],{icon:_ico,zIndexOffset:sure?600:(certif?450:(hasDrink?300:0))});
       mk.on("click",function(e){
         if(e&&e.originalEvent&&window.L&&L.DomEvent){try{L.DomEvent.stopPropagation(e.originalEvent);}catch(_e){}}
         if(window._pinMenuVientDeSOuvrir){window._pinMenuVientDeSOuvrir=false;return;} // l'appui long a deja agi
