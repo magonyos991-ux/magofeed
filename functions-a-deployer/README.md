@@ -17,6 +17,8 @@ Tout est **testable/déployable par toi**, jamais mis en prod sans essai.
 | `anti-farm.js` | **Les faux stocks font perdre des points** : une annonce contredite par 2 personnes sur place est sanctionnée, et la sanction est ineffaçable | Faible (ne crédite rien, ne fait que retirer) | **Maintenant**, avec les règles |
 | `migration-geohash.js` | **Recherche de magasins par geohash** : arrête de lire les magasins de Cologne à chaque recherche faite à Bruxelles | Faible (n'écrit qu'un champ, relançable) | Quand tu veux |
 | `partage.js` | **Aperçu des liens partagés** : une vraie vignette (titre + photo) pour les boissons de la communauté et les magasins, qui n'ont pas de page pré-générée | Faible (ne lit que des données publiques) | Quand tu veux |
+| `sauvegarde.js` | **Sauvegarde automatique** de toute la base, chaque nuit à 3 h, plus un bouton « Sauvegarder maintenant » dans l'administration | Faible (ne fait que lire et copier) | **Maintenant** |
+| `tests-regles/` | **Banc d'essai des règles** : 34 épreuves qui attaquent la base pour vérifier qu'elle tient, et que les usages normaux passent toujours | Aucun (tourne chez toi, sur une base jetable) | Avant chaque déploiement de règles |
 
 ---
 
@@ -36,6 +38,64 @@ sa propre découverte, ou écrive une notification à quelqu'un d'autre.
 > 🔸 **Limite honnête (Phase 1)** : le solde de points reste écrit par le client.
 > Pour le rendre infalsifiable, il faut la **Phase 2** (plus bas), puis activer la
 > « VERSION STRICTE » indiquée en bas de `firestore.rules`.
+
+## 1 bis) Vérifier les règles AVANT de les déployer (~3 min la première fois)
+
+Une règle Firestore ne prévient jamais quand elle laisse passer quelque chose.
+Le banc d'essai pose la question à l'envers : il **essaie d'attaquer** la base
+et échoue si l'attaque réussit. Il vérifie aussi que les usages normaux passent
+toujours — une règle trop serrée casse l'app aussi sûrement qu'une règle trop
+lâche la met en danger.
+
+C'est ce banc d'essai qui a trouvé que `match /{doc=**}` sous `users/{uid}`
+couvrait le document lui-même et annulait en silence **toutes** les protections
+du profil, y compris la ligne censée rendre ineffaçable la sanction anti-triche.
+À la lecture, la règle paraissait juste.
+
+```
+cd functions-a-deployer/tests-regles
+npm install          # une seule fois
+npm test
+```
+
+Il faut Java installé (l'émulateur Firestore tourne dessus). Rien ne part en
+ligne : tout se passe sur ta machine, sur une base jetable.
+
+Tu dois lire `34/34 conformes`. Si une ligne passe de `ok` à `ECHEC`,
+**ne déploie pas** : soit la règle est trop lâche (une attaque passe), soit elle
+est trop serrée (un usage normal est bloqué). Les deux se réparent avant, pas
+après.
+
+## 1 ter) Déployer la SAUVEGARDE automatique (~10 min)
+
+Sans sauvegarde, une fausse manœuvre est définitive. La fonction exporte toute
+la base chaque nuit à 3 h (heure de Bruxelles) vers ton propre stockage Firebase,
+dans un dossier daté.
+
+1. Copie `sauvegarde.js` dans ton dossier `functions`.
+2. Dans ce dossier : `npm install @google-cloud/firestore`
+3. Ajoute au bout de `functions/index.js` :
+   ```js
+   Object.assign(exports, require("./sauvegarde"));
+   ```
+4. Déploie :
+   ```
+   firebase deploy --only functions:sauvegardeQuotidienne,functions:sauvegarderMaintenant
+   ```
+5. Ouvre l'app, va dans **Administration**. Une carte « Sécurité » apparaît en
+   bas. Appuie sur **Sauvegarder maintenant** : la pastille doit passer au vert
+   avec la date du jour.
+
+La pastille devient **rouge** si la dernière sauvegarde date de plus de 36 h, et
+reste **grise** tant que la fonction n'est pas déployée. Une sauvegarde dont on
+ignore l'état est pire que pas de sauvegarde : on cesse de s'en méfier.
+
+**Restaurer**, le jour où il le faut :
+```
+gcloud firestore import gs://TON-PROJET.appspot.com/sauvegardes/AAAA-MM-JJ
+```
+Fais-le une fois pour de faux, sur un projet de test, pendant que tout va bien.
+Une restauration qu'on découvre le jour de l'incident n'est pas une sauvegarde.
 
 ## 2) Déployer le PUSH réel (~10 min)
 
