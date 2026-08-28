@@ -1115,7 +1115,7 @@ window.fbSyncUserStats = function(stats) {
     var favIds = [];
     try { favIds = (JSON.parse(localStorage.getItem("magofavs") || "[]") || []).slice(0, 10); } catch(e) {}
     setDoc(userDocRef(user.uid), {
-      pseudo: localStorage.getItem("magopseudo") || "Explorateur",
+      pseudo: String(localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
       avatar: av,
       favs: favIds,
       points: stats.pts || 0,
@@ -1270,7 +1270,7 @@ onAuthStateChanged(auth, async function(user) {
       // arriverait parfois en dernier et effacerait le consentement — plus
       // aucun e-mail, sans que rien ne le signale.
       await setDoc(userDocRef(user.uid), {
-        pseudo: localStorage.getItem("magopseudo") || "Explorateur",
+        pseudo: String(localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
         points: 0, signals: 0, confirms: 0,
         createdAt: serverTimestamp()
       }, { merge: true });
@@ -2662,7 +2662,15 @@ window.fbCountOnline = async function() {
    "chasse" visible par les gens autour (rayon ~15 km). But : mobiliser la
    communauté pour localiser une boisson rare. Données agrégées et localisation
    volontairement arrondie (~1 km) — aucun nom, aucune position précise. */
-function _coarse(x){ return Math.round(x * 100) / 100; }
+/* Deux decimales, c'etait une case d'environ 1 km sur 700 m : un quartier,
+   pas « une ville ». Et le document hunts/{drinkId} est lisible SANS COMPTE,
+   avec l'identifiant de chaque chercheur — identifiant qui ouvre users/{uid},
+   lui aussi public, donc pseudo et boissons favorites. Croises, ces deux
+   documents donnaient a un inconnu le quartier d'habitation d'une personne
+   nommee. Une decimale ramene la case a environ 11 km sur 7 : de quoi savoir
+   dans quelle ville chercher, ce que le filtre des chasses proches demande, et
+   rien de plus. */
+function _coarse(x){ return Math.round(x * 10) / 10; }
 /* TEST SOLO : simule une chasse lancée par un VOISIN (uid factice) à ta position.
    Déclenche notifyHuntNearby côté serveur, qui doit alors t'envoyer la notif à
    TOI (tu n'es pas le chercheur). Permet de tester toute la chaîne sans 2e tel. */
@@ -3050,6 +3058,24 @@ window.fbSaveStore = async function(id, data) {
    l'app retombe alors sur le parcours local ci-dessous. */
 /* Import serveur des horaires reels (OpenStreetMap, jeu belge publie avec
    le site). Voir functions-a-deployer/importer-horaires.js. */
+/* Journal des actions sensibles : quoi, quand, sur combien. Lecture et
+   ecriture reservees a l'administrateur par les regles. Sans cette trace,
+   comprendre un incident revient a le deviner. */
+window.fbJournalAdmin = async function(champs) {
+  try {
+    var u = auth.currentUser; if (!u) return;
+    await addDoc(collection(db, "adminLog"), Object.assign({
+      par: u.uid, quand: serverTimestamp()
+    }, champs || {}));
+  } catch (e) { /* le journal ne doit jamais bloquer une action */ }
+};
+/* Sauvegarde complete a la demande, avant une operation risquee. */
+window.fbSauvegarderMaintenant = async function() {
+  var fns = getFunctions(app, "europe-west1");
+  var call = httpsCallable(fns, "sauvegarderMaintenant", { timeout: 540000 });
+  var r = await call({});
+  return r.data;
+};
 window.fbImporterHoraires = async function() {
   var fns = getFunctions(app, "europe-west1");
   var call = httpsCallable(fns, "importerHoraires", { timeout: 540000 });
@@ -4376,7 +4402,7 @@ function renderLeaderboard(){
     var rlv=levelInfo(r.points||0),rcol=levelPseudoColor(rlv.idx);
     row.innerHTML=rankBadge(i)+
       '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:'+(isMe?"800":"600")+';color:'+(rcol||"var(--s1)")+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(r.pseudo)+(isMe?' <span style="font-size:11px;font-weight:700;color:var(--s2)">'+((LANGS[curLang]||LANGS.fr).me)+'</span>':"")+(r.streak>=2?' <span style="display:inline-flex;align-items:center;gap:1px;font-size:11px;font-weight:700;color:#e67e22;vertical-align:-1px" title="'+r.streak+' jours d\'affil\u00E9e">'+svgFlame(12,"#e67e22")+r.streak+'</span>':"")+'</div>'+
-      '<div style="font-size:12.5px;font-weight:700;color:var(--s1);flex-shrink:0">'+r.points+' pts</div>'+
+      '<div style="font-size:12.5px;font-weight:700;color:var(--s1);flex-shrink:0">'+nbSur(r.points)+' pts</div>'+
       '<span style="font-size:13px;color:var(--s3);flex-shrink:0">\u203A</span>';
     row.onclick=function(){openPlayerProfile(r);};
     row.onkeydown=function(ev){if(ev.key==="Enter")openPlayerProfile(r);};
@@ -6177,6 +6203,12 @@ function onBarcodeDetected(r){
   }
 }
 function sanitize(str){var d=document.createElement("div");d.textContent=str;return d.innerHTML;}
+/* Un nombre qui vient d'un AUTRE utilisateur (points, serie, confirmations)
+   n'est pas forcement un nombre : le document users/{uid} est ecrit par son
+   proprietaire, qui peut y mettre du texte. Interpole tel quel dans du HTML,
+   ce texte s'executait. On force donc la conversion partout ou on affiche la
+   valeur de quelqu'un d'autre. */
+function nbSur(v){var n=Number(v);return (isFinite(n)&&n>0)?Math.floor(n):0;}
 /* Code-barre inconnu MAIS boisson connue (la Pepsi belge dont OFF ignore le
    code) : l'utilisateur choisit la boisson du catalogue, le code lui est lie
    sur-le-champ en local + suggestion envoyee a l'admin (formatSuggestions,
@@ -8797,11 +8829,137 @@ function adminCleanDuplicateUsers(){
     toast("\u00c9chec ("+(e&&e.message||"erreur")+") \u2014 r\u00e8gle users delete admin manquante ?");
   });
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GARDE-FOU DES ACTIONS SENSIBLES
+   ---------------------------------------------------------------------------
+   Un seul passage obligatoire pour TOUTE action qui detruit des donnees ou en
+   modifie beaucoup d'un coup — celles d'aujourd'hui comme celles qu'on
+   ajoutera demain. Il remplace les confirm() disparates, qui avaient trois
+   defauts : ils n'annoncaient pas l'AMPLEUR (« purger » : combien ?), ils se
+   validaient d'un doigt qui glisse, et ils ne laissaient AUCUNE trace — apres
+   coup, impossible de savoir ce qu'on avait fait a 2 h du matin.
+
+   Trois niveaux, choisis selon ce que l'action fait vraiment :
+     'massif'      : beaucoup d'ecritures, mais rien ne se perd  -> confirmation simple
+     'destructif'  : des donnees disparaissent                   -> il faut ECRIRE un mot
+     'irreversible': destruction large et definitive             -> mot + sauvegarde proposee
+
+   Chaque passage est journalise dans adminLog (lecture et ecriture reservees
+   a l'administrateur par les regles) : quoi, quand, sur combien, et le
+   resultat. C'est ce journal qui permet de comprendre un incident au lieu de
+   le deviner.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function journaliserAction(action, champs){
+  try{
+    if(!window.fbJournalAdmin)return;
+    window.fbJournalAdmin(Object.assign({action:String(action).slice(0,60)},champs||{}));
+  }catch(e){}
+}
+function actionSensible(o){
+  // o = {titre, quoi, compte, unite, niveau, mot, reversible, faire}
+  return new Promise(function(resolve){
+    if(document.getElementById("garde-fou")){resolve(false);return;}
+    var niveau=o.niveau||"massif";
+    /* Au niveau « massif » sans mot impose il n'y a pas de mot a taper : il
+       faut donc laisser motAttendu a null, pas appeler toUpperCase sur null. */
+    var motBrut=o.mot||(niveau==="massif"?"":"CONFIRMER");
+    var motAttendu=motBrut?String(motBrut).toUpperCase():null;
+    var ov=document.createElement("div");
+    ov.id="garde-fou";
+    ov.style.cssText="position:fixed;inset:0;z-index:100002;background:rgba(12,10,8,.72);display:flex;align-items:center;justify-content:center;padding:20px;touch-action:manipulation";
+    var couleur=niveau==="massif"?"#c69a57":"#dc2626";
+    var compteTxt=(o.compte==null)?"":(o.compte+" "+(o.unite||"élément")+(o.compte>1?"s":""));
+    ov.innerHTML='<div style="background:var(--app-bg);border:2px solid '+couleur+';border-radius:22px;max-width:380px;width:100%;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.5);max-height:86vh;overflow-y:auto">'+
+      '<div style="font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:'+couleur+';margin-bottom:6px">'+
+        (niveau==="massif"?"Action de grande ampleur":(niveau==="irreversible"?"Destruction définitive":"Action destructive"))+'</div>'+
+      '<div style="font-size:19px;font-weight:800;color:var(--s1);margin-bottom:10px">'+sanitize(o.titre||"Confirmer")+'</div>'+
+      '<div style="font-size:13.5px;color:var(--s2);line-height:1.55;margin-bottom:12px">'+sanitize(o.quoi||"")+'</div>'+
+      (compteTxt?'<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:13px;padding:11px 13px;margin-bottom:12px">'+
+        '<div style="font-size:22px;font-weight:800;color:'+couleur+'">'+sanitize(compteTxt)+'</div>'+
+        '<div style="font-size:11.5px;color:var(--s2);margin-top:2px">que cette action va toucher</div></div>':'')+
+      '<div style="font-size:12.5px;font-weight:700;color:'+(o.reversible?"var(--s2)":"#dc2626")+';margin-bottom:14px">'+
+        (o.reversible?"Réversible : tu pourras revenir en arrière.":"Irréversible : rien ne pourra être récupéré sans sauvegarde.")+'</div>'+
+      (niveau==="irreversible"?'<button id="gf-save" type="button" style="width:100%;padding:12px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-weight:800;font-size:13px;cursor:pointer;margin-bottom:12px;touch-action:manipulation">Sauvegarder la base d\'abord</button>':'')+
+      (motAttendu?'<div style="font-size:12.5px;color:var(--s1);font-weight:700;margin-bottom:6px">Écris <b style="color:'+couleur+'">'+sanitize(motAttendu)+'</b> pour confirmer</div>'+
+        '<input id="gf-mot" type="text" autocapitalize="characters" autocomplete="off" style="width:100%;padding:12px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:15px;font-weight:700;margin-bottom:14px;box-sizing:border-box">':'')+
+      '<div style="display:flex;gap:8px">'+
+        '<button id="gf-non" type="button" style="flex:1;padding:14px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-weight:800;font-size:14px;cursor:pointer;touch-action:manipulation">Annuler</button>'+
+        '<button id="gf-oui" type="button" style="flex:1.2;padding:14px;border-radius:12px;border:none;background:'+couleur+';color:#fff;font-weight:800;font-size:14px;cursor:pointer;opacity:'+(motAttendu?".45":"1")+';touch-action:manipulation">Confirmer</button>'+
+      '</div></div>';
+    document.body.appendChild(ov);
+    var fermer=function(v){try{ov.remove();}catch(e){}resolve(v);};
+    var oui=ov.querySelector("#gf-oui"), champ=ov.querySelector("#gf-mot");
+    if(champ){
+      champ.addEventListener("input",function(){
+        var bon=champ.value.trim().toUpperCase()===motAttendu;
+        oui.style.opacity=bon?"1":".45";
+      });
+      setTimeout(function(){try{champ.focus();}catch(e){}},120);
+    }
+    /* Verrou COURT, pas definitif. Un appui sur mobile emet touchend PUIS
+       click : sans verrou, l'action partirait deux fois. Mais un verrou
+       permanent tuait le bouton des la premiere saisie refusee — on ne
+       pouvait plus jamais confirmer. Il se relache donc apres le geste. */
+    var brancher=function(el,fn){
+      if(!el)return; var enCours=false;
+      var go=function(ev){
+        if(enCours)return;
+        enCours=true; setTimeout(function(){enCours=false;},450);
+        try{ev.preventDefault();ev.stopPropagation();}catch(e){}
+        fn();
+      };
+      el.addEventListener("click",go); el.addEventListener("touchend",go,{passive:false});
+    };
+    brancher(ov.querySelector("#gf-non"),function(){
+      journaliserAction(o.titre||"?",{etat:"annulee",compte:o.compte||null});
+      fermer(false);
+    });
+    brancher(ov.querySelector("#gf-save"),function(){
+      if(!window.fbSauvegarderMaintenant){toast("Fonction de sauvegarde pas encore déployée");return;}
+      toast("Sauvegarde lancée…");
+      window.fbSauvegarderMaintenant()
+        .then(function(r){playSound("win");toast("Sauvegarde en cours vers "+(r&&r.dossier?String(r.dossier).split("/").pop():"le stockage"));})
+        .catch(function(e){playSound("err");toast("Sauvegarde impossible : "+((e&&(e.code||e.message))||e));});
+    });
+    brancher(oui,function(){
+      if(motAttendu && (!champ||champ.value.trim().toUpperCase()!==motAttendu)){
+        playSound("err");
+        if(champ){champ.style.borderColor="#dc2626";setTimeout(function(){champ.style.borderColor="var(--border)";},900);}
+        return;
+      }
+      journaliserAction(o.titre||"?",{etat:"lancee",compte:o.compte||null,niveau:niveau});
+      fermer(true);
+    });
+    ov.addEventListener("click",function(e){if(e.target===ov){journaliserAction(o.titre||"?",{etat:"annulee"});fermer(false);}});
+  });
+}
 function adminCleanUnverified(){
   if(!isAdmin)return;
-  if(!confirm("Purger Lidl / Aldi / Match ?\nToute boisson SANS confirmation communautaire positive sera retiree de ces magasins (jamais verifies en catalogue).\nLes confirmations > 0 sont conservees."))return;
+  /* Compte reel AVANT de demander : « purger » sans chiffre ne veut rien dire,
+     et c'est justement l'action qui efface le plus de lignes d'un coup. */
+  var _vises=0,_lignes=0;
+  try{
+    (STORES||[]).forEach(function(st){
+      var b=normTxt((st.brand||"")+" "+(st.name||""));
+      if(!/\blidl\b|\baldi\b|\bmatch\b/.test(b))return;
+      _vises++;
+      var cf=st.confirmations||{};
+      _lignes+=(st.drinks||[]).filter(function(id){return (Number(cf[id])||0)<=0;}).length;
+    });
+  }catch(e){}
+  actionSensible({
+    titre:"Purger Lidl, Aldi et Match",
+    quoi:"Toute boisson sans confirmation d'un utilisateur sera retirée de ces enseignes, qui n'ont jamais été vérifiées en rayon. Les boissons confirmées par quelqu'un sont conservées.",
+    compte:_lignes, unite:"référence", niveau:"irreversible", mot:"PURGER", reversible:false,
+    faire:null
+  }).then(function(ok){ if(ok)_lancerPurge(); });
+  return;
+}
+function _lancerPurge(){
   toast("Purge en cours\u2026");
   window.fbCleanUnverifiedBrands().then(function(cleaned){
+    journaliserAction("Purger Lidl, Aldi et Match",{etat:"terminee",compte:cleaned});
     (STORES||[]).forEach(function(s){
       var b=normTxt((s.brand||"")+" "+(s.name||""));
       if(!/\blidl\b|\baldi\b|\bmatch\b/.test(b))return;
@@ -15987,13 +16145,32 @@ function generatePseudo(){
 }
 var userAvatar=null;
 try{userAvatar=JSON.parse(localStorage.getItem("magoAvatar")||"null");}catch(e){}
+/* L'avatar affiche ici peut venir de N'IMPORTE QUEL utilisateur : profil
+   public, resultats de recherche, classement. Il etait recopie tel quel dans
+   du HTML, donc une valeur comme  x" onerror="...  executait du code chez
+   celui qui regardait — administrateur compris, dont la session peut tout
+   ecrire dans la base. On ne fait plus confiance a la valeur : une photo doit
+   etre une image en data-url ou une adresse https sans guillemet, un emoji
+   est echappe et borne. Tout le reste est refuse et retombe sur l'initiale. */
+function avatarPhotoSure(v){
+  var t=String(v||"");
+  if(!t||t.length>3000000)return null;
+  if(/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(t.replace(/\s+/g,"")))
+    return t.replace(/\s+/g,"");
+  if(/^https:\/\/[A-Za-z0-9._~:/?#@!$&()*+,;=%-]+$/.test(t))return t;
+  return null;
+}
 function avatarHTML(av,size){
   size=size||46;
   if(av&&av.type==="photo"&&av.v){
-    return '<img src="'+av.v+'" alt="" style="width:'+size+'px;height:'+size+'px;border-radius:50%;object-fit:cover;display:block">';
+    var src=avatarPhotoSure(av.v);
+    if(!src)return null;
+    return '<img src="'+src+'" alt="" style="width:'+size+'px;height:'+size+'px;border-radius:50%;object-fit:cover;display:block">';
   }
   if(av&&av.type==="emoji"&&av.v){
-    return '<span style="font-size:'+Math.round(size*0.55)+'px;line-height:1">'+av.v+'</span>';
+    var e=sanitize(String(av.v).slice(0,8));
+    if(!e)return null;
+    return '<span style="font-size:'+Math.round(size*0.55)+'px;line-height:1">'+e+'</span>';
   }
   return null;
 }
@@ -17433,13 +17610,13 @@ function openUserProfile(u){
     (seen?'<div style="font-size:11.5px;font-weight:600;color:var(--s3);margin-top:3px">Derni\u00E8re activit\u00E9 : '+seen+'</div>':"")+
   '</div>'+
   '<div style="display:flex;gap:8px;margin-bottom:10px">'+
-    statCell((u.points||0),"points")+
-    statCell((u.streak||0),"s\u00E9rie")+
-    statCell((u.bestStreak||0),"record")+
+    statCell(nbSur(u.points),"points")+
+    statCell(nbSur(u.streak),"s\u00E9rie")+
+    statCell(nbSur(u.bestStreak),"record")+
   '</div>'+
   '<div style="display:flex;gap:8px;margin-bottom:18px">'+
-    statCell((u.confirms||0),"confirmations")+
-    statCell((u.signals||0),"signalements")+
+    statCell(nbSur(u.confirms),"confirmations")+
+    statCell(nbSur(u.signals),"signalements")+
   '</div>'+
   (function(){
     if(!ppBadges.length)return "";
@@ -17513,7 +17690,7 @@ function renderUserSearchList(){
         card.innerHTML='<div style="display:flex;align-items:center;gap:12px">'+
           '<div style="width:44px;height:44px;border-radius:50%;background:var(--s1);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">'+av+'</div>'+
           '<div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(u.pseudo||"Explorateur")+'</div>'+
-          '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:2px">'+(u.points||0)+' pts'+((u.streak||0)>0?' \u00B7 '+u.streak+' j de s\u00E9rie':'')+'</div></div></div>'+
+          '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:2px">'+nbSur(u.points)+' pts'+(nbSur(u.streak)>0?' \u00B7 '+nbSur(u.streak)+' j de s\u00E9rie':'')+'</div></div></div>'+
           favHTML;
         card.style.cursor="pointer";
         card.onclick=function(){openUserProfile(u);};

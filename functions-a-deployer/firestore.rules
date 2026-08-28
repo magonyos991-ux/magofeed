@@ -54,9 +54,36 @@ service cloud.firestore {
 
     // ── Profils utilisateurs : lisibles par tous (classement), écrits par soi.
     //    (Phase 1 : points inclus. Version stricte en bas du fichier.)
+    /* Le profil d'un utilisateur est AFFICHE chez les autres (profil public,
+       recherche de joueurs, classement). Sans validation, son proprietaire
+       pouvait y mettre du HTML a la place d'un nombre ou d'un pseudo : le
+       navigateur de celui qui regardait — administrateur compris — executait
+       le contenu. L'app echappe desormais tout a l'affichage ; cette regle est
+       la deuxieme barriere, celle qui empeche la valeur d'entrer. */
+    function profilValide() {
+      let d = request.resource.data;
+      return (!('pseudo' in d) || (d.pseudo is string && d.pseudo.size() <= 24))
+        && (!('points' in d) || d.points is number)
+        && (!('streak' in d) || d.streak is number)
+        && (!('bestStreak' in d) || d.bestStreak is number)
+        && (!('confirms' in d) || d.confirms is number)
+        && (!('signals' in d) || d.signals is number)
+        && (!('discAccepted' in d) || d.discAccepted is number)
+        && (!('favs' in d) || (d.favs is list && d.favs.size() <= 10))
+        && (!('avatar' in d) || d.avatar == null
+            || (d.avatar is map
+                && d.avatar.keys().hasOnly(['type','v'])
+                && (!('type' in d.avatar) || (d.avatar.type is string && d.avatar.type.size() <= 8))
+                && (!('v' in d.avatar) || d.avatar.v is string)));
+    }
     match /users/{uid} {
       allow read: if true;
-      allow create: if isSelf(uid);
+      /* Les memes interdictions qu'en modification : sinon il suffisait
+         d'effacer son profil et de le recreer pour repartir sans penalite. */
+      allow create: if isSelf(uid) && profilValide()
+        && !request.resource.data.keys().hasAny(
+             ['emailDay','emailCount','emailStartDay','emailStartCount',
+              'emailTestDay','emailTestCount','penalty','penaltyAt']);
       // Les compteurs d'e-mails sont ecrits par les Cloud Functions (Admin SDK,
       // qui contourne ces regles). Le client n'y touche pas, sinon il lui
       // suffirait de les remettre a zero pour contourner l'anti-spam.
@@ -66,11 +93,19 @@ service cloud.firestore {
       // annuler sa sanction : toute la mecanique anti-triche ne servirait plus
       // a rien. C'est LA ligne qui rend la sanction ineffacable.
       allow update: if isSelf(uid)
+        && profilValide()
         && !changed().hasAny(['emailDay','emailCount','emailStartDay','emailStartCount','emailTestDay','emailTestCount',
                               'penalty','penaltyAt']);
       allow delete: if isSelf(uid) || isAdmin();
-      // Sous-collections éventuelles (favoris, etc.) : réservées au propriétaire
-      match /{doc=**} {
+      /* Sous-collections eventuelles (favoris, etc.) : reservees au proprietaire.
+         ATTENTION : il faut DEUX segments ({col}/{doc=**}), pas un seul. Ecrit
+         « match /{doc=**} », ce bloc couvrait aussi users/{uid} LUI-MEME et
+         accordait « write » sans condition au proprietaire — ce qui annulait en
+         silence tout ce qui est ecrit juste au-dessus : la validation des
+         champs, l'interdiction des compteurs d'e-mails, et la ligne censee
+         rendre la sanction anti-triche ineffacable. Verifie par l'emulateur :
+         avant ce correctif, un utilisateur remettait sa penalite a zero. */
+      match /{col}/{doc=**} {
         allow read, write: if isSelf(uid);
       }
     }
@@ -123,11 +158,34 @@ service cloud.firestore {
       // catégoriser une découverte (name/brand/cat) est réservé à SON AUTEUR
       // (by == uid) ou à l'admin — sinon un malveillant pouvait rebaptiser la
       // trouvaille d'un autre.
+      /* Le champ 'votes' etait librement modifiable : la sous-collection
+         votedBy dedoublonnait les votes passes par l'app, mais un seul appel a
+         la console ecrivait votes:999 sans y toucher, et trois voix suffisent a
+         reclamer une promotion. On impose donc deux choses a qui vote :
+         l'increment vaut exactement +1, et il n'a pas deja vote. La deuxieme
+         condition marche meme dans le lot atomique de l'app, ou les regles
+         evaluent chaque ecriture sur l'etat d'AVANT le lot : votedBy/{uid}
+         n'existe pas encore, le vote passe ; au vote suivant il existe, et les
+         deux ecritures sont refusees ensemble.
+         'foundIn' est borne : il decide dans quels magasins la boisson sera
+         injectee lors de la promotion. */
+      function voteHonnete() {
+        return !changed().hasAny(['votes'])
+          || (request.resource.data.votes == resource.data.votes + 1
+              && !exists(/databases/$(database)/documents/discoveries/$(id)/votedBy/$(request.auth.uid)));
+      }
+      function foundInBorne() {
+        return !('foundIn' in request.resource.data)
+          || (request.resource.data.foundIn is list
+              && request.resource.data.foundIn.size() <= 30);
+      }
       allow update: if isAdmin()
         || (isSignedIn() && resource.data.by == request.auth.uid
-            && changed().hasOnly(['votes','hasPhoto','name','brand','cat','foundIn']))
+            && changed().hasOnly(['votes','hasPhoto','name','brand','cat','foundIn'])
+            && voteHonnete() && foundInBorne())
         || (isSignedIn()
-            && changed().hasOnly(['votes','hasPhoto','foundIn']));
+            && changed().hasOnly(['votes','hasPhoto','foundIn'])
+            && voteHonnete() && foundInBorne());
       allow delete: if isAdmin();
 
       // Un vote = un doc votedBy/{uid} (dédoublonnage infalsifiable).
@@ -183,13 +241,26 @@ service cloud.firestore {
     function champsCertif() {
       return ['certified','certifiedAt','owner'];
     }
+    /* 'drinksVerified' porte le bandeau « Confirme au catalogue de l'enseigne »
+       et le pin vert. Il etait modifiable par tout compte connecte : deux
+       lignes dans la console suffisaient a faire dire a la carte qu'une
+       boisson est confirmee dans un magasin ou personne n'a jamais rien vu —
+       exactement ce que la carte ne doit jamais faire.
+       Il reste autorise a la CREATION : l'import OpenStreetMap ne touche que
+       des magasins absents de la base (il filtre sur 'news'), il pose donc le
+       catalogue d'enseigne au moment ou le magasin apparait, et plus jamais
+       apres. Ensuite, seuls l'administrateur et les Cloud Functions peuvent y
+       ajouter quoi que ce soit. */
+    function champsServeurStore() {
+      return ['certified','certifiedAt','owner','drinksVerified'];
+    }
     match /stores/{id} {
       allow read: if true;
       allow create: if isAdmin()
         || (isSignedIn() && !request.resource.data.keys().hasAny(champsCertif()));
       allow update: if isAdmin()
         || (isSignedIn()
-            && !changed().hasAny(champsCertif())
+            && !changed().hasAny(champsServeurStore())
             && (resource.data.addedBy == request.auth.uid
                 || !changed().hasAny(['name','brand','lat','lng','emoji'])));
       allow delete: if isAdmin();
@@ -200,7 +271,7 @@ service cloud.firestore {
         || (isSignedIn() && !request.resource.data.keys().hasAny(champsCertif()));
       allow update: if isAdmin()
         || (isSignedIn()
-            && !changed().hasAny(champsCertif())
+            && !changed().hasAny(champsServeurStore())
             && (resource.data.addedBy == request.auth.uid
                 || !changed().hasAny(['name','brand','lat','lng','emoji'])));
       allow delete: if isAdmin();
@@ -281,6 +352,23 @@ service cloud.firestore {
     }
 
     // ── Signalements : déposés par les connectés, lus par l'admin.
+    /* ── Journal des actions sensibles de l'administrateur ────────────────
+     * Quoi, quand, sur combien, et le resultat. Ecrit par l'app a chaque
+     * passage du garde-fou, y compris quand l'action est ANNULEE — c'est ce
+     * qui permet, apres un incident, de comprendre ce qui s'est passe au lieu
+     * de le deviner. Reserve a l'administrateur des deux cotes : personne
+     * d'autre ne l'ecrit, personne d'autre ne le lit. Jamais modifiable :
+     * un journal qu'on peut reecrire ne prouve rien. */
+    match /adminLog/{id} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.par == request.auth.uid
+        && request.resource.data.action is string
+        && request.resource.data.action.size() <= 60;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
     /* ── Signalements ────────────────────────────────────────────────────
      * La creation etait ouverte a tout compte connecte SANS aucune validation
      * de champ. Or le client ecrit lui-meme `by` : n'importe qui pouvait donc
@@ -313,9 +401,14 @@ service cloud.firestore {
 
     // ── Agrégats publics (compteurs de scans, notes) : lecture libre, écriture
     //    par les connectés (increment). Ce ne sont pas des données sensibles.
+    /* 'write' comprenait DELETE : n'importe quel compte anonyme pouvait effacer
+       stats/drinkRatings et faire disparaitre toutes les notes de la
+       communaute, d'un coup et sans trace. On separe : chacun peut incrementer,
+       personne ne peut effacer. */
     match /stats/{id} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
     }
 
     // ── Métadonnées / fusions de doublons / curseurs : lecture libre,
