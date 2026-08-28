@@ -704,7 +704,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <div>
           <div class="t-label" style="margin-bottom:8px">Données que nous collectons</div>
           <div style="font-size:13.5px;line-height:1.7;color:var(--s1)">
-            <b>• Position GPS</b> — utilisée pour trier les magasins par distance et centrer la carte. Elle reste sur ton appareil pour l'affichage ; si tu actives les alertes/notifications de proximité, ta position est enregistrée (base Firebase) afin de te prévenir quand une boisson que tu suis est repérée près de toi. Elle n'est alors lisible que par toi, et pour les « chasses » partagées elle est volontairement arrondie (~1 km) pour préserver ta vie privée.<br>
+            <b>• Position GPS</b> — utilisée pour trier les magasins par distance et centrer la carte. Elle reste sur ton appareil pour l'affichage ; si tu actives les alertes/notifications de proximité, ta position est enregistrée (base Firebase) afin de te prévenir quand une boisson que tu suis est repérée près de toi. Elle n'est alors lisible que par toi, et pour les « chasses » partagées, qui sont le seul endroit public, elle est volontairement arrondie à environ 11 km — de quoi savoir dans quelle ville chercher, rien de plus.<br>
             <b>• Ville d'utilisation</b> — tant que l'application est ouverte et que tu as autorisé la localisation, une position <b>arrondie à environ 1 km</b> est enregistrée avec ton pseudo, pour savoir dans quelles villes Magofeed est utilisé. Cette information n'est lisible que par l'administrateur de Magofeed, elle ne permet pas de remonter à une adresse, et elle disparaît si tu refuses la localisation.<br>
             <b>• Compte</b> — un identifiant anonyme t'est attribué automatiquement à l'ouverture de l'app (Firebase Authentication) pour associer tes points de façon persistante. Si tu choisis de te connecter avec Google, ton nom, ta photo de profil et ton e-mail sont récupérés pour identifier ton compte.<br>
             <b>• Pseudo et statistiques</b> (signalements, confirmations, points) — stockés pour faire fonctionner le système communautaire et le classement.<br>
@@ -2574,8 +2574,9 @@ window.fbHeartbeat = async function() {
     /* POSITION ARRONDIE A ~1 KM (deux decimales), jamais la position exacte.
        C'est assez pour savoir dans quelle ville quelqu'un utilise l'app —
        la seule chose utile pour comprendre d'ou viennent les gens — et bien
-       trop grossier pour approcher une adresse. Meme arrondi que les chasses
-       de zone. Lisible par le seul administrateur (regles Firestore). */
+       trop grossier pour approcher une adresse. Lisible par le seul
+       administrateur (regles Firestore) — contrairement aux chasses de zone,
+       publiques, qui sont arrondies plus grossierement encore (~11 km). */
     if (typeof window.userLat === "number" && window.userLat &&
         typeof window.userLng === "number") {
       beat.lat = Math.round(window.userLat * 100) / 100;
@@ -2661,7 +2662,9 @@ window.fbCountOnline = async function() {
 /* ── Chasses de zone : quand quelqu'un met une boisson en veille, ça crée une
    "chasse" visible par les gens autour (rayon ~15 km). But : mobiliser la
    communauté pour localiser une boisson rare. Données agrégées et localisation
-   volontairement arrondie (~1 km) — aucun nom, aucune position précise. */
+   volontairement arrondie (~11 km, la ville) — aucun nom, aucune position
+   précise. Cet arrondi-la est le plus grossier de l'app parce que le document
+   des chasses est le seul a etre lisible publiquement. */
 /* Deux decimales, c'etait une case d'environ 1 km sur 700 m : un quartier,
    pas « une ville ». Et le document hunts/{drinkId} est lisible SANS COMPTE,
    avec l'identifiant de chaque chercheur — identifiant qui ouvre users/{uid},
