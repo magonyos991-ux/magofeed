@@ -1367,62 +1367,122 @@ body.sheet-open{overflow:hidden;overscroll-behavior:none}
 /* Mode sombre : OSM n'a pas de tuiles nocturnes, on inverse en plus. */
 .tuiles-sombres.leaflet-tile,.leaflet-tile-pane .tuiles-sombres{filter:grayscale(.85) invert(1) hue-rotate(180deg) brightness(.85) contrast(.82)}
 
-/* ── Menu en arc à l'appui long sur un pin ─────────────────────────────────
-   Il doit être glissant : les choix jaillissent en décalé, celui que le pouce
-   touche se remplit et se soulève, les autres s'effacent. Une seule étiquette,
-   au centre, qui prend le nom du choix visé — trois étiquettes permanentes
-   s'encombraient. Rien ne capte le doigt (pointer-events:none) : la détection
-   est géométrique, c'est le document qui suit le geste. */
+/* ── Menu en gouttes à l'appui long sur un pin ─────────────────────────────
+   Deux couches superposées, alignées au pixel :
+     .pm-goo   les disques pleins, passés au filtre de fusion → la matière
+     .pm-face  les icônes, nettes, par-dessus
+   Le filtre floute puis écrase l'alpha : deux formes proches se recollent en
+   une seule masse et se détachent en s'éloignant. C'est l'effet AirDrop. */
+
 .pin-menu{position:fixed;z-index:5000;pointer-events:none;transform:translate(-50%,-50%);
-  --sortie:cubic-bezier(.22,1.18,.36,1)}
+  --ex:0px;--ey:0px;                                  /* décalage magnétique vers le doigt */
+  --ressort:cubic-bezier(.34,1.42,.5,1);              /* dépasse, puis se pose */
+  --retour:cubic-bezier(.4,0,.2,1)}
 
-/* Halo : donne la profondeur, et détache le menu du fond de carte. */
-.pm-halo{position:absolute;left:50%;top:50%;width:210px;height:210px;margin:-105px 0 0 -105px;
-  border-radius:50%;background:radial-gradient(circle,rgba(0,0,0,.30) 0%,rgba(0,0,0,.16) 45%,rgba(0,0,0,0) 72%);
-  opacity:0;transform:scale(.5);transition:opacity .26s ease,transform .34s var(--sortie)}
-.pin-menu.in .pm-halo{opacity:1;transform:scale(1)}
+/* L'onde d'ouverture : une seule impulsion qui part du pin, comme AirDrop. */
+.pm-onde{position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;
+  border-radius:50%;border:2px solid currentColor;color:rgba(255,255,255,.55);opacity:0}
+.pin-menu.in .pm-onde{animation:pm-onde .62s cubic-bezier(.2,.7,.3,1) forwards}
+@keyframes pm-onde{
+  0%{opacity:.75;transform:scale(.35);border-width:3px}
+  70%{opacity:.18}
+  100%{opacity:0;transform:scale(5.2);border-width:.5px}
+}
 
-.pm-item{position:absolute;left:0;top:0;width:50px;height:50px;margin:-25px 0 0 -25px;border-radius:50%;
-  display:flex;align-items:center;justify-content:center;
-  background:var(--app-bg);color:var(--c);
-  box-shadow:0 3px 14px rgba(0,0,0,.26),0 0 0 1.5px color-mix(in srgb,var(--c) 28%,transparent);
-  transform:translate(0,0) scale(.3);opacity:0;
-  transition:transform .34s var(--sortie),opacity .18s ease,
-             background .16s ease,color .16s ease,box-shadow .2s ease;
-  transition-delay:var(--r),var(--r),0s,0s,0s}          /* le décalé qui rend le geste vivant */
-.pin-menu.in .pm-item{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}
+/* L'ombre est CHAINEE apres la fusion : posee avant, elle serait avalee par le
+   flou. C'est elle qui detache les gouttes du fond de carte — une bordure ne
+   survivrait pas au filtre. */
+.pm-goo{position:absolute;left:0;top:0;
+  filter:url(#mago-goo) drop-shadow(0 3px 10px rgba(0,0,0,.28));
+  -webkit-filter:url(#mago-goo) drop-shadow(0 3px 10px rgba(0,0,0,.28));
+  will-change:filter}
+.pm-face{position:absolute;left:0;top:0}
 
-/* Le choix visé : il se remplit, grossit et se soulève. Les autres reculent. */
-.pin-menu.in.vise .pm-item{opacity:.62;transform:translate(var(--dx),var(--dy)) scale(.92)}
-.pin-menu.in .pm-item.on,
-.pin-menu.in.vise .pm-item.on{opacity:1;transform:translate(var(--dx),var(--dy)) scale(1.16);
-  background:var(--c);color:#fff;
-  box-shadow:0 7px 22px color-mix(in srgb,var(--c) 45%,transparent),0 0 0 3px color-mix(in srgb,var(--c) 22%,transparent)}
-/* Accusé de réception au relâchement : une pulsation courte, puis ça part. */
-.pin-menu.in .pm-item.go{transform:translate(var(--dx),var(--dy)) scale(.92);transition-duration:.11s}
-.pm-ico{display:flex;line-height:0}
+/* La goutte mère : elle reste au pin et retient les autres par un filet. */
+.pm-noyau{position:absolute;left:0;top:0;width:22px;height:22px;margin:-11px 0 0 -11px;
+  border-radius:50%;background:var(--app-bg);
+  transform:scale(0);transition:transform .3s var(--ressort)}
+.pin-menu.in .pm-noyau{transform:scale(1)}
+.pin-menu.in.vise .pm-noyau{transform:scale(.62);transition-duration:.22s}
 
-/* L'étiquette centrale : elle ne s'affiche qu'une fois un choix visé. */
-.pm-lab{position:absolute;left:50%;top:30px;transform:translateX(-50%) translateY(4px);
+.pm-blob{position:absolute;left:0;top:0;width:52px;height:52px;margin:-26px 0 0 -26px;
+  border-radius:50%;background:var(--app-bg);
+  transform:translate(0,0) scale(.2);opacity:0;
+  transition:transform .42s var(--ressort),opacity .2s ease,background .18s ease;
+  transition-delay:var(--r,0ms),var(--r,0ms),0s}
+.pin-menu.in .pm-blob{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}
+
+.pm-face-item{position:absolute;left:0;top:0;width:52px;height:52px;margin:-26px 0 0 -26px;
+  display:flex;align-items:center;justify-content:center;color:var(--c);
+  transform:translate(0,0) scale(.2);opacity:0;
+  transition:transform .42s var(--ressort),opacity .2s ease,color .18s ease;
+  transition-delay:var(--r,0ms),var(--r,0ms),0s}
+.pin-menu.in .pm-face-item{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}
+
+/* Le choix visé : la goutte gonfle, se remplit, et se penche vers le doigt.
+   Les autres refluent — la matière se concentre là où on regarde. */
+.pin-menu.in.vise .pm-blob:not(.on):not(.pm-prix){transform:translate(var(--dx),var(--dy)) scale(.82);opacity:.72}
+.pin-menu.in.vise .pm-face-item:not(.on):not(.pm-prix){transform:translate(var(--dx),var(--dy)) scale(.82);opacity:.5}
+.pin-menu.in .pm-blob.on{background:var(--c);
+  transform:translate(calc(var(--dx) + var(--ex)),calc(var(--dy) + var(--ey))) scale(1.24)}
+.pin-menu.in .pm-face-item.on{color:#fff;
+  transform:translate(calc(var(--dx) + var(--ex)),calc(var(--dy) + var(--ey))) scale(1.24)}
+
+/* La goutte de prix : elle bourgeonne DEPUIS « en stock », dans le prolongement
+   du geste. Elle n'existe que si le pouce s'attarde — facultative. */
+.pm-prix{width:40px;height:40px;margin:-20px 0 0 -20px}
+/* Etat cache ECRIT AVEC LA MEME FORCE que « .pin-menu.in .pm-face-item »,
+   sinon cette derniere l'emportait et la goutte de prix s'affichait des
+   l'ouverture — alors qu'elle ne doit naitre que si le pouce s'attarde. */
+.pin-menu.in .pm-blob.pm-prix,
+.pin-menu.in .pm-face-item.pm-prix{
+  transform:translate(var(--ox),var(--oy)) scale(.15);opacity:0;
+  transition:transform .38s var(--ressort),opacity .18s ease,background .18s ease,color .18s ease;
+  transition-delay:0s}
+.pin-menu.in.prix-la .pm-blob.pm-prix,
+.pin-menu.in.prix-la .pm-face-item.pm-prix{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}
+/* Une fois nee, elle se met legerement en retrait comme les autres — mais
+   seulement une fois nee. */
+.pin-menu.in.prix-la.vise .pm-blob.pm-prix:not(.on),
+.pin-menu.in.prix-la.vise .pm-face-item.pm-prix:not(.on){transform:translate(var(--dx),var(--dy)) scale(.9);opacity:.92}
+.pin-menu.in.prix-la .pm-blob.pm-prix.on{transform:translate(calc(var(--dx) + var(--ex)),calc(var(--dy) + var(--ey))) scale(1.2)}
+.pin-menu.in.prix-la .pm-face-item.pm-prix.on{transform:translate(calc(var(--dx) + var(--ex)),calc(var(--dy) + var(--ey))) scale(1.2)}
+
+/* L'étiquette : le nom du magasin au repos, le nom du choix dès qu'on en vise un. */
+.pm-lab{position:absolute;left:50%;top:34px;transform:translateX(-50%) translateY(5px);
   white-space:nowrap;pointer-events:none;opacity:0;max-width:230px;overflow:hidden;text-overflow:ellipsis;
-  transition:opacity .16s ease,transform .22s var(--sortie)}
-/* Visible dès l'ouverture : elle porte alors le nom du magasin. */
+  transition:opacity .18s ease,transform .26s var(--ressort)}
 .pin-menu.in .pm-lab{opacity:1;transform:translateX(-50%) translateY(0)}
-/* Arc retourné : l'étiquette passe SOUS l'arc, sinon elle percutait le pin
-   et sa bulle de prix. */
-.pin-menu.bas .pm-lab{top:146px;bottom:auto}
+.pin-menu.bas .pm-lab{top:172px;bottom:auto}
 .pm-lab span{display:inline-block;background:var(--c,var(--s1));color:#fff;
-  font-size:11.5px;font-weight:800;letter-spacing:-.01em;padding:5px 12px;border-radius:999px;
-  box-shadow:0 3px 12px rgba(0,0,0,.3)}
+  font-size:11.5px;font-weight:800;letter-spacing:-.01em;padding:5px 13px;border-radius:999px;
+  box-shadow:0 3px 12px rgba(0,0,0,.32);transition:background .18s ease}
 
-/* Sortie : tout se rétracte vers le pin, sans à-coup. */
-.pin-menu.out .pm-item{transform:translate(0,0) scale(.4);opacity:0;transition-delay:0s;transition-duration:.18s}
-.pin-menu.out .pm-halo{opacity:0;transform:scale(.6)}
+/* Au relâchement, le choix ABSORBE les autres : elles refluent vers lui, il
+   pulse, puis la matière se retire. C'est la moitié de la sensation. */
+.pin-menu.absorbe .pm-blob:not(.on),
+.pin-menu.absorbe .pm-face-item:not(.on){transform:translate(0,0) scale(.2);opacity:0;
+  transition-duration:.17s;transition-delay:0s}
+.pin-menu.absorbe .pm-blob.on,
+.pin-menu.absorbe .pm-face-item.on{transform:translate(var(--dx),var(--dy)) scale(1.34);
+  transition-duration:.16s}
+.pin-menu.absorbe .pm-noyau{transform:scale(0);transition-duration:.15s}
+
+/* Sortie : tout reflue vers le pin, sans à-coup. */
+.pin-menu.out .pm-blob,.pin-menu.out .pm-face-item{transform:translate(0,0) scale(.2);opacity:0;
+  transition:transform .2s var(--retour),opacity .16s ease;transition-delay:0s}
+.pin-menu.out .pm-noyau{transform:scale(0)}
 .pin-menu.out .pm-lab{opacity:0}
 
+/* Le filtre de fusion coûte une passe de flou par image. Si la personne a
+   demandé à réduire les animations, on rend la matière nette et immobile. */
 @media (prefers-reduced-motion:reduce){
-  .pm-item,.pm-halo,.pm-lab{transition-duration:.01ms!important;transition-delay:0s!important}
+  .pm-goo{filter:none;-webkit-filter:none}
+  .pm-onde{display:none}
+  .pm-blob,.pm-face-item,.pm-noyau,.pm-lab,.pm-prix{
+    transition-duration:.01ms!important;transition-delay:0s!important}
 }
+
 
 /* ── Niveau de détail des marqueurs selon le zoom ──
    À l'échelle d'une ville, un pin complet est illisible et coûte 4 à 6 nœuds

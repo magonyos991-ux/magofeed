@@ -13731,33 +13731,52 @@ function closeExploreMap(){
    celui qu'on veut et on relache. Un seul geste, sans lever le doigt.
 
 /* ============================================================================
-   MENU EN ARC PAR APPUI LONG SUR UN PIN
+   MENU EN GOUTTES PAR APPUI LONG SUR UN PIN
    ----------------------------------------------------------------------------
-   On appuie sur un pin, trois choix s'ouvrent en arc juste au-dessus, on GLISSE
-   le pouce sur celui qu'on veut et on relache. Un seul geste, sans lever le
-   doigt : utilisable d'une main, debout dans un rayon.
+   L'effet recherche est celui d'AirDrop : des gouttes qui se DETACHENT du pin,
+   restent liees par un filet de matiere, puis se separent. Ca ne s'obtient pas
+   avec des transitions ordinaires — il faut un filtre « gooey » : on floute une
+   couche de disques pleins, puis on ecrase l'alpha au contraste. Deux formes
+   proches fusionnent alors en une seule masse, et se separent en s'eloignant.
 
-   POURQUOI LES ECOUTEURS SONT SUR LE DOCUMENT, ET PAS SUR LE PIN
-   Ils l'etaient. Resultat : le menu restait colle a l'ecran pour toujours.
-   La carte se redessine a chaque fin de mouvement (exploreLoadStores fait
-   clearLayers), ce qui DETRUIT l'element du marqueur. Un element retire du DOM
-   ne recoit plus ni touchend ni touchcancel : la fin du geste n'arrivait donc
-   jamais, et rien ne refermait le menu.
-   Le doigt, lui, appartient au document du debut a la fin du geste. C'est donc
-   la que le suivi doit vivre. Le pin ne sert plus qu'a DEMARRER.
+   D'ou DEUX COUCHES superposees :
+     .pm-goo   les disques pleins, floutes et contrastes -> la matiere
+     .pm-face  les icones et le texte, NETS, par-dessus
+   Si on filtrait tout, les icones seraient illisibles.
+
+   Les ecouteurs du geste vivent sur le DOCUMENT, jamais sur le marqueur : la
+   carte se redessine et detruit le marqueur en cours de geste, ce qui privait
+   le menu de son touchend et le laissait colle a l'ecran.
    ============================================================================ */
 var PIN_MENU_ACTIONS=[
   {cle:"stock", libelle:"En stock", couleur:"#16a34a",
-   ico:'<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6.5"/></svg>'},
-  /* Un gris-bleu plutot que du noir : le noir se confondait avec le fond de
-     carte en theme sombre, le bouton disparaissait. */
+   ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6.5"/></svg>'},
   {cle:"fiche", libelle:"Détails", couleur:"#64748b",
-   ico:'<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.6"/></svg>'},
+   ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.6"/></svg>'},
   {cle:"rupture", libelle:"Rupture", couleur:"#dc2626",
-   ico:'<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>'}
+   ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.9" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>'}
 ];
-/* Le geste en cours. Un seul a la fois, connu de tout le module : c'est lui qui
-   permet de tout refermer proprement depuis n'importe ou. */
+/* La goutte enchainee : elle ne nait QUE si le pouce s'attarde sur « en stock ».
+   Facultative par construction — on peut relacher avant qu'elle apparaisse. */
+var PIN_MENU_PRIX={cle:"prix", libelle:"Noter le prix", couleur:"#c69a57",
+  ico:'<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6.5A7.2 7.2 0 0 0 13 4.6c-4 0-7 3.3-7 7.4s3 7.4 7 7.4a7.2 7.2 0 0 0 5-1.9"/><path d="M4 10.2h9M4 13.8h9"/></svg>'};
+
+/* Le filtre de fusion. Injecte une seule fois, invisible, reutilise partout.
+   stdDeviation regle l'epaisseur du filet ; la derniere ligne de la matrice
+   ecrase l'alpha : c'est elle qui recolle les formes. */
+function _pinAssureFiltre(){
+  if(document.getElementById("mago-goo-def"))return;
+  var d=document.createElement("div");
+  d.id="mago-goo-def";
+  d.setAttribute("aria-hidden","true");
+  d.style.cssText="position:absolute;width:0;height:0;overflow:hidden";
+  d.innerHTML='<svg><defs><filter id="mago-goo" color-interpolation-filters="sRGB">'+
+    '<feGaussianBlur in="SourceGraphic" stdDeviation="8" result="flou"/>'+
+    '<feColorMatrix in="flou" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9"/>'+
+    '</filter></defs></svg>';
+  document.body.appendChild(d);
+}
+
 var _geste=null;
 
 function _pinDetache(){
@@ -13769,79 +13788,75 @@ function _pinDetache(){
   document.removeEventListener("mouseup",_geste.fin,true);
   _geste=null;
 }
-/* Retirer le MENU sans toucher au geste : c'est ce dont ouvrirMenuPin a besoin
-   quand il repart de zero. Confondre les deux faisait qu'a l'ouverture on
-   arrachait le suivi du doigt qu'on venait tout juste de poser. */
+/* Retirer le MENU sans toucher au geste : ouvrirMenuPin en a besoin quand il
+   repart de zero. Confondre les deux arrachait le suivi du doigt a l'instant
+   meme ou on venait de le poser. */
 function _pinRetirerMenu(){
   try{ if(window.exploreMap&&exploreMap.dragging)exploreMap.dragging.enable(); }catch(e){}
   var m=document.getElementById("pin-menu");
   if(m){
     m.classList.remove("in");
     m.classList.add("out");
-    setTimeout(function(){ if(m&&m.parentNode)m.remove(); },200);
+    setTimeout(function(){ if(m&&m.parentNode)m.remove(); },230);
   }
   window._pinMenuActif=null;
 }
-function fermerMenuPin(){
-  _pinDetache();
-  _pinRetirerMenu();
-}
-/* Filet de securite : quoi qu'il arrive ailleurs dans l'app, le menu ne doit
-   jamais survivre a un changement d'ecran ni a un mouvement de carte. */
+function fermerMenuPin(){ _pinDetache(); _pinRetirerMenu(); }
 window.addEventListener("pagehide",fermerMenuPin);
 document.addEventListener("visibilitychange",function(){ if(document.hidden)fermerMenuPin(); });
 
 function ouvrirMenuPin(s,x,y){
-  _pinRetirerMenu();          // surtout PAS fermerMenuPin : le geste est en cours
+  _pinRetirerMenu();
+  _pinAssureFiltre();
   var m=document.createElement("div");
-  m.id="pin-menu";
-  m.className="pin-menu";
-  /* Les actions de stock n'ont de sens que si on regarde UNE boisson. Sans
-     filtre, on ne saurait pas quoi confirmer : on n'offre alors que la fiche. */
+  m.id="pin-menu"; m.className="pin-menu";
   var actions=exploreFilter?PIN_MENU_ACTIONS:PIN_MENU_ACTIONS.filter(function(a){return a.cle==="fiche";});
-  var n=actions.length;
-  var R=78;
-  var LEVEE=30;
-  /* On bascule vers le bas des que l'arc entrerait dans la barre du haut —
-     pas seulement s'il sortait de l'ecran. Sinon les choix se retrouvent sous
-     les filtres et deviennent a moitie invisibles. */
-  var HAUT_SUR=150;
-  var versLeBas=(y-(R+LEVEE+34)<HAUT_SUR);
-  // ... sauf si basculer vers le bas le ferait sortir par le bas : on garde
-  // alors le haut, et on remonte le point d'ancrage juste ce qu'il faut.
-  if(versLeBas&&(y+R+LEVEE+34)>(window.innerHeight||844)-90){
-    versLeBas=false;
-    y=Math.max(y,HAUT_SUR+R+LEVEE+34);
+  var n=actions.length, R=80, LEVEE=32, HAUT_SUR=150;
+  var versLeBas=(y-(R+LEVEE+36)<HAUT_SUR);
+  if(versLeBas&&(y+R+LEVEE+36)>(window.innerHeight||844)-90){
+    versLeBas=false; y=Math.max(y,HAUT_SUR+R+LEVEE+36);
   }
-  var marge=R*0.87+34;
+  var marge=R*0.87+36;
   x=Math.max(marge,Math.min((window.innerWidth||390)-marge,x));
-  var html='<div class="pm-halo"></div>';
+
+  var places={};
+  var goo='<div class="pm-noyau"></div>';      // la goutte mere, restee au pin
+  var face="";
   actions.forEach(function(a,i){
     var ang=(n===1)?-90:(-90-60+(120/(n-1))*i);
     var rad=ang*Math.PI/180;
     var dx=Math.cos(rad)*R, dy=Math.sin(rad)*R-LEVEE;
     if(versLeBas)dy=-dy;
-    html+='<div class="pm-item" data-cle="'+a.cle+'" style="--dx:'+dx.toFixed(1)+'px;--dy:'+dy.toFixed(1)+'px;--c:'+a.couleur+';--r:'+(i*36)+'ms">'+
-            '<span class="pm-ico">'+a.ico+'</span>'+
-          '</div>';
+    places[a.cle]={dx:dx,dy:dy};
+    var st='--dx:'+dx.toFixed(1)+'px;--dy:'+dy.toFixed(1)+'px;--c:'+a.couleur+';--r:'+(i*42)+'ms';
+    goo +='<div class="pm-blob" data-cle="'+a.cle+'" style="'+st+'"></div>';
+    face+='<div class="pm-face-item" data-cle="'+a.cle+'" style="'+st+'">'+a.ico+'</div>';
   });
-  /* Une seule etiquette. Au repos elle dit QUEL magasin on vise ; des qu'un
-     choix passe sous le pouce, elle dit LEQUEL. Elle n'est donc jamais vide et
-     ne repete jamais l'evidence. Trois etiquettes permanentes se chevauchaient. */
-  html+='<div class="pm-lab" data-nom="'+sanitize(s.name||"Ce magasin")+'"><span>'+sanitize(s.name||"Ce magasin")+'</span></div>';
-  m.innerHTML=html;
+  /* La goutte de prix se place dans le prolongement de « en stock », vers
+     l'exterieur : le pouce continue son mouvement au lieu de revenir. */
+  if(exploreFilter&&places.stock){
+    var p0=places.stock;
+    var norme=Math.sqrt(p0.dx*p0.dx+p0.dy*p0.dy)||1;
+    /* 74 px : assez loin pour que la goutte de prix soit entiere, assez pres
+       pour que le filet de matiere reste visible entre les deux. */
+    var pdx=p0.dx+(p0.dx/norme)*74, pdy=p0.dy+(p0.dy/norme)*74;
+    var stp='--dx:'+pdx.toFixed(1)+'px;--dy:'+pdy.toFixed(1)+'px;--c:'+PIN_MENU_PRIX.couleur+';--ox:'+p0.dx.toFixed(1)+'px;--oy:'+p0.dy.toFixed(1)+'px';
+    goo +='<div class="pm-blob pm-prix" data-cle="prix" style="'+stp+'"></div>';
+    face+='<div class="pm-face-item pm-prix" data-cle="prix" style="'+stp+'">'+PIN_MENU_PRIX.ico+'</div>';
+  }
+  m.innerHTML=
+    '<div class="pm-onde"></div>'+
+    '<div class="pm-goo">'+goo+'</div>'+
+    '<div class="pm-face">'+face+'</div>'+
+    '<div class="pm-lab" data-nom="'+sanitize(s.name||"Ce magasin")+'"><span>'+sanitize(s.name||"Ce magasin")+'</span></div>';
   if(versLeBas)m.classList.add("bas");
   m.style.left=x+"px"; m.style.top=y+"px";
   document.body.appendChild(m);
-  /* Tant que le menu est ouvert, la carte ne glisse plus. preventDefault ne
-     suffit pas : il empeche le defilement natif du navigateur, pas les
-     gestionnaires JavaScript de Leaflet, qui faisaient partir la carte et
-     detruisaient le pin sous le doigt. */
   try{ if(window.exploreMap&&exploreMap.dragging)exploreMap.dragging.disable(); }catch(e){}
   requestAnimationFrame(function(){ m.classList.add("in"); });
-  try{ if(navigator.vibrate)navigator.vibrate(11); }catch(e){}
+  try{ if(navigator.vibrate)navigator.vibrate(12); }catch(e){}
   try{playSound("pop");}catch(e){}
-  window._pinMenuActif={el:m,store:s};
+  window._pinMenuActif={el:m,store:s,places:places};
   return m;
 }
 function executerActionPin(cle,s){
@@ -13849,16 +13864,23 @@ function executerActionPin(cle,s){
   if(cle==="fiche"){ try{openStoreDetail(s.id);}catch(e){} return; }
   if(!exploreFilter)return;
   var did=exploreFilter.drinkId;
-  /* On reutilise exactement le chemin de confirmation existant (doConfirm) :
-     memes points, meme anti-rejeu, meme synchronisation. Un raccourci qui
-     contournerait ces regles serait une porte ouverte au farming. */
-  try{
-    var faux={parentElement:document.createElement("div")};
-    doConfirm(faux,String(s.fbId||s.id),did,cle==="stock"?1:-1);
-  }catch(e){ try{toast("Impossible d'enregistrer — réessaie");}catch(_){} }
+  /* On reutilise le chemin de confirmation existant (doConfirm) : memes points,
+     meme anti-rejeu. Un raccourci qui contournerait ces regles serait une porte
+     ouverte au farming. */
+  var poser=function(v){
+    try{
+      var faux={parentElement:document.createElement("div")};
+      doConfirm(faux,String(s.fbId||s.id),did,v);
+    }catch(e){ try{toast("Impossible d'enregistrer — réessaie");}catch(_){} }
+  };
+  if(cle==="stock"){ poser(1); return; }
+  if(cle==="rupture"){ poser(-1); return; }
+  if(cle==="prix"){
+    // en stock ET le prix : la goutte de prix vaut confirmation
+    poser(1);
+    setTimeout(function(){ try{quickPrice(s.id,did);}catch(e){} },260);
+  }
 }
-/* Arme l'appui long sur un marqueur. Le pin ne fait que DEMARRER le geste ;
-   des que le menu s'ouvre, le suivi passe au document. */
 function armerMenuPin(mk,s){
   mk.on("add",function(){
     var el=mk.getElement&&mk.getElement();
@@ -13868,78 +13890,104 @@ function armerMenuPin(mk,s){
 
     function demarrer(e,tactile){
       var p=pos(e);
-      var g={ store:s, ouvert:false, survol:null, depart:p, minuteur:null, bouge:null, fin:null };
+      var g={ store:s, ouvert:false, survol:null, depart:p, minuteur:null, tPrix:null, prixNe:false };
 
+      g.actionDe=function(cle){
+        if(cle==="prix")return PIN_MENU_PRIX;
+        return PIN_MENU_ACTIONS.filter(function(z){return z.cle===cle;})[0];
+      };
       g.majSurvol=function(pt){
         var m=window._pinMenuActif&&window._pinMenuActif.el; if(!m)return;
-        var item=null,meilleure=1e9,TOL=26;
-        [].forEach.call(m.querySelectorAll(".pm-item"),function(it){
+        var item=null,meilleure=1e9;
+        [].forEach.call(m.querySelectorAll(".pm-face .pm-face-item"),function(it){
+          if(it.classList.contains("pm-prix")&&!g.prixNe)return;
           var r=it.getBoundingClientRect();
           var cx=r.left+r.width/2, cy=r.top+r.height/2;
           var d=Math.sqrt((pt.x-cx)*(pt.x-cx)+(pt.y-cy)*(pt.y-cy));
+          var TOL=it.classList.contains("pm-prix")?22:28;
           if(d<=r.width/2+TOL && d<meilleure){meilleure=d;item=it;}
         });
-        if(g.survol===item)return;
-        if(g.survol)g.survol.classList.remove("on");
+        var cle=item&&item.getAttribute("data-cle");
+        var avant=g.survol;
+        if(cle!==avant){
+          [].forEach.call(m.querySelectorAll("[data-cle]"),function(z){
+            z.classList.toggle("on",!!cle&&z.getAttribute("data-cle")===cle);
+          });
+          if(cle){ try{ if(navigator.vibrate)navigator.vibrate(8); }catch(e){} }
+          g.survol=cle;
+          m.classList.toggle("vise",!!cle);
+          var boite=m.querySelector(".pm-lab"), lab=boite&&boite.querySelector("span");
+          if(lab&&boite){
+            var a=cle&&g.actionDe(cle);
+            lab.textContent=a?a.libelle:(boite.getAttribute("data-nom")||"");
+            boite.style.setProperty("--c",a?a.couleur:"var(--s1)");
+          }
+          /* La goutte de prix nait si le pouce s'attarde sur « en stock », et
+             se retracte des qu'il quitte la paire stock/prix. */
+          if(g.tPrix){clearTimeout(g.tPrix);g.tPrix=null;}
+          if(cle==="stock"&&!g.prixNe){
+            g.tPrix=setTimeout(function(){
+              if(g.survol!=="stock")return;
+              g.prixNe=true; m.classList.add("prix-la");
+              try{ if(navigator.vibrate)navigator.vibrate(6); }catch(e){}
+            },230);
+          } else if(cle!=="stock"&&cle!=="prix"&&g.prixNe){
+            g.prixNe=false; m.classList.remove("prix-la");
+          }
+        }
+        /* Magnetisme : la goutte visee se penche legerement vers le doigt.
+           C'est ce qui donne l'impression que la matiere suit la main. */
         if(item){
-          item.classList.add("on");
-          try{ if(navigator.vibrate)navigator.vibrate(7); }catch(e){}
-        }
-        g.survol=item;
-        m.classList.toggle("vise",!!item);
-        var boite=m.querySelector(".pm-lab"), lab=boite&&boite.querySelector("span");
-        if(lab&&boite){
-          var a=item&&PIN_MENU_ACTIONS.filter(function(z){return z.cle===item.getAttribute("data-cle");})[0];
-          lab.textContent=a?a.libelle:(boite.getAttribute("data-nom")||"");
-          boite.style.setProperty("--c",a?a.couleur:"var(--s1)");
-        }
+          var r2=item.getBoundingClientRect();
+          var ex=Math.max(-9,Math.min(9,(pt.x-(r2.left+r2.width/2))*0.34));
+          var ey=Math.max(-9,Math.min(9,(pt.y-(r2.top+r2.height/2))*0.34));
+          m.style.setProperty("--ex",ex.toFixed(1)+"px");
+          m.style.setProperty("--ey",ey.toFixed(1)+"px");
+        } else { m.style.setProperty("--ex","0px"); m.style.setProperty("--ey","0px"); }
       };
 
       g.bouge=function(ev){
         if(!g.ouvert){
-          // avant l'ouverture, un vrai deplacement = la personne fait glisser
-          // la carte : on abandonne l'appui long sans rien afficher
           var q=pos(ev);
           if(Math.abs(q.x-g.depart.x)>12||Math.abs(q.y-g.depart.y)>12)g.annuler();
           return;
         }
         if(ev.cancelable)ev.preventDefault();
-        ev.stopPropagation();                   // ceinture : Leaflet ecoute aussi le document
+        ev.stopPropagation();                  // Leaflet ecoute aussi le document
         g.majSurvol(pos(ev));
       };
 
       g.fin=function(){
         if(g.minuteur){clearTimeout(g.minuteur);g.minuteur=null;}
+        if(g.tPrix){clearTimeout(g.tPrix);g.tPrix=null;}
         if(!g.ouvert){ _pinDetache(); return; }
-        var cle=g.survol&&g.survol.getAttribute("data-cle");
-        if(cle){
-          // petit accuse de reception avant la fermeture : on voit ce qu'on a choisi
-          g.survol.classList.add("go");
-          try{ if(navigator.vibrate)navigator.vibrate([9,26,9]); }catch(e){}
+        var cle=g.survol;
+        var m=window._pinMenuActif&&window._pinMenuActif.el;
+        if(cle&&m){
+          /* Le choix absorbe les autres : elles refluent vers lui avant que la
+             matiere se retire. C'est la moitie de la sensation. */
+          m.classList.add("absorbe");
+          try{ if(navigator.vibrate)navigator.vibrate([10,28,14]); }catch(e){}
         }
         g.ouvert=false;
-        setTimeout(function(){ fermerMenuPin(); },cle?110:0);
-        if(cle)setTimeout(function(){ executerActionPin(cle,g.store); },150);
+        setTimeout(function(){ fermerMenuPin(); },cle?170:0);
+        if(cle)setTimeout(function(){ executerActionPin(cle,g.store); },200);
         window._pinMenuVientDeSOuvrir=true;
-        setTimeout(function(){window._pinMenuVientDeSOuvrir=false;},420);
+        setTimeout(function(){window._pinMenuVientDeSOuvrir=false;},460);
       };
 
       g.annuler=function(){
         if(g.minuteur){clearTimeout(g.minuteur);g.minuteur=null;}
-        g.ouvert=false;
-        fermerMenuPin();
+        if(g.tPrix){clearTimeout(g.tPrix);g.tPrix=null;}
+        g.ouvert=false; fermerMenuPin();
       };
 
       _pinDetache();
       _geste=g;
-      /* LE POINT DECISIF : le suivi vit sur le document, qui survit a la
-         destruction du marqueur. En capture, pour passer avant Leaflet. */
       if(tactile){
-        /* EN CAPTURE, imperativement. En phase de bulle, Leaflet — dont les
-           gestionnaires sont sur le conteneur de carte, donc plus bas dans
-           l'arbre — recevait le touchmove AVANT nous, demarrait le glissement
-           de la carte, et le movestart refermait le menu qu'on venait
-           d'ouvrir. En capture on passe devant, et le preventDefault tient. */
+        /* EN CAPTURE : en phase de bulle, Leaflet — dont les gestionnaires sont
+           plus bas dans l'arbre — recevait le touchmove avant nous et faisait
+           partir la carte. */
         document.addEventListener("touchmove",g.bouge,{passive:false,capture:true});
         document.addEventListener("touchend",g.fin,true);
         document.addEventListener("touchcancel",g.fin,true);
