@@ -15740,9 +15740,53 @@ function heuristicHours(name,type){
     return[{days:[1,2,3,4,5,6],ranges:[[7*60,19*60]]},{days:[0],ranges:[[7*60,13*60]]}];
   return null;
 }
+/* ═══ HORAIRES REELS, SANS RIEN DEMANDER A PERSONNE ══════════════════════
+   Les vrais horaires de 34 786 magasins belges sont publies AVEC le site
+   (data/horaires-osm-be.json, ~400 Ko compresses). Plutot que de les recopier
+   un a un dans la base — ce qui imposait de deployer une fonction et de
+   cliquer un bouton —, l'app lit le fichier directement et fait la
+   correspondance par identifiant OpenStreetMap, que chaque magasin importe
+   porte deja (champ osm, ou identifiant « o12345 »).
+
+   Chargement PARESSEUX : jamais au demarrage, seulement quand un ecran a
+   besoin d'un horaire, et une seule fois par session (le service worker le
+   garde ensuite). Tant qu'il n'est pas la, on retombe sur l'heuristique :
+   aucune regression, juste une precision qui arrive. */
+var HORAIRES_OSM=null, _horairesEtat=0;   // 0 rien, 1 en cours, 2 pret, 3 echec
+function chargerHorairesOSM(){
+  if(_horairesEtat)return;
+  _horairesEtat=1;
+  fetch("data/horaires-osm-be.json")
+    .then(function(r){ if(!r.ok)throw 0; return r.json(); })
+    .then(function(j){
+      HORAIRES_OSM=j; _horairesEtat=2;
+      /* Les ecrans deja peints affichaient « Ouvert » selon l'heuristique :
+         on les repeint pour qu'ils disent la verite. */
+      try{ if(typeof renderStoreList==="function"&&curSel)renderStoreList(); }catch(e){}
+      try{ if(typeof renderNearby==="function")renderNearby(); }catch(e){}
+      try{ if(window.exploreMap&&typeof exploreLoadStores==="function")exploreLoadStores(true); }catch(e){}
+      try{ if(curStoreDetail&&typeof renderStoreDetail==="function")renderStoreDetail(); }catch(e){}
+    })
+    .catch(function(){ _horairesEtat=3; });
+}
+/* L'identifiant OpenStreetMap d'un magasin : champ osm, ou id « o12345 ». */
+function osmIdDe(s){
+  if(!s)return null;
+  if(s.osm!=null)return String(s.osm);
+  var i=String(s.fbId||s.id||"");
+  return /^o\d+$/.test(i)?i.slice(1):null;
+}
+function horairesReels(s){
+  if(_horairesEtat===0)chargerHorairesOSM();
+  if(!HORAIRES_OSM)return null;
+  var k=osmIdDe(s);
+  return k?(HORAIRES_OSM[k]||null):null;
+}
 function storeOpenState(s,at){
   var now=at||(window.__forceNow?new Date(window.__forceNow):new Date());
-  var rules=parseOSMHours(s.hours)||heuristicHours(s.name,s.type);
+  /* Ordre de confiance : ce que le commercant a saisi lui-meme, puis les
+     horaires reels d'OpenStreetMap, puis seulement l'heuristique. */
+  var rules=parseOSMHours(s.hours)||parseOSMHours(horairesReels(s))||heuristicHours(s.name,s.type);
   if(!rules)return null; // horaires inconnus : pas de mensonge
   var day=now.getDay(),t=now.getHours()*60+now.getMinutes();
   var open=false;
