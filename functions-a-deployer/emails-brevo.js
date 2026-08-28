@@ -224,7 +224,12 @@ exports.emailHuntStarted = onDocumentWritten(
     }
 
     const w = after.data() || {};
-    if (!w.uid) return;
+    /* Le champ uid d'une veille est ecrit par le client. Les regles Firestore le
+       verrouillent desormais des deux cotes, mais on ne fait pas dependre d'un seul
+       verrou l'envoi d'un message a une personne : l'identifiant du document EST
+       « uid_boisson » (fbSyncWatch), on recoupe donc le champ avec le nom du
+       document. Une veille repointee sur quelqu'un d'autre ne passe plus. */
+    if (!w.uid || !String(after.id).startsWith(String(w.uid) + "_")) return;
 
     /* ⚠️ POURQUOI onDocumentWritten ET PAS onDocumentCreated.
        L'app écrit la veille sous un identifiant fixe (uid_boisson) avec un
@@ -293,7 +298,9 @@ exports.emailHuntFound = onDocumentUpdated(
 
       for (const w of watchSnap.docs) {
         const wd = w.data();
-        if (!wd.uid) continue;
+        // Meme recoupement que ci-dessus : le champ uid doit correspondre au
+        // nom du document, sinon la veille a ete repointee sur une victime.
+        if (!wd.uid || !String(w.id).startsWith(String(wd.uid) + "_")) continue;
         const radius = (typeof wd.radius === "number" && wd.radius >= 1 && wd.radius <= 20) ? wd.radius : 10;
         if (sLat != null && wd.lat != null && _dist(sLat, sLng, wd.lat, wd.lng) > radius) continue;
 
@@ -375,9 +382,16 @@ exports.sendTestEmail = onCall(
       return { ok: true, to: to };
     } catch (e) {
       await refundDailySlot(uid, "test");
-      // Message brut de Brevo (ex. « sender not valid ») : c'est CE texte qui
-      // dit quoi corriger. On le remonte tel quel à l'app.
-      return { ok: false, reason: "brevo", detail: String(e && e.message || e).slice(0, 300) };
+      /* Message brut de Brevo (ex. « sender not valid ») : c'est CE texte qui
+         dit quoi corriger, il reste donc utile — mais pour l'administrateur
+         seulement. Il decrit la configuration interne de l'envoi (adresse
+         d'expedition, etat du domaine, identifiants de compte) : inutile de
+         l'offrir a qui appelle la fonction depuis une console. */
+      let admin = false;
+      try { admin = (await db.collection("admins").doc(uid).get()).exists; } catch (e2) {}
+      return admin
+        ? { ok: false, reason: "brevo", detail: String(e && e.message || e).slice(0, 300) }
+        : { ok: false, reason: "brevo" };
     }
   }
 );

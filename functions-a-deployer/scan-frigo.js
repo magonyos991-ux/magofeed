@@ -62,10 +62,40 @@ const SCHEMA = {
 };
 
 exports.identifyFridge = onCall(
-  { region: REGION, secrets: [ANTHROPIC_API_KEY], memory: "512MiB", timeoutSeconds: 120 },
+  { region: REGION, secrets: [ANTHROPIC_API_KEY], memory: "512MiB", timeoutSeconds: 120,
+    /* Borne la vitesse de depense : sans elle, une boucle ouvre autant
+       d'instances que Google en accorde, toutes facturees en parallele. */
+    maxInstances: 3 },
   async (req) => {
     const uid = req.auth && req.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi d'abord.");
+
+    /* CONTROLE D'ACCES. Le bouton est cache par du CSS (#sd-admin-tools est en
+       display:none pour les autres), mais du CSS n'a jamais protege personne :
+       un appel direct a la fonction passait, et chaque appel coute quelques
+       centimes. Le serveur decide donc lui-meme : administrateur, ou gerant
+       certifie du magasin vise. C'est ce que font deja sauvegarderMaintenant,
+       importerHoraires et remplirEnseignes ; celle-ci avait ete oubliee. */
+    const adm = await db.collection("admins").doc(uid).get();
+    if (!adm.exists) {
+      const storeId = String((req.data && req.data.storeId) || "");
+      if (!/^[A-Za-z0-9_-]{1,80}$/.test(storeId))
+        throw new HttpsError("permission-denied", "Reserve a l'administrateur et aux gerants certifies.");
+      const st = await db.collection("stores").doc(storeId).get();
+      if (!st.exists || st.data().owner !== uid)
+        throw new HttpsError("permission-denied", "Reserve a l'administrateur et aux gerants certifies.");
+    }
+
+    /* Plafond commun a toute l'app, en plus des 10 par personne : un compte
+       s'obtient gratuitement, ce plafond-la est le seul que le nombre de
+       comptes ne contourne pas. */
+    const PLAFOND_JOUR_FRIGO = 120;
+    const jour = new Date().toISOString().slice(0, 10);
+    const gRef = db.collection("_meta").doc("aiQuotaGlobal");
+    const gSnap = await gRef.get();
+    const gd = gSnap.exists ? gSnap.data() : {};
+    if (gd.jour === jour && (gd.frigo || 0) >= PLAFOND_JOUR_FRIGO)
+      return { ok: false, reason: "quota-global" };
 
     const dataUrl = String((req.data && req.data.image) || "");
     const m = dataUrl.match(/^data:image\/(jpeg|png);base64,([A-Za-z0-9+/=]+)$/);
@@ -82,6 +112,7 @@ exports.identifyFridge = onCall(
       const count = d.fday === day ? (d.fcount || 0) : 0;
       if (count >= 10) return { blocked: true };
       t.set(qRef, { fday: day, fcount: count + 1 }, { merge: true });
+      t.set(gRef, { jour: jour, frigo: (gd.jour === jour ? (gd.frigo || 0) : 0) + 1 }, { merge: true });
       return { blocked: false };
     });
     if (quota.blocked) return { ok: false, reason: "quota" };

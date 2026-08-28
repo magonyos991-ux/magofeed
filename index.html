@@ -2674,22 +2674,12 @@ window.fbCountOnline = async function() {
    dans quelle ville chercher, ce que le filtre des chasses proches demande, et
    rien de plus. */
 function _coarse(x){ return Math.round(x * 10) / 10; }
-/* TEST SOLO : simule une chasse lancée par un VOISIN (uid factice) à ta position.
-   Déclenche notifyHuntNearby côté serveur, qui doit alors t'envoyer la notif à
-   TOI (tu n'es pas le chercheur). Permet de tester toute la chaîne sans 2e tel. */
-window.fbSimulateHunt = async function(lat, lng, drinkId, drinkName) {
-  try {
-    await ensureAuthed();
-    var docId = "simtest_" + Date.now();          // doc UNIQUE -> pas d'anti-spam 6h
-    var simUid = "simseeker_" + Date.now();        // chercheur factice (pas toi)
-    var seekers = {}; seekers[simUid] = { lat: lat != null ? _coarse(lat) : null, lng: lng != null ? _coarse(lng) : null, at: Date.now() };
-    await setDoc(doc(db, "hunts", docId), {
-      drinkId: Number(drinkId) || drinkId, drinkName: String(drinkName || "Boisson test").slice(0, 60),
-      emoji: "", updatedAt: serverTimestamp(), seekers: seekers
-    });
-    return { ok: true, docId: docId };
-  } catch (e) { return { ok: false, reason: String(e && (e.code || e.message) || e) }; }
-};
+/* fbSimulateHunt a ete RETIRE. C'etait un outil de test expose sur window,
+   dans le code livre a tout le monde : il inscrivait un chercheur factice sans
+   position dans un document neuf, ce qui — cote serveur — faisait partir une
+   notification vers TOUS les telephones de l'app, sans anti-spam et en boucle.
+   Les regles refusent maintenant ce document, mais l'amorce n'a rien a faire
+   dans la page. Pour tester une chasse, rejoins-en une vraie a deux appareils. */
 /* Nettoyage : efface TOUTES les chasses (collection hunts). Sert à repartir sur
    une base propre après les tests, pour que chaque « 1 personne cherche » soit
    ensuite une vraie personne. Admin uniquement (les règles veillent aussi). */
@@ -2704,24 +2694,45 @@ window.fbWipeAllHunts = async function() {
     return { ok: fail === 0, total: total, deleted: ok, failed: fail, reason: lastErr };
   } catch (e) { return { ok: false, reason: String(e && (e.code || e.message) || e) }; }
 };
+/* ATTENTION AUX CLES POINTEES. setDoc ne les comprend PAS : « seekers.abc »
+   y est un nom de champ litteral, et le document se retrouve avec un champ
+   « seekers.abc » a cote de la carte « seekers », qui elle ne bouge pas. Seul
+   updateDoc lit le point comme un chemin. C'est ce que faisait cette fonction :
+   personne n'etait donc jamais inscrit dans seekers, le compteur « X personnes
+   cherchent » restait faux, et la Cloud Function notifyHuntNearby, qui surveille
+   cette carte, ne voyait jamais arriver un vrai chercheur. Trouve par le banc
+   d'essai des regles, pas a la lecture. */
 window.fbJoinHunt = async function(drinkId, drinkName, emoji, lat, lng) {
   try {
     var user = await ensureAuthed();
-    var seeker = {}; seeker["seekers." + user.uid] = {
+    var moi = {
       lat: lat != null ? _coarse(lat) : null, lng: lng != null ? _coarse(lng) : null, at: Date.now()
     };
-    await setDoc(doc(db, "hunts", String(drinkId)), Object.assign({
-      drinkId: Number(drinkId) || drinkId, drinkName: String(drinkName || "").slice(0, 60),
+    var ref = doc(db, "hunts", String(drinkId));
+    var commun = {
+      drinkName: String(drinkName || "").slice(0, 60),
       emoji: String(emoji || "").slice(0, 4), updatedAt: serverTimestamp()
-    }, seeker), { merge: true });
+    };
+    var maj = Object.assign({}, commun);
+    maj["seekers." + user.uid] = moi;
+    try {
+      await updateDoc(ref, maj);
+    } catch (e) {
+      // La chasse n'existe pas encore : on la cree avec soi comme seul chercheur.
+      await setDoc(ref, Object.assign({
+        drinkId: Number(drinkId) || drinkId,
+        seekers: (function(){ var o = {}; o[user.uid] = moi; return o; })()
+      }, commun));
+    }
   } catch (e) { console.warn("join hunt:", e); }
 };
 window.fbLeaveHunt = async function(drinkId) {
   try {
     var user = auth.currentUser; if (!user) return;
+    // updateDoc, pas setDoc : voir la note sur les cles pointees ci-dessus.
     var patch = {}; patch["seekers." + user.uid] = null; // marqué parti, filtré à la lecture
-    await setDoc(doc(db, "hunts", String(drinkId)), patch, { merge: true });
-  } catch (e) { /* silencieux */ }
+    await updateDoc(doc(db, "hunts", String(drinkId)), patch);
+  } catch (e) { /* silencieux : la chasse peut ne plus exister */ }
 };
 /* Nombre d'AUTRES personnes qui chassent cette boisson (pour récompenser
    celui qui la trouve et la signale : il aide une vraie demande). */
@@ -3000,12 +3011,14 @@ window.fbSendTestEmail = async function() {
 };
 /* Scan de frigo : une photo -> la liste de TOUTES les boissons reconnues.
    L'alcool est ecarte cote serveur, quota 10 frigos/jour/utilisateur. */
-window.fbIdentifyFridge = async function(imageDataUrl) {
+window.fbIdentifyFridge = async function(imageDataUrl, storeId) {
   try {
     await ensureAuthed();
     var fns = getFunctions(app, "europe-west1");
     var call = httpsCallable(fns, "identifyFridge");
-    var res = await call({ image: imageDataUrl });
+    /* Le magasin vise part avec la demande : le serveur verifie desormais que
+       l'appelant est l'administrateur OU le gerant certifie de CE magasin. */
+    var res = await call({ image: imageDataUrl, storeId: String(storeId || "") });
     return (res && res.data) || { ok: false, reason: "no-response" };
   } catch (e) {
     var code = String((e && e.code) || "");
@@ -11109,7 +11122,7 @@ function scanFridgeStart(){
     playSound("pop");
     compressPhotoFile(file,function(data){
       if(!window.fbIdentifyFridge){toast("Fonction IA non disponible");return;}
-      window.fbIdentifyFridge(data).then(function(res){
+      window.fbIdentifyFridge(data, (curStoreDetail&&(curStoreDetail.fbId||curStoreDetail.id))||"").then(function(res){
         if(!res||!res.ok){
           var msg=res&&res.reason==="quota"?"Quota du jour atteint (10 frigos)":
                   res&&res.reason==="not-deployed"?"Fonction identifyFridge pas encore déployée":
@@ -15024,7 +15037,7 @@ async function runNotifDiagnostic(){
     rows+
     '<div style="margin-top:14px;padding:12px 14px;border-radius:14px;background:'+(vcol==="#15803d"?"rgba(21,128,61,.10)":"rgba(180,83,9,.10)")+';border:1px solid '+(vcol==="#15803d"?"rgba(21,128,61,.3)":"rgba(180,83,9,.3)")+';font-size:12.5px;font-weight:700;line-height:1.5;color:'+vcol+'">'+verdict+'</div>'+
     '<div onclick="diagFixPosition()" role="button" tabindex="0" style="margin-top:12px;text-align:center;padding:13px;border-radius:14px;background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer">Enregistrer ma position</div>'+
-    '<div onclick="simulateNeighborHunt()" role="button" tabindex="0" style="margin-top:8px;text-align:center;padding:13px;border-radius:14px;background:#e67e22;color:#fff;font-size:14px;font-weight:800;cursor:pointer">'+icoFlask(15)+' Tester : simuler une chasse voisine</div>'+
+
     '<div style="margin-top:6px;font-size:10.5px;color:var(--s3);text-align:center;line-height:1.4">Simule quelqu\'un qui lance une chasse près de toi. Ferme l\'app après : tu dois recevoir la notif. Test seul, sans 2e téléphone.</div>'+
     (isAdmin?'<div onclick="wipeTestHunts()" role="button" tabindex="0" style="margin-top:12px;text-align:center;padding:12px;border-radius:14px;background:transparent;border:1.5px solid #dc2626;color:#dc2626;font-size:13px;font-weight:800;cursor:pointer">'+icoTrash(15)+' Effacer toutes les chasses de test (repartir propre)</div>':'')+
     '<div onclick="var p=document.getElementById(\'notif-diag\');if(p)p.remove();" role="button" tabindex="0" style="margin-top:10px;text-align:center;padding:11px;font-size:13px;font-weight:700;color:var(--s2);cursor:pointer">Fermer</div>'+
@@ -15115,29 +15128,11 @@ function diagFixPosition(){
   if(typeof refreshLocation==="function")refreshLocation(function(){setTimeout(done,300);});
   else done();
 }
-/* Test SOLO de la boucle chasse : simule une chasse voisine -> tu dois recevoir
-   la notif. Prouve toute la chaîne (fonction serveur + push) sans 2e téléphone. */
-function simulateNeighborHunt(){
-  if(!(typeof userLat==="number"&&userLat)){toast("Active d'abord ta position");playSound("err");return;}
-  // Pas besoin du jeton LOCAL : le serveur a déjà ton jeton (serveur: oui) et
-  // c'est lui qui t'enverra la notif. On tente aussi de restaurer le jeton local
-  // en silence, mais ça ne bloque pas le test.
-  try{ if(("Notification" in window)&&Notification.permission==="granted"&&!window._pushToken&&window.fbEnablePush){window.fbEnablePush(userLat,userLng);} }catch(e){}
-  if(!window.fbSimulateHunt){toast("Indisponible ici");playSound("err");return;}
-  // Boisson au hasard PAS dans tes veilles (évite l'anti-spam 6h de la fonction).
-  var pool=DRINKS.filter(function(d){return !(drinkWatches||[]).some(function(w){return Number(w.id)===Number(d.id);});});
-  var d=pool[Math.floor(Math.random()*pool.length)]||DRINKS[0];
-  toast("Simulation d'une chasse voisine sur "+d.name+"…");
-  window.fbSimulateHunt(userLat,userLng,d.id,d.name).then(function(r){
-    if(r&&r.ok){playSound("win");toast("Chasse voisine simulée ! FERME l'app — la notif « Chasse près de toi » doit arriver dans ~10 s");}
-    else{
-      var why=String(r&&r.reason||"?");
-      if(why.indexOf("permission")>=0||why.indexOf("PERMISSION")>=0)toast("Bloqué par les règles Firestore — envoie-moi une capture, on ajustera");
-      else toast("Échec : "+why);
-      playSound("err");
-    }
-  });
-}
+/* Le test « simuler une chasse voisine » a ete retire avec fbSimulateHunt :
+   il inscrivait un chercheur factice sans position, ce qui declenchait cote
+   serveur une notification vers TOUS les telephones de l'app. Pour verifier la
+   chaine des notifications, le bouton « Tester la notification » juste
+   au-dessus suffit ; pour verifier une vraie chasse, il faut deux appareils. */
 /* Admin : efface toutes les chasses (base propre après tests). */
 function wipeTestHunts(){
   if(!isAdmin){toast("Réservé à l'admin");playSound("err");return;}

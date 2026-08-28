@@ -393,10 +393,24 @@ service cloud.firestore {
 
     // ── Veilles "préviens-moi" : chacun gère les siennes (id = uid_drinkId,
     //    champ uid == propriétaire).
+    /* La regle de modification ne testait que resource.data.uid, c'est-a-dire
+       la valeur AVANT ecriture. On pouvait donc creer une veille a son nom,
+       puis la repointer sur quelqu'un d'autre en une deuxieme ecriture. La
+       veille appartenait alors a la victime, et les Cloud Functions la croient
+       sur parole : elles lui envoyaient e-mails et notifications, avec un
+       libelle choisi par l'attaquant, en consommant son quota. Il faut donc
+       tester les DEUX cotes. L'identifiant est aussi impose (uid_boisson,
+       exactement ce que fbSyncWatch ecrit deja) : le serveur peut ainsi
+       recouper le proprietaire sans faire confiance au champ. */
     match /watches/{id} {
       allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
-      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
-      allow update, delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && id == request.auth.uid + '_' + string(request.resource.data.drinkId);
+      allow update: if isSignedIn()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
     }
 
     // ── Agrégats publics (compteurs de scans, notes) : lecture libre, écriture
@@ -428,9 +442,27 @@ service cloud.firestore {
     //    connecté rejoint/quitte une chasse (met à jour son entrée seekers).
     //    On empêche d'écraser drinkId/drinkName d'autrui : création libre pour
     //    un connecté, mise à jour libre (le champ seekers.{uid} lui appartient).
+    /* Le document etait entierement libre pour tout compte connecte. Trois
+       consequences, toutes verifiees dans notifications-push.js :
+       - on pouvait inscrire un chercheur FACTICE sans position, ce qui fait
+         partir une notification vers TOUS les telephones de l'app ;
+       - l'anti-spam du serveur etant range dans ce meme document (_lastPush),
+         il suffisait de creer un document neuf a chaque fois pour le sauter,
+         ou d'y ecrire une date lointaine pour eteindre definitivement les
+         alertes d'une boisson ;
+       - l'identifiant etant libre, la boucle etait illimitee.
+       Desormais : le document porte le numero de la boisson, chacun ne touche
+       que SA propre entree, et _lastPush est hors de portee du client. */
     match /hunts/{drinkId} {
       allow read: if true;
-      allow create, update: if isSignedIn();
+      allow create: if isSignedIn()
+        && drinkId == string(request.resource.data.drinkId)
+        && request.resource.data.seekers.keys().hasOnly([request.auth.uid])
+        && !('_lastPush' in request.resource.data);
+      allow update: if isSignedIn()
+        && request.resource.data.seekers.diff(resource.data.seekers)
+             .affectedKeys().hasOnly([request.auth.uid])
+        && !changed().hasAny(['_lastPush']);
       allow delete: if isAdmin();
     }
 

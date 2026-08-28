@@ -129,6 +129,50 @@ await doit('bloque : Mallory lit la sous-collection privee d Alice',
   ()=>assertFails(getDoc(doc(m,'users',ALICE,'prive','notes'))));
 await doit('bloque : profil recree sans penalite apres effacement',
   ()=>assertFails(setDoc(doc(m,'users',MALLORY),{pseudo:'M',penalty:0})));
+/* ── chasses de zone et veilles (audit des Cloud Functions) ───────────── */
+/* Reproduit fbJoinHunt / fbLeaveHunt A L'IDENTIQUE : updateDoc, pas setDoc.
+   Avec setDoc, « seekers.uid » serait un nom de champ litteral et n'entrerait
+   jamais dans la carte seekers — c'est le bug que ce banc d'essai a trouve. */
+await doit('legitime : rejoindre une chasse',
+  ()=>assertSucceeds(updateDoc(doc(m,'hunts','7'),
+      {drinkName:'Ramune',emoji:'',['seekers.'+MALLORY]:{lat:50.8,lng:4.3,at:2}})));
+await doit('verifie : le chercheur entre bien dans la carte seekers',
+  async()=>{ const d=await getDoc(doc(a,'hunts','7'));
+             const s=(d.data()||{}).seekers||{};
+             if(!s[MALLORY]) throw new Error('seekers ne contient pas le chercheur');
+             if(Object.prototype.hasOwnProperty.call(d.data(),'seekers.'+MALLORY))
+               throw new Error('champ litteral pointe cree'); });
+await doit('legitime : quitter une chasse',
+  ()=>assertSucceeds(updateDoc(doc(m,'hunts','7'),{['seekers.'+MALLORY]:null})));
+await doit('legitime : creer une chasse neuve sur une autre boisson',
+  ()=>assertSucceeds(setDoc(doc(m,'hunts','99'),
+      {drinkId:99,drinkName:'Milkis',seekers:{[MALLORY]:{lat:50.8,lng:4.3,at:1}}})));
+await doit('bloque : inscrire un chercheur factice',
+  ()=>assertFails(setDoc(doc(m,'hunts','123'),
+      {drinkId:123,drinkName:'x',seekers:{faux:{lat:null,lng:null,at:1}}})));
+await doit('bloque : document de chasse a identifiant libre',
+  ()=>assertFails(setDoc(doc(m,'hunts','simtest_9'),
+      {drinkId:5,drinkName:'x',seekers:{[MALLORY]:{lat:50.8,lng:4.3,at:1}}})));
+await doit('bloque : eteindre les alertes d une boisson (_lastPush)',
+  ()=>assertFails(updateDoc(doc(m,'hunts','7'),{_lastPush:Date.now()+1e12})));
+await doit('bloque : retirer le chercheur d un autre',
+  ()=>assertFails(updateDoc(doc(m,'hunts','7'),{['seekers.'+ALICE]:null})));
+
+await doit('legitime : Alice cree sa veille',
+  ()=>assertSucceeds(setDoc(doc(a,'watches',ALICE+'_424'),
+      {uid:ALICE,drinkId:424,drinkName:'Ramune',lat:50.8,lng:4.3,radius:10})));
+await doit('legitime : Alice regle le rayon de sa veille',
+  ()=>assertSucceeds(setDoc(doc(a,'watches',ALICE+'_424'),{uid:ALICE,radius:20},{merge:true})));
+await doit('bloque : veille a identifiant fantaisiste',
+  ()=>assertFails(setDoc(doc(m,'watches','piege1'),{uid:MALLORY,drinkId:424242})));
+await doit('bloque : repointer sa veille sur une victime',
+  ()=>{ return setDoc(doc(m,'watches',MALLORY+'_777'),{uid:MALLORY,drinkId:777,drinkName:'x',lat:null,radius:20})
+          .then(()=>assertFails(setDoc(doc(m,'watches',MALLORY+'_777'),{uid:ALICE},{merge:true}))); });
+await doit('bloque : lire la veille d un autre',
+  ()=>assertFails(getDoc(doc(m,'watches',ALICE+'_424'))));
+await doit('bloque : lire le compteur global d IA',
+  ()=>assertFails(getDoc(doc(m,'_meta','aiQuotaGlobal'))));
+
 await doit('bloque : se declarer administrateur',
   ()=>assertFails(setDoc(doc(m,'admins',MALLORY),{ok:true})));
 

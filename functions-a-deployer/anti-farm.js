@@ -38,6 +38,7 @@ const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
+const { getAuth } = require("firebase-admin/auth");
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
@@ -165,11 +166,29 @@ exports.antiFarmRupture = onDocumentCreated(
       contradicteurs.add(String(x.by));
     });
 
+    /* 2 bis) Les contradicteurs doivent etre de VRAIES personnes.
+       Le seuil ne comptait que des uid distincts, or un uid s'obtient
+       gratuitement et sans limite : deux comptes anonymes crees en dix secondes
+       suffisaient a retirer des points a un contributeur honnete, et la
+       sanction est volontairement ineffacable. On exige donc un compte lie a
+       une methode de connexion reelle (Google ou e-mail) et vieux d'une
+       semaine — la contradiction reste facile pour un habitue, impossible pour
+       un compte fabrique a l'instant. */
+    const reels = new Set();
+    for (const u of contradicteurs) {
+      try {
+        const acc = await getAuth().getUser(u);
+        const vraiCompte = Array.isArray(acc.providerData) && acc.providerData.length > 0;
+        const ancien = Date.now() - Date.parse(acc.metadata.creationTime) > 7 * 86400000;
+        if (vraiCompte && ancien) reels.add(u);
+      } catch (e) { /* compte introuvable : il ne compte pas */ }
+    }
+
     // 3) Pour chaque auteur d'annonce : ses propres signalements ne comptent
     //    pas contre lui (corriger sa propre erreur est un bon réflexe, pas
     //    une faute — sinon personne ne corrigerait jamais rien).
     for (const uid of auteurs) {
-      const contre = new Set(contradicteurs);
+      const contre = new Set(reels);
       contre.delete(uid);
       if (contre.size < SEUIL) continue;
 

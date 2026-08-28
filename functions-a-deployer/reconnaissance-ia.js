@@ -59,8 +59,39 @@ const SCHEMA = {
   }
 };
 
+/* PLAFOND GLOBAL QUOTIDIEN — la seule borne qui tienne sur la facture.
+   Le quota de 25 analyses est indexe sur l'uid, or un uid s'obtient gratuitement
+   et sans limite (connexion anonyme). Mille comptes jetables = vingt-cinq mille
+   appels payants dans la journee. Ce compteur-la est commun a tout le monde :
+   quel que soit le nombre de comptes, la depense s'arrete ici. Monte le chiffre
+   quand l'app grandit — c'est un plafond de securite, pas un objectif. */
+const PLAFOND_JOUR_PRODUIT = 400;
+const PLAFOND_JOUR_FRIGO = 120;
+async function quotaJour(db, uid, champJour, champCompte, plafondPerso, champGlobal, plafondGlobal) {
+  const jour = new Date().toISOString().slice(0, 10);
+  const persoRef = db.collection("aiQuota").doc(uid);
+  const globalRef = db.collection("_meta").doc("aiQuotaGlobal");
+  return db.runTransaction(async (t) => {
+    const [p, g] = await Promise.all([t.get(persoRef), t.get(globalRef)]);
+    const dp = p.exists ? p.data() : {};
+    const dg = g.exists ? g.data() : {};
+    const nPerso = dp[champJour] === jour ? (dp[champCompte] || 0) : 0;
+    if (nPerso >= plafondPerso) return { blocked: true, raison: "quota" };
+    const nGlobal = dg.jour === jour ? (dg[champGlobal] || 0) : 0;
+    if (nGlobal >= plafondGlobal) return { blocked: true, raison: "quota-global" };
+    const patchP = {}; patchP[champJour] = jour; patchP[champCompte] = nPerso + 1;
+    const patchG = { jour: jour }; patchG[champGlobal] = nGlobal + 1;
+    t.set(persoRef, patchP, { merge: true });
+    t.set(globalRef, patchG, { merge: true });
+    return { blocked: false };
+  });
+}
+
 exports.identifyDrink = onCall(
-  { region: REGION, secrets: [ANTHROPIC_API_KEY], memory: "512MiB", timeoutSeconds: 60 },
+  { region: REGION, secrets: [ANTHROPIC_API_KEY], memory: "512MiB", timeoutSeconds: 60,
+    /* Borne la vitesse de depense : sans elle, une boucle ouvre autant
+       d'instances que Google en accorde, toutes facturees en parallele. */
+    maxInstances: 8 },
   async (req) => {
     const uid = req.auth && req.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi d'abord.");
@@ -71,18 +102,9 @@ exports.identifyDrink = onCall(
     if (!m) throw new HttpsError("invalid-argument", "Image manquante ou format invalide.");
     if (m[2].length > 600000) throw new HttpsError("invalid-argument", "Image trop lourde.");
 
-    // Anti-abus : 25 analyses par jour et par utilisateur.
-    const day = new Date().toISOString().slice(0, 10);
-    const qRef = db.collection("aiQuota").doc(uid);
-    const quota = await db.runTransaction(async (t) => {
-      const snap = await t.get(qRef);
-      const d = snap.exists ? snap.data() : {};
-      const count = d.day === day ? (d.count || 0) : 0;
-      if (count >= 25) return { blocked: true };
-      t.set(qRef, { day: day, count: count + 1 }, { merge: true });
-      return { blocked: false };
-    });
-    if (quota.blocked) return { ok: false, reason: "quota" };
+    // Anti-abus : 25 analyses par jour et par personne, ET un plafond commun.
+    const quota = await quotaJour(db, uid, "day", "count", 25, "produit", PLAFOND_JOUR_PRODUIT);
+    if (quota.blocked) return { ok: false, reason: quota.raison };
 
     const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
     let resp;
@@ -181,8 +203,11 @@ exports.confirmAiDrink = onCall(
   async (req) => {
     const uid = req.auth && req.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi d'abord.");
+    /* Verifier la longueur ne suffit pas : l'Admin SDK interprete une valeur
+       contenant « / » comme un CHEMIN, pas comme un identifiant. .doc("a/b/c")
+       vise donc discoveries/a/b/c, une sous-collection. On impose la forme. */
     const discId = String((req.data && req.data.discoveryId) || "");
-    if (!discId || discId.length > 40) throw new HttpsError("invalid-argument", "discoveryId manquant.");
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(discId)) throw new HttpsError("invalid-argument", "discoveryId invalide.");
 
     const vRef = db.collection("aiVerified").doc(uid);
     const vSnap = await vRef.get();
