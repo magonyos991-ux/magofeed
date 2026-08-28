@@ -2177,6 +2177,31 @@ window.fbAddReport = async function(storeId, drinkId, type) {
     console.warn("Firebase report error:", e);
   }
 };
+/* Un code-barres colle a la mauvaise boisson. On le fait remonter dans la
+   collection "reports" existante — meme forme, meme regle, rien a redeployer.
+   Le champ note porte le code lu et le nom reel annonce par la personne. */
+window.fbReportBadBarcode = async function(code, drinkId, drinkName, realName) {
+  try {
+    var uid = null;
+    try { var u = await ensureAuthed(); uid = u && u.uid; } catch(e) {}
+    /* La regle exige by == request.auth.uid : sans session, l'ecriture serait
+       refusee en silence. Mieux vaut le dire que de faire croire a un envoi. */
+    if (!uid) { console.warn("Signalement code-barres non envoye : pas de session"); return; }
+    var note = String(code).slice(0, 20) + " lie a tort a \"" + String(drinkName || "").slice(0, 80) +
+               "\" — c'est en realite : " + String(realName || "(non precise)").slice(0, 120);
+    await window.fbAddDoc(window.fbCollection(window.db, "reports"), {
+      storeId: null,
+      drinkId: drinkId != null ? drinkId : null,
+      type: "codebarre",
+      note: note.slice(0, 300),
+      by: uid || null,
+      byPseudo: (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
+      createdAt: window.fbServerTimestamp()
+    });
+  } catch(e) {
+    console.warn("Firebase bad-barcode report error:", e);
+  }
+};
 /* Dernières contributions de la communauté, pour l'admin : qui a signalé quoi
    (stock, rupture, découverte…) — afin de distinguer ses propres actions de
    celles des autres joueurs. Lecture réservée à l'admin par les règles. */
@@ -5659,6 +5684,14 @@ function findFamilyDrink(offName,offBrand){
   return best;
 }
 function confirmFamilyFormat(family,barcode,fmt){
+  /* Verrou de dernier recours : quel que soit le chemin d'appel (choix de
+     marque, selecteur de catalogue, anti-doublon), on ne resoude jamais un
+     code que cette personne a explicitement desavoue pour cette boisson. */
+  if(barcodeDisavowed(barcode,family.id)){
+    toast("Tu as d\u00E9j\u00E0 dit que ce code n'est pas "+family.name);
+    playSound("err");
+    return;
+  }
   // Localement : le code-barre rejoint la famille tout de suite
   // (le prochain scan du meme code sera reconnu sans OFF)
   if(!family.barcodes)family.barcodes=[];
@@ -5701,11 +5734,27 @@ function findBrandFamily(offBrand,offName){
   // ne proposer que si UNE seule marque du catalogue correspond (sinon ambigu)
   return Object.keys(seenBrand).length===1?out:[];
 }
-function renderBrandKinChoice(kin,best,code,p){
+function renderBrandKinChoice(kin,best,code,p,tout){
   var res=document.getElementById("scan-result");
   var btn=document.getElementById("scan-btn");
   if(!res||!btn)return;
   var fmt=parseFormatFromOFF(p);
+  /* Avec 22 Monster au catalogue, l'ordre du fichier ne veut rien dire. On
+     classe par mots partages avec la fiche OpenFoodFacts : « Lewis Hamilton »
+     ne ressemblant a aucun, les plus generiques remontent — et surtout le
+     bouton « nouveau produit » reste la vraie reponse. */
+  var _nOff=normFamilyTxt((best&&best.name)||"");
+  var _motsOff=_nOff.split(" ").filter(function(t){return t.length>2;});
+  kin=kin.slice().sort(function(a,b){
+    function sc(d){
+      var t=normFamilyTxt(d.name).split(" ").filter(function(x){return x.length>2;});
+      var communs=t.filter(function(x){return _motsOff.indexOf(x)!==-1;}).length;
+      return communs*100-t.length;          // a egalite, le nom le plus court
+    }
+    return sc(b)-sc(a);
+  });
+  var _tous=kin, _coupe=8, _replie=!tout&&kin.length>_coupe;
+  if(_replie)kin=kin.slice(0,_coupe);
   res.className="scan-result found";
   res.innerHTML='<div style="font-size:13px;font-weight:700;color:#166534;margin-bottom:8px">Marque reconnue \u2014 c\'est peut-\u00EAtre\u2026</div>'+
     kin.map(function(d){
@@ -5714,6 +5763,15 @@ function renderBrandKinChoice(kin,best,code,p){
         '<span style="flex:1;font-size:13px;font-weight:700;color:var(--s1)">'+sanitize(d.name)+'</span>'+
         '<span style="font-size:11px;font-weight:800;color:var(--s1)">C\'est \u00E7a \u2192</span></div>';
     }).join("");
+  if(_replie){
+    var plus=document.createElement("div");
+    plus.setAttribute("role","button");plus.setAttribute("tabindex","0");
+    plus.style.cssText="text-align:center;font-size:11.5px;font-weight:800;color:var(--s2);padding:9px;cursor:pointer;-webkit-tap-highlight-color:transparent";
+    plus.textContent="Voir les "+(_tous.length-_coupe)+" autres "+(best&&best.brand?sanitize(best.brand):"de cette marque");
+    plus.onclick=function(){ renderBrandKinChoice(_tous,best,code,p,true); };
+    plus.onkeydown=function(ev){if(ev.key==="Enter")plus.onclick();};
+    res.appendChild(plus);
+  }
   res.querySelectorAll(".kin-choice").forEach(function(row){
     var did=Number(row.getAttribute("data-id"));
     row.onclick=function(){
@@ -5775,6 +5833,115 @@ function validGTIN(code){
   return (10-(sum%10))%10===check;
 }
 var _scanVotes={code:null,count:0};
+/* ============================================================================
+   CONTESTER UN RATTACHEMENT CODE-BARRES → BOISSON
+   ----------------------------------------------------------------------------
+   Un code-barres designe UN produit precis, jamais une famille. Mais une fois
+   un code ecrit dans barcodes[], la branche "deja au catalogue" s'imposait sans
+   aucune sortie : un Monster Lewis Hamilton scannait « Monster Energy » et on ne
+   pouvait pas dire le contraire. Le catalogue ne pouvait donc que se degrader,
+   jamais se corriger.
+
+   Trois pieces : le desaveu reste sur l'appareil (effet immediat, hors ligne),
+   il remonte a l'admin pour reparer le catalogue partage, et la reconnaissance
+   le respecte des le scan suivant.
+   ============================================================================ */
+function badLinks(){
+  try{ return JSON.parse(localStorage.getItem("magoBadLinks")||"{}")||{}; }catch(e){ return {}; }
+}
+function barcodeDisavowed(code,drinkId){
+  var l=badLinks()[String(code)];
+  return !!l && l.indexOf(Number(drinkId))!==-1;
+}
+function disavowBarcode(code,drinkId){
+  var all=badLinks(), k=String(code);
+  if(!all[k])all[k]=[];
+  if(all[k].indexOf(Number(drinkId))===-1)all[k].push(Number(drinkId));
+  try{ localStorage.setItem("magoBadLinks",JSON.stringify(all)); }catch(e){}
+  // Le catalogue charge en memoire garde le code : on l'en retire aussi, sinon
+  // la boisson continuerait de se dire porteuse de ce code jusqu'au rechargement.
+  try{
+    var d=DRINKS.find(function(x){return Number(x.id)===Number(drinkId);});
+    if(d&&d.barcodes){
+      var i=d.barcodes.indexOf(String(code));
+      if(i!==-1)d.barcodes.splice(i,1);
+    }
+  }catch(e){}
+  // L'historique local repetait le mauvais nom a chaque consultation.
+  try{
+    scanHist=(scanHist||[]).filter(function(e){return String(e.code)!==String(code);});
+    localStorage.setItem("magoScanHist",JSON.stringify(scanHist));
+  }catch(e){}
+}
+function openBarcodeDispute(drink,code){
+  var res=document.getElementById("scan-result");
+  var btn=document.getElementById("scan-btn");
+  if(!res)return;
+  /* « Ou l'as-tu trouve ? » vit dans un autre conteneur (#scan-where) : sans
+     ce reset, ses lignes « C'est ici » resteraient braquees sur la boisson
+     qu'on est en train de contester, et un tap l'ecrirait dans un magasin. */
+  try{ renderWhereFound(null); }catch(e){}
+  if(btn)btn.style.display="none";
+  Array.prototype.forEach.call(document.querySelectorAll(".scan-injected"),function(n){n.remove();});
+  res.className="scan-result";
+  res.innerHTML=
+    '<div style="text-align:center;margin-bottom:9px">'+
+      '<div style="font-size:13.5px;font-weight:700;color:var(--s1)">Qu\'est-ce que tu as en main ?</div>'+
+      '<div style="font-size:11.5px;color:var(--s2);margin-top:3px;line-height:1.45">Un code-barres = <b>une</b> boisson pr\u00E9cise. '+
+        'Le code '+sanitize(String(code))+' est actuellement li\u00E9 \u00E0 \u00AB '+sanitize(drink.name)+' \u00BB.</div>'+
+    '</div>'+
+    '<input id="dispute-name" type="text" placeholder="Nom exact lu sur l\'\u00E9tiquette" autocomplete="off" '+
+      'style="width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:13px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none;text-align:center">'+
+    '<div id="dispute-hint" style="font-size:11px;color:var(--s3);text-align:center;margin-top:6px;min-height:14px">Recherche du vrai nom\u2026</div>'+
+    '<div id="dispute-new" role="button" tabindex="0" style="margin-top:8px;text-align:center;font-size:12.5px;font-weight:800;color:#fff;background:#e67e22;border-radius:12px;padding:12px;cursor:pointer;-webkit-tap-highlight-color:transparent">Ce produit n\'est pas encore dans Magofeed</div>'+
+    '<div id="dispute-other" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:12px;font-weight:700;color:var(--s1);background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:11px;cursor:pointer;-webkit-tap-highlight-color:transparent">C\'est une autre boisson d\u00E9j\u00E0 au catalogue</div>'+
+    '<div id="dispute-cancel" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:11.5px;font-weight:700;color:var(--s3);padding:8px;cursor:pointer;-webkit-tap-highlight-color:transparent">Annuler \u2014 c\'\u00E9tait bien \u00E7a</div>'+
+    /* La barre d'onglets flotte au-dessus du contenu : sans cette reserve,
+       elle recouvre le dernier choix — celui qui permet de faire marche
+       arriere. On reserve sa hauteur, encoche du telephone comprise. */
+    '<div style="height:calc(78px + env(safe-area-inset-bottom))" aria-hidden="true"></div>';
+  try{ res.scrollIntoView({block:"nearest"}); }catch(e){}
+  var input=document.getElementById("dispute-name");
+  var hint=document.getElementById("dispute-hint");
+  var offBrand="",offCat="";
+  /* On propose le vrai nom plutot que de le faire taper : debout dans un rayon,
+     personne ne saisit « Monster Energy Lewis Hamilton » au clavier. */
+  if(typeof fetchOFFProduct==="function"){
+    fetchOFFProduct(code).then(function(data){
+      if(!data||data.status!==1)return;
+      var best=offBestProduct(data.product||{});
+      if(!best||!best.name)return;
+      offBrand=best.brand||""; offCat=best.cat||"";
+      if(input&&!input.value)input.value=best.name;
+      if(hint)hint.textContent="Nom trouv\u00E9 sur OpenFoodFacts \u2014 corrige-le si besoin";
+    }).catch(function(){ if(hint)hint.textContent=""; });
+    setTimeout(function(){ if(hint&&hint.textContent==="Recherche du vrai nom\u2026")hint.textContent=""; },6000);
+  } else if(hint){ hint.textContent=""; }
+  function valider(){
+    var nm=(input&&input.value||"").trim();
+    if(!nm){ toast("Indique le nom lu sur l'\u00E9tiquette"); if(input)input.focus(); playSound("err"); return null; }
+    disavowBarcode(code,drink.id);
+    if(window.fbReportBadBarcode)window.fbReportBadBarcode(code,drink.id,drink.name,nm);
+    return nm;
+  }
+  var bNew=document.getElementById("dispute-new");
+  bNew.onclick=function(){
+    var nm=valider(); if(!nm)return;
+    toast("Merci \u2014 le code ne pointe plus vers "+drink.name);
+    addDiscovery(nm,offBrand,code,offCat);
+  };
+  bNew.onkeydown=function(ev){if(ev.key==="Enter")bNew.onclick();};
+  var bOther=document.getElementById("dispute-other");
+  bOther.onclick=function(){
+    var nm=valider(); if(!nm)return;
+    openCatalogLinkPicker(code);
+  };
+  bOther.onkeydown=function(ev){if(ev.key==="Enter")bOther.onclick();};
+  var bCancel=document.getElementById("dispute-cancel");
+  bCancel.onclick=function(){ resetScanUI(); rescan(); };
+  bCancel.onkeydown=function(ev){if(ev.key==="Enter")bCancel.onclick();};
+  if(input)input.focus();
+}
 function onBarcodeDetected(r){
   var rawCode=r&&r.codeResult&&r.codeResult.code;
   if(!rawCode)return;
@@ -5800,7 +5967,7 @@ function onBarcodeDetected(r){
   document.getElementById("scan-hint").textContent="✓ Code : "+code;
   var btn=document.getElementById("scan-btn"),res=document.getElementById("scan-result");
   var rescanLink=document.getElementById("rescan-link");if(rescanLink)rescanLink.style.display="block";
-  var found=DRINKS.find(function(d){return d.barcodes&&d.barcodes.indexOf(code)!==-1;});
+  var found=DRINKS.find(function(d){return d.barcodes&&d.barcodes.indexOf(code)!==-1&&!barcodeDisavowed(code,d.id);});
   var foundDiscovery=DISCOVERIES.find(function(d){return String(d.barcode)===String(code);});
   res.style.display="block";
   // Nettoie les liens injectes par un scan precedent (« deja au catalogue ? »,
@@ -5819,6 +5986,17 @@ function onBarcodeDetected(r){
       sps.onclick=function(){openPhotoSuggest(found.id);};
       sps.onkeydown=function(ev){if(ev.key==="Enter")openPhotoSuggest(found.id);};
     }
+    /* La sortie de secours. Sans elle, un code colle a la mauvaise boisson
+       l'etait pour toujours : l'app affirmait, la personne ne pouvait pas
+       repondre. Discret, mais toujours la. */
+    var nope=document.createElement("div");
+    nope.className="scan-injected";
+    nope.setAttribute("role","button");nope.setAttribute("tabindex","0");
+    nope.style.cssText="text-align:center;font-size:12px;font-weight:700;color:var(--s2);background:transparent;border:1.5px solid var(--border);border-radius:12px;padding:10px;cursor:pointer;margin-top:8px;-webkit-tap-highlight-color:transparent";
+    nope.textContent="Ce n'est pas ce produit ?";
+    nope.onclick=function(){openBarcodeDispute(found,code);};
+    nope.onkeydown=function(ev){if(ev.key==="Enter")openBarcodeDispute(found,code);};
+    res.appendChild(nope);
     btn.textContent="Voir les magasins";btn.style.background=found.color;btn.style.display="block";
     btn.onclick=function(){stopScan();pick(found);};
     recordScan(code,found.name,found.brand,found.cat,"catalog");
@@ -5847,7 +6025,7 @@ function onBarcodeDetected(r){
     btn.textContent="Ajouter aux découvertes";btn.style.background="#e67e22";btn.style.display="block";
     btn.onclick=function(){addDiscovery(cached.name,cached.brand,code,cached.cat);};
     recordScan(code,cached.name,cached.brand,cached.cat,cached.src);
-    var cachedDrink=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(String(code))!==-1;});
+    var cachedDrink=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(String(code))!==-1&&!barcodeDisavowed(code,x.id);});
     var cachedDisc=DISCOVERIES.find(function(x){return String(x.barcode||x.id)===String(code);});
     renderWhereFound(cachedDrink?{drinkId:cachedDrink.id}:(cachedDisc?{discoveryId:cachedDisc.id}:{pendingBarcode:code}));
     playSound("win");toast("Déjà scanné : "+cached.name);
@@ -5881,7 +6059,15 @@ function onBarcodeDetected(r){
             // MAIS des mots de variante (peche, blanche, edition...) -> ce n'est
             // PAS un format, c'est une autre boisson. On demande, jamais en silence.
             if(brandKin.length===1&&!hasVariantExtras(best.name,brandKin[0])){family=brandKin[0];}
-            else if(brandKin.length>=1&&brandKin.length<=10){
+            else if(brandKin.length>=1){
+              /* Il y avait ici un plafond a 10 : au-dela, aucun ecran ne
+                 s'affichait. Or ce sont justement les grandes marques qui
+                 depassent 10 (Fanta 24, Monster 22, Red Bull 20) — 224 boissons
+                 sur 696. Resultat : pour un Monster edition limitee, l'app ne
+                 proposait rien, et la personne finissait dans le selecteur
+                 libre ou l'on colle un code sur n'importe quelle boisson.
+                 On classe par ressemblance et on affiche, quel que soit le
+                 nombre. */
               renderBrandKinChoice(brandKin,best,code,p);
               return;
             }
@@ -11493,7 +11679,7 @@ function rafaleAddCode(code){
   // Anti-rebond : le même code tenu en main déclenche plusieurs lectures.
   if(window._rafaleLast&&window._rafaleLast.code===code&&(now-window._rafaleLast.ts)<3000){window._rafaleLast.ts=now;return;}
   window._rafaleLast={code:code,ts:now};
-  var d=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(code)!==-1;});
+  var d=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(code)!==-1&&!barcodeDisavowed(code,x.id);});
   if(!d){
     rafaleFlash("#f59e0b");playSound("err");rafaleNote("Pas au catalogue — au suivant","#fbbf24");
     if(navigator.vibrate)try{navigator.vibrate(30);}catch(e){}
@@ -11733,6 +11919,10 @@ function addDiscovery(name,brand,barcode,cat){
       // le choix est ambigu, on laisse creer la decouverte
       if(bkList.length===1&&!hasVariantExtras(name,bkList[0]))kin=bkList[0];
     }
+    /* Si la personne vient justement de dire « ce n'est pas ce produit », lui
+       reposer la question — avec OK comme bouton par defaut — annulerait son
+       desaveu d'un tap. On ne repropose jamais une fusion refusee. */
+    if(kin&&barcodeDisavowed(barcode,kin.id))kin=null;
     if(kin&&confirm("\u00AB "+kin.name+" \u00BB existe d\u00E9j\u00E0 au catalogue.\nC'est ce produit ? (OK = oui, ne pas cr\u00E9er de doublon)")){
       confirmFamilyFormat(kin,barcode,{type:null,cl:null});
       return;
@@ -16054,8 +16244,8 @@ function maybeFounderRecap(){
    joueurs, AVEC leur pseudo, pour distinguer d'un coup d'œil ses propres actions
    de celles de la communauté. Répond à : "être notifié avec le pseudo pour savoir
    que ce n'était pas moi." */
-function _contribTypeLabel(t){return {stock:"En stock",rupture:"Rupture",contrefacon:"Contrefaçon",nouveau:"Nouveau",badstore:"Faux magasin"}[t]||t;}
-function _contribTypeColor(t){return {stock:"#16a34a",rupture:"#dc2626",contrefacon:"#b45309",nouveau:"#2563eb",badstore:"#b45309"}[t]||"#6b6560";}
+function _contribTypeLabel(t){return {stock:"En stock",rupture:"Rupture",contrefacon:"Contrefaçon",nouveau:"Nouveau",badstore:"Faux magasin",codebarre:"Code-barres contesté"}[t]||t;}
+function _contribTypeColor(t){return {stock:"#16a34a",rupture:"#dc2626",contrefacon:"#b45309",nouveau:"#2563eb",badstore:"#b45309",codebarre:"#7c3aed"}[t]||"#6b6560";}
 function renderContribFeed(){
   var host=document.getElementById("admin-contribs");
   if(!host){
@@ -16098,7 +16288,33 @@ function renderContribFeed(){
          donne au moins le pays. */
       '<div class="ct-ville" data-lat="'+(aLieu?r.lat:"")+'" data-lng="'+(aLieu?r.lng:"")+'" '+
         'style="font-size:11px;font-weight:700;color:var(--s3);margin-top:3px">'+
-        (aLieu?"…":(r.tz?sanitize(_paysDuFuseau(r.tz))+" · fuseau":"lieu inconnu"))+'</div>';
+        (aLieu?"…":(r.tz?sanitize(_paysDuFuseau(r.tz))+" · fuseau":"lieu inconnu"))+'</div>'+
+      /* La note porte TOUT ce qui permet de reparer : le code lu et le vrai nom
+         annonce. Sans elle, la carte disait « codebarre — Monster Energy » et
+         l'information necessaire restait en base, invisible. */
+      (r.note?'<div style="font-size:11.5px;color:var(--s1);background:var(--bg3);border-radius:9px;padding:7px 9px;margin-top:6px;line-height:1.45">'+sanitize(r.note)+'</div>':'');
+      /* Reparer depuis le fil, sans avoir a retrouver la fiche a la main. */
+      var _cbm=(r.type==="codebarre"&&r.note)?String(r.note).match(/^\s*(\d{8,14})\b/):null;
+      if(_cbm&&r.drinkId!=null&&window.fbRemoveBarcode){
+        var _code=_cbm[1], _did=r.drinkId;
+        var fix=document.createElement("div");
+        fix.setAttribute("role","button");fix.setAttribute("tabindex","0");
+        fix.style.cssText="margin-top:7px;text-align:center;font-size:11.5px;font-weight:800;color:#fff;background:#7c3aed;border-radius:10px;padding:9px;cursor:pointer;-webkit-tap-highlight-color:transparent";
+        fix.textContent="Retirer "+_code+" de cette boisson";
+        fix.onclick=function(){
+          if(!confirm("Retirer le code "+_code+" de cette boisson ?\n\nVerifie d'abord sur openfoodfacts.org a quel produit il correspond vraiment."))return;
+          fix.textContent="Retrait\u2026";
+          window.fbRemoveBarcode(_did,_code).then(function(){
+            fix.textContent="\u2713 Retire";fix.style.background="#16a34a";
+            try{
+              var dd=DRINKS.find(function(x){return String(x.id)===String(_did);});
+              if(dd&&dd.barcodes){var i=dd.barcodes.indexOf(String(_code));if(i!==-1)dd.barcodes.splice(i,1);}
+            }catch(e){}
+          }).catch(function(){ fix.textContent="\u00C9chec \u2014 r\u00E9essaie";fix.style.background="#dc2626"; });
+        };
+        fix.onkeydown=function(ev){if(ev.key==="Enter")fix.onclick();};
+        card.appendChild(fix);
+      }
       host.appendChild(card);
     });
     var sep=document.createElement("div");sep.style.cssText="height:1px;background:var(--border);margin:6px 0 14px";host.appendChild(sep);
