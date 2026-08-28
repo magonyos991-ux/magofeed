@@ -3965,6 +3965,9 @@ function emptyGo(tab){
   navTo(tab);
 }
 function show(s){
+  /* Le menu du pin est en position fixe sur le document : sans ca il suivrait
+     la personne d'ecran en ecran. C'est exactement ce qui s'est produit. */
+  try{fermerMenuPin();}catch(e){}
   var cur=document.querySelector(".screen.on");
   var curId=cur?cur.id.replace(/^s-/,""):null;
   if(curId&&curId!==s){
@@ -13647,6 +13650,9 @@ function openExploreMap(opts){
           })
         : L.layerGroup();
       exploreLayer.addTo(exploreMap);
+      /* Si la carte bouge, le geste n'a plus de sens : la carte va se
+         redessiner et detruire le marqueur sous le doigt. On referme avant. */
+      exploreMap.on("movestart zoomstart",function(){ try{fermerMenuPin();}catch(e){} });
       exploreMap.on("moveend zoomend",function(){
         try{renderInStockArrows();}catch(e){}
         clearTimeout(_exploreTimer);
@@ -13724,58 +13730,116 @@ function closeExploreMap(){
    pin, trois choix s'ouvrent en arc juste au-dessus, on GLISSE le pouce sur
    celui qu'on veut et on relache. Un seul geste, sans lever le doigt.
 
-   Le tap simple garde son role (tracer l'itineraire) : on n'enleve rien.
+/* ============================================================================
+   MENU EN ARC PAR APPUI LONG SUR UN PIN
+   ----------------------------------------------------------------------------
+   On appuie sur un pin, trois choix s'ouvrent en arc juste au-dessus, on GLISSE
+   le pouce sur celui qu'on veut et on relache. Un seul geste, sans lever le
+   doigt : utilisable d'une main, debout dans un rayon.
+
+   POURQUOI LES ECOUTEURS SONT SUR LE DOCUMENT, ET PAS SUR LE PIN
+   Ils l'etaient. Resultat : le menu restait colle a l'ecran pour toujours.
+   La carte se redessine a chaque fin de mouvement (exploreLoadStores fait
+   clearLayers), ce qui DETRUIT l'element du marqueur. Un element retire du DOM
+   ne recoit plus ni touchend ni touchcancel : la fin du geste n'arrivait donc
+   jamais, et rien ne refermait le menu.
+   Le doigt, lui, appartient au document du debut a la fin du geste. C'est donc
+   la que le suivi doit vivre. Le pin ne sert plus qu'a DEMARRER.
    ============================================================================ */
 var PIN_MENU_ACTIONS=[
   {cle:"stock", libelle:"En stock", couleur:"#16a34a",
-   ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6.5"/></svg>'},
-  {cle:"fiche", libelle:"Détails", couleur:"#1a1714",
-   ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.6"/></svg>'},
+   ico:'<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6.5"/></svg>'},
+  /* Un gris-bleu plutot que du noir : le noir se confondait avec le fond de
+     carte en theme sombre, le bouton disparaissait. */
+  {cle:"fiche", libelle:"Détails", couleur:"#64748b",
+   ico:'<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.6"/></svg>'},
   {cle:"rupture", libelle:"Rupture", couleur:"#dc2626",
-   ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>'}
+   ico:'<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>'}
 ];
-function fermerMenuPin(){
+/* Le geste en cours. Un seul a la fois, connu de tout le module : c'est lui qui
+   permet de tout refermer proprement depuis n'importe ou. */
+var _geste=null;
+
+function _pinDetache(){
+  if(!_geste)return;
+  document.removeEventListener("touchmove",_geste.bouge,{passive:false,capture:true});
+  document.removeEventListener("touchend",_geste.fin,true);
+  document.removeEventListener("touchcancel",_geste.fin,true);
+  document.removeEventListener("mousemove",_geste.bouge,true);
+  document.removeEventListener("mouseup",_geste.fin,true);
+  _geste=null;
+}
+/* Retirer le MENU sans toucher au geste : c'est ce dont ouvrirMenuPin a besoin
+   quand il repart de zero. Confondre les deux faisait qu'a l'ouverture on
+   arrachait le suivi du doigt qu'on venait tout juste de poser. */
+function _pinRetirerMenu(){
+  try{ if(window.exploreMap&&exploreMap.dragging)exploreMap.dragging.enable(); }catch(e){}
   var m=document.getElementById("pin-menu");
-  if(m){m.classList.remove("in");setTimeout(function(){if(m.parentNode)m.remove();},170);}
+  if(m){
+    m.classList.remove("in");
+    m.classList.add("out");
+    setTimeout(function(){ if(m&&m.parentNode)m.remove(); },200);
+  }
   window._pinMenuActif=null;
 }
+function fermerMenuPin(){
+  _pinDetache();
+  _pinRetirerMenu();
+}
+/* Filet de securite : quoi qu'il arrive ailleurs dans l'app, le menu ne doit
+   jamais survivre a un changement d'ecran ni a un mouvement de carte. */
+window.addEventListener("pagehide",fermerMenuPin);
+document.addEventListener("visibilitychange",function(){ if(document.hidden)fermerMenuPin(); });
+
 function ouvrirMenuPin(s,x,y){
-  fermerMenuPin();
+  _pinRetirerMenu();          // surtout PAS fermerMenuPin : le geste est en cours
   var m=document.createElement("div");
   m.id="pin-menu";
   m.className="pin-menu";
   /* Les actions de stock n'ont de sens que si on regarde UNE boisson. Sans
-     filtre, on ne saurait pas quoi confirmer : on n'offre alors que la fiche,
-     plutot qu'un bouton qui ne peut rien faire. */
+     filtre, on ne saurait pas quoi confirmer : on n'offre alors que la fiche. */
   var actions=exploreFilter?PIN_MENU_ACTIONS:PIN_MENU_ACTIONS.filter(function(a){return a.cle==="fiche";});
   var n=actions.length;
-  var R=76;                                   // rayon de l'arc, en pixels
-  var LEVEE=26;                               // on hisse tout l'arc : sinon les
-                                              // boutons lateraux tombent sous le pouce
-  /* Un pin en haut de l'ecran ferait sortir le menu : dans ce cas on retourne
-     l'arc vers le bas. Et on ecarte le centre des bords lateraux pour que les
-     boutons de cote restent entiers. */
-  var versLeBas=(y-(R+LEVEE+34)<8);
-  var marge=R*0.87+30;
+  var R=78;
+  var LEVEE=30;
+  /* On bascule vers le bas des que l'arc entrerait dans la barre du haut —
+     pas seulement s'il sortait de l'ecran. Sinon les choix se retrouvent sous
+     les filtres et deviennent a moitie invisibles. */
+  var HAUT_SUR=150;
+  var versLeBas=(y-(R+LEVEE+34)<HAUT_SUR);
+  // ... sauf si basculer vers le bas le ferait sortir par le bas : on garde
+  // alors le haut, et on remonte le point d'ancrage juste ce qu'il faut.
+  if(versLeBas&&(y+R+LEVEE+34)>(window.innerHeight||844)-90){
+    versLeBas=false;
+    y=Math.max(y,HAUT_SUR+R+LEVEE+34);
+  }
+  var marge=R*0.87+34;
   x=Math.max(marge,Math.min((window.innerWidth||390)-marge,x));
-  var html='<div class="pm-nom">'+sanitize(s.name||"Ce magasin")+'</div>';
+  var html='<div class="pm-halo"></div>';
   actions.forEach(function(a,i){
-    // Arc de 120° centre vers le haut : les choix restent a portee de pouce.
-    var ang=(n===1)?-90:(-90-60+ (120/(n-1))*i);
+    var ang=(n===1)?-90:(-90-60+(120/(n-1))*i);
     var rad=ang*Math.PI/180;
     var dx=Math.cos(rad)*R, dy=Math.sin(rad)*R-LEVEE;
     if(versLeBas)dy=-dy;
-    html+='<div class="pm-item" data-cle="'+a.cle+'" style="--dx:'+dx.toFixed(1)+'px;--dy:'+dy.toFixed(1)+'px;--c:'+a.couleur+'">'+
+    html+='<div class="pm-item" data-cle="'+a.cle+'" style="--dx:'+dx.toFixed(1)+'px;--dy:'+dy.toFixed(1)+'px;--c:'+a.couleur+';--r:'+(i*36)+'ms">'+
             '<span class="pm-ico">'+a.ico+'</span>'+
-            '<span class="pm-lab">'+a.libelle+'</span>'+
           '</div>';
   });
+  /* Une seule etiquette. Au repos elle dit QUEL magasin on vise ; des qu'un
+     choix passe sous le pouce, elle dit LEQUEL. Elle n'est donc jamais vide et
+     ne repete jamais l'evidence. Trois etiquettes permanentes se chevauchaient. */
+  html+='<div class="pm-lab" data-nom="'+sanitize(s.name||"Ce magasin")+'"><span>'+sanitize(s.name||"Ce magasin")+'</span></div>';
   m.innerHTML=html;
   if(versLeBas)m.classList.add("bas");
   m.style.left=x+"px"; m.style.top=y+"px";
   document.body.appendChild(m);
-  requestAnimationFrame(function(){m.classList.add("in");});
-  try{ if(navigator.vibrate)navigator.vibrate(12); }catch(e){}
+  /* Tant que le menu est ouvert, la carte ne glisse plus. preventDefault ne
+     suffit pas : il empeche le defilement natif du navigateur, pas les
+     gestionnaires JavaScript de Leaflet, qui faisaient partir la carte et
+     detruisaient le pin sous le doigt. */
+  try{ if(window.exploreMap&&exploreMap.dragging)exploreMap.dragging.disable(); }catch(e){}
+  requestAnimationFrame(function(){ m.classList.add("in"); });
+  try{ if(navigator.vibrate)navigator.vibrate(11); }catch(e){}
   try{playSound("pop");}catch(e){}
   window._pinMenuActif={el:m,store:s};
   return m;
@@ -13793,68 +13857,108 @@ function executerActionPin(cle,s){
     doConfirm(faux,String(s.fbId||s.id),did,cle==="stock"?1:-1);
   }catch(e){ try{toast("Impossible d'enregistrer — réessaie");}catch(_){} }
 }
-/* Arme l'appui long sur un marqueur Leaflet. On travaille sur l'element DOM
-   du marqueur : Leaflet n'expose pas d'evenement d'appui long. */
+/* Arme l'appui long sur un marqueur. Le pin ne fait que DEMARRER le geste ;
+   des que le menu s'ouvre, le suivi passe au document. */
 function armerMenuPin(mk,s){
   mk.on("add",function(){
     var el=mk.getElement&&mk.getElement();
     if(!el||el._pinArme)return;
     el._pinArme=true;
-    var minuteur=null,ouvert=false,survol=null;
     var pos=function(e){ var t=(e.touches&&e.touches[0])||e; return {x:t.clientX,y:t.clientY}; };
-    /* Le menu est en pointer-events:none pour ne jamais voler un geste a la
-       carte — donc elementFromPoint ne le verrait pas. On fait la detection
-       nous-memes, au plus proche centre, avec une marge : un pouce n'atterrit
-       jamais au pixel pres. */
-    var majSurvol=function(p){
-      var m=window._pinMenuActif&&window._pinMenuActif.el; if(!m)return;
-      var item=null,meilleure=1e9;
-      var TOL=22;                                   // marge autour du bouton
-      [].forEach.call(m.querySelectorAll(".pm-item"),function(el){
-        var r=el.getBoundingClientRect();
-        var cx=r.left+r.width/2, cy=r.top+r.height/2;
-        var d=Math.sqrt((p.x-cx)*(p.x-cx)+(p.y-cy)*(p.y-cy));
-        if(d<=r.width/2+TOL && d<meilleure){meilleure=d;item=el;}
-      });
-      if(survol&&survol!==item)survol.classList.remove("on");
-      if(item)item.classList.add("on");
-      survol=item;
-    };
-    var debut=function(e){
+
+    function demarrer(e,tactile){
       var p=pos(e);
-      minuteur=setTimeout(function(){
-        ouvert=true;
+      var g={ store:s, ouvert:false, survol:null, depart:p, minuteur:null, bouge:null, fin:null };
+
+      g.majSurvol=function(pt){
+        var m=window._pinMenuActif&&window._pinMenuActif.el; if(!m)return;
+        var item=null,meilleure=1e9,TOL=26;
+        [].forEach.call(m.querySelectorAll(".pm-item"),function(it){
+          var r=it.getBoundingClientRect();
+          var cx=r.left+r.width/2, cy=r.top+r.height/2;
+          var d=Math.sqrt((pt.x-cx)*(pt.x-cx)+(pt.y-cy)*(pt.y-cy));
+          if(d<=r.width/2+TOL && d<meilleure){meilleure=d;item=it;}
+        });
+        if(g.survol===item)return;
+        if(g.survol)g.survol.classList.remove("on");
+        if(item){
+          item.classList.add("on");
+          try{ if(navigator.vibrate)navigator.vibrate(7); }catch(e){}
+        }
+        g.survol=item;
+        m.classList.toggle("vise",!!item);
+        var boite=m.querySelector(".pm-lab"), lab=boite&&boite.querySelector("span");
+        if(lab&&boite){
+          var a=item&&PIN_MENU_ACTIONS.filter(function(z){return z.cle===item.getAttribute("data-cle");})[0];
+          lab.textContent=a?a.libelle:(boite.getAttribute("data-nom")||"");
+          boite.style.setProperty("--c",a?a.couleur:"var(--s1)");
+        }
+      };
+
+      g.bouge=function(ev){
+        if(!g.ouvert){
+          // avant l'ouverture, un vrai deplacement = la personne fait glisser
+          // la carte : on abandonne l'appui long sans rien afficher
+          var q=pos(ev);
+          if(Math.abs(q.x-g.depart.x)>12||Math.abs(q.y-g.depart.y)>12)g.annuler();
+          return;
+        }
+        if(ev.cancelable)ev.preventDefault();
+        ev.stopPropagation();                   // ceinture : Leaflet ecoute aussi le document
+        g.majSurvol(pos(ev));
+      };
+
+      g.fin=function(){
+        if(g.minuteur){clearTimeout(g.minuteur);g.minuteur=null;}
+        if(!g.ouvert){ _pinDetache(); return; }
+        var cle=g.survol&&g.survol.getAttribute("data-cle");
+        if(cle){
+          // petit accuse de reception avant la fermeture : on voit ce qu'on a choisi
+          g.survol.classList.add("go");
+          try{ if(navigator.vibrate)navigator.vibrate([9,26,9]); }catch(e){}
+        }
+        g.ouvert=false;
+        setTimeout(function(){ fermerMenuPin(); },cle?110:0);
+        if(cle)setTimeout(function(){ executerActionPin(cle,g.store); },150);
         window._pinMenuVientDeSOuvrir=true;
-        ouvrirMenuPin(s,p.x,p.y);
-      },420);
-    };
-    var bouge=function(e){
-      if(!ouvert){ if(minuteur){clearTimeout(minuteur);minuteur=null;} return; }
-      if(e.cancelable)e.preventDefault();      // on garde le doigt, la carte ne bouge pas
-      majSurvol(pos(e));
-    };
-    var fin=function(){
-      if(minuteur){clearTimeout(minuteur);minuteur=null;}
-      if(!ouvert)return;
-      ouvert=false;
-      var cle=survol&&survol.getAttribute("data-cle");
-      if(survol)survol.classList.remove("on");
-      survol=null;
-      fermerMenuPin();
-      if(cle)executerActionPin(cle,s);
-      setTimeout(function(){window._pinMenuVientDeSOuvrir=false;},350);
-    };
-    el.addEventListener("touchstart",debut,{passive:true});
-    el.addEventListener("touchmove",bouge,{passive:false});
-    el.addEventListener("touchend",fin,{passive:true});
-    el.addEventListener("touchcancel",fin,{passive:true});
-    el.addEventListener("mousedown",function(e){debut(e);
-      var mv=function(ev){bouge(ev);},up=function(){fin();window.removeEventListener("mousemove",mv);window.removeEventListener("mouseup",up);};
-      window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
-    });
+        setTimeout(function(){window._pinMenuVientDeSOuvrir=false;},420);
+      };
+
+      g.annuler=function(){
+        if(g.minuteur){clearTimeout(g.minuteur);g.minuteur=null;}
+        g.ouvert=false;
+        fermerMenuPin();
+      };
+
+      _pinDetache();
+      _geste=g;
+      /* LE POINT DECISIF : le suivi vit sur le document, qui survit a la
+         destruction du marqueur. En capture, pour passer avant Leaflet. */
+      if(tactile){
+        /* EN CAPTURE, imperativement. En phase de bulle, Leaflet — dont les
+           gestionnaires sont sur le conteneur de carte, donc plus bas dans
+           l'arbre — recevait le touchmove AVANT nous, demarrait le glissement
+           de la carte, et le movestart refermait le menu qu'on venait
+           d'ouvrir. En capture on passe devant, et le preventDefault tient. */
+        document.addEventListener("touchmove",g.bouge,{passive:false,capture:true});
+        document.addEventListener("touchend",g.fin,true);
+        document.addEventListener("touchcancel",g.fin,true);
+      } else {
+        document.addEventListener("mousemove",g.bouge,true);
+        document.addEventListener("mouseup",g.fin,true);
+      }
+      g.minuteur=setTimeout(function(){
+        if(_geste!==g)return;
+        g.ouvert=true;
+        window._pinMenuVientDeSOuvrir=true;
+        ouvrirMenuPin(g.store,g.depart.x,g.depart.y);
+      },400);
+    }
+
+    el.addEventListener("touchstart",function(e){demarrer(e,true);},{passive:true});
+    el.addEventListener("mousedown",function(e){demarrer(e,false);});
   });
 }
-
 function exploreLoadStores(useCache){
   if(!exploreMap)return;
   var status=document.getElementById("explore-status");
