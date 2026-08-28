@@ -281,9 +281,25 @@ service cloud.firestore {
     }
 
     // ── Signalements : déposés par les connectés, lus par l'admin.
+    /* ── Signalements ────────────────────────────────────────────────────
+     * La creation etait ouverte a tout compte connecte SANS aucune validation
+     * de champ. Or le client ecrit lui-meme `by` : n'importe qui pouvait donc
+     * deposer des ruptures signees du nom d'un AUTRE utilisateur, et l'anti-farm
+     * (qui retire des points a l'auteur d'une annonce contredite) devenait une
+     * arme pour vider le compte d'un innocent. On exige desormais que l'auteur
+     * soit celui qui ecrit, et on borne le reste. */
     match /reports/{id} {
       allow read: if isAdmin();
-      allow create: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.by == request.auth.uid
+        && request.resource.data.keys().hasOnly(
+             ['by','byPseudo','type','storeId','drinkId','storeName',
+              'lat','lng','tz','note','createdAt'])
+        && request.resource.data.type is string
+        && request.resource.data.type.size() <= 30
+        && (!('note' in request.resource.data)
+            || (request.resource.data.note is string
+                && request.resource.data.note.size() <= 300));
       allow update, delete: if isAdmin();
     }
 

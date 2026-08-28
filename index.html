@@ -711,7 +711,8 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
             <b>• Contributions</b> (confirmation de stock, signalement de rupture ou de contrefaçon) — enregistrées avec l'horodatage et le magasin concerné, sans lien direct avec ton identité civile.<br>
             <b>• Statistiques de recherche anonymes</b> — quand tu ouvres la fiche d'une boisson, l'app enregistre la boisson, une zone arrondie (~1 km) et le fait qu'un magasin confirmé existait ou non. Aucun identifiant, aucune position exacte : ça sert uniquement à savoir quelles boissons manquent où.<br>
             <b>• Demande de certification commerçant</b> — si tu demandes la pastille bleue pour ta boutique, ton <b>nom, ton moyen de contact</b> (téléphone ou e-mail), ton rôle et le mot que tu nous laisses sont enregistrés, pour qu'un humain puisse vérifier que tu tiens bien ce magasin. Ces informations ne sont lisibles que par l'administrateur de Magofeed et par toi. Elles sont effacées si tu supprimes ton compte, si tu retires ta demande, ou si la certification est retirée.<br>
-            <b>• Préférences locales</b> (favoris, historique de recherche, thème, langue, sons) — stockées uniquement dans le stockage local de ton navigateur (localStorage), jamais transmises à nos serveurs.
+            <b>• Favoris</b> — tes dix premières boissons favorites sont enregistrées avec ton pseudo et apparaissent sur ton <b>profil public</b>, visible depuis le classement. Vide tes favoris pour les retirer.<br>
+            <b>• Préférences locales</b> (historique de recherche, thème, langue, sons) — stockées uniquement dans le stockage local de ton navigateur (localStorage), jamais transmises à nos serveurs.
           </div>
         </div>
 
@@ -10548,7 +10549,11 @@ function majBoutonCertif(s){
 function openStoreDetail(storeId){
   var s=STORES.find(function(x){return x.id===storeId||x.fbId===storeId;});
   if(!s)return;
-  bumpStoreStat(s,"vues");
+  /* Le gerant ouvre sa propre fiche a chaque fois qu'il veut voir son tableau
+     de bord — c'est le seul chemin pour y acceder. Compter ces ouvertures
+     gonflait son audience avec ses propres visites, et ce chiffre est celui
+     qu'on lui montre comme valeur de l'app. */
+  if(!estProprietaire(s))bumpStoreStat(s,"vues");
   _stripAutoDrinks(s);
   // Ouvert depuis la carte Explorer : le "retour" doit REVENIR sur la carte, pas
   // sauter à l'accueil (l'écran sous l'overlay). On mémorise ce contexte et on
@@ -10595,11 +10600,50 @@ function openStoreDetail(storeId){
 /* Le commerçant corrige ses horaires lui-meme. C'est LA donnee qu'il connait
    mieux que tout le monde, et c'est elle qui rend le filtre « Ouvert »
    fiable. */
+/* Traduit une saisie humaine (« Lun-Sam 8h-20h · Dim 9h-13h ») vers la
+   syntaxe qu'attend parseOSMHours (« Mo-Sa 08:00-20:00; Su 09:00-13:00 »).
+   Sans cette traduction, le gerant enregistrait un texte que l'app ne savait
+   pas relire : la fiche affichait ses horaires, mais le filtre « Ouvert » les
+   ignorait completement et le magasin restait invisible. */
+function normaliserHoraires(txt){
+  var t=" "+String(txt||"").toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")+" ";
+  if(/24\s*[\/h]\s*(24|7)|non.?stop/.test(t))return "24/7";
+  var jours=[["lundi","Mo"],["mardi","Tu"],["mercredi","We"],["jeudi","Th"],
+             ["vendredi","Fr"],["samedi","Sa"],["dimanche","Su"],
+             ["lun","Mo"],["mar","Tu"],["mer","We"],["jeu","Th"],
+             ["ven","Fr"],["sam","Sa"],["dim","Su"]];
+  jours.forEach(function(p){ t=t.replace(new RegExp("\\b"+p[0]+"\\.?","g"),p[1]); });
+  // « tous les jours », « 7j/7 », « chaque jour » -> la semaine entiere
+  var toute=/tous les jours|chaque jour|7\s*j\s*\/?\s*7|semaine/.test(t);
+  t=t.replace(/tous les jours|chaque jour|7\s*j\s*\/?\s*7|toute la semaine|semaine/g," ");
+  t=t.replace(/\bde\b|\bd.\s/g," ");                     // « de 9h a 22h »
+  t=t.replace(/\bau\b|\ba\b|\bjusqu.?a\b/g,"-");        // « lundi au samedi »
+  t=t.replace(/[·•,]|\bet\b/g,";");                        // separateurs de plages
+  // « 8h », « 8h30 », « 8 h 30 », « 8:5 » -> HH:MM
+  t=t.replace(/\b(\d{1,2})\s*[h:]\s*(\d{1,2})?\b/g,function(_,h,m){
+    return ("0"+h).slice(-2)+":"+("0"+(m||"0")).slice(-2);
+  });
+  t=t.replace(/\s*-\s*/g,"-").replace(/\s*;\s*/g,"; ").replace(/\s+/g," ").trim();
+  t=t.replace(/;\s*$/,"");
+  // Aucune mention de jour mais « tous les jours » : on prefixe la semaine.
+  if(toute && !/\b(Mo|Tu|We|Th|Fr|Sa|Su)\b/.test(t)) t="Mo-Su "+t;
+  return t.trim();
+}
 function ownerEditHours(){
   var s=curStoreDetail; if(!s)return;
   var v=window.prompt("Tes horaires, comme tes clients doivent les lire.\nExemple : Lun-Sam 8h-20h \u00b7 Dim 9h-13h", s.hours||"");
   if(v===null)return;
   v=String(v).trim().slice(0,120);
+  if(v){
+    var norm=normaliserHoraires(v);
+    if(!parseOSMHours(norm)){
+      playSound("err");
+      alert("Je n'arrive pas a lire ces horaires, et je prefere ne rien enregistrer plutot que d'afficher un magasin ferme a tes clients alors qu'il est ouvert.\n\nEcris-les comme ceci :\nLun-Sam 8h-20h \u00b7 Dim 9h-13h\n\nOu, si tu es ouvert en continu : 24/7");
+      return;
+    }
+    v=norm;
+  }
   s.hours=v||null;
   if(window.fbSaveStore){
     window.fbSaveStore(s.fbId||s.id,{hours:s.hours})
@@ -11180,8 +11224,21 @@ function renderMerchantBoard(s){
   var lat=(typeof s.lat==="number")?s.lat:userLat;
   var lng=(typeof s.lng==="number")?s.lng:userLng;
   if(!window.fbLoadNearbyHunts){ _peindreBoard(s,[],rayon); return; }
-  window.fbLoadNearbyHunts(lat,lng,10)
-    .then(function(hunts){ _peindreBoard(s,hunts||[],rayon); })
+  /* 25 km et non 10 : fbLoadNearbyHunts ignore toute valeur <= 15 et retombe
+     alors sur 100 km — le tableau annoncait « 10 km » en lisant la moitie du
+     pays. On demande donc un rayon qu'elle honore, et on borne la fraicheur a
+     30 jours ici seulement : « on cherche » au present ne peut pas designer
+     une recherche d'il y a onze mois. L'affichage des chasses ailleurs dans
+     l'app garde volontairement sa fenetre large. */
+  window.fbLoadNearbyHunts(lat,lng,25)
+    .then(function(hunts){
+      var limite=Date.now()-30*86400000;
+      var recentes=(hunts||[]).filter(function(h){
+        var t=h&&(h.lastAt||h.at||h.createdAt);
+        return !t||t>=limite;
+      });
+      _peindreBoard(s,recentes,rayon);
+    })
     .catch(function(){ _peindreBoard(s,[],rayon); });
 }
 function _mbLigne(d,n,action,libelle,ton){
@@ -11222,7 +11279,7 @@ function _peindreBoard(s,hunts,rayon){
 
   var h="";
   h+='<div class="mb-card">';
-  h+='<div class="mb-head">Ce qu\'on cherche autour de chez toi <span class="mb-rayon">10 km</span></div>';
+  h+='<div class="mb-head">Ce qu\'on cherche autour de chez toi <span class="mb-rayon">25 km · 30 j</span></div>';
 
   if(aLui.length){
     h+='<div class="mb-sec hot">Tu l\'as en rayon — dis-le, ils seront prévenus</div>';
@@ -16183,7 +16240,11 @@ function _boutonReprise(){
     '<div class="cl-line">'+n+' magasin'+(n>1?'s':'')+' de cette zone '+(n>1?'ont':'a')+' un rayon photographié mais pas encore la pastille bleue. Ouvre la fiche pour vérifier avant de certifier.</div>'+
     lignes+
     (n>8?'<div class="cl-line quiet">…et '+(n-8)+' autre'+(n-8>1?'s':'')+'</div>':'')+
-    (n>1?'<div class="cl-acts"><button class="cl-btn" onclick="admReprendrePhotos()">Tout certifier ('+n+')</button></div>':'')+
+    /* Le bouton « Tout certifier » a ete retire : il posait la pastille sur
+       la foi de verifiedSource, un champ que N'IMPORTE QUEL compte peut ecrire
+       (l'import automatique s'en sert). Il suffisait d'y glisser le mot
+       « photos » pour se certifier soi-meme en masse. Le bouton par magasin
+       reste : il oblige a regarder la fiche avant de decider. */
   '</div>';
 }
 /* LE CACHE EFFACAIT LA CERTIFICATION. Le cache localStorage des magasins
