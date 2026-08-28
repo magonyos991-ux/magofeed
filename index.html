@@ -3070,6 +3070,21 @@ window.fbJournalAdmin = async function(champs) {
   } catch (e) { /* le journal ne doit jamais bloquer une action */ }
 };
 /* Sauvegarde complete a la demande, avant une operation risquee. */
+window.fbLireSauvegardes = async function() {
+  try {
+    var snap = await getDoc(doc(db, "_meta", "sauvegardes"));
+    return snap.exists() ? (snap.data() || null) : null;
+  } catch (e) { return null; }
+};
+window.fbLireJournalAdmin = async function(combien) {
+  try {
+    var q = query(collection(db, "adminLog"), orderBy("quand", "desc"), limit(combien || 25));
+    var snap = await getDocs(q);
+    var out = [];
+    snap.forEach(function(d) { out.push(Object.assign({ id: d.id }, d.data())); });
+    return out;
+  } catch (e) { return null; }
+};
 window.fbSauvegarderMaintenant = async function() {
   var fns = getFunctions(app, "europe-west1");
   var call = httpsCallable(fns, "sauvegarderMaintenant", { timeout: 540000 });
@@ -16269,6 +16284,7 @@ function renderAdmin(){
   try{ renderShopClaims(); }catch(e){ console.warn("shopClaims:",e); }
   renderFormatSuggestions();
   renderAdminHistory();
+  try{ renderSecurite(); }catch(e){ console.warn("securite:",e); }
   var pending=DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected;});
   if(!pending.length){
     el.innerHTML='<div style="text-align:center;padding:40px 20px;font-size:13px;color:var(--s3)">Aucune d\u00E9couverte en attente </div>';
@@ -16968,6 +16984,87 @@ function renderAdminHistory(){
     if(ar)ar.textContent=open?"\u25BE":"\u25B4";
   };
   hd.onkeydown=function(ev){if(ev.key==="Enter")hd.onclick();};
+}
+/* ── SECURITE : sauvegarde et journal ─────────────────────────────────────
+   Un systeme de sauvegarde dont on ignore s'il tourne ne rassure personne, et
+   un journal que personne ne peut ouvrir ne sert a rien. Cette carte montre
+   les deux : la date du dernier export, un bouton pour en declencher un tout
+   de suite, et les dernieres actions sensibles — celles qui ont ete lancees
+   comme celles qui ont ete annulees. */
+function _dateCourte(v){
+  try{
+    var ms=v&&v.seconds?v.seconds*1000:(typeof v==="number"?v:Date.parse(v));
+    if(!ms||isNaN(ms))return null;
+    return new Date(ms).toLocaleString("fr-BE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+  }catch(e){ return null; }
+}
+function renderSecurite(){
+  if(!isAdmin)return;
+  var host=document.getElementById("admin-securite");
+  if(!host){
+    host=document.createElement("div");
+    host.id="admin-securite";
+    var list=document.getElementById("admin-list");
+    if(list&&list.parentNode)list.parentNode.appendChild(host);
+  }
+  host.innerHTML='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:18px 0 10px">S\u00E9curit\u00E9</div>'+
+    '<div id="sec-sauv" style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px;margin-bottom:10px">'+
+      '<div style="font-size:12.5px;color:var(--s2)">Lecture de l\'\u00E9tat des sauvegardes\u2026</div></div>'+
+    '<div id="sec-journal"></div>';
+
+  var boite=document.getElementById("sec-sauv");
+  var peindreSauvegarde=function(info,dispo){
+    /* sauvegarde.js ecrit _meta/sauvegardes = { derniere: {quand, dossier,
+       etat, motif}, ... } ou « quand » est une date au format ISO. */
+    var d=info&&info.derniere?info.derniere:null;
+    var quand=d?_dateCourte(d.quand):null;
+    var ms=null;
+    try{ ms=d&&d.quand?Date.parse(d.quand):null; if(isNaN(ms))ms=null; }catch(e){}
+    var vieille=ms?(Date.now()-ms>36*3600*1000):true;
+    boite.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'+
+      '<div style="width:9px;height:9px;border-radius:50%;flex-shrink:0;background:'+
+        (!dispo?"var(--s3)":(vieille?"#dc2626":"#22c55e"))+'"></div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:13px;font-weight:700;color:var(--s1)">Sauvegarde de la base</div>'+
+        '<div style="font-size:11.5px;color:var(--s2);margin-top:2px">'+
+          (!dispo?"Fonction pas encore d\u00E9ploy\u00E9e sur Firebase"
+                 :(quand?("Derni\u00E8re : "+sanitize(quand)+(vieille?" \u2014 plus de 36 h":""))
+                        :"Aucune sauvegarde enregistr\u00E9e pour l\'instant"))+
+        '</div></div></div>'+
+      '<button id="sec-go" type="button" style="width:100%;padding:11px;border-radius:12px;border:1.5px solid var(--border);background:var(--app-bg);color:var(--s1);font-weight:800;font-size:12.5px;cursor:pointer;touch-action:manipulation">Sauvegarder maintenant</button>';
+    var b=document.getElementById("sec-go");
+    if(b)b.onclick=function(){
+      if(!window.fbSauvegarderMaintenant){toast("Fonction de sauvegarde pas encore d\u00E9ploy\u00E9e");return;}
+      b.disabled=true; b.textContent="Sauvegarde en cours\u2026";
+      window.fbSauvegarderMaintenant()
+        .then(function(){ playSound("win"); toast("Sauvegarde lanc\u00E9e"); renderSecurite(); })
+        .catch(function(e){ playSound("err"); b.disabled=false; b.textContent="Sauvegarder maintenant";
+                            toast("Sauvegarde impossible : "+((e&&(e.code||e.message))||e)); });
+    };
+  };
+  if(window.fbLireSauvegardes){
+    window.fbLireSauvegardes().then(function(info){ peindreSauvegarde(info,true); })
+      .catch(function(){ peindreSauvegarde(null,false); });
+  } else peindreSauvegarde(null,false);
+
+  var jHost=document.getElementById("sec-journal");
+  if(!window.fbLireJournalAdmin){ jHost.innerHTML=""; return; }
+  window.fbLireJournalAdmin(25).then(function(lignes){
+    if(!lignes||!lignes.length){ jHost.innerHTML=""; return; }
+    var hd='<div style="font-size:12.5px;font-weight:800;color:var(--s1);margin:4px 0 8px">Derni\u00E8res actions sensibles ('+lignes.length+')</div>';
+    jHost.innerHTML=hd+lignes.map(function(l){
+      var etat=String(l.etat||""), quand=_dateCourte(l.quand);
+      var coul=etat==="annulee"?"var(--s3)":(etat==="terminee"?"#22c55e":"#c69a57");
+      return '<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--bg2);border:1.5px solid var(--border);border-radius:13px;margin-bottom:7px">'+
+        '<div style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:'+coul+'"></div>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:12.5px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(l.action||"?")+'</div>'+
+          '<div style="font-size:10.5px;color:var(--s2)">'+
+            (etat==="annulee"?"Annul\u00E9e":(etat==="terminee"?"Termin\u00E9e":"Lanc\u00E9e"))+
+            (l.compte!=null?" \u00B7 "+nbSur(l.compte):"")+(quand?" \u00B7 "+sanitize(quand):"")+
+          '</div></div></div>';
+    }).join("");
+  }).catch(function(){ jHost.innerHTML=""; });
 }
 /* ── DEMANDES DE CERTIFICATION ────────────────────────────────────────────
    Le poste le plus sensible de l'administration : approuver, c'est poser la
