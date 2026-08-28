@@ -13498,6 +13498,145 @@ function closeExploreMap(){
   // page produit encombree (que l'utilisateur ne doit plus voir).
   if(window._exploreFromDrink){window._exploreFromDrink=false;try{show("home");}catch(e){}}
 }
+/* ============================================================================
+   MENU EN ARC PAR APPUI LONG SUR UN PIN
+   ----------------------------------------------------------------------------
+   En rayon, on a une main pour le telephone et une pour la bouteille. Ouvrir
+   la fiche, chercher le bouton, revenir : trop long. Ici : on appuie sur le
+   pin, trois choix s'ouvrent en arc juste au-dessus, on GLISSE le pouce sur
+   celui qu'on veut et on relache. Un seul geste, sans lever le doigt.
+
+   Le tap simple garde son role (tracer l'itineraire) : on n'enleve rien.
+   ============================================================================ */
+var PIN_MENU_ACTIONS=[
+  {cle:"stock", libelle:"En stock", couleur:"#16a34a",
+   ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6.5"/></svg>'},
+  {cle:"fiche", libelle:"Détails", couleur:"#1a1714",
+   ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.6"/></svg>'},
+  {cle:"rupture", libelle:"Rupture", couleur:"#dc2626",
+   ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>'}
+];
+function fermerMenuPin(){
+  var m=document.getElementById("pin-menu");
+  if(m){m.classList.remove("in");setTimeout(function(){if(m.parentNode)m.remove();},170);}
+  window._pinMenuActif=null;
+}
+function ouvrirMenuPin(s,x,y){
+  fermerMenuPin();
+  var m=document.createElement("div");
+  m.id="pin-menu";
+  m.className="pin-menu";
+  /* Les actions de stock n'ont de sens que si on regarde UNE boisson. Sans
+     filtre, on ne saurait pas quoi confirmer : on n'offre alors que la fiche,
+     plutot qu'un bouton qui ne peut rien faire. */
+  var actions=exploreFilter?PIN_MENU_ACTIONS:PIN_MENU_ACTIONS.filter(function(a){return a.cle==="fiche";});
+  var n=actions.length;
+  var R=76;                                   // rayon de l'arc, en pixels
+  var LEVEE=26;                               // on hisse tout l'arc : sinon les
+                                              // boutons lateraux tombent sous le pouce
+  /* Un pin en haut de l'ecran ferait sortir le menu : dans ce cas on retourne
+     l'arc vers le bas. Et on ecarte le centre des bords lateraux pour que les
+     boutons de cote restent entiers. */
+  var versLeBas=(y-(R+LEVEE+34)<8);
+  var marge=R*0.87+30;
+  x=Math.max(marge,Math.min((window.innerWidth||390)-marge,x));
+  var html='<div class="pm-nom">'+sanitize(s.name||"Ce magasin")+'</div>';
+  actions.forEach(function(a,i){
+    // Arc de 120° centre vers le haut : les choix restent a portee de pouce.
+    var ang=(n===1)?-90:(-90-60+ (120/(n-1))*i);
+    var rad=ang*Math.PI/180;
+    var dx=Math.cos(rad)*R, dy=Math.sin(rad)*R-LEVEE;
+    if(versLeBas)dy=-dy;
+    html+='<div class="pm-item" data-cle="'+a.cle+'" style="--dx:'+dx.toFixed(1)+'px;--dy:'+dy.toFixed(1)+'px;--c:'+a.couleur+'">'+
+            '<span class="pm-ico">'+a.ico+'</span>'+
+            '<span class="pm-lab">'+a.libelle+'</span>'+
+          '</div>';
+  });
+  m.innerHTML=html;
+  if(versLeBas)m.classList.add("bas");
+  m.style.left=x+"px"; m.style.top=y+"px";
+  document.body.appendChild(m);
+  requestAnimationFrame(function(){m.classList.add("in");});
+  try{ if(navigator.vibrate)navigator.vibrate(12); }catch(e){}
+  try{playSound("pop");}catch(e){}
+  window._pinMenuActif={el:m,store:s};
+  return m;
+}
+function executerActionPin(cle,s){
+  if(!s)return;
+  if(cle==="fiche"){ try{openStoreDetail(s.id);}catch(e){} return; }
+  if(!exploreFilter)return;
+  var did=exploreFilter.drinkId;
+  /* On reutilise exactement le chemin de confirmation existant (doConfirm) :
+     memes points, meme anti-rejeu, meme synchronisation. Un raccourci qui
+     contournerait ces regles serait une porte ouverte au farming. */
+  try{
+    var faux={parentElement:document.createElement("div")};
+    doConfirm(faux,String(s.fbId||s.id),did,cle==="stock"?1:-1);
+  }catch(e){ try{toast("Impossible d'enregistrer — réessaie");}catch(_){} }
+}
+/* Arme l'appui long sur un marqueur Leaflet. On travaille sur l'element DOM
+   du marqueur : Leaflet n'expose pas d'evenement d'appui long. */
+function armerMenuPin(mk,s){
+  mk.on("add",function(){
+    var el=mk.getElement&&mk.getElement();
+    if(!el||el._pinArme)return;
+    el._pinArme=true;
+    var minuteur=null,ouvert=false,survol=null;
+    var pos=function(e){ var t=(e.touches&&e.touches[0])||e; return {x:t.clientX,y:t.clientY}; };
+    /* Le menu est en pointer-events:none pour ne jamais voler un geste a la
+       carte — donc elementFromPoint ne le verrait pas. On fait la detection
+       nous-memes, au plus proche centre, avec une marge : un pouce n'atterrit
+       jamais au pixel pres. */
+    var majSurvol=function(p){
+      var m=window._pinMenuActif&&window._pinMenuActif.el; if(!m)return;
+      var item=null,meilleure=1e9;
+      var TOL=22;                                   // marge autour du bouton
+      [].forEach.call(m.querySelectorAll(".pm-item"),function(el){
+        var r=el.getBoundingClientRect();
+        var cx=r.left+r.width/2, cy=r.top+r.height/2;
+        var d=Math.sqrt((p.x-cx)*(p.x-cx)+(p.y-cy)*(p.y-cy));
+        if(d<=r.width/2+TOL && d<meilleure){meilleure=d;item=el;}
+      });
+      if(survol&&survol!==item)survol.classList.remove("on");
+      if(item)item.classList.add("on");
+      survol=item;
+    };
+    var debut=function(e){
+      var p=pos(e);
+      minuteur=setTimeout(function(){
+        ouvert=true;
+        window._pinMenuVientDeSOuvrir=true;
+        ouvrirMenuPin(s,p.x,p.y);
+      },420);
+    };
+    var bouge=function(e){
+      if(!ouvert){ if(minuteur){clearTimeout(minuteur);minuteur=null;} return; }
+      if(e.cancelable)e.preventDefault();      // on garde le doigt, la carte ne bouge pas
+      majSurvol(pos(e));
+    };
+    var fin=function(){
+      if(minuteur){clearTimeout(minuteur);minuteur=null;}
+      if(!ouvert)return;
+      ouvert=false;
+      var cle=survol&&survol.getAttribute("data-cle");
+      if(survol)survol.classList.remove("on");
+      survol=null;
+      fermerMenuPin();
+      if(cle)executerActionPin(cle,s);
+      setTimeout(function(){window._pinMenuVientDeSOuvrir=false;},350);
+    };
+    el.addEventListener("touchstart",debut,{passive:true});
+    el.addEventListener("touchmove",bouge,{passive:false});
+    el.addEventListener("touchend",fin,{passive:true});
+    el.addEventListener("touchcancel",fin,{passive:true});
+    el.addEventListener("mousedown",function(e){debut(e);
+      var mv=function(ev){bouge(ev);},up=function(){fin();window.removeEventListener("mousemove",mv);window.removeEventListener("mouseup",up);};
+      window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
+    });
+  });
+}
+
 function exploreLoadStores(useCache){
   if(!exploreMap)return;
   var status=document.getElementById("explore-status");
@@ -13667,11 +13806,17 @@ function exploreLoadStores(useCache){
       var mk=L.marker([s.lat,s.lng],{icon:L.divIcon({className:"",html:'<div class="'+cls+'" style="position:relative;--pc:'+pc+';width:30px;height:39px;'+ctx+'">'+priceTag+'<div class="mago-pin-head" style="width:30px;height:30px;font-size:12px">'+ini+badge+'</div><div class="mago-pin-tip" style="width:11px;height:11px;bottom:2px"></div></div>',iconSize:[30,39],iconAnchor:[15,39]}),zIndexOffset:sure?600:(certif?450:(hasDrink?300:0))});
       mk.on("click",function(e){
         if(e&&e.originalEvent&&window.L&&L.DomEvent){try{L.DomEvent.stopPropagation(e.originalEvent);}catch(_e){}}
+        if(window._pinMenuVientDeSOuvrir){window._pinMenuVientDeSOuvrir=false;return;} // l'appui long a deja agi
         try{if(exploreMap.panTo)exploreMap.panTo([s.lat,s.lng]);}catch(_e){}
         // Clic sur un pin = tracer l'itineraire directement (le "traçage partout").
         showRouteToStore(s.lat,s.lng,s);
         playSound("pop");
       });
+      /* Appui long sur un pin -> menu en arc juste au-dessus. On garde le
+         doigt appuye et on glisse sur le choix : c'est un seul geste, sans
+         relever le doigt, donc utilisable d'une main en plein rayon. Le tap
+         simple continue de tracer l'itineraire — rien n'est retire. */
+      try{ armerMenuPin(mk,s); }catch(_e){}
       _lot.push(mk);
       shown++;
     });
