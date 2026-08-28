@@ -8,8 +8,8 @@ input,button{font-family:'Space Grotesk',sans-serif;outline:none;border:none;bac
   --cr:#e7e5df;
   --app-bg:#f4f2ee;
   --s1:#1a1714;
-  --s2:#9b948b;
-  --s3:#c8c2bb;
+  --s2:#5f5b55;
+  --s3:#716e6a;
   --txt2:#5c554d;   /* texte secondaire LISIBLE (6,2:1) */
   --bg2:#eceae4;
   --bg3:#e8e5df;
@@ -31,7 +31,7 @@ body.dark{
   --app-bg:#151210;
   --s1:#f4f0e9;
   --s2:#9a8f80;
-  --s3:#574f45;
+  --s3:#827c74;
   --txt2:#b9ae9e;   /* texte secondaire LISIBLE (7,4:1) */
   --bg2:#201b16;
   --bg3:#29221b;
@@ -921,7 +921,7 @@ body.dark .leaflet-control-zoom a{background:rgba(42,42,42,.85)!important;color:
   overflow:hidden;
 }
 .ob-chip-demo{position:absolute;bottom:-1px;left:50%;transform:translateX(-50%);display:flex;gap:6px;}
-.ob-chip-sm{padding:5px 10px;border-radius:999px;font-size:10px;font-weight:700;background:var(--s1);color:#fff;white-space:nowrap;}
+.ob-chip-sm{padding:5px 10px;border-radius:999px;font-size:10px;font-weight:700;background:var(--s1);color:var(--app-bg);white-space:nowrap;}
 .ob-tag{font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--s3);text-transform:uppercase;margin-bottom:12px;}
 .ob-title{font-size:24px;font-weight:800;letter-spacing:-.5px;color:var(--s1);text-align:center;line-height:1.2;margin-bottom:14px;}
 .ob-desc{font-size:14px;font-weight:400;line-height:1.6;color:var(--s2);text-align:center;max-width:280px;}
@@ -938,7 +938,7 @@ body.dark .ob-btn-primary{background:#f0f0f0;color:#1a1714}
 .ob-store-mini{position:absolute;background:#fff;border-radius:12px;padding:7px 10px;box-shadow:0 2px 12px rgba(0,0,0,.1);display:flex;align-items:center;gap:7px;font-size:11px;font-weight:600;color:#1a1714;white-space:nowrap;}
 body.dark .ob-store-mini{background:#2a2a2a;color:#f0f0f0}
 .ob-store-dot{width:6px;height:6px;border-radius:50%;background:#22c55e;flex-shrink:0}
-.ob-pts{position:absolute;background:var(--s1);color:#fff;border-radius:999px;padding:5px 12px;font-size:13px;font-weight:800;}
+.ob-pts{position:absolute;background:var(--s1);color:var(--app-bg);border-radius:999px;padding:5px 12px;font-size:13px;font-weight:800;}
 
 /* ── Tutorial ── */
 #tuto-overlay{position:absolute;inset:0;z-index:250;display:none;opacity:0;transition:opacity .4s;}
@@ -1366,3 +1366,75 @@ body.sheet-open{overflow:hidden;overscroll-behavior:none}
 .leaflet-tile-pane .leaflet-tile{filter:grayscale(.88) saturate(.9) brightness(1.07) contrast(.88) sepia(.14)}
 /* Mode sombre : OSM n'a pas de tuiles nocturnes, on inverse en plus. */
 .tuiles-sombres.leaflet-tile,.leaflet-tile-pane .tuiles-sombres{filter:grayscale(.85) invert(1) hue-rotate(180deg) brightness(.85) contrast(.82)}
+
+/* ── Menu en arc à l'appui long sur un pin ─────────────────────────────────
+   Il doit être glissant : les choix jaillissent en décalé, celui que le pouce
+   touche se remplit et se soulève, les autres s'effacent. Une seule étiquette,
+   au centre, qui prend le nom du choix visé — trois étiquettes permanentes
+   s'encombraient. Rien ne capte le doigt (pointer-events:none) : la détection
+   est géométrique, c'est le document qui suit le geste. */
+.pin-menu{position:fixed;z-index:5000;pointer-events:none;transform:translate(-50%,-50%);
+  --sortie:cubic-bezier(.22,1.18,.36,1)}
+
+/* Halo : donne la profondeur, et détache le menu du fond de carte. */
+.pm-halo{position:absolute;left:50%;top:50%;width:210px;height:210px;margin:-105px 0 0 -105px;
+  border-radius:50%;background:radial-gradient(circle,rgba(0,0,0,.30) 0%,rgba(0,0,0,.16) 45%,rgba(0,0,0,0) 72%);
+  opacity:0;transform:scale(.5);transition:opacity .26s ease,transform .34s var(--sortie)}
+.pin-menu.in .pm-halo{opacity:1;transform:scale(1)}
+
+.pm-item{position:absolute;left:0;top:0;width:50px;height:50px;margin:-25px 0 0 -25px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--app-bg);color:var(--c);
+  box-shadow:0 3px 14px rgba(0,0,0,.26),0 0 0 1.5px color-mix(in srgb,var(--c) 28%,transparent);
+  transform:translate(0,0) scale(.3);opacity:0;
+  transition:transform .34s var(--sortie),opacity .18s ease,
+             background .16s ease,color .16s ease,box-shadow .2s ease;
+  transition-delay:var(--r),var(--r),0s,0s,0s}          /* le décalé qui rend le geste vivant */
+.pin-menu.in .pm-item{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}
+
+/* Le choix visé : il se remplit, grossit et se soulève. Les autres reculent. */
+.pin-menu.in.vise .pm-item{opacity:.62;transform:translate(var(--dx),var(--dy)) scale(.92)}
+.pin-menu.in .pm-item.on,
+.pin-menu.in.vise .pm-item.on{opacity:1;transform:translate(var(--dx),var(--dy)) scale(1.16);
+  background:var(--c);color:#fff;
+  box-shadow:0 7px 22px color-mix(in srgb,var(--c) 45%,transparent),0 0 0 3px color-mix(in srgb,var(--c) 22%,transparent)}
+/* Accusé de réception au relâchement : une pulsation courte, puis ça part. */
+.pin-menu.in .pm-item.go{transform:translate(var(--dx),var(--dy)) scale(.92);transition-duration:.11s}
+.pm-ico{display:flex;line-height:0}
+
+/* L'étiquette centrale : elle ne s'affiche qu'une fois un choix visé. */
+.pm-lab{position:absolute;left:50%;top:30px;transform:translateX(-50%) translateY(4px);
+  white-space:nowrap;pointer-events:none;opacity:0;max-width:230px;overflow:hidden;text-overflow:ellipsis;
+  transition:opacity .16s ease,transform .22s var(--sortie)}
+/* Visible dès l'ouverture : elle porte alors le nom du magasin. */
+.pin-menu.in .pm-lab{opacity:1;transform:translateX(-50%) translateY(0)}
+/* Arc retourné : l'étiquette passe SOUS l'arc, sinon elle percutait le pin
+   et sa bulle de prix. */
+.pin-menu.bas .pm-lab{top:146px;bottom:auto}
+.pm-lab span{display:inline-block;background:var(--c,var(--s1));color:#fff;
+  font-size:11.5px;font-weight:800;letter-spacing:-.01em;padding:5px 12px;border-radius:999px;
+  box-shadow:0 3px 12px rgba(0,0,0,.3)}
+
+/* Sortie : tout se rétracte vers le pin, sans à-coup. */
+.pin-menu.out .pm-item{transform:translate(0,0) scale(.4);opacity:0;transition-delay:0s;transition-duration:.18s}
+.pin-menu.out .pm-halo{opacity:0;transform:scale(.6)}
+.pin-menu.out .pm-lab{opacity:0}
+
+@media (prefers-reduced-motion:reduce){
+  .pm-item,.pm-halo,.pm-lab{transition-duration:.01ms!important;transition-delay:0s!important}
+}
+
+/* ── Niveau de détail des marqueurs selon le zoom ──
+   À l'échelle d'une ville, un pin complet est illisible et coûte 4 à 6 nœuds
+   DOM. On le remplace par un point. Seuls les magasins à information sûre
+   restent lisibles de loin. */
+.mago-dot{width:9px;height:9px;border-radius:50%;background:var(--pc,#8a8a8a);
+  border:1.5px solid var(--app-bg);box-shadow:0 1px 3px rgba(0,0,0,.3);box-sizing:border-box}
+.mago-dot.fort{width:16px;height:16px;background:var(--app-bg);border:2.5px solid var(--pc,#8a8a8a);
+  display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;color:#16a34a;line-height:1}
+.mago-dot.moyen{width:20px;height:20px;background:var(--pc,#8a8a8a);border:2px solid var(--app-bg);
+  display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff;line-height:1}
+.mago-dot.moyen.sure{box-shadow:0 0 0 2px #16a34a,0 1px 4px rgba(0,0,0,.3)}
+.mago-dot.moyen.certif{box-shadow:0 0 0 2px #2563eb,0 1px 4px rgba(0,0,0,.3)}
+.mago-dot.moyen.sure.certif{box-shadow:0 0 0 2px #16a34a,0 0 0 4px #2563eb,0 1px 4px rgba(0,0,0,.3)}
+.mago-dot.closed{opacity:.45;filter:saturate(.3)}

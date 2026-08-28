@@ -287,7 +287,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <svg width="36" height="36" viewBox="0 0 24 24" fill="none"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill="var(--bg3)" stroke="var(--s3)" stroke-width="1.5"/><circle cx="12" cy="9" r="2.5" fill="var(--s3)"/></svg>
           <div style="font-size:13px;font-weight:600;color:var(--s2)">Active ta position</div>
           <div style="font-size:11.5px;color:var(--s3);line-height:1.5">Pour voir les magasins<br>triés par distance</div>
-          <button onclick="initGPS()" style="margin-top:4px;padding:8px 18px;border-radius:999px;border:1.5px solid var(--border);background:var(--s1);color:#fff;font-size:12px;font-weight:600;cursor:pointer;font-family:'Space Grotesk',sans-serif">Activer le GPS</button>
+          <button onclick="initGPS()" style="margin-top:4px;padding:8px 18px;border-radius:999px;border:1.5px solid var(--border);background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:600;cursor:pointer;font-family:'Space Grotesk',sans-serif">Activer le GPS</button>
         </div>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px 8px">
@@ -456,7 +456,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       <div class="set-sec" data-i18n="profileSec">Profil</div>
       <div class="set-group">
         <div class="set-row" onclick="editPseudo()" role="button" tabindex="0" aria-label="Changer mon pseudo" onkeydown="if(event.key==='Enter'){editPseudo();}">
-          <div id="avatar-initials" class="set-ico" style="border-radius:50%;background:var(--s1);color:#fff;font-weight:800">M</div>
+          <div id="avatar-initials" class="set-ico" style="border-radius:50%;background:var(--s1);color:var(--app-bg);font-weight:800">M</div>
           <div class="set-txt">
             <div class="set-title" id="profile-pseudo-display"></div>
             <div class="set-sub" data-i18n="editPseudoHint">Appuie pour changer ton pseudo</div>
@@ -1641,14 +1641,24 @@ async function queryLatBand(latMin, latMax, depth) {
     limit(2000)
   );
   var snap = await getDocs(q);
-  if (snap.size >= 2000 && depth < 6) {
+  /* La profondeur etait de 6 : 2^6 x 2000 = 128 000 documents concatenes dans
+     un seul tableau, pour une carte qui en dessine deux cents. Et comme cette
+     requete ne borne QUE la latitude (la longitude n'est filtree qu'apres
+     telechargement, plus bas), la bande fait le tour de la Terre : depuis
+     Bruxelles elle ramene l'Allemagne, la Pologne, l'Ukraine, le Kazakhstan.
+     C'est de la que vient la memoire qui explose — pas des marqueurs.
+     A 1, le pire cas tombe a 4000 documents. Le vrai remede reste la requete
+     par geohash, deja ecrite et testee : il ne manque que la migration. */
+  if (snap.size >= 2000 && depth < 1) {
     var mid = (latMin + latMax) / 2;
     var a = await queryLatBand(latMin, mid, depth + 1);
     var b = await queryLatBand(mid, latMax, depth + 1);
     return a.concat(b);
   }
+  /* On ne garde que ce qu'on lit. Un QueryDocumentSnapshot retient les
+     structures internes du SDK ; un objet nu pese plusieurs fois moins. */
   var docs = [];
-  snap.forEach(function(d) { docs.push(d); });
+  snap.forEach(function(d) { docs.push({ id: d.id, _d: d.data() }); });
   return docs;
 }
 async function queryNearbyStores(lat, lng, radiusKm) {
@@ -1665,7 +1675,7 @@ async function queryNearbyStores(lat, lng, radiusKm) {
   docs.forEach(function(docSnap) {
     if (seen[docSnap.id]) return; // frontiere de bande : un doc peut arriver 2x
     seen[docSnap.id] = 1;
-    var data = docSnap.data();
+    var data = docSnap._d;
     if (data.lng == null || data.lng < box.lngMin || data.lng > box.lngMax) return;
     var d = haversineKm(lat, lng, data.lat, data.lng);
     if (d > radiusKm) return;
@@ -2175,6 +2185,31 @@ window.fbAddReport = async function(storeId, drinkId, type) {
     }, extra));
   } catch(e) {
     console.warn("Firebase report error:", e);
+  }
+};
+/* Un code-barres colle a la mauvaise boisson. On le fait remonter dans la
+   collection "reports" existante — meme forme, meme regle, rien a redeployer.
+   Le champ note porte le code lu et le nom reel annonce par la personne. */
+window.fbReportBadBarcode = async function(code, drinkId, drinkName, realName) {
+  try {
+    var uid = null;
+    try { var u = await ensureAuthed(); uid = u && u.uid; } catch(e) {}
+    /* La regle exige by == request.auth.uid : sans session, l'ecriture serait
+       refusee en silence. Mieux vaut le dire que de faire croire a un envoi. */
+    if (!uid) { console.warn("Signalement code-barres non envoye : pas de session"); return; }
+    var note = String(code).slice(0, 20) + " lie a tort a \"" + String(drinkName || "").slice(0, 80) +
+               "\" — c'est en realite : " + String(realName || "(non precise)").slice(0, 120);
+    await window.fbAddDoc(window.fbCollection(window.db, "reports"), {
+      storeId: null,
+      drinkId: drinkId != null ? drinkId : null,
+      type: "codebarre",
+      note: note.slice(0, 300),
+      by: uid || null,
+      byPseudo: (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
+      createdAt: window.fbServerTimestamp()
+    });
+  } catch(e) {
+    console.warn("Firebase bad-barcode report error:", e);
   }
 };
 /* Dernières contributions de la communauté, pour l'admin : qui a signalé quoi
@@ -3930,6 +3965,9 @@ function emptyGo(tab){
   navTo(tab);
 }
 function show(s){
+  /* Le menu du pin est en position fixe sur le document : sans ca il suivrait
+     la personne d'ecran en ecran. C'est exactement ce qui s'est produit. */
+  try{fermerMenuPin();}catch(e){}
   var cur=document.querySelector(".screen.on");
   var curId=cur?cur.id.replace(/^s-/,""):null;
   if(curId&&curId!==s){
@@ -5240,9 +5278,9 @@ function ensurePickerMap(cb){
   if(window._pickerMap){setTimeout(function(){window._pickerMap.invalidateSize();cb&&cb();},180);return;}
   function build(){
     var center=[userLat||50.8466,userLng||4.3528];
-    window._pickerMap=L.map("store-picker-map",{zoomControl:false,attributionControl:false}).setView(center,13);
+    window._pickerMap=L.map("store-picker-map",{zoomControl:false}).setView(center,13);
     var darkP=document.body.classList.contains("dark");
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,className:darkP?"tuiles-sombres":"",attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(window._pickerMap);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,keepBuffer:1,updateWhenZooming:false,className:darkP?"tuiles-sombres":"",attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(window._pickerMap);
     window._pickerMarkers=L.layerGroup().addTo(window._pickerMap);
     window._pickerMap.on("click",function(e){onPickerMapClick(e.latlng);});
     if(userLat){
@@ -5659,6 +5697,14 @@ function findFamilyDrink(offName,offBrand){
   return best;
 }
 function confirmFamilyFormat(family,barcode,fmt){
+  /* Verrou de dernier recours : quel que soit le chemin d'appel (choix de
+     marque, selecteur de catalogue, anti-doublon), on ne resoude jamais un
+     code que cette personne a explicitement desavoue pour cette boisson. */
+  if(barcodeDisavowed(barcode,family.id)){
+    toast("Tu as d\u00E9j\u00E0 dit que ce code n'est pas "+family.name);
+    playSound("err");
+    return;
+  }
   // Localement : le code-barre rejoint la famille tout de suite
   // (le prochain scan du meme code sera reconnu sans OFF)
   if(!family.barcodes)family.barcodes=[];
@@ -5701,11 +5747,27 @@ function findBrandFamily(offBrand,offName){
   // ne proposer que si UNE seule marque du catalogue correspond (sinon ambigu)
   return Object.keys(seenBrand).length===1?out:[];
 }
-function renderBrandKinChoice(kin,best,code,p){
+function renderBrandKinChoice(kin,best,code,p,tout){
   var res=document.getElementById("scan-result");
   var btn=document.getElementById("scan-btn");
   if(!res||!btn)return;
   var fmt=parseFormatFromOFF(p);
+  /* Avec 22 Monster au catalogue, l'ordre du fichier ne veut rien dire. On
+     classe par mots partages avec la fiche OpenFoodFacts : « Lewis Hamilton »
+     ne ressemblant a aucun, les plus generiques remontent — et surtout le
+     bouton « nouveau produit » reste la vraie reponse. */
+  var _nOff=normFamilyTxt((best&&best.name)||"");
+  var _motsOff=_nOff.split(" ").filter(function(t){return t.length>2;});
+  kin=kin.slice().sort(function(a,b){
+    function sc(d){
+      var t=normFamilyTxt(d.name).split(" ").filter(function(x){return x.length>2;});
+      var communs=t.filter(function(x){return _motsOff.indexOf(x)!==-1;}).length;
+      return communs*100-t.length;          // a egalite, le nom le plus court
+    }
+    return sc(b)-sc(a);
+  });
+  var _tous=kin, _coupe=8, _replie=!tout&&kin.length>_coupe;
+  if(_replie)kin=kin.slice(0,_coupe);
   res.className="scan-result found";
   res.innerHTML='<div style="font-size:13px;font-weight:700;color:#166534;margin-bottom:8px">Marque reconnue \u2014 c\'est peut-\u00EAtre\u2026</div>'+
     kin.map(function(d){
@@ -5714,6 +5776,15 @@ function renderBrandKinChoice(kin,best,code,p){
         '<span style="flex:1;font-size:13px;font-weight:700;color:var(--s1)">'+sanitize(d.name)+'</span>'+
         '<span style="font-size:11px;font-weight:800;color:var(--s1)">C\'est \u00E7a \u2192</span></div>';
     }).join("");
+  if(_replie){
+    var plus=document.createElement("div");
+    plus.setAttribute("role","button");plus.setAttribute("tabindex","0");
+    plus.style.cssText="text-align:center;font-size:11.5px;font-weight:800;color:var(--s2);padding:9px;cursor:pointer;-webkit-tap-highlight-color:transparent";
+    plus.textContent="Voir les "+(_tous.length-_coupe)+" autres "+(best&&best.brand?sanitize(best.brand):"de cette marque");
+    plus.onclick=function(){ renderBrandKinChoice(_tous,best,code,p,true); };
+    plus.onkeydown=function(ev){if(ev.key==="Enter")plus.onclick();};
+    res.appendChild(plus);
+  }
   res.querySelectorAll(".kin-choice").forEach(function(row){
     var did=Number(row.getAttribute("data-id"));
     row.onclick=function(){
@@ -5775,6 +5846,115 @@ function validGTIN(code){
   return (10-(sum%10))%10===check;
 }
 var _scanVotes={code:null,count:0};
+/* ============================================================================
+   CONTESTER UN RATTACHEMENT CODE-BARRES → BOISSON
+   ----------------------------------------------------------------------------
+   Un code-barres designe UN produit precis, jamais une famille. Mais une fois
+   un code ecrit dans barcodes[], la branche "deja au catalogue" s'imposait sans
+   aucune sortie : un Monster Lewis Hamilton scannait « Monster Energy » et on ne
+   pouvait pas dire le contraire. Le catalogue ne pouvait donc que se degrader,
+   jamais se corriger.
+
+   Trois pieces : le desaveu reste sur l'appareil (effet immediat, hors ligne),
+   il remonte a l'admin pour reparer le catalogue partage, et la reconnaissance
+   le respecte des le scan suivant.
+   ============================================================================ */
+function badLinks(){
+  try{ return JSON.parse(localStorage.getItem("magoBadLinks")||"{}")||{}; }catch(e){ return {}; }
+}
+function barcodeDisavowed(code,drinkId){
+  var l=badLinks()[String(code)];
+  return !!l && l.indexOf(Number(drinkId))!==-1;
+}
+function disavowBarcode(code,drinkId){
+  var all=badLinks(), k=String(code);
+  if(!all[k])all[k]=[];
+  if(all[k].indexOf(Number(drinkId))===-1)all[k].push(Number(drinkId));
+  try{ localStorage.setItem("magoBadLinks",JSON.stringify(all)); }catch(e){}
+  // Le catalogue charge en memoire garde le code : on l'en retire aussi, sinon
+  // la boisson continuerait de se dire porteuse de ce code jusqu'au rechargement.
+  try{
+    var d=DRINKS.find(function(x){return Number(x.id)===Number(drinkId);});
+    if(d&&d.barcodes){
+      var i=d.barcodes.indexOf(String(code));
+      if(i!==-1)d.barcodes.splice(i,1);
+    }
+  }catch(e){}
+  // L'historique local repetait le mauvais nom a chaque consultation.
+  try{
+    scanHist=(scanHist||[]).filter(function(e){return String(e.code)!==String(code);});
+    localStorage.setItem("magoScanHist",JSON.stringify(scanHist));
+  }catch(e){}
+}
+function openBarcodeDispute(drink,code){
+  var res=document.getElementById("scan-result");
+  var btn=document.getElementById("scan-btn");
+  if(!res)return;
+  /* « Ou l'as-tu trouve ? » vit dans un autre conteneur (#scan-where) : sans
+     ce reset, ses lignes « C'est ici » resteraient braquees sur la boisson
+     qu'on est en train de contester, et un tap l'ecrirait dans un magasin. */
+  try{ renderWhereFound(null); }catch(e){}
+  if(btn)btn.style.display="none";
+  Array.prototype.forEach.call(document.querySelectorAll(".scan-injected"),function(n){n.remove();});
+  res.className="scan-result";
+  res.innerHTML=
+    '<div style="text-align:center;margin-bottom:9px">'+
+      '<div style="font-size:13.5px;font-weight:700;color:var(--s1)">Qu\'est-ce que tu as en main ?</div>'+
+      '<div style="font-size:11.5px;color:var(--s2);margin-top:3px;line-height:1.45">Un code-barres = <b>une</b> boisson pr\u00E9cise. '+
+        'Le code '+sanitize(String(code))+' est actuellement li\u00E9 \u00E0 \u00AB '+sanitize(drink.name)+' \u00BB.</div>'+
+    '</div>'+
+    '<input id="dispute-name" type="text" placeholder="Nom exact lu sur l\'\u00E9tiquette" autocomplete="off" '+
+      'style="width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:13px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none;text-align:center">'+
+    '<div id="dispute-hint" style="font-size:11px;color:var(--s3);text-align:center;margin-top:6px;min-height:14px">Recherche du vrai nom\u2026</div>'+
+    '<div id="dispute-new" role="button" tabindex="0" style="margin-top:8px;text-align:center;font-size:12.5px;font-weight:800;color:#fff;background:#e67e22;border-radius:12px;padding:12px;cursor:pointer;-webkit-tap-highlight-color:transparent">Ce produit n\'est pas encore dans Magofeed</div>'+
+    '<div id="dispute-other" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:12px;font-weight:700;color:var(--s1);background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:11px;cursor:pointer;-webkit-tap-highlight-color:transparent">C\'est une autre boisson d\u00E9j\u00E0 au catalogue</div>'+
+    '<div id="dispute-cancel" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:11.5px;font-weight:700;color:var(--s3);padding:8px;cursor:pointer;-webkit-tap-highlight-color:transparent">Annuler \u2014 c\'\u00E9tait bien \u00E7a</div>'+
+    /* La barre d'onglets flotte au-dessus du contenu : sans cette reserve,
+       elle recouvre le dernier choix — celui qui permet de faire marche
+       arriere. On reserve sa hauteur, encoche du telephone comprise. */
+    '<div style="height:calc(78px + env(safe-area-inset-bottom))" aria-hidden="true"></div>';
+  try{ res.scrollIntoView({block:"nearest"}); }catch(e){}
+  var input=document.getElementById("dispute-name");
+  var hint=document.getElementById("dispute-hint");
+  var offBrand="",offCat="";
+  /* On propose le vrai nom plutot que de le faire taper : debout dans un rayon,
+     personne ne saisit « Monster Energy Lewis Hamilton » au clavier. */
+  if(typeof fetchOFFProduct==="function"){
+    fetchOFFProduct(code).then(function(data){
+      if(!data||data.status!==1)return;
+      var best=offBestProduct(data.product||{});
+      if(!best||!best.name)return;
+      offBrand=best.brand||""; offCat=best.cat||"";
+      if(input&&!input.value)input.value=best.name;
+      if(hint)hint.textContent="Nom trouv\u00E9 sur OpenFoodFacts \u2014 corrige-le si besoin";
+    }).catch(function(){ if(hint)hint.textContent=""; });
+    setTimeout(function(){ if(hint&&hint.textContent==="Recherche du vrai nom\u2026")hint.textContent=""; },6000);
+  } else if(hint){ hint.textContent=""; }
+  function valider(){
+    var nm=(input&&input.value||"").trim();
+    if(!nm){ toast("Indique le nom lu sur l'\u00E9tiquette"); if(input)input.focus(); playSound("err"); return null; }
+    disavowBarcode(code,drink.id);
+    if(window.fbReportBadBarcode)window.fbReportBadBarcode(code,drink.id,drink.name,nm);
+    return nm;
+  }
+  var bNew=document.getElementById("dispute-new");
+  bNew.onclick=function(){
+    var nm=valider(); if(!nm)return;
+    toast("Merci \u2014 le code ne pointe plus vers "+drink.name);
+    addDiscovery(nm,offBrand,code,offCat);
+  };
+  bNew.onkeydown=function(ev){if(ev.key==="Enter")bNew.onclick();};
+  var bOther=document.getElementById("dispute-other");
+  bOther.onclick=function(){
+    var nm=valider(); if(!nm)return;
+    openCatalogLinkPicker(code);
+  };
+  bOther.onkeydown=function(ev){if(ev.key==="Enter")bOther.onclick();};
+  var bCancel=document.getElementById("dispute-cancel");
+  bCancel.onclick=function(){ resetScanUI(); rescan(); };
+  bCancel.onkeydown=function(ev){if(ev.key==="Enter")bCancel.onclick();};
+  if(input)input.focus();
+}
 function onBarcodeDetected(r){
   var rawCode=r&&r.codeResult&&r.codeResult.code;
   if(!rawCode)return;
@@ -5800,7 +5980,7 @@ function onBarcodeDetected(r){
   document.getElementById("scan-hint").textContent="✓ Code : "+code;
   var btn=document.getElementById("scan-btn"),res=document.getElementById("scan-result");
   var rescanLink=document.getElementById("rescan-link");if(rescanLink)rescanLink.style.display="block";
-  var found=DRINKS.find(function(d){return d.barcodes&&d.barcodes.indexOf(code)!==-1;});
+  var found=DRINKS.find(function(d){return d.barcodes&&d.barcodes.indexOf(code)!==-1&&!barcodeDisavowed(code,d.id);});
   var foundDiscovery=DISCOVERIES.find(function(d){return String(d.barcode)===String(code);});
   res.style.display="block";
   // Nettoie les liens injectes par un scan precedent (« deja au catalogue ? »,
@@ -5819,6 +5999,17 @@ function onBarcodeDetected(r){
       sps.onclick=function(){openPhotoSuggest(found.id);};
       sps.onkeydown=function(ev){if(ev.key==="Enter")openPhotoSuggest(found.id);};
     }
+    /* La sortie de secours. Sans elle, un code colle a la mauvaise boisson
+       l'etait pour toujours : l'app affirmait, la personne ne pouvait pas
+       repondre. Discret, mais toujours la. */
+    var nope=document.createElement("div");
+    nope.className="scan-injected";
+    nope.setAttribute("role","button");nope.setAttribute("tabindex","0");
+    nope.style.cssText="text-align:center;font-size:12px;font-weight:700;color:var(--s2);background:transparent;border:1.5px solid var(--border);border-radius:12px;padding:10px;cursor:pointer;margin-top:8px;-webkit-tap-highlight-color:transparent";
+    nope.textContent="Ce n'est pas ce produit ?";
+    nope.onclick=function(){openBarcodeDispute(found,code);};
+    nope.onkeydown=function(ev){if(ev.key==="Enter")openBarcodeDispute(found,code);};
+    res.appendChild(nope);
     btn.textContent="Voir les magasins";btn.style.background=found.color;btn.style.display="block";
     btn.onclick=function(){stopScan();pick(found);};
     recordScan(code,found.name,found.brand,found.cat,"catalog");
@@ -5847,7 +6038,7 @@ function onBarcodeDetected(r){
     btn.textContent="Ajouter aux découvertes";btn.style.background="#e67e22";btn.style.display="block";
     btn.onclick=function(){addDiscovery(cached.name,cached.brand,code,cached.cat);};
     recordScan(code,cached.name,cached.brand,cached.cat,cached.src);
-    var cachedDrink=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(String(code))!==-1;});
+    var cachedDrink=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(String(code))!==-1&&!barcodeDisavowed(code,x.id);});
     var cachedDisc=DISCOVERIES.find(function(x){return String(x.barcode||x.id)===String(code);});
     renderWhereFound(cachedDrink?{drinkId:cachedDrink.id}:(cachedDisc?{discoveryId:cachedDisc.id}:{pendingBarcode:code}));
     playSound("win");toast("Déjà scanné : "+cached.name);
@@ -5881,7 +6072,15 @@ function onBarcodeDetected(r){
             // MAIS des mots de variante (peche, blanche, edition...) -> ce n'est
             // PAS un format, c'est une autre boisson. On demande, jamais en silence.
             if(brandKin.length===1&&!hasVariantExtras(best.name,brandKin[0])){family=brandKin[0];}
-            else if(brandKin.length>=1&&brandKin.length<=10){
+            else if(brandKin.length>=1){
+              /* Il y avait ici un plafond a 10 : au-dela, aucun ecran ne
+                 s'affichait. Or ce sont justement les grandes marques qui
+                 depassent 10 (Fanta 24, Monster 22, Red Bull 20) — 224 boissons
+                 sur 696. Resultat : pour un Monster edition limitee, l'app ne
+                 proposait rien, et la personne finissait dans le selecteur
+                 libre ou l'on colle un code sur n'importe quelle boisson.
+                 On classe par ressemblance et on affiche, quel que soit le
+                 nombre. */
               renderBrandKinChoice(brandKin,best,code,p);
               return;
             }
@@ -8877,7 +9076,7 @@ function initLeafletMap(lat,lng){
      tuile) : OpenStreetMap, gratuit et sans cle, le remplace. Le sombre est
      rendu par un filtre CSS — OSM n'a pas de variante nocturne. */
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{
-    maxZoom:19,className:dark?"tuiles-sombres":"",
+    maxZoom:19,keepBuffer:1,updateWhenZooming:false,className:dark?"tuiles-sombres":"",
     attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map);
 
@@ -11493,7 +11692,7 @@ function rafaleAddCode(code){
   // Anti-rebond : le même code tenu en main déclenche plusieurs lectures.
   if(window._rafaleLast&&window._rafaleLast.code===code&&(now-window._rafaleLast.ts)<3000){window._rafaleLast.ts=now;return;}
   window._rafaleLast={code:code,ts:now};
-  var d=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(code)!==-1;});
+  var d=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(code)!==-1&&!barcodeDisavowed(code,x.id);});
   if(!d){
     rafaleFlash("#f59e0b");playSound("err");rafaleNote("Pas au catalogue — au suivant","#fbbf24");
     if(navigator.vibrate)try{navigator.vibrate(30);}catch(e){}
@@ -11733,6 +11932,10 @@ function addDiscovery(name,brand,barcode,cat){
       // le choix est ambigu, on laisse creer la decouverte
       if(bkList.length===1&&!hasVariantExtras(name,bkList[0]))kin=bkList[0];
     }
+    /* Si la personne vient justement de dire « ce n'est pas ce produit », lui
+       reposer la question — avec OK comme bouton par defaut — annulerait son
+       desaveu d'un tap. On ne repropose jamais une fusion refusee. */
+    if(kin&&barcodeDisavowed(barcode,kin.id))kin=null;
     if(kin&&confirm("\u00AB "+kin.name+" \u00BB existe d\u00E9j\u00E0 au catalogue.\nC'est ce produit ? (OK = oui, ne pas cr\u00E9er de doublon)")){
       confirmFamilyFormat(kin,barcode,{type:null,cl:null});
       return;
@@ -13414,14 +13617,32 @@ function openExploreMap(opts){
       exploreMap=L.map("explore-map",{zoomControl:false,doubleClickZoom:true,touchZoom:true,tap:true});
       L.control.zoom({position:"bottomleft"}).addTo(exploreMap);
       var darkE=document.body.classList.contains("dark");
-      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,className:darkE?"tuiles-sombres":"",attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(exploreMap);
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,keepBuffer:1,updateWhenZooming:false,className:darkE?"tuiles-sombres":"",attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(exploreMap);
       /* Regroupement si le greffon est la, sinon simple couche : la carte
          s'affiche dans les deux cas. disableClusteringAtZoom : au-dela, on
          est assez pres pour que chaque magasin merite son propre pin. */
       exploreLayer=(window.L&&L.markerClusterGroup)
         ? L.markerClusterGroup({
             chunkedLoading:true,          // ajout par paquets : l'interface ne gele pas
-            maxClusterRadius:55,
+            /* Le rayon etait fixe a 55 px jusqu'au zoom 17 : a l'echelle d'une
+               ville, TOUT se regroupait et on ne voyait que des bulles de
+               comptage, jamais les magasins. C'est ce qui donnait l'aspect
+               grumeleux au lieu du semis de points d'Uber Eats.
+               Un point de palier 0 coute 1 noeud DOM contre 5 pour un pin
+               complet : on peut donc en montrer beaucoup. On ne regroupe plus
+               que ce qui se chevauche vraiment, palier par palier. */
+            maxClusterRadius:function(zoom){
+              /* Aux paliers larges, l'eclaircissement par grille garantit deja
+                 qu'aucun marqueur n'en recouvre un autre : regrouper par-dessus
+                 ne ferait que remplacer un semis lisible par des bulles de
+                 comptage. On ne regroupe donc qu'a partir du palier « rue »,
+                 la ou les pins complets peuvent vraiment se chevaucher. */
+              if(zoom<=14)return 1;       // pratiquement desactive
+              return 46;                  // pins complets de 30 px
+            },
+            /* Remis a 17 : a 16, les pins complets et leurs bulles de prix
+               se chevauchaient en tas illisibles. Entre 15 et 16, c'est le
+               regroupement qui degage la vue. */
             disableClusteringAtZoom:17,
             spiderfyOnMaxZoom:false,
             showCoverageOnHover:false,
@@ -13429,6 +13650,9 @@ function openExploreMap(opts){
           })
         : L.layerGroup();
       exploreLayer.addTo(exploreMap);
+      /* Si la carte bouge, le geste n'a plus de sens : la carte va se
+         redessiner et detruire le marqueur sous le doigt. On referme avant. */
+      exploreMap.on("movestart zoomstart",function(){ try{fermerMenuPin();}catch(e){} });
       exploreMap.on("moveend zoomend",function(){
         try{renderInStockArrows();}catch(e){}
         clearTimeout(_exploreTimer);
@@ -13498,6 +13722,243 @@ function closeExploreMap(){
   // page produit encombree (que l'utilisateur ne doit plus voir).
   if(window._exploreFromDrink){window._exploreFromDrink=false;try{show("home");}catch(e){}}
 }
+/* ============================================================================
+   MENU EN ARC PAR APPUI LONG SUR UN PIN
+   ----------------------------------------------------------------------------
+   En rayon, on a une main pour le telephone et une pour la bouteille. Ouvrir
+   la fiche, chercher le bouton, revenir : trop long. Ici : on appuie sur le
+   pin, trois choix s'ouvrent en arc juste au-dessus, on GLISSE le pouce sur
+   celui qu'on veut et on relache. Un seul geste, sans lever le doigt.
+
+/* ============================================================================
+   MENU EN ARC PAR APPUI LONG SUR UN PIN
+   ----------------------------------------------------------------------------
+   On appuie sur un pin, trois choix s'ouvrent en arc juste au-dessus, on GLISSE
+   le pouce sur celui qu'on veut et on relache. Un seul geste, sans lever le
+   doigt : utilisable d'une main, debout dans un rayon.
+
+   POURQUOI LES ECOUTEURS SONT SUR LE DOCUMENT, ET PAS SUR LE PIN
+   Ils l'etaient. Resultat : le menu restait colle a l'ecran pour toujours.
+   La carte se redessine a chaque fin de mouvement (exploreLoadStores fait
+   clearLayers), ce qui DETRUIT l'element du marqueur. Un element retire du DOM
+   ne recoit plus ni touchend ni touchcancel : la fin du geste n'arrivait donc
+   jamais, et rien ne refermait le menu.
+   Le doigt, lui, appartient au document du debut a la fin du geste. C'est donc
+   la que le suivi doit vivre. Le pin ne sert plus qu'a DEMARRER.
+   ============================================================================ */
+var PIN_MENU_ACTIONS=[
+  {cle:"stock", libelle:"En stock", couleur:"#16a34a",
+   ico:'<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6.5"/></svg>'},
+  /* Un gris-bleu plutot que du noir : le noir se confondait avec le fond de
+     carte en theme sombre, le bouton disparaissait. */
+  {cle:"fiche", libelle:"Détails", couleur:"#64748b",
+   ico:'<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.6"/></svg>'},
+  {cle:"rupture", libelle:"Rupture", couleur:"#dc2626",
+   ico:'<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>'}
+];
+/* Le geste en cours. Un seul a la fois, connu de tout le module : c'est lui qui
+   permet de tout refermer proprement depuis n'importe ou. */
+var _geste=null;
+
+function _pinDetache(){
+  if(!_geste)return;
+  document.removeEventListener("touchmove",_geste.bouge,{passive:false,capture:true});
+  document.removeEventListener("touchend",_geste.fin,true);
+  document.removeEventListener("touchcancel",_geste.fin,true);
+  document.removeEventListener("mousemove",_geste.bouge,true);
+  document.removeEventListener("mouseup",_geste.fin,true);
+  _geste=null;
+}
+/* Retirer le MENU sans toucher au geste : c'est ce dont ouvrirMenuPin a besoin
+   quand il repart de zero. Confondre les deux faisait qu'a l'ouverture on
+   arrachait le suivi du doigt qu'on venait tout juste de poser. */
+function _pinRetirerMenu(){
+  try{ if(window.exploreMap&&exploreMap.dragging)exploreMap.dragging.enable(); }catch(e){}
+  var m=document.getElementById("pin-menu");
+  if(m){
+    m.classList.remove("in");
+    m.classList.add("out");
+    setTimeout(function(){ if(m&&m.parentNode)m.remove(); },200);
+  }
+  window._pinMenuActif=null;
+}
+function fermerMenuPin(){
+  _pinDetache();
+  _pinRetirerMenu();
+}
+/* Filet de securite : quoi qu'il arrive ailleurs dans l'app, le menu ne doit
+   jamais survivre a un changement d'ecran ni a un mouvement de carte. */
+window.addEventListener("pagehide",fermerMenuPin);
+document.addEventListener("visibilitychange",function(){ if(document.hidden)fermerMenuPin(); });
+
+function ouvrirMenuPin(s,x,y){
+  _pinRetirerMenu();          // surtout PAS fermerMenuPin : le geste est en cours
+  var m=document.createElement("div");
+  m.id="pin-menu";
+  m.className="pin-menu";
+  /* Les actions de stock n'ont de sens que si on regarde UNE boisson. Sans
+     filtre, on ne saurait pas quoi confirmer : on n'offre alors que la fiche. */
+  var actions=exploreFilter?PIN_MENU_ACTIONS:PIN_MENU_ACTIONS.filter(function(a){return a.cle==="fiche";});
+  var n=actions.length;
+  var R=78;
+  var LEVEE=30;
+  /* On bascule vers le bas des que l'arc entrerait dans la barre du haut —
+     pas seulement s'il sortait de l'ecran. Sinon les choix se retrouvent sous
+     les filtres et deviennent a moitie invisibles. */
+  var HAUT_SUR=150;
+  var versLeBas=(y-(R+LEVEE+34)<HAUT_SUR);
+  // ... sauf si basculer vers le bas le ferait sortir par le bas : on garde
+  // alors le haut, et on remonte le point d'ancrage juste ce qu'il faut.
+  if(versLeBas&&(y+R+LEVEE+34)>(window.innerHeight||844)-90){
+    versLeBas=false;
+    y=Math.max(y,HAUT_SUR+R+LEVEE+34);
+  }
+  var marge=R*0.87+34;
+  x=Math.max(marge,Math.min((window.innerWidth||390)-marge,x));
+  var html='<div class="pm-halo"></div>';
+  actions.forEach(function(a,i){
+    var ang=(n===1)?-90:(-90-60+(120/(n-1))*i);
+    var rad=ang*Math.PI/180;
+    var dx=Math.cos(rad)*R, dy=Math.sin(rad)*R-LEVEE;
+    if(versLeBas)dy=-dy;
+    html+='<div class="pm-item" data-cle="'+a.cle+'" style="--dx:'+dx.toFixed(1)+'px;--dy:'+dy.toFixed(1)+'px;--c:'+a.couleur+';--r:'+(i*36)+'ms">'+
+            '<span class="pm-ico">'+a.ico+'</span>'+
+          '</div>';
+  });
+  /* Une seule etiquette. Au repos elle dit QUEL magasin on vise ; des qu'un
+     choix passe sous le pouce, elle dit LEQUEL. Elle n'est donc jamais vide et
+     ne repete jamais l'evidence. Trois etiquettes permanentes se chevauchaient. */
+  html+='<div class="pm-lab" data-nom="'+sanitize(s.name||"Ce magasin")+'"><span>'+sanitize(s.name||"Ce magasin")+'</span></div>';
+  m.innerHTML=html;
+  if(versLeBas)m.classList.add("bas");
+  m.style.left=x+"px"; m.style.top=y+"px";
+  document.body.appendChild(m);
+  /* Tant que le menu est ouvert, la carte ne glisse plus. preventDefault ne
+     suffit pas : il empeche le defilement natif du navigateur, pas les
+     gestionnaires JavaScript de Leaflet, qui faisaient partir la carte et
+     detruisaient le pin sous le doigt. */
+  try{ if(window.exploreMap&&exploreMap.dragging)exploreMap.dragging.disable(); }catch(e){}
+  requestAnimationFrame(function(){ m.classList.add("in"); });
+  try{ if(navigator.vibrate)navigator.vibrate(11); }catch(e){}
+  try{playSound("pop");}catch(e){}
+  window._pinMenuActif={el:m,store:s};
+  return m;
+}
+function executerActionPin(cle,s){
+  if(!s)return;
+  if(cle==="fiche"){ try{openStoreDetail(s.id);}catch(e){} return; }
+  if(!exploreFilter)return;
+  var did=exploreFilter.drinkId;
+  /* On reutilise exactement le chemin de confirmation existant (doConfirm) :
+     memes points, meme anti-rejeu, meme synchronisation. Un raccourci qui
+     contournerait ces regles serait une porte ouverte au farming. */
+  try{
+    var faux={parentElement:document.createElement("div")};
+    doConfirm(faux,String(s.fbId||s.id),did,cle==="stock"?1:-1);
+  }catch(e){ try{toast("Impossible d'enregistrer — réessaie");}catch(_){} }
+}
+/* Arme l'appui long sur un marqueur. Le pin ne fait que DEMARRER le geste ;
+   des que le menu s'ouvre, le suivi passe au document. */
+function armerMenuPin(mk,s){
+  mk.on("add",function(){
+    var el=mk.getElement&&mk.getElement();
+    if(!el||el._pinArme)return;
+    el._pinArme=true;
+    var pos=function(e){ var t=(e.touches&&e.touches[0])||e; return {x:t.clientX,y:t.clientY}; };
+
+    function demarrer(e,tactile){
+      var p=pos(e);
+      var g={ store:s, ouvert:false, survol:null, depart:p, minuteur:null, bouge:null, fin:null };
+
+      g.majSurvol=function(pt){
+        var m=window._pinMenuActif&&window._pinMenuActif.el; if(!m)return;
+        var item=null,meilleure=1e9,TOL=26;
+        [].forEach.call(m.querySelectorAll(".pm-item"),function(it){
+          var r=it.getBoundingClientRect();
+          var cx=r.left+r.width/2, cy=r.top+r.height/2;
+          var d=Math.sqrt((pt.x-cx)*(pt.x-cx)+(pt.y-cy)*(pt.y-cy));
+          if(d<=r.width/2+TOL && d<meilleure){meilleure=d;item=it;}
+        });
+        if(g.survol===item)return;
+        if(g.survol)g.survol.classList.remove("on");
+        if(item){
+          item.classList.add("on");
+          try{ if(navigator.vibrate)navigator.vibrate(7); }catch(e){}
+        }
+        g.survol=item;
+        m.classList.toggle("vise",!!item);
+        var boite=m.querySelector(".pm-lab"), lab=boite&&boite.querySelector("span");
+        if(lab&&boite){
+          var a=item&&PIN_MENU_ACTIONS.filter(function(z){return z.cle===item.getAttribute("data-cle");})[0];
+          lab.textContent=a?a.libelle:(boite.getAttribute("data-nom")||"");
+          boite.style.setProperty("--c",a?a.couleur:"var(--s1)");
+        }
+      };
+
+      g.bouge=function(ev){
+        if(!g.ouvert){
+          // avant l'ouverture, un vrai deplacement = la personne fait glisser
+          // la carte : on abandonne l'appui long sans rien afficher
+          var q=pos(ev);
+          if(Math.abs(q.x-g.depart.x)>12||Math.abs(q.y-g.depart.y)>12)g.annuler();
+          return;
+        }
+        if(ev.cancelable)ev.preventDefault();
+        ev.stopPropagation();                   // ceinture : Leaflet ecoute aussi le document
+        g.majSurvol(pos(ev));
+      };
+
+      g.fin=function(){
+        if(g.minuteur){clearTimeout(g.minuteur);g.minuteur=null;}
+        if(!g.ouvert){ _pinDetache(); return; }
+        var cle=g.survol&&g.survol.getAttribute("data-cle");
+        if(cle){
+          // petit accuse de reception avant la fermeture : on voit ce qu'on a choisi
+          g.survol.classList.add("go");
+          try{ if(navigator.vibrate)navigator.vibrate([9,26,9]); }catch(e){}
+        }
+        g.ouvert=false;
+        setTimeout(function(){ fermerMenuPin(); },cle?110:0);
+        if(cle)setTimeout(function(){ executerActionPin(cle,g.store); },150);
+        window._pinMenuVientDeSOuvrir=true;
+        setTimeout(function(){window._pinMenuVientDeSOuvrir=false;},420);
+      };
+
+      g.annuler=function(){
+        if(g.minuteur){clearTimeout(g.minuteur);g.minuteur=null;}
+        g.ouvert=false;
+        fermerMenuPin();
+      };
+
+      _pinDetache();
+      _geste=g;
+      /* LE POINT DECISIF : le suivi vit sur le document, qui survit a la
+         destruction du marqueur. En capture, pour passer avant Leaflet. */
+      if(tactile){
+        /* EN CAPTURE, imperativement. En phase de bulle, Leaflet — dont les
+           gestionnaires sont sur le conteneur de carte, donc plus bas dans
+           l'arbre — recevait le touchmove AVANT nous, demarrait le glissement
+           de la carte, et le movestart refermait le menu qu'on venait
+           d'ouvrir. En capture on passe devant, et le preventDefault tient. */
+        document.addEventListener("touchmove",g.bouge,{passive:false,capture:true});
+        document.addEventListener("touchend",g.fin,true);
+        document.addEventListener("touchcancel",g.fin,true);
+      } else {
+        document.addEventListener("mousemove",g.bouge,true);
+        document.addEventListener("mouseup",g.fin,true);
+      }
+      g.minuteur=setTimeout(function(){
+        if(_geste!==g)return;
+        g.ouvert=true;
+        window._pinMenuVientDeSOuvrir=true;
+        ouvrirMenuPin(g.store,g.depart.x,g.depart.y);
+      },400);
+    }
+
+    el.addEventListener("touchstart",function(e){demarrer(e,true);},{passive:true});
+    el.addEventListener("mousedown",function(e){demarrer(e,false);});
+  });
+}
 function exploreLoadStores(useCache){
   if(!exploreMap)return;
   var status=document.getElementById("explore-status");
@@ -13524,10 +13985,15 @@ function exploreLoadStores(useCache){
     if(!exploreFilter){try{exploreSetHeader(null,null);}catch(e){}}
     return;
   }
+  /* Un panoramique en trois coups de pouce mettait trois requetes en vol, et
+     les trois repeignaient la carte. Le motif du jeton existe deja pour les
+     requetes Firestore (window._fbQuerySeq) : on l'applique au rendu. */
+  var _seq = (window._exploreSeq = (window._exploreSeq || 0) + 1);
   var q;
   if(useCache&&window._exploreRawList){q=Promise.resolve(window._exploreRawList);}
-  else{if(status)status.textContent="Chargement\u2026";q=window.fbQueryZone?window.fbQueryZone(cLat,cLng,Math.min(radiusKm,25)):Promise.resolve(STORES||[]);}
+  else{if(status)status.textContent="Chargement\u2026";q=window.fbQueryZone?window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12)):Promise.resolve(STORES||[]);}
   q.then(function(list){
+    if(_seq!==window._exploreSeq)return;      // un mouvement plus recent a pris la main
     list=list||[];
     list.forEach(_stripAutoDrinks);           // retire les inventaires inventés
     /* Distance recalculee depuis MA position pour chaque magasin. Sans ca,
@@ -13637,8 +14103,52 @@ function exploreLoadStores(useCache){
        regroupement, le nombre d'elements dessines ne depend plus du nombre de
        magasins mais du zoom — on peut donc tout montrer. Le plafond restant
        (3000) ne protege plus l'affichage mais la memoire du telephone. */
-    var _lot=[];
-    list.slice(0,3000).forEach(function(s){
+    /* Le palier de detail se decide une seule fois, avant la boucle : appeler
+       getZoom() 800 fois couterait plus cher que tout le reste. */
+    var _zNiv=14; try{_zNiv=exploreMap.getZoom();}catch(eZ){}
+    var _palier=_zNiv<=12?0:(_zNiv<=14?1:2);
+    /* ECLAIRCISSEMENT PAR GRILLE, aux paliers larges seulement.
+       A l'echelle d'une ville, deux magasins distants de 20 m tombent sur le
+       meme pixel : en dessiner un par-dessus l'autre ne montre rien de plus,
+       ca ne fait que payer des noeuds DOM. On decoupe donc l'ecran en cellules
+       et on ne garde que le magasin le plus informatif de chaque cellule —
+       stock confirme d'abord, puis certifie, puis vendeur.
+       Ce n'est pas cacher des magasins : c'est dessiner ce qui est dessinable a
+       cette echelle. Le compteur de l'en-tete continue d'annoncer le VRAI
+       nombre, et des le zoom suivant tout reapparait. */
+    var _pourCarte=list;
+    if(_palier<2&&list.length>60){
+      try{
+        var _cell=_palier===0?34:42, _grille={}, _rang=function(x){
+          var _d=exploreFilter?exploreFilter.drinkId:null;
+          if(_d&&(storeVerifiedFor(x,_d)||((x.confirmations||{})[_d]||0)>0))return 3;
+          if(storeCertifie(x))return 2;
+          if(!exploreFilter||x._hasDrink)return 1;
+          return 0;
+        };
+        list.forEach(function(x){
+          if(typeof x.lat!=="number"||typeof x.lng!=="number")return;
+          var pt=exploreMap.latLngToContainerPoint([x.lat,x.lng]);
+          var k=Math.round(pt.x/_cell)+":"+Math.round(pt.y/_cell);
+          var cur=_grille[k];
+          if(!cur||_rang(x)>_rang(cur))_grille[k]=x;
+        });
+        var _clair=[];
+        Object.keys(_grille).forEach(function(k){_clair.push(_grille[k]);});
+        if(_clair.length)_pourCarte=_clair;
+      }catch(eG){}
+    }
+    /* Seuls les MARQUEURS sont eclaircis. La liste du bas et les compteurs
+       continuent de parler de tous les magasins de la zone : sinon la carte
+       dirait « 25 magasins » la ou il y en a 800. */
+    var _lot=[], _avant=0;
+    /* Les plus proches d'abord, pour que les six mis en avant soient ceux qui
+       servent vraiment — pas les six premiers du tableau. */
+    if(_palier<2&&typeof userLat==="number"&&userLat&&typeof _distM==="function"){
+      try{ _pourCarte=_pourCarte.slice().sort(function(a,b){
+        return _distM(userLat,userLng,a.lat,a.lng)-_distM(userLat,userLng,b.lat,b.lng);}); }catch(eS){}
+    }
+    _pourCarte.slice(0,3000).forEach(function(s){
       if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
       var pc=brandColor(s.brand);
       var ini=((s.brand||s.name||"?").trim().charAt(0)||"?").toUpperCase();
@@ -13650,6 +14160,13 @@ function exploreLoadStores(useCache){
       // vend & confirme = vert coche ; vend = point de marque ; ne vend pas = gris (contexte alentour)
       // + BLEU : magasin certifie. Independant du vert, donc cumulable.
       var certif=storeCertifie(s);
+      /* « Mis en avant » facon Uber Eats : quelques marqueurs lisibles au
+         milieu d'un semis de points. Si TOUS les magasins sûrs passaient en
+         gros, il n'y aurait plus aucun contraste — c'est justement ce que
+         l'eclaircissement produit, puisqu'il retient les meilleurs de chaque
+         cellule. On plafonne donc a six, les plus proches d'abord. */
+      var _enAvant=(sure||certif)&&_avant<6;
+      if(_enAvant)_avant++;
       var cls="mago-pin"+(closed?" closed":"")+(sure?" sure":"")+(certif?" certif":"");
       var badge=(sure?'<span class="pin-check">✓</span>':"")+(certif?pinCertifBadge():"");
       var ctx=(exploreFilter&&!hasDrink)?"opacity:.4;filter:grayscale(1)":"";
@@ -13658,20 +14175,46 @@ function exploreLoadStores(useCache){
       var priceTag="";
       if(exploreFilter&&hasDrink&&did){
         var _pv=(typeof getStorePrice==="function")?getStorePrice(s,did):null;
-        var _zoomOK=false;try{_zoomOK=exploreMap.getZoom()>=15;}catch(ez){}
-        if(_pv!=null&&_zoomOK){
+        /* Le prix ne s'affiche qu'une fois vraiment proche : a 15, les
+           bulles se recouvraient les unes les autres et ne se lisaient plus. */
+        var _zPrix=false; try{_zPrix=exploreMap.getZoom()>=16;}catch(ez){}
+        if(_pv!=null&&_palier===2&&_zPrix){
           var _ptxt=(_pv.toFixed(2).replace(/\.?0+$/,""))+"€";
           priceTag='<div style="position:absolute;left:50%;top:-15px;transform:translateX(-50%);background:#fff;color:#12100e;font-size:10.5px;font-weight:800;line-height:1;padding:3px 7px;border-radius:999px;white-space:nowrap;box-shadow:0 2px 7px rgba(0,0,0,.32);border:1px solid rgba(0,0,0,.08);z-index:5">'+_ptxt+'</div>';
         }
       }
-      var mk=L.marker([s.lat,s.lng],{icon:L.divIcon({className:"",html:'<div class="'+cls+'" style="position:relative;--pc:'+pc+';width:30px;height:39px;'+ctx+'">'+priceTag+'<div class="mago-pin-head" style="width:30px;height:30px;font-size:12px">'+ini+badge+'</div><div class="mago-pin-tip" style="width:11px;height:11px;bottom:2px"></div></div>',iconSize:[30,39],iconAnchor:[15,39]}),zIndexOffset:sure?600:(certif?450:(hasDrink?300:0))});
+      /* NIVEAU DE DETAIL SELON LE ZOOM.
+         Un pin complet coute 4 a 6 noeuds DOM. A l'echelle d'une ville ils sont
+         de toute facon illisibles : autant ne pas les fabriquer. On garde le pin
+         riche pour la rue, un point avec l'initiale pour le quartier, et un
+         simple point pour la ville — sauf les magasins qui meritent d'etre vus
+         de loin (stock confirme ou certifie), qui gardent une pastille lisible.
+         Le marqueur reste un divIcon a tous les paliers : le menu par appui
+         long a toujours un element DOM ou s'accrocher. */
+      var _ico;
+      if(_palier===0){
+        _ico=_enAvant
+          ? L.divIcon({className:"",html:'<div class="mago-dot fort'+(closed?" closed":"")+'" style="--pc:'+pc+';'+ctx+'">'+(sure?"✓":"")+'</div>',iconSize:[16,16],iconAnchor:[8,8]})
+          : L.divIcon({className:"",html:'<div class="mago-dot" style="--pc:'+pc+';'+ctx+'"></div>',iconSize:[9,9],iconAnchor:[4,4]});
+      } else if(_palier===1){
+        _ico=L.divIcon({className:"",html:'<div class="mago-dot moyen'+(closed?" closed":"")+(sure?" sure":"")+(certif?" certif":"")+'" style="--pc:'+pc+';'+ctx+'">'+ini+'</div>',iconSize:[20,20],iconAnchor:[10,10]});
+      } else {
+        _ico=L.divIcon({className:"",html:'<div class="'+cls+'" style="position:relative;--pc:'+pc+';width:30px;height:39px;'+ctx+'">'+priceTag+'<div class="mago-pin-head" style="width:30px;height:30px;font-size:12px">'+ini+badge+'</div><div class="mago-pin-tip" style="width:11px;height:11px;bottom:2px"></div></div>',iconSize:[30,39],iconAnchor:[15,39]});
+      }
+      var mk=L.marker([s.lat,s.lng],{icon:_ico,zIndexOffset:sure?600:(certif?450:(hasDrink?300:0))});
       mk.on("click",function(e){
         if(e&&e.originalEvent&&window.L&&L.DomEvent){try{L.DomEvent.stopPropagation(e.originalEvent);}catch(_e){}}
+        if(window._pinMenuVientDeSOuvrir){window._pinMenuVientDeSOuvrir=false;return;} // l'appui long a deja agi
         try{if(exploreMap.panTo)exploreMap.panTo([s.lat,s.lng]);}catch(_e){}
         // Clic sur un pin = tracer l'itineraire directement (le "traçage partout").
         showRouteToStore(s.lat,s.lng,s);
         playSound("pop");
       });
+      /* Appui long sur un pin -> menu en arc juste au-dessus. On garde le
+         doigt appuye et on glisse sur le choix : c'est un seul geste, sans
+         relever le doigt, donc utilisable d'une main en plein rayon. Le tap
+         simple continue de tracer l'itineraire — rien n'est retire. */
+      try{ armerMenuPin(mk,s); }catch(_e){}
       _lot.push(mk);
       shown++;
     });
@@ -15237,7 +15780,7 @@ function initPullToRefresh(){
   var scr=document.getElementById("s-home");var scrollEl=scr?scr.querySelector(".scroll"):null;if(!scrollEl)return;
   var ind=document.createElement("div");
   ind.style.cssText="height:0;overflow:hidden;display:flex;align-items:center;justify-content:center;gap:8px;transition:height .25s cubic-bezier(.4,0,.2,1);flex-shrink:0";
-  ind.innerHTML='<span id="ptr-icon" style="display:inline-block;font-size:14px;transition:transform .15s">↓</span><span id="ptr-label" style="font-size:12px;font-weight:600;color:var(--s2)">Tirer pour rafraîchir</span>';
+  ind.innerHTML='<span id="ptr-icon" style="display:inline-block;font-size:14px;color:var(--s2);transition:transform .15s">↓</span><span id="ptr-label" style="font-size:12px;font-weight:600;color:var(--s2)">Tirer pour rafraîchir</span>';
   scrollEl.parentElement.insertBefore(ind,scrollEl);
   var startY=0,pulling=false,triggered=false;
   scrollEl.addEventListener("touchstart",function(e){if(scrollEl.scrollTop===0){startY=e.touches[0].clientY;pulling=true;triggered=false;}},{passive:true});
@@ -15953,8 +16496,8 @@ function maybeFounderRecap(){
    joueurs, AVEC leur pseudo, pour distinguer d'un coup d'œil ses propres actions
    de celles de la communauté. Répond à : "être notifié avec le pseudo pour savoir
    que ce n'était pas moi." */
-function _contribTypeLabel(t){return {stock:"En stock",rupture:"Rupture",contrefacon:"Contrefaçon",nouveau:"Nouveau",badstore:"Faux magasin"}[t]||t;}
-function _contribTypeColor(t){return {stock:"#16a34a",rupture:"#dc2626",contrefacon:"#b45309",nouveau:"#2563eb",badstore:"#b45309"}[t]||"#6b6560";}
+function _contribTypeLabel(t){return {stock:"En stock",rupture:"Rupture",contrefacon:"Contrefaçon",nouveau:"Nouveau",badstore:"Faux magasin",codebarre:"Code-barres contesté"}[t]||t;}
+function _contribTypeColor(t){return {stock:"#16a34a",rupture:"#dc2626",contrefacon:"#b45309",nouveau:"#2563eb",badstore:"#b45309",codebarre:"#7c3aed"}[t]||"#6b6560";}
 function renderContribFeed(){
   var host=document.getElementById("admin-contribs");
   if(!host){
@@ -15997,7 +16540,33 @@ function renderContribFeed(){
          donne au moins le pays. */
       '<div class="ct-ville" data-lat="'+(aLieu?r.lat:"")+'" data-lng="'+(aLieu?r.lng:"")+'" '+
         'style="font-size:11px;font-weight:700;color:var(--s3);margin-top:3px">'+
-        (aLieu?"…":(r.tz?sanitize(_paysDuFuseau(r.tz))+" · fuseau":"lieu inconnu"))+'</div>';
+        (aLieu?"…":(r.tz?sanitize(_paysDuFuseau(r.tz))+" · fuseau":"lieu inconnu"))+'</div>'+
+      /* La note porte TOUT ce qui permet de reparer : le code lu et le vrai nom
+         annonce. Sans elle, la carte disait « codebarre — Monster Energy » et
+         l'information necessaire restait en base, invisible. */
+      (r.note?'<div style="font-size:11.5px;color:var(--s1);background:var(--bg3);border-radius:9px;padding:7px 9px;margin-top:6px;line-height:1.45">'+sanitize(r.note)+'</div>':'');
+      /* Reparer depuis le fil, sans avoir a retrouver la fiche a la main. */
+      var _cbm=(r.type==="codebarre"&&r.note)?String(r.note).match(/^\s*(\d{8,14})\b/):null;
+      if(_cbm&&r.drinkId!=null&&window.fbRemoveBarcode){
+        var _code=_cbm[1], _did=r.drinkId;
+        var fix=document.createElement("div");
+        fix.setAttribute("role","button");fix.setAttribute("tabindex","0");
+        fix.style.cssText="margin-top:7px;text-align:center;font-size:11.5px;font-weight:800;color:#fff;background:#7c3aed;border-radius:10px;padding:9px;cursor:pointer;-webkit-tap-highlight-color:transparent";
+        fix.textContent="Retirer "+_code+" de cette boisson";
+        fix.onclick=function(){
+          if(!confirm("Retirer le code "+_code+" de cette boisson ?\n\nVerifie d'abord sur openfoodfacts.org a quel produit il correspond vraiment."))return;
+          fix.textContent="Retrait\u2026";
+          window.fbRemoveBarcode(_did,_code).then(function(){
+            fix.textContent="\u2713 Retire";fix.style.background="#16a34a";
+            try{
+              var dd=DRINKS.find(function(x){return String(x.id)===String(_did);});
+              if(dd&&dd.barcodes){var i=dd.barcodes.indexOf(String(_code));if(i!==-1)dd.barcodes.splice(i,1);}
+            }catch(e){}
+          }).catch(function(){ fix.textContent="\u00C9chec \u2014 r\u00E9essaie";fix.style.background="#dc2626"; });
+        };
+        fix.onkeydown=function(ev){if(ev.key==="Enter")fix.onclick();};
+        card.appendChild(fix);
+      }
       host.appendChild(card);
     });
     var sep=document.createElement("div");sep.style.cssText="height:1px;background:var(--border);margin:6px 0 14px";host.appendChild(sep);
