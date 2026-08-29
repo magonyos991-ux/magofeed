@@ -1359,126 +1359,104 @@ body.sheet-open{overflow:hidden;overscroll-behavior:none}
 .pchip{font-size:12px;font-weight:800;color:var(--s1);background:var(--bg2);padding:2px 8px;border-radius:999px}
 .pchip.best{background:rgba(22,163,74,.15);color:#15803d}
 
-/* Habillage des tuiles OSM. Le fond de carte brut est trop bariole pour
-   l'app : on le desature fortement et on l'eclaircit, facon Uber Eats — un
-   fond quasi monochrome creme ou seuls les pins portent la couleur. Les
-   parcs et l'eau restent devinables (leger residu de saturation). */
-.leaflet-tile-pane .leaflet-tile{filter:grayscale(.88) saturate(.9) brightness(1.07) contrast(.88) sepia(.14)}
-/* Mode sombre : OSM n'a pas de tuiles nocturnes, on inverse en plus. */
-.tuiles-sombres.leaflet-tile,.leaflet-tile-pane .tuiles-sombres{filter:grayscale(.85) invert(1) hue-rotate(180deg) brightness(.85) contrast(.82)}
+/* Le fond de carte est desormais SOBRE A LA SOURCE (voir fondMago) : il n'y a
+   plus rien a desaturer. On retire donc le filtre qui s'appliquait a CHAQUE
+   tuile, en permanence, dans les deux themes — un tampon hors ecran par tuile,
+   soit la depense de composition la plus lourde de la carte sur iPhone.
+   Un filtre enlevait de toute facon la COULEUR, jamais le DETAIL : c'est le
+   changement de source qui supprime les numeros de maison, pas lui.
+   Le theme sombre est servi par les tuiles nocturnes du fournisseur.
+   Il reste un tres leger adoucissement au zoom rue, la ou OSM reprend la main. */
+.leaflet-tile-pane .leaflet-tile{filter:saturate(.82) brightness(1.02)}
 
-/* ── Menu en gouttes à l'appui long sur un pin ─────────────────────────────
-   Deux couches superposées, alignées au pixel :
-     .pm-goo   les disques pleins, passés au filtre de fusion → la matière
-     .pm-face  les icônes, nettes, par-dessus
-   Le filtre floute puis écrase l'alpha : deux formes proches se recollent en
-   une seule masse et se détachent en s'éloignant. C'est l'effet AirDrop. */
+/* ── Menu à l'appui long sur un pin ────────────────────────────────────────
+   Même vocabulaire que les puces de filtre de l'app : au repos --bg3 sur
+   bordure, sélectionné rempli avec l'encre inversée. Le menu doit avoir l'air
+   d'appartenir à Magofeed, pas d'être un widget posé dessus.
+
+   RÈGLE DE PERFORMANCE, non négociable : on n'anime QUE transform et opacity.
+   La première version passait chaque image dans un filtre SVG de fusion — beau
+   sur un ordinateur, hachures garanties sur iPhone : Safari refait alors une
+   passe de flou hors GPU à chaque image, par-dessus une carte qui se redessine
+   déjà. Rien ici ne déclenche de repeinte : pas de filter, pas de blur, pas
+   d'ombre animée. */
 
 .pin-menu{position:fixed;z-index:5000;pointer-events:none;transform:translate(-50%,-50%);
-  --ex:0px;--ey:0px;                                  /* décalage magnétique vers le doigt */
-  --ressort:cubic-bezier(.34,1.42,.5,1);              /* dépasse, puis se pose */
+  --ex:0px;--ey:0px;                                   /* aimantation vers le doigt */
+  --ressort:cubic-bezier(.32,1.4,.5,1);
   --retour:cubic-bezier(.4,0,.2,1)}
 
-/* L'onde d'ouverture : une seule impulsion qui part du pin, comme AirDrop. */
-.pm-onde{position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;
-  border-radius:50%;border:2px solid currentColor;color:rgba(255,255,255,.55);opacity:0}
-.pin-menu.in .pm-onde{animation:pm-onde .62s cubic-bezier(.2,.7,.3,1) forwards}
+/* Un seul anneau au départ, comme une pression qui se propage. Transform seul. */
+.pm-onde{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;
+  border-radius:50%;border:2px solid var(--s1);opacity:0}
+.pin-menu.in .pm-onde{animation:pm-onde .5s cubic-bezier(.2,.7,.3,1) forwards}
 @keyframes pm-onde{
-  0%{opacity:.75;transform:scale(.35);border-width:3px}
-  70%{opacity:.18}
-  100%{opacity:0;transform:scale(5.2);border-width:.5px}
+  0%{opacity:.4;transform:scale(.5)}
+  100%{opacity:0;transform:scale(3.4)}
 }
 
-/* L'ombre est CHAINEE apres la fusion : posee avant, elle serait avalee par le
-   flou. C'est elle qui detache les gouttes du fond de carte — une bordure ne
-   survivrait pas au filtre. */
-.pm-goo{position:absolute;left:0;top:0;
-  filter:url(#mago-goo) drop-shadow(0 3px 10px rgba(0,0,0,.28));
-  -webkit-filter:url(#mago-goo) drop-shadow(0 3px 10px rgba(0,0,0,.28));
-  will-change:filter}
 .pm-face{position:absolute;left:0;top:0}
 
-/* La goutte mère : elle reste au pin et retient les autres par un filet. */
-.pm-noyau{position:absolute;left:0;top:0;width:22px;height:22px;margin:-11px 0 0 -11px;
-  border-radius:50%;background:var(--app-bg);
-  transform:scale(0);transition:transform .3s var(--ressort)}
-.pin-menu.in .pm-noyau{transform:scale(1)}
-.pin-menu.in.vise .pm-noyau{transform:scale(.62);transition-duration:.22s}
-
-.pm-blob{position:absolute;left:0;top:0;width:52px;height:52px;margin:-26px 0 0 -26px;
-  border-radius:50%;background:var(--app-bg);
-  transform:translate(0,0) scale(.2);opacity:0;
-  transition:transform .42s var(--ressort),opacity .2s ease,background .18s ease;
-  transition-delay:var(--r,0ms),var(--r,0ms),0s}
-.pin-menu.in .pm-blob{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}
-
 .pm-face-item{position:absolute;left:0;top:0;width:52px;height:52px;margin:-26px 0 0 -26px;
-  display:flex;align-items:center;justify-content:center;color:var(--c);
-  transform:translate(0,0) scale(.2);opacity:0;
-  transition:transform .42s var(--ressort),opacity .2s ease,color .18s ease;
-  transition-delay:var(--r,0ms),var(--r,0ms),0s}
+  display:flex;align-items:center;justify-content:center;
+  border-radius:50%;
+  background:var(--bg3);color:var(--s2);
+  border:1.5px solid var(--border);
+  box-shadow:0 3px 12px rgba(0,0,0,.16);            /* fixe : jamais animée */
+  transform:translate(0,0) scale(.4);opacity:0;
+  transition:transform .34s var(--ressort),opacity .16s linear,
+             background-color .15s ease,color .15s ease,border-color .15s ease;
+  transition-delay:var(--r,0ms),var(--r,0ms),0s,0s,0s}
 .pin-menu.in .pm-face-item{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}
 
-/* Le choix visé : la goutte gonfle, se remplit, et se penche vers le doigt.
-   Les autres refluent — la matière se concentre là où on regarde. */
-.pin-menu.in.vise .pm-blob:not(.on):not(.pm-prix){transform:translate(var(--dx),var(--dy)) scale(.82);opacity:.72}
-.pin-menu.in.vise .pm-face-item:not(.on):not(.pm-prix){transform:translate(var(--dx),var(--dy)) scale(.82);opacity:.5}
-.pin-menu.in .pm-blob.on{background:var(--c);
-  transform:translate(calc(var(--dx) + var(--ex)),calc(var(--dy) + var(--ey))) scale(1.24)}
-.pin-menu.in .pm-face-item.on{color:#fff;
-  transform:translate(calc(var(--dx) + var(--ex)),calc(var(--dy) + var(--ey))) scale(1.24)}
+/* Sélection : on remplit, exactement comme .chip.on. Les autres s'effacent. */
+.pin-menu.in.vise .pm-face-item:not(.on):not(.pm-prix){
+  transform:translate(var(--dx),var(--dy)) scale(.86);opacity:.55}
+.pin-menu.in .pm-face-item.on{
+  background:var(--c);color:var(--app-bg);border-color:var(--c);
+  transform:translate(calc(var(--dx) + var(--ex)),calc(var(--dy) + var(--ey))) scale(1.18)}
 
-/* La goutte de prix : elle bourgeonne DEPUIS « en stock », dans le prolongement
-   du geste. Elle n'existe que si le pouce s'attarde — facultative. */
-.pm-prix{width:40px;height:40px;margin:-20px 0 0 -20px}
-/* Etat cache ECRIT AVEC LA MEME FORCE que « .pin-menu.in .pm-face-item »,
-   sinon cette derniere l'emportait et la goutte de prix s'affichait des
-   l'ouverture — alors qu'elle ne doit naitre que si le pouce s'attarde. */
-.pin-menu.in .pm-blob.pm-prix,
+/* La goutte de prix : elle ne naît que si le pouce s'attarde sur « en stock ».
+   État caché écrit avec la même force que la règle d'ouverture, sinon cette
+   dernière l'emporte et la bulle apparaît trop tôt. */
+.pm-prix{width:42px;height:42px;margin:-21px 0 0 -21px}
 .pin-menu.in .pm-face-item.pm-prix{
   transform:translate(var(--ox),var(--oy)) scale(.15);opacity:0;
-  transition:transform .38s var(--ressort),opacity .18s ease,background .18s ease,color .18s ease;
+  transition:transform .3s var(--ressort),opacity .15s linear,
+             background-color .15s ease,color .15s ease,border-color .15s ease;
   transition-delay:0s}
-.pin-menu.in.prix-la .pm-blob.pm-prix,
 .pin-menu.in.prix-la .pm-face-item.pm-prix{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}
-/* Une fois nee, elle se met legerement en retrait comme les autres — mais
-   seulement une fois nee. */
-.pin-menu.in.prix-la.vise .pm-blob.pm-prix:not(.on),
-.pin-menu.in.prix-la.vise .pm-face-item.pm-prix:not(.on){transform:translate(var(--dx),var(--dy)) scale(.9);opacity:.92}
-.pin-menu.in.prix-la .pm-blob.pm-prix.on{transform:translate(calc(var(--dx) + var(--ex)),calc(var(--dy) + var(--ey))) scale(1.2)}
-.pin-menu.in.prix-la .pm-face-item.pm-prix.on{transform:translate(calc(var(--dx) + var(--ex)),calc(var(--dy) + var(--ey))) scale(1.2)}
+.pin-menu.in.prix-la.vise .pm-face-item.pm-prix:not(.on){
+  transform:translate(var(--dx),var(--dy)) scale(.92);opacity:.9}
+.pin-menu.in.prix-la .pm-face-item.pm-prix.on{
+  transform:translate(calc(var(--dx) + var(--ex)),calc(var(--dy) + var(--ey))) scale(1.16)}
 
-/* L'étiquette : le nom du magasin au repos, le nom du choix dès qu'on en vise un. */
-.pm-lab{position:absolute;left:50%;top:34px;transform:translateX(-50%) translateY(5px);
+/* L'étiquette reprend la puce active de l'app, au mot près. */
+.pm-lab{position:absolute;left:50%;top:36px;transform:translateX(-50%) translateY(6px);
   white-space:nowrap;pointer-events:none;opacity:0;max-width:230px;overflow:hidden;text-overflow:ellipsis;
-  transition:opacity .18s ease,transform .26s var(--ressort)}
+  transition:opacity .16s linear,transform .24s var(--ressort)}
 .pin-menu.in .pm-lab{opacity:1;transform:translateX(-50%) translateY(0)}
-.pin-menu.bas .pm-lab{top:172px;bottom:auto}
-.pm-lab span{display:inline-block;background:var(--c,var(--s1));color:#fff;
-  font-size:11.5px;font-weight:800;letter-spacing:-.01em;padding:5px 13px;border-radius:999px;
-  box-shadow:0 3px 12px rgba(0,0,0,.32);transition:background .18s ease}
+.pin-menu.bas .pm-lab{top:176px;bottom:auto}
+.pm-lab span{display:inline-block;background:var(--c,var(--s1));color:var(--app-bg);
+  font-family:'Space Grotesk',sans-serif;
+  font-size:12px;font-weight:800;letter-spacing:-.01em;padding:6px 14px;border-radius:999px;
+  box-shadow:0 3px 10px rgba(26,23,20,.18);transition:background-color .15s ease}
 
-/* Au relâchement, le choix ABSORBE les autres : elles refluent vers lui, il
-   pulse, puis la matière se retire. C'est la moitié de la sensation. */
-.pin-menu.absorbe .pm-blob:not(.on),
-.pin-menu.absorbe .pm-face-item:not(.on){transform:translate(0,0) scale(.2);opacity:0;
-  transition-duration:.17s;transition-delay:0s}
-.pin-menu.absorbe .pm-blob.on,
-.pin-menu.absorbe .pm-face-item.on{transform:translate(var(--dx),var(--dy)) scale(1.34);
-  transition-duration:.16s}
-.pin-menu.absorbe .pm-noyau{transform:scale(0);transition-duration:.15s}
+/* Au relâchement, le choix se pose et les autres se retirent vers le pin. */
+.pin-menu.absorbe .pm-face-item:not(.on){transform:translate(0,0) scale(.4);opacity:0;
+  transition-duration:.15s;transition-delay:0s}
+.pin-menu.absorbe .pm-face-item.on{
+  transform:translate(var(--dx),var(--dy)) scale(1.3);transition-duration:.14s}
 
-/* Sortie : tout reflue vers le pin, sans à-coup. */
-.pin-menu.out .pm-blob,.pin-menu.out .pm-face-item{transform:translate(0,0) scale(.2);opacity:0;
-  transition:transform .2s var(--retour),opacity .16s ease;transition-delay:0s}
-.pin-menu.out .pm-noyau{transform:scale(0)}
+.pin-menu.out .pm-face-item{transform:translate(0,0) scale(.4);opacity:0;
+  transition:transform .18s var(--retour),opacity .14s linear;transition-delay:0s}
 .pin-menu.out .pm-lab{opacity:0}
 
-/* Le filtre de fusion coûte une passe de flou par image. Si la personne a
-   demandé à réduire les animations, on rend la matière nette et immobile. */
 @media (prefers-reduced-motion:reduce){
-  .pm-goo{filter:none;-webkit-filter:none}
   .pm-onde{display:none}
+  .pm-face-item,.pm-lab{transition-duration:.01ms!important;transition-delay:0s!important}
+}
+
   .pm-blob,.pm-face-item,.pm-noyau,.pm-lab,.pm-prix{
     transition-duration:.01ms!important;transition-delay:0s!important}
 }
