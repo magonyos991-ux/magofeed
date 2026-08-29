@@ -10609,41 +10609,29 @@ window._leafletState = window._leafletState || null;   // null | "loading" | "re
    etre a l'ecran. Si les conditions d'Esri posaient probleme un jour, il suffit
    de renvoyer toujours l'URL OSM ci-dessous pour revenir en arriere.
    ============================================================================ */
-var FOND_ATTRIB='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> | Esri, HERE, Garmin';
-var FOND_BASCULE=17;   // en dessous : sobre. a partir de la : net.
+var FOND_ATTRIB='Esri, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 function fondMago(sombre){
-  /* DEUX SOURCES, UNE SEULE COUCHE.
-     Aucun fond gratuit ne convient aux deux usages : le fond sobre devient une
-     bouillie des qu'on s'approche (sa donnee s'arrete au zoom 16), et
-     OpenStreetMap noie la carte sous les numeros de maison quand on parcourt.
-     On prend donc le bon a chaque distance — et dans UNE seule couche, choisie
-     tuile par tuile par getTileUrl : un seul cache, aucun clignotement de
-     bascule, pas de doublement de memoire.
+  /* UN SEUL FOND, SOBRE, A TOUS LES ZOOMS.
+     On basculait sur OpenStreetMap une fois proche, pour gagner en detail.
+     Mais ce detail-la ne sert a rien ici : Magofeed dit dans QUEL MAGASIN se
+     trouve une boisson, il ne livre personne a domicile. Numeros de maison,
+     numeros de police, commerces sans rapport : tout cela encombre ce qui doit
+     rester lisible d'un coup d'oeil, c'est-a-dire les pins.
 
-       zoom < 17  : fond sobre, presque blanc — on cherche un quartier
-       zoom >= 17 : OpenStreetMap, net — on est devant la vitrine
-
-     En theme sombre, les tuiles OpenStreetMap sont claires : on les inverse,
-     mais ELLES SEULES. Le fond sobre a deja sa version nocturne, l'inverser
-     aussi le rendrait blanc. D'ou la classe posee tuile par tuile. */
-  var Base=L.TileLayer.extend({
-    getTileUrl:function(c){
-      if(c.z<FOND_BASCULE){
-        return "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_"+
-               (sombre?"Dark":"Light")+"_Gray_Base/MapServer/tile/"+c.z+"/"+c.y+"/"+c.x;
-      }
-      return "https://tile.openstreetmap.org/"+c.z+"/"+c.x+"/"+c.y+".png";
-    },
-    createTile:function(coords,done){
-      var t=L.TileLayer.prototype.createTile.call(this,coords,done);
-      if(coords.z>=FOND_BASCULE)t.classList.add("tuile-nette");
-      return t;
-    }
-  });
-  /* keepBuffer:1 divise par deux les tuiles gardees hors ecran ; sans
-     updateWhenZooming, la grille se reconstruit une seule fois, a la fin du
-     zoom, au lieu d'une fois par image pendant le geste. */
-  return new Base("",{maxZoom:19,keepBuffer:1,updateWhenZooming:false,attribution:FOND_ATTRIB});
+     La donnee de ce fond s'arrete au zoom 16 — mesure : au-dela le serveur
+     renvoie une tuile « pas de donnee » de 2,5 Ko. maxNativeZoom dit a Leaflet
+     de REUTILISER la tuile 16 en l'agrandissant, plutot que d'afficher un carre
+     vide. C'est adouci si on zoome au maximum ; c'est assume, et de toute facon
+     les regroupements se defont maintenant des le zoom 15, donc on a rarement
+     besoin d'aller plus loin. */
+  var jeu=sombre?"World_Dark_Gray_Base":"World_Light_Gray_Base";
+  return L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/"+jeu+"/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom:19,            // on peut zoomer jusqu'au bout...
+      maxNativeZoom:16,      // ...mais la donnee s'arrete la, on agrandit
+      keepBuffer:1,          // moitie moins de tuiles gardees hors ecran
+      updateWhenZooming:false, // une seule reconstruction de grille, a la fin du zoom
+      attribution:FOND_ATTRIB });
 }
 function ensureLeaflet(onReady, onFail){
   if (window.L) { window._leafletState="ready"; onReady&&onReady(); return; }
@@ -14091,13 +14079,17 @@ function openExploreMap(opts){
                  ne ferait que remplacer un semis lisible par des bulles de
                  comptage. On ne regroupe donc qu'a partir du palier « rue »,
                  la ou les pins complets peuvent vraiment se chevaucher. */
-              if(zoom<=14)return 1;       // pratiquement desactive
-              return 46;                  // pins complets de 30 px
+              return zoom<=14?1:40;
             },
-            /* Remis a 17 : a 16, les pins complets et leurs bulles de prix
-               se chevauchaient en tas illisibles. Entre 15 et 16, c'est le
-               regroupement qui degage la vue. */
-            disableClusteringAtZoom:17,
+            /* Il fallait zoomer jusqu'au niveau 17 — deux ou trois rues — pour
+               que les bulles de comptage se defassent et laissent voir les
+               magasins un par un. Beaucoup trop tard : on veut les voir en
+               regardant un quartier.
+               Sur un telephone de 390 px de large, le niveau 15 couvre ~1,2 km
+               (rayon ~590 m) et le niveau 16 ~590 m (rayon ~295 m). Defaire les
+               regroupements des 15 met donc les magasins a nu bien au-dela des
+               300-400 m demandes. */
+            disableClusteringAtZoom:15,
             spiderfyOnMaxZoom:false,
             showCoverageOnHover:false,
             iconCreateFunction:exploreClusterIcon
@@ -14213,6 +14205,19 @@ var PIN_MENU_ACTIONS=[
   {cle:"rupture", libelle:"Rupture", couleur:"#dc2626",
    ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.9" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>'}
 ];
+/* Sans filtre boisson, « en stock » et « rupture » n'ont aucun sens : on ne
+   saurait pas de QUELLE boisson on parle. On n'affichait donc qu'une seule
+   bulle, « Details » — un menu a un choix, ce qui ne vaut pas la peine d'un
+   appui long. On propose desormais trois actions qui, elles, fonctionnent
+   toujours : ou on va, ce qu'il y a dedans, et ce qu'on peut y ajouter. */
+var PIN_MENU_SANS_FILTRE=[
+  {cle:"route", libelle:"Y aller", couleur:"#2563eb",
+   ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 21 3l-8.5 18-2.2-7.3z"/></svg>'},
+  {cle:"fiche", libelle:"Détails", couleur:"#64748b",
+   ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.6"/></svg>'},
+  {cle:"ajout", libelle:"Ajouter une boisson", couleur:"#16a34a",
+   ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'}
+];
 /* La goutte enchainee : elle ne nait QUE si le pouce s'attarde sur « en stock ».
    Facultative par construction — on peut relacher avant qu'elle apparaisse. */
 var PIN_MENU_PRIX={cle:"prix", libelle:"Noter le prix", couleur:"#c69a57",
@@ -14265,7 +14270,7 @@ function ouvrirMenuPin(s,x,y){
   _pinRetirerMenu();
   var m=document.createElement("div");
   m.id="pin-menu"; m.className="pin-menu";
-  var actions=exploreFilter?PIN_MENU_ACTIONS:PIN_MENU_ACTIONS.filter(function(a){return a.cle==="fiche";});
+  var actions=exploreFilter?PIN_MENU_ACTIONS:PIN_MENU_SANS_FILTRE;
   var n=actions.length, R=80, LEVEE=32, HAUT_SUR=150;
   var versLeBas=(y-(R+LEVEE+36)<HAUT_SUR);
   if(versLeBas&&(y+R+LEVEE+36)>(window.innerHeight||844)-90){
@@ -14313,6 +14318,13 @@ function ouvrirMenuPin(s,x,y){
 function executerActionPin(cle,s){
   if(!s)return;
   if(cle==="fiche"){ try{openStoreDetail(s.id);}catch(e){} return; }
+  if(cle==="route"){ try{showRouteToStore(s.lat,s.lng,s);}catch(e){} return; }
+  if(cle==="ajout"){
+    /* openAddDrinkToStore travaille sur le magasin ouvert : on le lui designe
+       avant d'appeler, sinon il repond « ouvre d'abord un magasin ». */
+    try{ curStoreDetail=s; openAddDrinkToStore(); }catch(e){}
+    return;
+  }
   if(!exploreFilter)return;
   var did=exploreFilter.drinkId;
   /* On reutilise le chemin de confirmation existant (doConfirm) : memes points,
@@ -14346,7 +14358,8 @@ function armerMenuPin(mk,s){
 
       g.actionDe=function(cle){
         if(cle==="prix")return PIN_MENU_PRIX;
-        return PIN_MENU_ACTIONS.filter(function(z){return z.cle===cle;})[0];
+        var jeu=exploreFilter?PIN_MENU_ACTIONS:PIN_MENU_SANS_FILTRE;
+        return jeu.filter(function(z){return z.cle===cle;})[0];
       };
       g.majSurvol=function(pt){
         var m=window._pinMenuActif&&window._pinMenuActif.el; if(!m)return;
