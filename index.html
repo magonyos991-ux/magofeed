@@ -1860,6 +1860,14 @@ window.fbConfirmStock = async function(storeId, drinkId, value) {
 // près n'est de toute façon pas nécessaire pour un graphique d'évolution.
 window.fbSavePrice = async function(storeId, drinkId, price) {
   try {
+    /* Aucun plafond n'existait : le dernier prix ecrit devenait LE prix montre
+       a tout le monde. Un chiffre casse fait deplacer des gens pour rien —
+       exactement ce que cette app promet de ne pas faire — et un chiffre
+       absurde decredibilise la fiche. Hors de cette fourchette, ce n'est pas
+       une boisson vendue en Belgique. */
+    price = Number(price);
+    if (!(price >= 0.20 && price <= 25)) return;
+    price = Math.round(price * 100) / 100;
     var s = window.STORES.find(function(x){ return x.id === storeId || x.fbId === storeId; });
     if(!s || !s.fbId) return;
     var updates = {};
@@ -2157,6 +2165,16 @@ window.fbLoadLeaderboard = async function() {
       // Points NETS : ce que le serveur a retire (anti-farm) est deduit ici
       // aussi, sinon un compte sanctionne resterait en tete du classement.
       var pts = Math.max(0, (data.points || 0) - (data.penalty || 0));
+      /* CLASSEMENT DES CONTRIBUTEURS, pas des comptes. Les points restent
+         ecrits par le client (limite assumee), et le classement lit les 30
+         premiers : trente comptes anonymes fabriques en une minute, chacun
+         avec un pseudo different et un score enorme, evinçaient donc TOUS les
+         vrais contributeurs. Un compte sans la moindre contribution declaree
+         n'a rien a faire dans un classement de contributeurs — quel que soit
+         son score. */
+      var contributions = (Number(data.confirms) || 0) + (Number(data.signals) || 0)
+                        + (Number(data.discAccepted) || 0);
+      if (contributions <= 0) return;
       if (!parPseudo[cle] || pts > parPseudo[cle].points) {
         parPseudo[cle] = { uid: d.id, pseudo: pseudo, points: pts, streak: data.streak || 0 };
       }
@@ -4268,7 +4286,8 @@ function confirmWithPrice(sid,did){
   if(!s.confirmations[did])s.confirmations[did]=0;
   s.confirmations[did]++;
   if(!s.seenAt)s.seenAt={};s.seenAt[did]=Date.now();
-  if(price&&price>0){
+  // Meme fourchette que fbSavePrice : un prix hors de la, on ne l'enregistre pas.
+  if(price>=0.20&&price<=25){
     if(!storePrices[sid])storePrices[sid]={};
     storePrices[sid][did]=price;
     localStorage.setItem("magoPrices",JSON.stringify(storePrices));

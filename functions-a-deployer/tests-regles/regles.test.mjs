@@ -22,7 +22,7 @@
  * « ok » a « ECHEC », ne deploie pas.
  */
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, setDoc, updateDoc, getDoc, deleteDoc, collection, addDoc,
+import { doc, setDoc, updateDoc, getDoc, getDocs, deleteDoc, collection, addDoc,
          writeBatch, increment, arrayUnion, serverTimestamp } from 'firebase/firestore';
 import fs from 'fs';
 
@@ -208,6 +208,27 @@ await doit('bloque : se placer dans la file de certification',
   ()=>assertFails(updateDoc(doc(m,'stores','s1'),{verifiedSource:'photos rayon (08/2026)'})));
 await doit('legitime : import OSM ecrit sa source d origine',
   ()=>assertSucceeds(updateDoc(doc(m,'stores','s1'),{verifiedSource:'catalogue enseigne (auto)'})));
+
+await doit('bloque : injecter des magasins dans foundIn (non-auteur)',
+  ()=>assertFails(updateDoc(doc(m,'discoveries','d1'),{foundIn:['s1','s2']})));
+await doit('legitime : l auteur dit ou il a vu sa decouverte',
+  ()=>assertSucceeds(updateDoc(doc(a,'discoveries','d1'),{foundIn:['s1']})));
+await doit('bloque : aspirer toutes les photos de decouvertes',
+  ()=>assertFails(getDocs(collection(m,'discoveryPhotos'))));
+await doit('legitime : lire UNE photo de decouverte',
+  ()=>assertSucceeds(getDoc(doc(m,'discoveryPhotos','d1'))));
+await doit('bloque : photo de decouverte signee d un autre',
+  ()=>assertFails(setDoc(doc(m,'discoveryPhotos','d9'),{data:'x',by:ALICE})));
+await doit('bloque : magasin invente au nom de 10000 caracteres',
+  ()=>assertFails(setDoc(doc(m,'stores','sLong'),
+      {name:'x'.repeat(10000),lat:50.8,lng:4.3})));
+await doit('bloque : magasin sans coordonnees valides',
+  ()=>assertFails(setDoc(doc(m,'stores','sHorsMonde'),
+      {name:'Nulle part',lat:'50.8',lng:4.3})));
+await doit('legitime : la communaute cree un night shop',
+  ()=>assertSucceeds(setDoc(doc(m,'stores','sNight'),
+      {name:'ARARAT Night Shop',lat:50.83,lng:4.36,drinks:[],
+       confirmations:{},community:true,addedBy:MALLORY})));
 
 await doit('bloque : se declarer administrateur',
   ()=>assertFails(setDoc(doc(m,'admins',MALLORY),{ok:true})));

@@ -208,15 +208,23 @@ service cloud.firestore {
       function foundInBorne() {
         return !('foundIn' in request.resource.data)
           || (request.resource.data.foundIn is list
-              && request.resource.data.foundIn.size() <= 30);
+              && request.resource.data.foundIn.size() <= 10);
       }
       allow update: if isAdmin()
         || (isSignedIn() && resource.data.by == request.auth.uid
             && changed().hasOnly(['votes','hasPhoto','name','brand','cat','foundIn'])
             && voteHonnete() && foundInBorne())
+        /* 'foundIn' etait modifiable par TOUT compte connecte, pas seulement
+           par l'auteur. Rien ne se voyait tant que la decouverte dormait ; le
+           jour ou l'administrateur la promeut, l'app boucle sur cette liste et
+           injecte la boisson dans chaque magasin cite, avec une confirmation
+           et une date fraiche. Deux cents magasins declaraient alors stocker
+           une boisson que personne n'y a vue — et c'est l'administrateur qui
+           posait le mensonge, en un clic legitime. Celui qui a scanne le
+           produit reste libre de dire ou il l'a vu (branche du dessus). */
         || (isSignedIn()
-            && changed().hasOnly(['votes','hasPhoto','foundIn'])
-            && voteHonnete() && foundInBorne());
+            && changed().hasOnly(['votes','hasPhoto'])
+            && voteHonnete());
       allow delete: if isAdmin();
 
       // Un vote = un doc votedBy/{uid} (dédoublonnage infalsifiable).
@@ -228,9 +236,18 @@ service cloud.firestore {
     }
     // Photo jointe à une découverte : lisible par les connectés (modération
     //    admin), créée par les connectés, supprimée par l'admin.
+    /* « isSignedIn » n'est pas une barriere ici : l'app cree un compte anonyme
+       pour chaque visiteur, automatiquement. Et la regle portait sur la
+       COLLECTION : une seule requete renvoyait toutes les photos envoyees par
+       la communaute, avec l'identifiant de leur auteur, y compris celles que
+       l'administrateur n'a pas encore vues — donc avant toute moderation.
+       L'app ne lit jamais qu'une photo a la fois, par identifiant de
+       decouverte : on autorise 'get', pas 'list'. */
     match /discoveryPhotos/{id} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
+      allow get: if isSignedIn();
+      allow list: if isAdmin();
+      allow create: if isSignedIn()
+        && request.resource.data.by == request.auth.uid;
       allow update, delete: if isAdmin();
     }
 
@@ -311,8 +328,22 @@ service cloud.firestore {
       /* drinksVerified rejoint la liste des champs serveur A LA CREATION aussi :
          plus aucun chemin client ne l'ecrit depuis que l'import automatique a
          cesse de marquer « verifie » un rayon devine d'apres le nom du magasin. */
+      /* Aucune contrainte de type ni de taille n'existait : le decoupage a 60
+         caracteres du nom vit cote client, donc rien n'empechait de creer un
+         magasin invente, place n'importe ou, avec un nom de dix mille
+         caracteres. Un magasin s'affiche sur la carte de tout le monde. */
       allow create: if isAdmin()
-        || (isSignedIn() && !request.resource.data.keys().hasAny(champsServeurStore()));
+        || (isSignedIn()
+            && !request.resource.data.keys().hasAny(champsServeurStore())
+            && (!('addedBy' in request.resource.data)
+                || request.resource.data.addedBy == request.auth.uid)
+            && request.resource.data.name is string
+            && request.resource.data.name.size() > 0
+            && request.resource.data.name.size() <= 60
+            && request.resource.data.lat is number
+            && request.resource.data.lat >= -90 && request.resource.data.lat <= 90
+            && request.resource.data.lng is number
+            && request.resource.data.lng >= -180 && request.resource.data.lng <= 180);
       allow update: if isAdmin()
         || (isSignedIn()
             && !changed().hasAny(champsServeurStore())
@@ -327,8 +358,22 @@ service cloud.firestore {
       /* drinksVerified rejoint la liste des champs serveur A LA CREATION aussi :
          plus aucun chemin client ne l'ecrit depuis que l'import automatique a
          cesse de marquer « verifie » un rayon devine d'apres le nom du magasin. */
+      /* Aucune contrainte de type ni de taille n'existait : le decoupage a 60
+         caracteres du nom vit cote client, donc rien n'empechait de creer un
+         magasin invente, place n'importe ou, avec un nom de dix mille
+         caracteres. Un magasin s'affiche sur la carte de tout le monde. */
       allow create: if isAdmin()
-        || (isSignedIn() && !request.resource.data.keys().hasAny(champsServeurStore()));
+        || (isSignedIn()
+            && !request.resource.data.keys().hasAny(champsServeurStore())
+            && (!('addedBy' in request.resource.data)
+                || request.resource.data.addedBy == request.auth.uid)
+            && request.resource.data.name is string
+            && request.resource.data.name.size() > 0
+            && request.resource.data.name.size() <= 60
+            && request.resource.data.lat is number
+            && request.resource.data.lat >= -90 && request.resource.data.lat <= 90
+            && request.resource.data.lng is number
+            && request.resource.data.lng >= -180 && request.resource.data.lng <= 180);
       allow update: if isAdmin()
         || (isSignedIn()
             && !changed().hasAny(champsServeurStore())
