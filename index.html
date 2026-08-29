@@ -5416,7 +5416,7 @@ function ensurePickerMap(cb){
     var center=[userLat||50.8466,userLng||4.3528];
     window._pickerMap=L.map("store-picker-map",{zoomControl:false}).setView(center,13);
     var darkP=document.body.classList.contains("dark");
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,keepBuffer:1,updateWhenZooming:false,className:darkP?"tuiles-sombres":"",attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(window._pickerMap);
+    fondMago(darkP).addTo(window._pickerMap);
     window._pickerMarkers=L.layerGroup().addTo(window._pickerMap);
     window._pickerMap.on("click",function(e){onPickerMapClick(e.latlng);});
     if(userLat){
@@ -9421,10 +9421,7 @@ function initLeafletMap(lat,lng){
   /* Carto a ferme son acces gratuit (« API KEY REQUIRED » imprime sur chaque
      tuile) : OpenStreetMap, gratuit et sans cle, le remplace. Le sombre est
      rendu par un filtre CSS — OSM n'a pas de variante nocturne. */
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{
-    maxZoom:19,keepBuffer:1,updateWhenZooming:false,className:dark?"tuiles-sombres":"",
-    attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-  }).addTo(map);
+  fondMago(dark).addTo(map);
 
   // Pin position utilisateur
   if(userLat){
@@ -10575,6 +10572,41 @@ function toggleAdvFilters(){
    POUR TOUJOURS et l'ecran restait vide, sans un mot d'explication.
    Un seul chargeur desormais, memorise, avec un echec qui se dit. ── */
 window._leafletState = window._leafletState || null;   // null | "loading" | "ready" | "failed"
+/* ============================================================================
+   LE FOND DE CARTE
+   ----------------------------------------------------------------------------
+   OpenStreetMap standard affiche les numeros de maison, les noms de commerces
+   et le detail des batiments a tous les zooms : illisible sous des pins, et
+   trois fois plus lourd (39 Ko par tuile contre 13). Uber Eats montre un fond
+   quasi blanc ou ne survivent que les axes et les noms de quartier.
+
+   On prend donc le fond sobre d'Esri jusqu'au zoom 16, et OSM au-dela — sa
+   donnee s'arrete a 16, et de toute facon c'est au niveau de la rue qu'on veut
+   enfin voir les batiments. UNE seule couche, donc un seul cache de tuiles et
+   aucun clignotement de bascule : c'est getTileUrl qui choisit, tuile par
+   tuile, selon le zoom.
+
+   Les deux sources doivent etre citees en permanence puisque les deux peuvent
+   etre a l'ecran. Si les conditions d'Esri posaient probleme un jour, il suffit
+   de renvoyer toujours l'URL OSM ci-dessous pour revenir en arriere.
+   ============================================================================ */
+var FOND_ATTRIB='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> | Esri, HERE, Garmin, GIS user community';
+function fondMago(sombre){
+  var Base=L.TileLayer.extend({
+    getTileUrl:function(c){
+      if(c.z<=16){
+        return "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_"+
+               (sombre?"Dark":"Light")+"_Gray_Base/MapServer/tile/"+c.z+"/"+c.y+"/"+c.x;
+      }
+      return "https://tile.openstreetmap.org/"+c.z+"/"+c.x+"/"+c.y+".png";
+    }
+  });
+  /* keepBuffer:1 divise par deux les tuiles gardees hors ecran (~14 Mo de
+     bitmaps decodes -> ~7). updateWhenZooming:false n'attend qu'une seule
+     reconstruction de grille, a la fin du zoom, au lieu d'une par image —
+     c'est-a-dire pendant le geste meme qui faisait ramer. */
+  return new Base("",{maxZoom:19,keepBuffer:1,updateWhenZooming:false,attribution:FOND_ATTRIB});
+}
 function ensureLeaflet(onReady, onFail){
   if (window.L) { window._leafletState="ready"; onReady&&onReady(); return; }
   window._leafletWaiters = window._leafletWaiters || [];
@@ -14001,7 +14033,7 @@ function openExploreMap(opts){
       exploreMap=L.map("explore-map",{zoomControl:false,doubleClickZoom:true,touchZoom:true,tap:true});
       L.control.zoom({position:"bottomleft"}).addTo(exploreMap);
       var darkE=document.body.classList.contains("dark");
-      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,keepBuffer:1,updateWhenZooming:false,className:darkE?"tuiles-sombres":"",attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(exploreMap);
+      fondMago(darkE).addTo(exploreMap);
       /* Regroupement si le greffon est la, sinon simple couche : la carte
          s'affiche dans les deux cas. disableClusteringAtZoom : au-dela, on
          est assez pres pour que chaque magasin merite son propre pin. */
@@ -14115,22 +14147,25 @@ function closeExploreMap(){
    celui qu'on veut et on relache. Un seul geste, sans lever le doigt.
 
 /* ============================================================================
-   MENU EN GOUTTES PAR APPUI LONG SUR UN PIN
+   MENU PAR APPUI LONG SUR UN PIN
    ----------------------------------------------------------------------------
-   L'effet recherche est celui d'AirDrop : des gouttes qui se DETACHENT du pin,
-   restent liees par un filet de matiere, puis se separent. Ca ne s'obtient pas
-   avec des transitions ordinaires — il faut un filtre « gooey » : on floute une
-   couche de disques pleins, puis on ecrase l'alpha au contraste. Deux formes
-   proches fusionnent alors en une seule masse, et se separent en s'eloignant.
+   On appuie sur un pin, les choix s'ouvrent en arc au-dessus, on GLISSE le
+   pouce sur celui qu'on veut et on relache. Un seul geste, sans lever le doigt.
 
-   D'ou DEUX COUCHES superposees :
-     .pm-goo   les disques pleins, floutes et contrastes -> la matiere
-     .pm-face  les icones et le texte, NETS, par-dessus
-   Si on filtrait tout, les icones seraient illisibles.
+   DEUX LECONS PAYEES CHER, a ne pas defaire.
 
-   Les ecouteurs du geste vivent sur le DOCUMENT, jamais sur le marqueur : la
-   carte se redessine et detruit le marqueur en cours de geste, ce qui privait
-   le menu de son touchend et le laissait colle a l'ecran.
+   1. PERFORMANCE. Une version precedente passait chaque image dans un filtre
+      SVG de fusion pour imiter les gouttes d'AirDrop. Fluide sur un ordinateur,
+      hachee sur iPhone : Safari refait alors une passe de flou hors GPU a
+      chaque image, par-dessus une carte qui se redessine deja. On n'anime plus
+      que transform et opacity, les deux seules proprietes que le compositeur
+      traite sans repeindre.
+
+   2. LES ECOUTEURS VIVENT SUR LE DOCUMENT, jamais sur le marqueur. La carte se
+      redessine a chaque fin de mouvement (clearLayers) et DETRUIT le marqueur
+      en cours de geste : prive de son touchend, le menu restait colle a
+      l'ecran, par-dessus toute l'application. Le doigt, lui, appartient au
+      document du debut a la fin.
    ============================================================================ */
 var PIN_MENU_ACTIONS=[
   {cle:"stock", libelle:"En stock", couleur:"#16a34a",
@@ -14144,22 +14179,6 @@ var PIN_MENU_ACTIONS=[
    Facultative par construction — on peut relacher avant qu'elle apparaisse. */
 var PIN_MENU_PRIX={cle:"prix", libelle:"Noter le prix", couleur:"#c69a57",
   ico:'<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6.5A7.2 7.2 0 0 0 13 4.6c-4 0-7 3.3-7 7.4s3 7.4 7 7.4a7.2 7.2 0 0 0 5-1.9"/><path d="M4 10.2h9M4 13.8h9"/></svg>'};
-
-/* Le filtre de fusion. Injecte une seule fois, invisible, reutilise partout.
-   stdDeviation regle l'epaisseur du filet ; la derniere ligne de la matrice
-   ecrase l'alpha : c'est elle qui recolle les formes. */
-function _pinAssureFiltre(){
-  if(document.getElementById("mago-goo-def"))return;
-  var d=document.createElement("div");
-  d.id="mago-goo-def";
-  d.setAttribute("aria-hidden","true");
-  d.style.cssText="position:absolute;width:0;height:0;overflow:hidden";
-  d.innerHTML='<svg><defs><filter id="mago-goo" color-interpolation-filters="sRGB">'+
-    '<feGaussianBlur in="SourceGraphic" stdDeviation="8" result="flou"/>'+
-    '<feColorMatrix in="flou" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9"/>'+
-    '</filter></defs></svg>';
-  document.body.appendChild(d);
-}
 
 var _geste=null;
 
@@ -14191,7 +14210,6 @@ document.addEventListener("visibilitychange",function(){ if(document.hidden)ferm
 
 function ouvrirMenuPin(s,x,y){
   _pinRetirerMenu();
-  _pinAssureFiltre();
   var m=document.createElement("div");
   m.id="pin-menu"; m.className="pin-menu";
   var actions=exploreFilter?PIN_MENU_ACTIONS:PIN_MENU_ACTIONS.filter(function(a){return a.cle==="fiche";});
@@ -14204,7 +14222,6 @@ function ouvrirMenuPin(s,x,y){
   x=Math.max(marge,Math.min((window.innerWidth||390)-marge,x));
 
   var places={};
-  var goo='<div class="pm-noyau"></div>';      // la goutte mere, restee au pin
   var face="";
   actions.forEach(function(a,i){
     var ang=(n===1)?-90:(-90-60+(120/(n-1))*i);
@@ -14213,7 +14230,6 @@ function ouvrirMenuPin(s,x,y){
     if(versLeBas)dy=-dy;
     places[a.cle]={dx:dx,dy:dy};
     var st='--dx:'+dx.toFixed(1)+'px;--dy:'+dy.toFixed(1)+'px;--c:'+a.couleur+';--r:'+(i*42)+'ms';
-    goo +='<div class="pm-blob" data-cle="'+a.cle+'" style="'+st+'"></div>';
     face+='<div class="pm-face-item" data-cle="'+a.cle+'" style="'+st+'">'+a.ico+'</div>';
   });
   /* La goutte de prix se place dans le prolongement de « en stock », vers
@@ -14225,12 +14241,10 @@ function ouvrirMenuPin(s,x,y){
        pour que le filet de matiere reste visible entre les deux. */
     var pdx=p0.dx+(p0.dx/norme)*74, pdy=p0.dy+(p0.dy/norme)*74;
     var stp='--dx:'+pdx.toFixed(1)+'px;--dy:'+pdy.toFixed(1)+'px;--c:'+PIN_MENU_PRIX.couleur+';--ox:'+p0.dx.toFixed(1)+'px;--oy:'+p0.dy.toFixed(1)+'px';
-    goo +='<div class="pm-blob pm-prix" data-cle="prix" style="'+stp+'"></div>';
     face+='<div class="pm-face-item pm-prix" data-cle="prix" style="'+stp+'">'+PIN_MENU_PRIX.ico+'</div>';
   }
   m.innerHTML=
     '<div class="pm-onde"></div>'+
-    '<div class="pm-goo">'+goo+'</div>'+
     '<div class="pm-face">'+face+'</div>'+
     '<div class="pm-lab" data-nom="'+attr(s.name||"Ce magasin")+'"><span>'+sanitize(s.name||"Ce magasin")+'</span></div>';
   if(versLeBas)m.classList.add("bas");
@@ -14274,7 +14288,8 @@ function armerMenuPin(mk,s){
 
     function demarrer(e,tactile){
       var p=pos(e);
-      var g={ store:s, ouvert:false, survol:null, depart:p, minuteur:null, tPrix:null, prixNe:false };
+      var g={ store:s, ouvert:false, survol:null, depart:p, minuteur:null,
+              tPrix:null, tPret:null, prixNe:false, prixPret:false };
 
       g.actionDe=function(cle){
         if(cle==="prix")return PIN_MENU_PRIX;
@@ -14284,7 +14299,11 @@ function armerMenuPin(mk,s){
         var m=window._pinMenuActif&&window._pinMenuActif.el; if(!m)return;
         var item=null,meilleure=1e9;
         [].forEach.call(m.querySelectorAll(".pm-face .pm-face-item"),function(it){
-          if(it.classList.contains("pm-prix")&&!g.prixNe)return;
+          /* Tant qu'elle jaillit, la bulle de prix TRAVERSE la position de
+             « en stock » : son rectangle passe par la, elle devient la plus
+             proche du doigt, et elle volerait la selection. On ne la rend
+             visable qu'une fois posee. */
+          if(it.classList.contains("pm-prix")&&!g.prixPret)return;
           var r=it.getBoundingClientRect();
           var cx=r.left+r.width/2, cy=r.top+r.height/2;
           var d=Math.sqrt((pt.x-cx)*(pt.x-cx)+(pt.y-cy)*(pt.y-cy));
@@ -14314,9 +14333,13 @@ function armerMenuPin(mk,s){
               if(g.survol!=="stock")return;
               g.prixNe=true; m.classList.add("prix-la");
               try{ if(navigator.vibrate)navigator.vibrate(6); }catch(e){}
+              // le temps qu'elle finisse de sortir (transition de 300 ms)
+              g.tPret=setTimeout(function(){ if(g.prixNe)g.prixPret=true; },340);
             },230);
           } else if(cle!=="stock"&&cle!=="prix"&&g.prixNe){
-            g.prixNe=false; m.classList.remove("prix-la");
+            g.prixNe=false; g.prixPret=false;
+            if(g.tPret){clearTimeout(g.tPret);g.tPret=null;}
+            m.classList.remove("prix-la");
           }
         }
         /* Magnetisme : la goutte visee se penche legerement vers le doigt.
@@ -14344,6 +14367,7 @@ function armerMenuPin(mk,s){
       g.fin=function(){
         if(g.minuteur){clearTimeout(g.minuteur);g.minuteur=null;}
         if(g.tPrix){clearTimeout(g.tPrix);g.tPrix=null;}
+        if(g.tPret){clearTimeout(g.tPret);g.tPret=null;}
         if(!g.ouvert){ _pinDetache(); return; }
         var cle=g.survol;
         var m=window._pinMenuActif&&window._pinMenuActif.el;
@@ -14363,6 +14387,7 @@ function armerMenuPin(mk,s){
       g.annuler=function(){
         if(g.minuteur){clearTimeout(g.minuteur);g.minuteur=null;}
         if(g.tPrix){clearTimeout(g.tPrix);g.tPrix=null;}
+        if(g.tPret){clearTimeout(g.tPret);g.tPret=null;}
         g.ouvert=false; fermerMenuPin();
       };
 
