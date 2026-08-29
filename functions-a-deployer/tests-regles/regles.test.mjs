@@ -173,6 +173,40 @@ await doit('bloque : lire la veille d un autre',
 await doit('bloque : lire le compteur global d IA',
   ()=>assertFails(getDoc(doc(m,'_meta','aiQuotaGlobal'))));
 
+/* ── audit adverse complet : decouvertes, identite des magasins ───────── */
+await doit('legitime : creer une decouverte par code-barre',
+  ()=>assertSucceeds(setDoc(doc(m,'discoveries','4901234567894'),
+      {name:'Ramune Original',brand:'Sangaria',votes:1,barcode:'4901234567894',
+       by:MALLORY,byPseudo:'Pirate',cat:'soda'})));
+await doit('legitime : proposition par photo (identifiant m+horodatage)',
+  ()=>assertSucceeds(setDoc(doc(m,'discoveries','m1787946607178'),
+      {name:'Milkis',brand:'',votes:1,barcode:'m1787946607178',by:MALLORY,
+       hasPhoto:true,manualProposal:true})));
+await doit('bloque : decouverte a identifiant piege (guillemet)',
+  ()=>assertFails(setDoc(doc(m,'discoveries','x" onmouseover=alert(1) y="'),
+      {name:'x',votes:1,barcode:'x',by:MALLORY})));
+await doit('bloque : decouverte creee avec 999 votes',
+  ()=>assertFails(setDoc(doc(m,'discoveries','4901234567895'),
+      {name:'x',votes:999,barcode:'4901234567895',by:MALLORY})));
+await doit('bloque : decouverte signee du nom d un autre',
+  ()=>assertFails(setDoc(doc(m,'discoveries','4901234567896'),
+      {name:'x',votes:1,barcode:'4901234567896',by:ALICE})));
+await doit('bloque : decouverte avec un champ invente',
+  ()=>assertFails(setDoc(doc(m,'discoveries','4901234567897'),
+      {name:'x',votes:1,barcode:'4901234567897',by:MALLORY,adminNote:'coucou'})));
+await doit('bloque : nom de decouverte de 500 caracteres',
+  ()=>assertFails(setDoc(doc(m,'discoveries','4901234567898'),
+      {name:'x'.repeat(500),votes:1,barcode:'4901234567898',by:MALLORY})));
+
+await doit('bloque : s attribuer le magasin d un autre (addedBy)',
+  ()=>assertFails(updateDoc(doc(m,'stores','s1'),{addedBy:MALLORY})));
+await doit('bloque : deplacer un magasin par son geohash',
+  ()=>assertFails(updateDoc(doc(m,'stores','s1'),{geohash:'u0000000000'})));
+await doit('bloque : se placer dans la file de certification',
+  ()=>assertFails(updateDoc(doc(m,'stores','s1'),{verifiedSource:'photos rayon (08/2026)'})));
+await doit('legitime : import OSM ecrit sa source d origine',
+  ()=>assertSucceeds(updateDoc(doc(m,'stores','s1'),{verifiedSource:'catalogue enseigne (auto)'})));
+
 await doit('bloque : se declarer administrateur',
   ()=>assertFails(setDoc(doc(m,'admins',MALLORY),{ok:true})));
 

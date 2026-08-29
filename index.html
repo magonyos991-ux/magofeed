@@ -1167,18 +1167,30 @@ window.fbSignInWithGoogle = async function() {
 // (pseudo, points, streak) puis le compte d'authentification lui-meme.
 // Les contributions communautaires anonymes (magasins, decouvertes) restent :
 // ce ne sont pas des donnees personnelles rattachees a l'identite.
+/* L'ORDRE COMPTE. Cette fonction effacait d'abord le profil et les demandes de
+   certification, et supprimait le compte ENSUITE. Or cette derniere etape
+   echoue tres souvent : Firebase reclame une reconnexion recente, la fenetre
+   Google s'ouvre, la personne la ferme — la promesse est rejetee et l'app
+   affichait « Suppression annulee ». C'etait faux : le pseudo, les points, la
+   serie, le classement et le dossier de certification etaient DEJA partis,
+   definitivement, et le compte existait toujours. Pour un compte anonyme
+   l'echec etait meme garanti : la branche de reconnexion l'excluait.
+   On supprime donc le COMPTE d'abord. Tant qu'il n'est pas parti, on ne touche
+   a rien : un echec laisse la personne exactement comme avant. */
 window.fbDeleteAccount = async function() {
   var user = auth.currentUser;
   if (!user) throw new Error("no-user");
-  try { await deleteDoc(doc(db, "users", user.uid)); } catch (e) { console.warn("delete user doc:", e); }
-  /* Une demande de certification contient un NOM et un TELEPHONE. Les laisser
-     derriere un compte supprime viderait le droit a l'effacement de son sens. */
+  var uid = user.uid;
+
+  /* On releve les references AVANT de supprimer le compte : une fois le compte
+     parti, les regles refusent la lecture, et il ne resterait aucun moyen
+     d'effacer le nom et le telephone du dossier de certification. */
+  var refsAEffacer = [doc(db, "users", uid)];
   try {
-    var mesDemandes = await getDocs(query(collection(db, "shopClaims"), where("by", "==", user.uid)));
-    for (var i = 0; i < mesDemandes.docs.length; i++) {
-      try { await deleteDoc(mesDemandes.docs[i].ref); } catch (e2) {}
-    }
-  } catch (e) { console.warn("delete claims:", e); }
+    var mesDemandes = await getDocs(query(collection(db, "shopClaims"), where("by", "==", uid)));
+    mesDemandes.docs.forEach(function(d) { refsAEffacer.push(d.ref); });
+  } catch (e) { console.warn("lecture claims:", e); }
+
   try {
     await deleteUser(user);
   } catch (e) {
@@ -1187,11 +1199,20 @@ window.fbDeleteAccount = async function() {
       await reauthenticateWithPopup(user, new GoogleAuthProvider());
       await deleteUser(auth.currentUser);
     } else {
+      // Rien n'a ete efface : la personne retrouve son compte intact.
       throw e;
     }
   }
+
+  /* Le compte est parti pour de bon : on solde maintenant ses donnees. Ces
+     effacements passent par les regles « isSelf » avec le jeton encore en
+     memoire ; si l'un echoue, on le dit au lieu de promettre le contraire. */
+  var restes = 0;
+  for (var i = 0; i < refsAEffacer.length; i++) {
+    try { await deleteDoc(refsAEffacer[i]); } catch (e3) { restes++; }
+  }
   try { localStorage.removeItem("magoAuthProvider"); localStorage.removeItem("magoAuthEmail"); } catch (e) {}
-  return true;
+  return { ok: true, restes: restes };
 };
 
 /* Firebase restaure la session enregistree (compte Google lie inclus) de
@@ -3200,7 +3221,29 @@ window.fbCleanUnverifiedBrands = async function() {
    (priorite au compte actuellement connecte), on lui transfere le meilleur
    score du groupe, on supprime les autres. Necessite la regle
    "allow delete: if isAdmin();" sur users/. */
-window.fbCleanDuplicateUsers = async function() {
+/* DEUX PERSONNES PEUVENT CHOISIR LE MEME PSEUDO. La version precedente
+   groupait par pseudo et effacait definitivement le compte le plus ancien du
+   groupe : deux utilisateurs ayant tape « Lucas » suffisaient a en detruire un,
+   avec ses points, sa serie et sa place au classement, sans trace et sans
+   retour possible. Le confirm() n'annoncait meme aucun chiffre.
+   Un doublon qui merite d'etre efface, c'est une session vide restee derriere :
+   aucun point, aucune serie, aucune contribution, aucun avatar, aucun favori.
+   Des qu'un compte porte la moindre activite, c'est quelqu'un — on n'y touche
+   plus, meme si un autre compte porte le meme pseudo.
+   simuler=true renvoie ce qui SERAIT fait, sans rien ecrire : c'est ce que le
+   garde-fou affiche avant de demander confirmation. */
+function _compteVide(x) {
+  return (Number(x.points) || 0) === 0
+    && (Number(x.streak) || 0) === 0
+    && (Number(x.bestStreak) || 0) === 0
+    && (Number(x.confirms) || 0) === 0
+    && (Number(x.signals) || 0) === 0
+    && (Number(x.discAccepted) || 0) === 0
+    && !x.avatar
+    && !(x.favs && x.favs.length)
+    && !x.email;
+}
+window.fbCleanDuplicateUsers = async function(simuler) {
   const snap = await getDocs(query(collection(db, "users"), limit(1000)));
   const me = auth.currentUser ? auth.currentUser.uid : null;
   const groups = {};
@@ -3211,27 +3254,31 @@ window.fbCleanDuplicateUsers = async function() {
     // Pseudos generiques ou herites de l'ancien defaut : plusieurs PERSONNES
     // DIFFERENTES peuvent les porter -> interdits de fusion
     if (key === "magonyos" || key === "explorateur" || key === "anonyme") return;
-    (groups[key] = groups[key] || []).push({ ref: d.ref, uid: d.id, points: Number(x.points) || 0,
+    (groups[key] = groups[key] || []).push({ ref: d.ref, uid: d.id, pseudo: x.pseudo || key,
+      points: Number(x.points) || 0, vide: _compteVide(x),
       ts: x.updatedAt && x.updatedAt.toMillis ? x.updatedAt.toMillis() : 0 });
   });
-  let removed = 0, kept = 0;
+  const aEffacer = [];
+  const pseudos = [];
   for (const key of Object.keys(groups)) {
     const g = groups[key];
     if (g.length < 2) continue;
-    // Le gardien : le compte connecte s'il est dans le groupe, sinon le plus recent
-    let keep = g.find(u => u.uid === me) || g.slice().sort((a, b) => b.ts - a.ts)[0];
-    const maxPts = Math.max.apply(null, g.map(u => u.points));
-    if (maxPts > keep.points) {
-      await updateDoc(keep.ref, { points: maxPts });
-    }
-    for (const u of g) {
-      if (u.uid === keep.uid) continue;
-      await deleteDoc(u.ref);
-      removed++;
-    }
-    kept++;
+    // On ne touche JAMAIS a un compte qui porte une activite.
+    const vides = g.filter(u => u.vide && u.uid !== me);
+    if (!vides.length) continue;
+    // Il faut qu'il reste quelqu'un : on ne supprime pas tout le groupe.
+    if (vides.length >= g.length) vides.pop();
+    if (!vides.length) continue;
+    pseudos.push(g[0].pseudo);
+    vides.forEach(u => aEffacer.push(u));
   }
-  return { removed: removed, groups: kept };
+  if (simuler) return { removed: aEffacer.length, groups: pseudos.length, pseudos: pseudos.slice(0, 12) };
+  let removed = 0;
+  for (const u of aEffacer) {
+    await deleteDoc(u.ref);
+    removed++;
+  }
+  return { removed: removed, groups: pseudos.length, pseudos: pseudos.slice(0, 12) };
 };
 /* Rayon verifie par photos : assigne une liste d'ids a UN magasin, en drinks
    ET drinksVerified (pins verts) — outil generique, marche pour n'importe quel
@@ -3532,10 +3579,29 @@ window.fbAddRec = async function(drinkId, val) {
 
 // Chargement de toutes les données communautaires au démarrage
 window.fbLoadCommunityData = async function() {
+  /* Cette requete lisait la COLLECTION ENTIERE, a chaque ouverture de l'app,
+     sans limite. La creation d'une decouverte etant ouverte a tout compte
+     connecte — et un compte anonyme s'obtient gratuitement — il suffisait d'y
+     deposer des milliers de documents pour que chaque lancement de l'app les
+     telecharge tous : le quota de lecture gratuit part en deux ou trois
+     ouvertures, et l'app cesse de se charger pour tout le monde. En Blaze,
+     c'est une facture. Deux requetes bornees remplacent la lecture totale :
+     les plus recentes (celles qu'on vote) et les plus votees (celles qui sont
+     pretes a entrer au catalogue). Le cout par lancement est desormais
+     constant, quoi que quelqu'un depose dans la collection. */
   try {
-    var discSnap = await getDocs(collection(db, "discoveries"));
-    var discoveries = [];
-    discSnap.forEach(function(d) { var data = d.data(); data.id = d.id; discoveries.push(data); });
+    var vues = {}, discoveries = [];
+    var lots = await Promise.all([
+      getDocs(query(collection(db, "discoveries"), orderBy("createdAt", "desc"), limit(150))),
+      getDocs(query(collection(db, "discoveries"), orderBy("votes", "desc"), limit(60)))
+    ]);
+    lots.forEach(function(lot) {
+      lot.forEach(function(d) {
+        if (vues[d.id]) return;
+        vues[d.id] = 1;
+        var data = d.data(); data.id = d.id; discoveries.push(data);
+      });
+    });
     discoveries.sort(function(a, b) { return (b.votes || 0) - (a.votes || 0); });
     window.dispatchEvent(new CustomEvent("fbDiscoveriesLoaded", { detail: discoveries }));
   } catch (e) { console.warn("Firestore discoveries load error:", e); }
@@ -3586,7 +3652,7 @@ window.fbLoadCommunityData();
      encore DOMContentLoaded, alors qu'async n'attend rien du tout. Quagga
      n'est appelé que dans startScan(), jamais au chargement : l'ordre
      d'exécution n'a aucune importance ici. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js" async></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js" integrity="sha512-bCsBoYoW6zE0aja5xcIyoCDPfT27+cGr7AOCqelttLVRGay6EKGQbR6wm6SUcUGOMGXJpj+jrIpMS6i80+kZPw==" crossorigin="anonymous" async></script>
 
 <script src="data/drinks.js"></script>
 <script src="data/drinkart.js"></script>
@@ -3843,7 +3909,20 @@ function initGPS(){
         var a=d.address,rue=a.road||a.street||"",ville=a.city||a.town||a.village||"";
         var txt=(rue?rue+", ":"")+ville;
         var lbl=document.getElementById("gps-label");
-        if(lbl)lbl.innerHTML='<span style="width:7px;height:7px;border-radius:50%;background:#22c55e;flex-shrink:0;display:inline-block"></span><span style="font-size:12px;font-weight:500;color:var(--s2)">'+txt+'</span>';
+        /* txt vient de Nominatim, donc d'OpenStreetMap, que N'IMPORTE QUI peut
+           editer : un nom de voie contenant une balise s'executait chez toute
+           personne dont le GPS tombait dans le quartier, sans qu'elle touche a
+           rien. Les cinq autres appels a Nominatim de ce fichier passent deja
+           par textContent ; celui-ci etait le seul en innerHTML. */
+        if(lbl){
+          lbl.textContent="";
+          var pastille=document.createElement("span");
+          pastille.style.cssText="width:7px;height:7px;border-radius:50%;background:#22c55e;flex-shrink:0;display:inline-block";
+          var nom=document.createElement("span");
+          nom.style.cssText="font-size:12px;font-weight:500;color:var(--s2)";
+          nom.textContent=txt;
+          lbl.appendChild(pastille); lbl.appendChild(nom);
+        }
       }).catch(function(){});
   },function(err){
     // Echec GPS (refus, timeout, capteur absent) : ne plus rester muet.
@@ -4842,7 +4921,7 @@ function updateProfileStats(){
        passait rien. Elle ouvre maintenant « Tes points », qui montre ce qu'il
        reste a gagner ET ce que chaque palier suivant debloque. */
     lvHost.innerHTML='<div class="lvl-card" role="button" tabindex="0" '+
-      'aria-label="Niveau '+(lv.idx+1)+', '+sanitize(lv.name)+'. Voir tes points et les prochains niveaux" '+
+      'aria-label="Niveau '+(lv.idx+1)+', '+attr(lv.name)+'. Voir tes points et les prochains niveaux" '+
       'onclick="show(\'rewards\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();show(\'rewards\');}">'+
       '<div class="lvl-top">'+
         '<span class="lvl-name"><span class="lvl-num">'+(lv.idx+1)+'</span>Niveau '+(lv.idx+1)+' \u00B7 '+sanitize(lv.name)+'</span>'+
@@ -5359,7 +5438,7 @@ function openAddStoreForm(){
   var q=(document.getElementById("store-picker-q")||{}).value||"";
   el.innerHTML='<div style="padding:4px 2px">'+
     '<div style="font-size:13px;font-weight:800;color:var(--s1);margin-bottom:10px">Nouveau magasin</div>'+
-    '<input id="add-store-name" type="text" maxlength="60" placeholder="Nom (ex : ARARAT Night Shop)" value="'+sanitize(q)+'" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none;margin-bottom:10px">'+
+    '<input id="add-store-name" type="text" maxlength="60" placeholder="Nom (ex : ARARAT Night Shop)" value="'+attr(q)+'" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none;margin-bottom:10px">'+
     '<input id="add-store-address" type="text" maxlength="90" placeholder="Adresse + n° (ex : Rue du Midi 12) — auto si trouvée" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none;margin-bottom:10px">'+
     '<div id="add-store-types" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>'+
     '<div id="add-store-pos" style="font-size:12px;font-weight:600;color:var(--s2);background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:10px"></div>'+
@@ -6234,6 +6313,17 @@ function onBarcodeDetected(r){
   }
 }
 function sanitize(str){var d=document.createElement("div");d.textContent=str;return d.innerHTML;}
+/* sanitize() passe par textContent : il neutralise < et >, mais PAS le
+   guillemet. A l'interieur d'un attribut HTML ("value=..."), un guillemet
+   referme donc l'attribut et laisse ecrire un gestionnaire d'evenement. Toute
+   valeur qui vient d'ailleurs — Firestore, OpenStreetMap, un autre
+   utilisateur — et qui atterrit DANS un attribut doit passer par attr(), pas
+   par sanitize(). */
+function attr(v){
+  return String(v==null?"":v)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
 /* Un nombre qui vient d'un AUTRE utilisateur (points, serie, confirmations)
    n'est pas forcement un nombre : le document users/{uid} est ecrit par son
    proprietaire, qui peut y mettre du texte. Interpole tel quel dans du HTML,
@@ -7347,8 +7437,8 @@ function openMissions(){
     if(hd&&!getCachedDrinkImage(hd)){try{fetchVerifiedOFFImage(hd);}catch(e){}}
     var who=h.seekers>1?(h.seekers+" cherchent"):(h.mine?"Tu cherches":"1 cherche");
     var thumb=hd?drinkIconHTML(hd):magoCatIcon("Autre",20,"#7a4a10");
-    return '<div class="ms-hunt" data-did="'+h.drinkId+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 0;cursor:pointer;border-top:1px solid var(--border)">'+
-      '<span class="ms-thumb" data-did="'+h.drinkId+'" role="button" tabindex="0" aria-label="Voir cette boisson sur la carte" style="width:40px;height:40px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">'+thumb+'</span>'+
+    return '<div class="ms-hunt" data-did="'+nbSur(h.drinkId)+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 0;cursor:pointer;border-top:1px solid var(--border)">'+
+      '<span class="ms-thumb" data-did="'+nbSur(h.drinkId)+'" role="button" tabindex="0" aria-label="Voir cette boisson sur la carte" style="width:40px;height:40px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">'+thumb+'</span>'+
       '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(h.drinkName||"Boisson")+'</div><div style="font-size:11.5px;font-weight:600;color:var(--s2)">'+who+' près d\'ici</div></div>'+
       '<span style="font-size:12px;font-weight:800;color:#e67e22;flex-shrink:0">Je l\'ai vue →</span></div>';
   }).join(""):emptyStateHTML("radar","Aucune chasse en cours","Cherche une boisson introuvable et lance la chasse : les explorateurs autour de toi seront prévenus dès qu\'elle est repérée.","Explorer les boissons","emptyGo(\'search\')");
@@ -7997,12 +8087,14 @@ function renderMap(){
       var lc=document.createElement("link");
       lc.id="leaflet-cluster-css"; lc.rel="stylesheet";
       lc.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css";
+      lc.integrity="sha512-fYyZwU1wU0QWB4Yutd/Pvhy5J1oWAwFXun1pt+Bps04WSe4Aq6tyHlT4+MHSJhD8JlLfgLuC4CbCnX5KHSjyCg=="; lc.crossOrigin="anonymous";
       document.head.appendChild(lc);
     }
     var done=false;
     var go=function(){ if(done)return; done=true; initLeafletMap(lat,lng); };
     var sc=document.createElement("script");
     sc.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js";
+    sc.integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg=="; sc.crossOrigin="anonymous";
     sc.onload=go; sc.onerror=go;          // sans regroupement, mais avec une carte
     document.head.appendChild(sc);
     setTimeout(go,6000);                  // et jamais d'attente infinie
@@ -8632,9 +8724,26 @@ function adminBatchAssignHere(){
   if(raw===null)return;
   var ids=raw.split(/[\s,;]+/).map(Number).filter(function(x){return !isNaN(x)&&x>0;});
   if(!ids.length){toast("Aucun id valide");playSound("err");return;}
-  if(!confirm(ids.length+" boissons \u2192 \u00ab "+s.name+" \u00bb, en V\u00c9RIFI\u00c9 (pins verts). Confirmer ?"))return;
+  /* La confirmation ne parlait que des pins verts. Or fbAssignListToStore
+     ecrit AUSSI certified:true — la pastille bleue, celle que les visiteurs
+     croient, et celle qui ouvre le tableau de bord commercant. L'admin la
+     posait donc sans le savoir, sur un magasin choisi dans une liste floue,
+     et le bouton affichait ensuite « Retirer la certification » : la question
+     ne se reposait plus jamais. On le dit, et on passe par le garde-fou. */
+  actionSensible({
+    titre:"Marquer ce rayon comme vu sur place",
+    quoi:"Les "+ids.length+" boissons passent en rayon v\u00e9rifi\u00e9 (pins verts) chez "
+        +"\u00ab "+s.name+" \u00bb, ET le magasin re\u00e7oit la PASTILLE BLEUE de "
+        +"certification \u2014 celle que les visiteurs croient, et qui donne acc\u00e8s "
+        +"au tableau de bord commer\u00e7ant. Ne le fais que si tu as vraiment vu ce "
+        +"rayon. R\u00e9versible par « Retirer la certification ».",
+    compte:ids.length, unite:"boisson", niveau:"destructif", mot:"VERIFIE", reversible:true
+  }).then(function(ok){ if(ok)_lancerAssignation(s,ids); });
+}
+function _lancerAssignation(s,ids){
   toast("Assignation\u2026");
   window.fbAssignListToStore(s.fbId||s.id,ids).then(function(n){
+    journaliserAction("Rayon verifie + certification",{etat:"terminee",compte:ids.length});
     s.drinks=s.drinks||[];s.drinksVerified=s.drinksVerified||[];
     ids.forEach(function(id){
       if(s.drinks.indexOf(id)===-1)s.drinks.push(id);
@@ -8781,9 +8890,23 @@ function adminBatchAssign(){
   if(raw===null)return;
   var ids=raw.split(/[\s,;]+/).map(Number).filter(function(x){return !isNaN(x)&&x>0;});
   if(!ids.length){toast("Aucun id valide");playSound("err");return;}
-  if(!confirm(ids.length+" boissons \u2192 \u00ab "+target.name+" \u00bb, en V\u00c9RIFI\u00c9 (pins verts). Confirmer ?"))return;
+  /* Meme remarque qu'au-dessus : cette action pose aussi la pastille bleue.
+     Et ici le magasin a ete choisi par une recherche floue qui prend le
+     premier resultat sans rien demander quand il n'y en a qu'un — raison de
+     plus pour afficher son nom une derniere fois avant d'ecrire. */
+  actionSensible({
+    titre:"Marquer ce rayon comme vu sur place",
+    quoi:"Les "+ids.length+" boissons passent en rayon v\u00e9rifi\u00e9 (pins verts) chez "
+        +"\u00ab "+target.name+" \u00bb, ET ce magasin re\u00e7oit la PASTILLE BLEUE de "
+        +"certification \u2014 celle que les visiteurs croient, et qui donne acc\u00e8s au "
+        +"tableau de bord commer\u00e7ant. V\u00e9rifie bien que c'est le bon magasin.",
+    compte:ids.length, unite:"boisson", niveau:"destructif", mot:"VERIFIE", reversible:true
+  }).then(function(ok){ if(ok)_lancerAssignationSur(target,ids); });
+}
+function _lancerAssignationSur(target,ids){
   toast("Assignation\u2026");
   window.fbAssignListToStore(target.fbId||target.id,ids).then(function(n){
+    journaliserAction("Rayon verifie + certification",{etat:"terminee",compte:ids.length});
     target.drinks=target.drinks||[];target.drinksVerified=target.drinksVerified||[];
     ids.forEach(function(id){
       if(target.drinks.indexOf(id)===-1)target.drinks.push(id);
@@ -8849,15 +8972,39 @@ function adminRenameDrink(){
 }
 function adminCleanDuplicateUsers(){
   if(!isAdmin)return;
-  if(!confirm("Nettoyer les doublons du classement ?\nPour chaque pseudo en double : on garde le compte le plus r\u00e9cent (ton compte actuel en priorit\u00e9), son score devient le meilleur du groupe, les copies sont supprim\u00e9es."))return;
-  toast("Nettoyage du classement\u2026");
-  window.fbCleanDuplicateUsers().then(function(r){
-    playSound("win");
-    toast("\u2713 "+r.removed+" copie"+(r.removed>1?"s":"")+" supprim\u00e9e"+(r.removed>1?"s":"")+" ("+r.groups+" pseudo"+(r.groups>1?"s":"")+" d\u00e9doublonn\u00e9"+(r.groups>1?"s":"")+")");
-    if(window.fbLoadLeaderboard)window.fbLoadLeaderboard();
+  /* On COMPTE d'abord, puis on demande. « Nettoyer les doublons ? » sans
+     chiffre ne veut rien dire, et c'est une suppression definitive de comptes
+     de personnes reelles : elle passe par le garde-fou, avec le nombre exact,
+     les pseudos concernes, et un mot a taper. */
+  toast("V\u00e9rification\u2026");
+  window.fbCleanDuplicateUsers(true).then(function(apercu){
+    if(!apercu.removed){ toast("Aucune session vide \u00e0 nettoyer"); return; }
+    var noms=(apercu.pseudos||[]).join(", ");
+    actionSensible({
+      titre:"Nettoyer les sessions vides du classement",
+      quoi:"Ces comptes portent un pseudo deja pris et n'ont AUCUNE activite : "
+          +"zero point, zero serie, aucune contribution, aucun favori. Les comptes "
+          +"qui ont la moindre activite ne sont jamais touches, meme en cas de "
+          +"pseudo identique \u2014 deux personnes peuvent avoir choisi le meme."
+          +(noms?" Pseudos concern\u00e9s : "+noms+".":""),
+      compte:apercu.removed, unite:"compte", niveau:"irreversible",
+      mot:"NETTOYER", reversible:false
+    }).then(function(ok){
+      if(!ok)return;
+      toast("Nettoyage du classement\u2026");
+      window.fbCleanDuplicateUsers(false).then(function(r){
+        journaliserAction("Nettoyer les sessions vides du classement",
+                          {etat:"terminee",compte:r.removed});
+        playSound("win");
+        toast("\u2713 "+r.removed+" session"+(r.removed>1?"s":"")+" vide"+(r.removed>1?"s":"")+" supprim\u00e9e"+(r.removed>1?"s":""));
+        if(window.fbLoadLeaderboard)window.fbLoadLeaderboard();
+      }).catch(function(e){
+        playSound("err");
+        toast("\u00c9chec ("+(e&&e.message||"erreur")+") \u2014 r\u00e8gle users delete admin manquante ?");
+      });
+    });
   }).catch(function(e){
-    playSound("err");
-    toast("\u00c9chec ("+(e&&e.message||"erreur")+") \u2014 r\u00e8gle users delete admin manquante ?");
+    playSound("err"); toast("Lecture impossible ("+(e&&e.message||"erreur")+")");
   });
 }
 
@@ -9845,7 +9992,7 @@ function _renderActivityList(){
     var neuf=(a.ts||0)>seen;
     var d=(a.drinkId!=null)?(DRINKS||[]).find(function(x){return Number(x.id)===Number(a.drinkId);}):null;
     if(d&&!getCachedDrinkImage(d))besoinPhoto=true;
-    return '<div class="swp" data-del="act:'+sanitize(String(a.key||""))+'" style="margin-bottom:8px">'+
+    return '<div class="swp" data-del="act:'+attr(String(a.key||""))+'" style="margin-bottom:8px">'+
       '<div class="swp-bg">'+(typeof icoTrash==="function"?icoTrash(16):"")+'<span>Supprimer</span></div>'+
       '<div class="swp-fg" style="--swp-face:var(--bg2)">'+
       '<div class="act-row'+(neuf?" act-unread":"")+(tap?" act-tap":"")+'" data-i="'+i+'"'+
@@ -9859,11 +10006,18 @@ function _renderActivityList(){
         '<div class="act-title">'+sanitize(a.title||"")+'</div>'+
         (a.body?'<div class="act-body">'+sanitize(a.body)+'</div>':'')+
       '</div>'+
-      '<button type="button" class="act-del" aria-label="Supprimer cette notification" onclick="event.stopPropagation();removeActivity(\''+sanitize(String(a.key||""))+'\')">'+
+      '<button type="button" class="act-del" aria-label="Supprimer cette notification" data-actkey="'+attr(String(a.key||""))+'">'+
         (typeof icoTrash==="function"?icoTrash(15):"\u2715")+'</button>'+
       (tap?'<span class="act-chev">›</span>':'')+
     '</div></div></div>';
   }).join("");
+  /* Le bouton de suppression portait un onclick contenant la cle de la
+     notification : cette valeur etait a la fois du HTML et du JavaScript, deux
+     echappements differents pour une seule chaine — impossible a securiser
+     proprement. Elle voyage maintenant dans un attribut de donnees, lu ici. */
+  host.querySelectorAll(".act-del").forEach(function(b){
+    b.onclick=function(ev){ ev.stopPropagation(); removeActivity(b.getAttribute("data-actkey")||""); };
+  });
   host.querySelectorAll(".act-row").forEach(function(row){
     row.onclick=function(){var a=_activity[Number(row.getAttribute("data-i"))];if(a&&a.action)_runActivityAction(a.action);};
     row.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();row.click();}};
@@ -10169,8 +10323,8 @@ function _drawHunts(map,noReflow){
     // photo pour les boissons pas encore vues.
     if(hd&&!getCachedDrinkImage(hd)){needPhoto=true;try{fetchVerifiedOFFImage(hd);}catch(e){}}
     var thumb=hd?drinkIconHTML(hd):magoCatIcon("Autre",22,"#7a4a10");
-    return '<div class="hunt-row" data-did="'+h.drinkId+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 0;cursor:pointer">'+
-      '<span class="hunt-thumb" data-did="'+h.drinkId+'" role="button" tabindex="0" aria-label="Voir cette boisson sur la carte" style="width:42px;height:42px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid rgba(240,184,64,.55);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">'+thumb+'</span>'+
+    return '<div class="hunt-row" data-did="'+nbSur(h.drinkId)+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 0;cursor:pointer">'+
+      '<span class="hunt-thumb" data-did="'+nbSur(h.drinkId)+'" role="button" tabindex="0" aria-label="Voir cette boisson sur la carte" style="width:42px;height:42px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid rgba(240,184,64,.55);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">'+thumb+'</span>'+
       '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:800;color:#2a1e12;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(h.drinkName||"Boisson")+'</div>'+
       '<div style="font-size:11px;font-weight:600;color:#8a6338">'+who+' près d\'ici</div></div>'+
       '<span style="font-size:11px;font-weight:800;color:#e67e22;flex-shrink:0">Je l\'ai vue →</span>'+
@@ -10246,7 +10400,7 @@ function renderAlertsCard(){
     return '<div class="swp" data-del="alert:'+w.id+'"><div class="swp-bg">'+
       (typeof icoTrash==="function"?icoTrash(16):"")+'<span>Supprimer</span></div>'+
       '<div class="swp-fg" style="--swp-face:var(--bg2)"><div class="alert-row" style="display:flex;align-items:center;gap:12px;padding:11px 0'+(last?"":";border-bottom:1px solid var(--border)")+'" data-wid="'+w.id+'">'+
-      '<span style="width:46px;height:46px;border-radius:13px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" role="button" tabindex="0" aria-label="Voir '+sanitize(w.name)+' sur la carte" onkeydown="if(event.key===\'Enter\'){this.click();}" onclick="event.stopPropagation();alertOpenOnMap('+w.id+')">'+thumb+'</span>'+
+      '<span style="width:46px;height:46px;border-radius:13px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" role="button" tabindex="0" aria-label="Voir '+attr(w.name)+' sur la carte" onkeydown="if(event.key===\'Enter\'){this.click();}" onclick="event.stopPropagation();alertOpenOnMap('+w.id+')">'+thumb+'</span>'+
       '<span style="flex:1;min-width:0;cursor:pointer" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')this.click()" onclick="'+lineAction+'">'+
         '<span style="display:block;font-size:14px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(w.name)+'</span>'+
         '<span style="display:block;margin-top:4px">'+pill+'</span>'+
@@ -10429,10 +10583,19 @@ function ensureLeaflet(onReady, onFail){
     var link=document.createElement("link");
     link.id="leaflet-css"; link.rel="stylesheet";
     link.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";
+    link.integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw=="; link.crossOrigin="anonymous";
     document.head.appendChild(link);
   }
   var script=document.createElement("script");
+    /* integrity : le navigateur verifie l'empreinte du fichier recu et refuse
+       de l'executer si elle ne correspond pas. Sans elle, un cdnjs compromis,
+       un compte de publication detourne ou un simple Wi-Fi hostile pouvaient
+       remplacer ce script — qui herite alors de tout : le jeton Firebase, la
+       position, la camera, et le tableau d'administration si c'est
+       l'administrateur qui regarde. Empreintes officielles publiees par cdnjs,
+       verifiees fichier par fichier avant d'etre posees ici. */
   script.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
+  script.integrity="sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g=="; script.crossOrigin="anonymous";
   script.onload=function(){ finish(!!window.L); };
   script.onerror=function(){ finish(false); };
   document.head.appendChild(script);
@@ -10463,11 +10626,13 @@ function ensureCluster(onDone){
     var lc=document.createElement("link");
     lc.id="leaflet-cluster-css"; lc.rel="stylesheet";
     lc.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css";
+    lc.integrity="sha512-fYyZwU1wU0QWB4Yutd/Pvhy5J1oWAwFXun1pt+Bps04WSe4Aq6tyHlT4+MHSJhD8JlLfgLuC4CbCnX5KHSjyCg=="; lc.crossOrigin="anonymous";
     document.head.appendChild(lc);
   }
   var fini=false, go=function(){ if(fini)return; fini=true; onDone&&onDone(); };
   var sc=document.createElement("script");
   sc.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js";
+  sc.integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg=="; sc.crossOrigin="anonymous";
   sc.onload=go; sc.onerror=go;
   document.head.appendChild(sc);
   setTimeout(go,6000);   // jamais d'attente infinie
@@ -12164,7 +12329,7 @@ function discFoundInHTML(d){
   else label="Rep\u00E9r\u00E9e dans "+ids.length+" magasin"+(ids.length>1?"s":"");
   return '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">'+
     '<span style="font-size:11px;font-weight:600;color:var(--s2)">'+label+'</span>'+
-    '<span class="disc-locate" data-disc="'+sanitize(String(d.id))+'" role="button" tabindex="0" aria-label="Indiquer un magasin">Je sais o\u00F9 !</span>'+
+    '<span class="disc-locate" data-disc="'+attr(String(d.id))+'" role="button" tabindex="0" aria-label="Indiquer un magasin">Je sais o\u00F9 !</span>'+
   '</div>';
 }
 /* Proposition manuelle avec photo : compression canvas (max 900px, JPEG
@@ -14037,7 +14202,7 @@ function ouvrirMenuPin(s,x,y){
     '<div class="pm-onde"></div>'+
     '<div class="pm-goo">'+goo+'</div>'+
     '<div class="pm-face">'+face+'</div>'+
-    '<div class="pm-lab" data-nom="'+sanitize(s.name||"Ce magasin")+'"><span>'+sanitize(s.name||"Ce magasin")+'</span></div>';
+    '<div class="pm-lab" data-nom="'+attr(s.name||"Ce magasin")+'"><span>'+sanitize(s.name||"Ce magasin")+'</span></div>';
   if(versLeBas)m.classList.add("bas");
   m.style.left=x+"px"; m.style.top=y+"px";
   document.body.appendChild(m);
@@ -15293,7 +15458,7 @@ function _peindreIntrouvables(demande){
     var n=x.chercheurs;
     var qui=(n>1)?(n+" personnes la cherchent"):(x.moi?"Tu la cherches":"1 personne la cherche");
     return '<div class="unf-row" role="button" tabindex="0" '+
-      'aria-label="'+sanitize(d.name)+' — '+qui+', rien trouvé dans 10 km autour de toi. Ouvrir la fiche" '+
+      'aria-label="'+attr(d.name)+' — '+qui+', rien trouvé dans 10 km autour de toi. Ouvrir la fiche" '+
       'onclick="introuvableOuvrir('+d.id+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();introuvableOuvrir('+d.id+');}">'+
       '<span class="unf-thumb">'+drinkIconHTML(d)+'</span>'+
       '<span class="unf-txt">'+
@@ -15333,7 +15498,7 @@ function renderDiscoveries(){
   pending.forEach(function(d){
     var desc=d.desc||((d.brand?d.brand+" · ":"")+(d.byPseudo?"Proposé par "+sanitize(d.byPseudo):"Suggéré par la communauté"));
     var voted=hasVotedDiscovery(d.id);
-    var votes=d.votes||0;
+    var votes=nbSur(d.votes);
     var ready=votes>=ADMIN_VOTE_THRESHOLD;
     var pct=Math.min(100,Math.round(votes/ADMIN_VOTE_THRESHOLD*100));
     var missing=ADMIN_VOTE_THRESHOLD-votes;
@@ -15342,12 +15507,19 @@ function renderDiscoveries(){
       '<div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:8px"><div style="font-size:14px;font-weight:700;color:var(--s1);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.3;word-break:break-word">'+sanitize(d.name)+'</div>'+
       (ready?'<span class="disc-ready" style="flex-shrink:0">PR\u00CATE </span>':"")+'</div>'+
       '<div style="font-size:12px;margin-top:2px;color:var(--s2)">'+sanitize(desc)+'</div>'+
-      '<div class="vote-progress" role="progressbar" aria-valuemin="0" aria-valuemax="'+ADMIN_VOTE_THRESHOLD+'" aria-valuenow="'+votes+'"><div style="width:'+pct+'%"></div></div>'+
+      '<div class="vote-progress" role="progressbar" aria-valuemin="0" aria-valuemax="'+ADMIN_VOTE_THRESHOLD+'" aria-valuenow="'+nbSur(votes)+'"><div style="width:'+pct+'%"></div></div>'+
       discFoundInHTML(d)+
       '<div style="font-size:11px;font-weight:600;margin-top:5px;color:'+(ready?"#16a34a":"#c69a57")+'">'+
       (ready?"Pr\u00EAte \u00E0 entrer au catalogue !":votes+"/"+ADMIN_VOTE_THRESHOLD+" votes \u00B7 encore "+missing+" pour le catalogue")+'</div></div>'+
-      (voted?'<span style="font-size:12px;font-weight:700;color:var(--s3);flex-shrink:0">✓ Voté</span>':'<button class="vote-btn" style="background:'+(document.body.classList.contains("dark")?"#f0f0f0":accentColor)+';color:'+(document.body.classList.contains("dark")?"#1a1714":"#fff")+'" onclick="voteDisc(\''+String(d.id).replace(/'/g,"\\'")+'\')">'+T.vote+'</button>');
+      (voted?'<span style="font-size:12px;font-weight:700;color:var(--s3);flex-shrink:0">✓ Voté</span>':'<button class="vote-btn" style="background:'+(document.body.classList.contains("dark")?"#f0f0f0":accentColor)+';color:'+(document.body.classList.contains("dark")?"#1a1714":"#fff")+'" data-vote="'+attr(String(d.id))+'">'+T.vote+'</button>');
     el.appendChild(div);
+  });
+  /* L'identifiant d'une decouverte est choisi par celui qui cree le document
+     (les regles ne contraignaient pas le nom). Place dans un onclick, un simple
+     guillemet refermait l'attribut et faisait executer du code chez tous ceux
+     qui ouvraient l'onglet. Il voyage maintenant dans un attribut de donnees. */
+  el.querySelectorAll(".vote-btn[data-vote]").forEach(function(b){
+    b.onclick=function(){ voteDisc(b.getAttribute("data-vote")||""); };
   });
 }
 function voteDisc(id){
@@ -17399,18 +17571,24 @@ function deleteAccount(){
   if(!confirm("Supprimer définitivement ton compte Magofeed ?\n\nTon pseudo, tes points, ton streak et ton classement seront effacés. Cette action est irréversible.")) return;
   if(!window.fbDeleteAccount){toast("Indisponible pour le moment");return;}
   toast("Suppression du compte…");
-  window.fbDeleteAccount().then(function(){
+  window.fbDeleteAccount().then(function(r){
     try{localStorage.clear();}catch(e){}
-    toast("Compte supprimé");
-    setTimeout(function(){location.reload();},1000);
+    /* Si un document a resiste, on le DIT : promettre un effacement complet
+       quand il en reste serait exactement le mensonge qu'on veut eviter. */
+    toast((r&&r.restes)?("Compte supprimé — "+r.restes+" donnée(s) à retirer, écris-moi")
+                       :"Compte supprimé");
+    setTimeout(function(){location.reload();},(r&&r.restes)?2600:1000);
   }).catch(function(e){
     var code=(e&&e.code)||"";
+    /* Le compte est supprime EN PREMIER : si on arrive ici, rien n'a ete
+       efface et la personne retrouve tout. On peut donc dire « annulee »
+       sans mentir — ce qui n'etait pas le cas avant. */
     if(code==="auth/requires-recent-login"){
-      toast("Reconnecte-toi avec Google puis réessaie");
+      toast("Reconnecte-toi avec Google puis réessaie — rien n'a été supprimé");
     }else if(code==="auth/popup-closed-by-user"||code==="auth/cancelled-popup-request"){
-      toast("Suppression annulée");
+      toast("Suppression annulée — ton compte est intact");
     }else{
-      toast("Erreur lors de la suppression");
+      toast("Erreur lors de la suppression — ton compte est intact");
     }
     console.warn("deleteAccount:",e);
   });
@@ -17827,7 +18005,7 @@ function renderUserSearchList(){
         var favs=(u.favs||[]).map(function(id){return DRINKS.find(function(d){return Number(d.id)===Number(id);});}).filter(Boolean).slice(0,4);
         if(favs.length){
           favHTML='<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'+favs.map(function(d){
-            return '<span class="usr-fav" data-drink="'+d.id+'" role="button" tabindex="0" aria-label="Voir '+sanitize(d.name)+'" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px 5px 5px;border-radius:999px;background:'+d.light+';cursor:pointer"><span style="width:24px;height:24px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:13px">'+drinkIconHTML(d)+'</span><span style="font-size:11px;font-weight:700;color:'+d.color+'">'+sanitize(d.name)+'</span></span>';
+            return '<span class="usr-fav" data-drink="'+d.id+'" role="button" tabindex="0" aria-label="Voir '+attr(d.name)+'" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px 5px 5px;border-radius:999px;background:'+d.light+';cursor:pointer"><span style="width:24px;height:24px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:13px">'+drinkIconHTML(d)+'</span><span style="font-size:11px;font-weight:700;color:'+d.color+'">'+sanitize(d.name)+'</span></span>';
           }).join("")+'</div>';
         }
         card.innerHTML='<div style="display:flex;align-items:center;gap:12px">'+

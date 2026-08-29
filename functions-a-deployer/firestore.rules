@@ -150,9 +150,40 @@ service cloud.firestore {
     //    mais PAS promoted/rejected/by/photoRejected — réservés à l'admin.
     match /discoveries/{id} {
       allow read: if true;
+      /* La creation etait ouverte a tout compte connecte, sans contrainte sur
+         le nom du document, sans liste de champs, sans borne de taille et sans
+         plafond de nombre. Trois consequences :
+         - un compte anonyme pouvait deposer des milliers de documents, que
+           l'app telechargeait tous a chaque ouverture (corrige aussi cote
+           client, mais la source du probleme est ici) ;
+         - le nom du document etant libre, il pouvait contenir un guillemet, et
+           ce nom finissait dans un attribut HTML chez tous les utilisateurs ;
+         - 'votes' n'etant pas contraint, on ecrivait directement votes:999 et
+            la decouverte apparaissait « PRETE » dans le panneau admin, ce qui
+            contourne d'un coup toute la mecanique de vote construite plus bas.
+         Le nom du document est donc le code-barre (la convention de l'app
+         depuis toujours : fbAddDiscovery ecrit doc(db,'discoveries',barcode)),
+         ou l'identifiant « m + horodatage » des propositions par photo. */
       allow create: if isSignedIn()
         && !('promoted' in request.resource.data)
-        && !('rejected' in request.resource.data);
+        && !('rejected' in request.resource.data)
+        && request.resource.data.barcode == id
+        && (id.matches('^[0-9]{6,20}$') || id.matches('^m[0-9]{10,16}$'))
+        && request.resource.data.by == request.auth.uid
+        && request.resource.data.votes == 1
+        && request.resource.data.keys().hasOnly(
+             ['name','brand','cat','desc','votes','barcode','by','byPseudo',
+              'createdAt','foundIn','hasPhoto','manualProposal','aiConfidence'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 60
+        && (!('brand' in request.resource.data)
+            || (request.resource.data.brand is string && request.resource.data.brand.size() <= 40))
+        && (!('cat' in request.resource.data)
+            || (request.resource.data.cat is string && request.resource.data.cat.size() <= 30))
+        && (!('byPseudo' in request.resource.data)
+            || (request.resource.data.byPseudo is string && request.resource.data.byPseudo.size() <= 24))
+        && (!('foundIn' in request.resource.data)
+            || (request.resource.data.foundIn is list && request.resource.data.foundIn.size() <= 30));
       // Anti-vandalisme : n'importe quel connecté peut faire évoluer les champs
       // "doux" (voter, joindre une photo, ajouter un lieu). MAIS renommer/re-
       // catégoriser une découverte (name/brand/cat) est réservé à SON AUTEUR
@@ -254,6 +285,27 @@ service cloud.firestore {
     function champsServeurStore() {
       return ['certified','certifiedAt','owner','drinksVerified'];
     }
+    /* 'addedBy' commandait sa PROPRE protection : la garde anti-vandalisme
+       autorise a renommer ou deplacer un magasin quand on en est le createur
+       (resource.data.addedBy == uid), mais rien n'empechait d'ecrire ce champ.
+       En deux requetes — d'abord addedBy, ensuite le nom et les coordonnees —
+       n'importe qui devenait createur du magasin d'un autre. 'geohash' rejoint
+       la liste liee a la position : deplacer un magasin sans deplacer son
+       geohash le rend introuvable dans sa nouvelle zone, ce qui est une autre
+       facon de le faire disparaitre.
+
+       'verifiedSource' restait libre au motif qu'il « ne porte aucune
+       confiance ». C'est vrai pour la pastille bleue, mais ce champ commande
+       toujours la FILE DE DECISION de l'administrateur : _repriseCandidats
+       selectionne les magasins dont la valeur contient « photos », et l'app en
+       extrait une date affichee comme « rayon verifie 08/2026 ». N'importe qui
+       pouvait donc se placer dans cette file avec une date inventee. On
+       n'interdit pas le champ — l'import automatique l'ecrit — on en limite la
+       valeur a celle que cet import produit reellement. */
+    function sourceHonnete() {
+      return !changed().hasAny(['verifiedSource'])
+        || request.resource.data.verifiedSource == 'catalogue enseigne (auto)';
+    }
     match /stores/{id} {
       allow read: if true;
       allow create: if isAdmin()
@@ -261,8 +313,10 @@ service cloud.firestore {
       allow update: if isAdmin()
         || (isSignedIn()
             && !changed().hasAny(champsServeurStore())
+            && !changed().hasAny(['addedBy','createdAt','community'])
+            && sourceHonnete()
             && (resource.data.addedBy == request.auth.uid
-                || !changed().hasAny(['name','brand','lat','lng','emoji'])));
+                || !changed().hasAny(['name','brand','lat','lng','emoji','geohash'])));
       allow delete: if isAdmin();
     }
     match /Stores/{id} {
@@ -272,8 +326,10 @@ service cloud.firestore {
       allow update: if isAdmin()
         || (isSignedIn()
             && !changed().hasAny(champsServeurStore())
+            && !changed().hasAny(['addedBy','createdAt','community'])
+            && sourceHonnete()
             && (resource.data.addedBy == request.auth.uid
-                || !changed().hasAny(['name','brand','lat','lng','emoji'])));
+                || !changed().hasAny(['name','brand','lat','lng','emoji','geohash'])));
       allow delete: if isAdmin();
     }
 
