@@ -10237,22 +10237,26 @@ window._leafletState = window._leafletState || null;   // null | "loading" | "re
    etre a l'ecran. Si les conditions d'Esri posaient probleme un jour, il suffit
    de renvoyer toujours l'URL OSM ci-dessous pour revenir en arriere.
    ============================================================================ */
-var FOND_ATTRIB='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> | Esri, HERE, Garmin, GIS user community';
+var FOND_ATTRIB='Esri, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 function fondMago(sombre){
-  var Base=L.TileLayer.extend({
-    getTileUrl:function(c){
-      if(c.z<=16){
-        return "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_"+
-               (sombre?"Dark":"Light")+"_Gray_Base/MapServer/tile/"+c.z+"/"+c.y+"/"+c.x;
-      }
-      return "https://tile.openstreetmap.org/"+c.z+"/"+c.x+"/"+c.y+".png";
-    }
-  });
-  /* keepBuffer:1 divise par deux les tuiles gardees hors ecran (~14 Mo de
-     bitmaps decodes -> ~7). updateWhenZooming:false n'attend qu'une seule
-     reconstruction de grille, a la fin du zoom, au lieu d'une par image —
-     c'est-a-dire pendant le geste meme qui faisait ramer. */
-  return new Base("",{maxZoom:19,keepBuffer:1,updateWhenZooming:false,attribution:FOND_ATTRIB});
+  /* UN SEUL fond, sobre a tous les zooms. La version precedente basculait sur
+     OpenStreetMap au-dela du zoom 16 pour gagner en detail : a l'aeroport, ca
+     donnait une bouillie de numeros de portes et de points d'interet, tout ce
+     qu'on cherchait justement a fuir.
+     La donnee du fond sobre s'arrete au zoom 16 ; maxNativeZoom dit a Leaflet
+     de REUTILISER la tuile 16 en l'agrandissant au-dela, plutot que de
+     demander une tuile qui n'existe pas et d'afficher un carre gris. C'est
+     legerement adouci quand on zoome au maximum — mais toujours lisible, et
+     de toute facon a cette distance ce sont les pins qui portent l'info.
+     Pour revenir au detail complet : remettre l'URL OpenStreetMap ci-dessous. */
+  var jeu=sombre?"World_Dark_Gray_Base":"World_Light_Gray_Base";
+  return L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/"+jeu+"/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom:19,            // on peut zoomer jusqu'a 19...
+      maxNativeZoom:16,      // ...mais on ne demande jamais au-dela de 16
+      keepBuffer:1,          // moitie moins de tuiles gardees hors ecran
+      updateWhenZooming:false, // une seule reconstruction de grille, a la fin du zoom
+      attribution:FOND_ATTRIB });
 }
 function ensureLeaflet(onReady, onFail){
   if (window.L) { window._leafletState="ready"; onReady&&onReady(); return; }
