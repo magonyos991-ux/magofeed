@@ -10237,30 +10237,41 @@ window._leafletState = window._leafletState || null;   // null | "loading" | "re
    etre a l'ecran. Si les conditions d'Esri posaient probleme un jour, il suffit
    de renvoyer toujours l'URL OSM ci-dessous pour revenir en arriere.
    ============================================================================ */
-var FOND_ATTRIB='Esri, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+var FOND_ATTRIB='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> | Esri, HERE, Garmin';
+var FOND_BASCULE=17;   // en dessous : sobre. a partir de la : net.
 function fondMago(sombre){
-  /* UN SEUL fond, sobre a tous les zooms. La version precedente basculait sur
-     OpenStreetMap au-dela du zoom 16 pour gagner en detail : a l'aeroport, ca
-     donnait une bouillie de numeros de portes et de points d'interet, tout ce
-     qu'on cherchait justement a fuir.
-     La donnee du fond sobre s'arrete au zoom 16 ; maxNativeZoom dit a Leaflet
-     de REUTILISER la tuile 16 en l'agrandissant au-dela, plutot que de
-     demander une tuile qui n'existe pas et d'afficher un carre gris. C'est
-     legerement adouci quand on zoome au maximum — mais toujours lisible, et
-     de toute facon a cette distance ce sont les pins qui portent l'info.
-     Pour revenir au detail complet : remettre l'URL OpenStreetMap ci-dessous. */
-  var jeu=sombre?"World_Dark_Gray_Base":"World_Light_Gray_Base";
-  return L.tileLayer(
-    "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/"+jeu+"/MapServer/tile/{z}/{y}/{x}",
-    /* On avait plafonne le zoom a 17 pour cacher le flou de l'agrandissement.
-       C'etait retirer une capacite pour masquer un defaut : sur une app qui
-       sert a trouver un magasin, on veut pouvoir se coller au batiment. Le
-       zoom revient a 19. */
-    { maxZoom:19,
-      maxNativeZoom:16,
-      keepBuffer:1,          // moitie moins de tuiles gardees hors ecran
-      updateWhenZooming:false, // une seule reconstruction de grille, a la fin du zoom
-      attribution:FOND_ATTRIB });
+  /* DEUX SOURCES, UNE SEULE COUCHE.
+     Aucun fond gratuit ne convient aux deux usages : le fond sobre devient une
+     bouillie des qu'on s'approche (sa donnee s'arrete au zoom 16), et
+     OpenStreetMap noie la carte sous les numeros de maison quand on parcourt.
+     On prend donc le bon a chaque distance — et dans UNE seule couche, choisie
+     tuile par tuile par getTileUrl : un seul cache, aucun clignotement de
+     bascule, pas de doublement de memoire.
+
+       zoom < 17  : fond sobre, presque blanc — on cherche un quartier
+       zoom >= 17 : OpenStreetMap, net — on est devant la vitrine
+
+     En theme sombre, les tuiles OpenStreetMap sont claires : on les inverse,
+     mais ELLES SEULES. Le fond sobre a deja sa version nocturne, l'inverser
+     aussi le rendrait blanc. D'ou la classe posee tuile par tuile. */
+  var Base=L.TileLayer.extend({
+    getTileUrl:function(c){
+      if(c.z<FOND_BASCULE){
+        return "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_"+
+               (sombre?"Dark":"Light")+"_Gray_Base/MapServer/tile/"+c.z+"/"+c.y+"/"+c.x;
+      }
+      return "https://tile.openstreetmap.org/"+c.z+"/"+c.x+"/"+c.y+".png";
+    },
+    createTile:function(coords,done){
+      var t=L.TileLayer.prototype.createTile.call(this,coords,done);
+      if(coords.z>=FOND_BASCULE)t.classList.add("tuile-nette");
+      return t;
+    }
+  });
+  /* keepBuffer:1 divise par deux les tuiles gardees hors ecran ; sans
+     updateWhenZooming, la grille se reconstruit une seule fois, a la fin du
+     zoom, au lieu d'une fois par image pendant le geste. */
+  return new Base("",{maxZoom:19,keepBuffer:1,updateWhenZooming:false,attribution:FOND_ATTRIB});
 }
 function ensureLeaflet(onReady, onFail){
   if (window.L) { window._leafletState="ready"; onReady&&onReady(); return; }
