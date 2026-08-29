@@ -10624,8 +10624,13 @@ function fondMago(sombre){
   var jeu=sombre?"World_Dark_Gray_Base":"World_Light_Gray_Base";
   return L.tileLayer(
     "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/"+jeu+"/MapServer/tile/{z}/{y}/{x}",
-    { maxZoom:19,            // on peut zoomer jusqu'a 19...
-      maxNativeZoom:16,      // ...mais on ne demande jamais au-dela de 16
+    /* La donnee du fond sobre s'arrete au zoom 16. On autorisait 19 : Leaflet
+       agrandissait alors la tuile 16 huit fois, d'ou une carte franchement
+       floue au zoom maximum. On plafonne a 17 — un seul agrandissement, encore
+       net — et c'est de toute facon le zoom auquel l'application travaille
+       (les regroupements se defont a 17, une fiche s'ouvre a 17). */
+    { maxZoom:17,
+      maxNativeZoom:16,
       keepBuffer:1,          // moitie moins de tuiles gardees hors ecran
       updateWhenZooming:false, // une seule reconstruction de grille, a la fin du zoom
       attribution:FOND_ATTRIB });
@@ -14230,6 +14235,21 @@ function _pinRetirerMenu(){
 function fermerMenuPin(){ _pinDetache(); _pinRetirerMenu(); }
 window.addEventListener("pagehide",fermerMenuPin);
 document.addEventListener("visibilitychange",function(){ if(document.hidden)fermerMenuPin(); });
+/* GARDE PERMANENT. Les ecouteurs d'un geste peuvent etre arraches par un
+   chemin qu'on n'avait pas prevu — et le menu reste alors colle a l'ecran, ce
+   qui s'est deja produit deux fois. Celui-ci n'appartient a aucun geste : il
+   est pose une fois pour toutes et verifie, chaque fois qu'un doigt se leve
+   quelque part, qu'aucun menu ne survit sans geste pour le porter.
+   Il ne remplace pas la logique du geste, il la rattrape. */
+["touchend","touchcancel","pointerup","pointercancel"].forEach(function(ev){
+  document.addEventListener(ev,function(){
+    setTimeout(function(){
+      if(!document.getElementById("pin-menu"))return;
+      if(_geste&&_geste.ouvert)return;          // un geste le porte encore : on ne touche a rien
+      fermerMenuPin();
+    },60);
+  },true);
+});
 
 function ouvrirMenuPin(s,x,y){
   _pinRetirerMenu();
@@ -14440,6 +14460,10 @@ function armerMenuPin(mk,s){
   });
 }
 function exploreLoadStores(useCache){
+  /* La reconstruction detruit les marqueurs. Si un menu est ouvert, le pin
+     qu'il designe n'existera plus dans un instant : le laisser serait montrer
+     un menu sans objet. */
+  try{ if(document.getElementById("pin-menu"))fermerMenuPin(); }catch(e){}
   if(!exploreMap)return;
   var status=document.getElementById("explore-status");
   var b=exploreMap.getBounds();
