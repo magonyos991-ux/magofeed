@@ -280,6 +280,15 @@ exports.emailHuntFound = onDocumentUpdated(
     const after = event.data.after.data() || {};
     const bd = new Set((before.drinks || []).map(String));
     const added = (after.drinks || []).map(String).filter(function (x) { return !bd.has(x); });
+    /* GARDE-FOU CONTRE LA TEMPETE. Une vraie observation en rayon ajoute une
+       boisson, parfois deux. Un remplissage d'enseigne en ajoute jusqu'a mille
+       deux cents, sur des milliers de magasins : ce declencheur partait alors
+       une fois par boisson et par magasin, chacune avec sa requete watches —
+       de quoi noyer les utilisateurs de notifications et faire exploser la
+       facture, sur un seul clic d'administration. Au-dela de trois boissons
+       d'un coup, ce n'est plus quelqu'un qui a vu quelque chose : on se tait. */
+    if (added.length > 3) return;
+
     if (!added.length) return;
 
     const storeId = String(event.params.id);
@@ -293,7 +302,7 @@ exports.emailHuntFound = onDocumentUpdated(
       try {
         const asNum = Number(drinkId);
         watchSnap = await db.collection("watches")
-          .where("drinkId", "==", Number.isFinite(asNum) ? asNum : drinkId).get();
+          .where("drinkId", "==", Number.isFinite(asNum) ? asNum : drinkId).limit(200).get();
       } catch (e) { console.warn("watches query:", e && e.message); continue; }
 
       for (const w of watchSnap.docs) {

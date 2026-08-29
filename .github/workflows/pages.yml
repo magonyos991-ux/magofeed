@@ -60,10 +60,46 @@ jobs:
         run: |
           sed -i "s/magofeed-__BUILD_ID__/magofeed-${GITHUB_SHA::12}/" sw.js
           grep -n 'CACHE_NAME =' sw.js
+      # Le site publiait la RACINE ENTIERE du depot. Tout ce qui n'est pas
+      # destine au navigateur etait donc servi a une adresse devinable : le
+      # plan anti-triche, les notes de strategie, le code d'automatisation n8n,
+      # les guides internes. On assemble desormais une liste blanche : ce qui
+      # est en ligne est ce que le site utilise, et rien d'autre.
+      # Les fichiers .js de functions-a-deployer restent publies : le mode
+      # d'emploi PowerShell les telecharge depuis cette adresse.
+      - name: Rassembler le site
+        run: |
+          set -e
+          mkdir -p _site
+          cp index.html app.css sw.js manifest.json privacy.html terms.html _site/
+          # La licence, oui : on veut qu'elle soit publique. Le dossier
+          # PROPRIETE-INTELLECTUELLE, non — ce sont des notes de depot de
+          # marque et des preuves d'anteriorite, servies jusqu'ici a une
+          # adresse devinable.
+          cp LICENSE _site/ 2>/dev/null || true
+          cp -r data icons screenshots f _site/
+          mkdir -p _site/growth
+          cp growth/partenaire-marque.html growth/waitlist.html _site/growth/ 2>/dev/null || true
+          mkdir -p _site/promo
+          cp -r promo/cards _site/promo/ 2>/dev/null || true
+          cp -r promo/carrousel _site/promo/ 2>/dev/null || true
+          # Les notes de legende accompagnent les images, elles n'ont rien a
+          # faire en ligne.
+          find _site/promo -name '*.md' -delete 2>/dev/null || true
+          mkdir -p _site/promo/cards-src
+          cp -r promo/cards-src/bottles _site/promo/cards-src/ 2>/dev/null || true
+          mkdir -p _site/functions-a-deployer
+          cp functions-a-deployer/*.js _site/functions-a-deployer/ 2>/dev/null || true
+          echo "--- contenu publie ---"
+          find _site -maxdepth 2 | head -40
+          echo "--- ce qui ne doit PAS y etre ---"
+          ! find _site -name '*.md' | grep . || (echo "ECHEC : un .md est publie" && exit 1)
+          ! test -d _site/promo/n8n || (echo "ECHEC : promo/n8n est publie" && exit 1)
+          ! test -d _site/functions-a-deployer/tests-regles || (echo "ECHEC : tests publies" && exit 1)
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4

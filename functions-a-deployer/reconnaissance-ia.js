@@ -163,11 +163,18 @@ exports.identifyDrink = onCall(
     // ne repose jamais sur ce que le client prétend.
     if (result.isDrink && !result.isAlcohol && result.confidence >= 85) {
       try {
+        /* On note l'empreinte de l'image REELLEMENT analysee. Sans elle,
+           rien ne reliait le verdict a la photo : on faisait analyser un vrai
+           soda, puis on deposait une TOUTE AUTRE image dans discoveryPhotos,
+           et confirmAiDrink la recopiait dans drinkPhotos — collection publique
+           en lecture. N'importe quelle image devenait ainsi la photo officielle
+           d'une boisson du catalogue, validee « par l'IA » qui ne l'a jamais vue. */
         await db.collection("aiVerified").doc(uid).set({
           name: result.name,
           brand: result.brand,
           category: result.category,
           confidence: result.confidence,
+          imgHash: require("crypto").createHash("sha256").update(m[2]).digest("hex"),
           ts: Date.now()
         });
       } catch (e) { console.warn("aiVerified save error:", e && e.message); }
@@ -244,14 +251,25 @@ exports.confirmAiDrink = onCall(
       Object.assign({}, entry, { createdAt: FieldValue.serverTimestamp(), fromBarcode: "" })
     );
 
-    // La photo de la proposition devient l'image publique de la boisson.
+    /* La photo de la proposition devient l'image publique de la boisson —
+       mais SEULEMENT si c'est bien celle que l'IA a analysee. On recalcule son
+       empreinte et on la compare a celle notee dans le verdict. Si elles
+       different, la boisson entre au catalogue sans photo : mieux vaut pas
+       d'image qu'une image que personne n'a validee. */
     try {
       const pSnap = await db.collection("discoveryPhotos").doc(discId).get();
-      if (pSnap.exists && pSnap.data().data) {
-        await db.collection("drinkPhotos").doc(String(entry.id)).set({
-          data: String(pSnap.data().data),
-          createdAt: FieldValue.serverTimestamp()
-        });
+      const brut = pSnap.exists ? String(pSnap.data().data || "") : "";
+      const b64 = (brut.match(/^data:image\/(?:jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/) || [])[1] || "";
+      if (b64 && v.imgHash) {
+        const h = require("crypto").createHash("sha256").update(b64).digest("hex");
+        if (h === v.imgHash) {
+          await db.collection("drinkPhotos").doc(String(entry.id)).set({
+            data: brut,
+            createdAt: FieldValue.serverTimestamp()
+          });
+        } else {
+          console.warn("photo differente de celle analysee — non publiee");
+        }
       }
     } catch (e) { console.warn("Photo carry error:", e && e.message); }
 

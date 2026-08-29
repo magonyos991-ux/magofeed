@@ -61,10 +61,12 @@ await doit('legitime : quelqu un confirme une boisson en rayon',
       {drinks:arrayUnion(9),'confirmations.9':increment(1),'seenAt.9':Date.now()})));
 await doit('legitime : le createur renomme SON magasin',
   ()=>assertSucceeds(updateDoc(doc(a,'stores','s1'),{name:'Night Ixelles bis'})));
-await doit('legitime : import OSM cree un magasin avec le catalogue enseigne',
+await doit('legitime : import OSM cree un magasin (rayon probable, sans « verifie »)',
   ()=>assertSucceeds(setDoc(doc(m,'stores','sNouveau'),
-      {name:'Carrefour Flagey',lat:50.8,lng:4.3,drinks:[1,2],drinksVerified:[1,2],
-       verifiedSource:'catalogue enseigne (auto)',osmImport:true})));
+      {name:'Carrefour Flagey',lat:50.8,lng:4.3,drinks:[1,2],osmImport:true})));
+await doit('bloque : creer un magasin deja marque verifie',
+  ()=>assertFails(setDoc(doc(m,'stores','sTriche'),
+      {name:'Faux',lat:50.8,lng:4.3,drinks:[1],drinksVerified:[1]})));
 await doit('legitime : un vote de decouverte (lot atomique comme dans l app)',
   ()=>{ const b=writeBatch(m);
         b.update(doc(m,'discoveries','d1'),{votes:increment(1)});

@@ -2294,10 +2294,10 @@ window.fbImportStores = async function(list, onProgress) {
       // ecraser ce qu'un magasin existant a deja (avant : set sans merge + drinks:[]
       // -> un re-import pouvait effacer les rayons et confirmations. repare.)
       if (s.drinks && s.drinks.length) data.drinks = arrayUnion.apply(null, s.drinks.map(Number));
-      if (s.drinksVerified && s.drinksVerified.length) {
-        data.drinksVerified = arrayUnion.apply(null, s.drinksVerified.map(Number));
-        if (s.verifiedSource) data.verifiedSource = s.verifiedSource;
-      }
+      /* Plus aucun chemin d'import client n'ecrit drinksVerified. Ce champ
+         porte le bandeau « confirme au catalogue de l'enseigne » et le pin
+         vert : il ne doit venir que de l'administrateur ou d'une Cloud
+         Function, jamais d'une heuristique sur le nom du magasin. */
       batch.set(doc(db, "stores", String(s.id)), data, { merge: true });
     });
     await batch.commit();
@@ -6330,6 +6330,16 @@ function attr(v){
    ce texte s'executait. On force donc la conversion partout ou on affiche la
    valeur de quelqu'un d'autre. */
 function nbSur(v){var n=Number(v);return (isFinite(n)&&n>0)?Math.floor(n):0;}
+/* Le compteur de confirmations est ecrit par les utilisateurs, sans plafond
+   cote base. Un chiffre gonfle n'apporte rien a la fiabilite — au-dela d'une
+   dizaine d'avis concordants, un de plus ne change pas la verite du rayon —
+   mais il fausse le classement « les plus fiables » et le libelle affiche.
+   On le borne donc a la lecture : gonfler ne sert plus a rien. */
+function confBornee(s,did){
+  var c=Number(((s&&s.confirmations)||{})[did]);
+  if(!isFinite(c))return 0;
+  return Math.max(-10,Math.min(10,Math.round(c)));
+}
 /* Code-barre inconnu MAIS boisson connue (la Pepsi belge dont OFF ignore le
    code) : l'utilisateur choisit la boisson du catalogue, le code lui est lie
    sur-le-champ en local + suggestion envoyee a l'admin (formatSuggestions,
@@ -10857,7 +10867,7 @@ function renderStoreList(){
   el.insertAdjacentHTML("beforeend",'<div style="padding:8px 20px 4px"><button onclick="drinkLocate()" class="ghost-btn" style="width:100%">Ajouter un autre magasin qui la vend</button></div>');
   stores.forEach(function(s){
     var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):"~?km";
-    var confs=Math.max(0,s.confirmations[sid]||0);
+    var confs=Math.max(0,confBornee(s,sid));
     // Fraicheur : un stock change chaque semaine — une confirmation d'il y a
     // 2 mois ne vaut pas une d'hier. La fiabilite decote avec l'age de la
     // derniere observation, et la date est montree a l'utilisateur.
@@ -10874,7 +10884,7 @@ function renderStoreList(){
     var storeIdStr=String(s.id);
     // Statut stock de CETTE boisson dans CE magasin, rendu tres visible :
     // barre d'accent coloree a gauche + pastille pres du nom.
-    var confN=s.confirmations[sid]||0;
+    var confN=confBornee(s,sid);
     var isSure=storeVerifiedFor(s,sid)||confN>0;
     var isNo=confN<0;
     var stCol=isSure?"#16a34a":(isNo?"#dc2626":"#f59e0b");
@@ -11616,6 +11626,7 @@ function renderStoreDetail(){
    après l'avoir rempli en rafale). Même mécanique communautaire que mapStockReport :
    fbConfirmStock ±1 côté partagé ; en local on force l'état pour un retour clair.
    Action seulement si l'état change (anti-spam), sans points (pas de farm). */
+var _dernierStock={};
 function sdSetStock(did,wantStock){
   var s=curStoreDetail; if(!s)return;
   var sid=s.fbId||String(s.id);
@@ -11624,6 +11635,18 @@ function sdSetStock(did,wantStock){
   var inStock=cur>0, isRupture=cur<0;
   if(wantStock&&inStock)return;        // déjà en stock
   if(!wantStock&&isRupture)return;     // déjà en rupture
+  /* Ce bouton ne testait que le SIGNE actuel : taper ✓ ✕ ✓ ✕ passait donc a
+     chaque fois, et chaque passage envoyait une vraie confirmation et un vrai
+     signalement. En quelques secondes, un doigt suffisait a gonfler le compteur
+     de fiabilite d'un magasin ou a faire passer une boisson pour absente. Une
+     personne qui se corrige le fait une fois ; on impose donc un delai entre
+     deux changements d'avis sur la meme boisson dans le meme magasin. */
+  var cle=sid+":"+did, maintenant=Date.now();
+  if(maintenant-(_dernierStock[cle]||0)<90*1000){
+    toast("Tu viens de te prononcer sur cette boisson \u2014 laisse passer un moment");
+    playSound("err"); return;
+  }
+  _dernierStock[cle]=maintenant;
   if(wantStock){
     if(!s.drinks)s.drinks=[];
     if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
@@ -12525,8 +12548,14 @@ function osmAnalyze(){
         if(lat==null||lng==null||!name)return null;
         var gcat=guessStoreCat(name+" "+(e.tags.brand||""));
         var chain=chainIdsFor(name,e.tags.brand);
+        /* Le catalogue d'enseigne dit ce qu'on trouve PROBABLEMENT ici. Il ne
+           dit pas que quelqu'un l'a vu. Ces deux chemins d'import ecrivaient
+           pourtant aussi drinksVerified et verifiedSource, ce qui fait
+           apparaitre la coche verte « confirme » sur un magasin ou personne
+           n'est jamais entre. Le rayon probable reste (c'est utile), la
+           revendication de verification part (c'est faux). */
         var cd={drinks:[],dv:null,vs:null};
-        if(chain){cd.drinks=chain.ids.slice();cd.dv=chain.ids.slice();cd.vs="catalogue enseigne (auto)";}
+        if(chain){cd.drinks=chain.ids.slice();}
         else if(gcat){cd.drinks=brandIds(M4_CATS[gcat]||[]);}
         else{cd.drinks=packDrinkIds();}
         return {id:"o"+e.id,osm:e.id,name:name,emoji:osmShopEmoji(e.tags.shop),lat:lat,lng:lng,hours:(e.tags.opening_hours||null),
@@ -12751,8 +12780,9 @@ function autoOsmForArea(lat,lng,zoom){
           if(la==null||ln==null||!name)return null;
           var gcat=guessStoreCat(name+" "+(e.tags.brand||""));
           var chain=chainIdsFor(name,e.tags.brand);
+          // Meme remarque qu'au-dessus : rayon probable oui, « verifie » non.
           var cd={drinks:[],dv:null,vs:null};
-          if(chain){cd.drinks=chain.ids.slice();cd.dv=chain.ids.slice();cd.vs="catalogue enseigne (auto)";}
+          if(chain){cd.drinks=chain.ids.slice();}
           else if(gcat){cd.drinks=brandIds(M4_CATS[gcat]||[]);}
           else{cd.drinks=packDrinkIds();}
           return {id:"o"+e.id,osm:e.id,name:name,emoji:osmShopEmoji(e.tags.shop),lat:la,lng:ln,hours:(e.tags.opening_hours||null),brand:(e.tags.brand||null),type:gcat?("épicerie "+gcat):null,drinks:cd.drinks,drinksVerified:cd.dv,verifiedSource:cd.vs};
@@ -16153,7 +16183,7 @@ function openLabel(s){
   return"";
 }
 function storeVerifiedFor(s,did){return !!(s&&s.drinksVerified&&s.drinksVerified.some(function(v){return Number(v)===Number(did);}));}
-function sortedStores(stores){var arr=stores.slice();if(curSort==="distance")arr.sort(function(a,b){return(a.dist||999)-(b.dist||999);});else if(curSort==="open")arr.sort(function(a,b){return openScore(b)-openScore(a);});else if(curSort==="trust")arr.sort(function(a,b){var id=curSel?curSel.id:0;return(b.confirmations[id]||0)-(a.confirmations[id]||0);});
+function sortedStores(stores){var arr=stores.slice();if(curSort==="distance")arr.sort(function(a,b){return(a.dist||999)-(b.dist||999);});else if(curSort==="open")arr.sort(function(a,b){return openScore(b)-openScore(a);});else if(curSort==="trust")arr.sort(function(a,b){var id=curSel?curSel.id:0;return confBornee(b,id)-confBornee(a,id);});
   // Ordre : SURS (catalogue verifie / confirmations positives) > probables > signalees absentes
   if(curSel){var did=curSel.id;arr.sort(function(a,b){
     function rank(s){
