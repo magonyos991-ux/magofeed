@@ -52,8 +52,15 @@ await env.withSecurityRulesDisabled(async (c)=>{
 });
 
 /* ── ce qui doit rester POSSIBLE (usages legitimes) ────────────────────── */
+/* 'points' n'est plus ecrit par le client : le score officiel est calcule par
+   les Cloud Functions a partir des contributions reellement verifiables. Le
+   profil ne porte plus que ce que son proprietaire a le droit de decider. */
 await doit('legitime : Alice met a jour son profil',
-  ()=>assertSucceeds(setDoc(doc(a,'users',ALICE),{pseudo:'Alice',points:20,streak:3},{merge:true})));
+  ()=>assertSucceeds(setDoc(doc(a,'users',ALICE),{pseudo:'Alice',streak:3},{merge:true})));
+await doit('bloque : s ecrire 999999 points',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),{points:999999},{merge:true})));
+await doit('bloque : se donner des points de parrainage',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),{refPoints:5000,refCount:99},{merge:true})));
 await doit('legitime : avatar photo normal',
   ()=>assertSucceeds(setDoc(doc(a,'users',ALICE),{avatar:{type:'photo',v:'data:image/png;base64,AAAA'}},{merge:true})));
 await doit('legitime : quelqu un confirme une boisson en rayon',
