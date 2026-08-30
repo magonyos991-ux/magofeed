@@ -810,7 +810,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div class="res-emoji" id="sd-emoji"></div>
           <div style="flex:1">
             <div id="sd-name" style="font-size:17px;font-weight:800;color:#fff"></div>
-          <div id="sd-partner" style="display:none;margin-top:3px"><span style="display:inline-flex;align-items:center;gap:6px;padding:3px 11px;border-radius:999px;background:rgba(37,99,235,.92);font-size:10.5px;font-weight:800;color:#fff"><svg width="11" height="11" viewBox="0 0 24 24" style="display:block;flex-shrink:0"><path fill="#fff" d="M12 2.4 4.4 5.9v6c0 4.6 3.2 8.5 7.6 9.7 4.4-1.2 7.6-5.1 7.6-9.7v-6L12 2.4z"/></svg>Magasin certifié · rayon vérifié sur place</span></div>
+          <div id="sd-partner" style="display:none;margin-top:3px"><span style="display:inline-flex;align-items:center;gap:6px;padding:3px 11px;border-radius:999px;background:rgba(37,99,235,.92);font-size:10.5px;font-weight:800;color:#fff"><svg width="11" height="11" viewBox="0 0 24 24" style="display:block;flex-shrink:0"><path fill="#fff" d="M12 2.4 4.4 5.9v6c0 4.6 3.2 8.5 7.6 9.7 4.4-1.2 7.6-5.1 7.6-9.7v-6L12 2.4z"/></svg>Tenu par son gérant</span></div>
             <div id="sd-sub" style="font-size:12px;color:rgba(255,255,255,.8);font-weight:500;margin-top:2px"></div>
             <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap" id="sd-badges"></div>
           </div>
@@ -11553,8 +11553,21 @@ function storeCertifie(s){
      certifies par l'administration (bouton de reprise dans l'admin). */
   return !!(s&&s.certified===true);
 }
-// Ancien nom, garde parce qu'il est appele ailleurs.
-function storeIsPartner(s){ return storeCertifie(s); }
+/* TROIS CHOSES DIFFERENTES, QU'IL NE FAUT JAMAIS CONFONDRE.
+   1. « Tenu par son gerant » (certified) : on a verifie QUI tient la boutique.
+      Ca ne dit rien sur ce qu'il y a dans le rayon.
+   2. « Rayon vu sur place » (drinksVerified / storeVerifiedFor) : quelqu'un a
+      vraiment regarde l'etagere. C'est un fait constate.
+   3. « Mis en avant » (partner) : le commercant a paye pour etre visible.
+      C'est de la publicite, et ca doit se voir comme telle.
+   storeIsPartner renvoyait exactement storeCertifie : les trois se
+   confondaient en une seule pastille bleue, qui affichait « rayon verifie sur
+   place » alors que la procedure de certification ne verifie aucun rayon —
+   elle verifie une identite. Le jour ou le paiement devient la preuve
+   d'identite, cette pastille aurait dit « rayon verifie » a qui a paye. On ne
+   vend pas une phrase fausse : les trois signaux sont separes, et 'partner'
+   est un champ a part, hors de portee du client comme le reste. */
+function storeIsPartner(s){ return !!(s&&s.partner===true); }
 /* Pastille bleue du pin. Un bouclier plein, pas une coche : la coche verte
    voisine dit « en stock », et deux coches de couleurs differentes sur le meme
    pin, personne ne les distingue. */
@@ -11591,8 +11604,12 @@ function renderStoreDetail(){
   var s=curStoreDetail;if(!s)return;
   document.getElementById("sd-emoji").innerHTML=storeIconHTML(s);
   document.getElementById("sd-name").textContent=s.name;
+  /* La pastille bleue dit « tenu par son gerant » : c'est storeCertifie
+     (identite verifiee) qui la commande, plus storeIsPartner — qui designe
+     maintenant une mise en avant payante, chose differente et non encore en
+     service. Les deux etaient le meme test. */
   var pb=document.getElementById("sd-partner");
-  if(pb)pb.style.display=storeIsPartner(s)?"block":"none";
+  if(pb)pb.style.display=storeCertifie(s)?"block":"none";
   var addr=s.address||"";
   document.getElementById("sd-sub").textContent=(s.brand?s.brand+" · ":"")+(s.type||"")+(addr?" · "+addr:"");
   if(!addr)resolveStoreAddress(s);
@@ -13580,7 +13597,7 @@ function toggleExploreLegend(){
     '<div class="lg-row">'+_legendePin("mago-pin","")+
       '<span><b>Magasin</b> — on ne sait pas encore ce qu\'il a en rayon.</span></div>'+
     '<div class="lg-row">'+_legendePin("mago-pin certif",bouclier)+
-      '<span><b>Certifié</b> — rayon vérifié sur place, information tenue à jour.</span></div>'+
+      '<span><b>Tenu par son gérant</b> — horaires et disponibilités mis à jour par le commerçant lui-même.</span></div>'+
     '<div class="lg-row">'+_legendePin("mago-pin sure",coche)+
       '<span><b>En stock</b> — la boisson que tu cherches est confirmée ici.</span></div>'+
     '<div class="lg-row">'+_legendePin("mago-pin sure certif",coche+bouclier)+

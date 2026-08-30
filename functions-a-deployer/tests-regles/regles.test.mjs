@@ -230,6 +230,12 @@ await doit('legitime : la communaute cree un night shop',
       {name:'ARARAT Night Shop',lat:50.83,lng:4.36,drinks:[],
        confirmations:{},community:true,addedBy:MALLORY})));
 
+await doit('bloque : s offrir une mise en avant payante',
+  ()=>assertFails(updateDoc(doc(m,'stores','s1'),{partner:true})));
+await doit('bloque : creer un magasin deja mis en avant',
+  ()=>assertFails(setDoc(doc(m,'stores','sPub'),
+      {name:'Pub',lat:50.8,lng:4.3,partner:true})));
+
 await doit('bloque : se declarer administrateur',
   ()=>assertFails(setDoc(doc(m,'admins',MALLORY),{ok:true})));
 
