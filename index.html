@@ -5189,7 +5189,56 @@ function pickerFetchZone(force){
     });
   }catch(e){ window._pickerZoneEnCours=false; }
 }
+/* ============================================================================
+   « JE SAIS OU » : LA MEME CARTE QUE PARTOUT AILLEURS
+   ----------------------------------------------------------------------------
+   Il existait une SECONDE carte, avec ses propres pins, sa propre recherche et
+   ses propres donnees : fbQueryZone(userLat, userLng, 12) — un rayon fixe
+   autour de SOI, pas autour de ce qu'on regarde. Un magasin que la carte
+   principale affichait tres bien restait donc introuvable ici, y compris en
+   tapant son nom, puisqu'il n'avait jamais ete charge en memoire.
+
+   On ouvre desormais la carte principale, en mode « choisir » : memes tuiles,
+   memes pins, meme regroupement, meme recherche. Toucher un magasin le
+   choisit, au lieu de tracer un itineraire. Il n'y a plus deux comportements
+   a maintenir en parallele, donc plus de derive possible entre les deux.
+   ============================================================================ */
+function choisirCeMagasin(s){
+  window._choixMagasin=false;
+  _majBandeauChoix();
+  try{ closeExploreMap(); }catch(e){}
+  try{ tagScanToStore(s); }catch(e){}
+}
+function _majBandeauChoix(){
+  var b=document.getElementById("choix-magasin-bandeau");
+  if(!window._choixMagasin){ if(b)b.remove(); return; }
+  var host=document.getElementById("explore-map-host");
+  if(!host)return;
+  if(!b){
+    b=document.createElement("div");
+    b.id="choix-magasin-bandeau";
+    b.style.cssText="position:absolute;left:12px;right:12px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:1400;"+
+      "background:var(--s1);color:var(--app-bg);border-radius:14px;padding:11px 14px;"+
+      "font-size:12.5px;font-weight:800;text-align:center;box-shadow:0 6px 20px rgba(0,0,0,.3);pointer-events:none";
+    host.appendChild(b);
+  }
+  var nom=(window._choixBoisson&&window._choixBoisson.name)?" \u00AB "+sanitize(window._choixBoisson.name)+" \u00BB":"";
+  b.textContent="Touche le magasin o\u00F9 tu as vu"+(nom?nom:" cette boisson");
+}
 function openStorePicker(){
+  /* On garde le nom de la fonction : quatre endroits l'appellent, et tous
+     attendent la meme chose — que la personne designe un magasin. */
+  window._choixMagasin=true;
+  try{ window._choixBoisson=(lastScanContext&&lastScanContext.drinkId!=null)
+        ? DRINKS.find(function(d){return Number(d.id)===Number(lastScanContext.drinkId);}) : null; }catch(e){ window._choixBoisson=null; }
+  try{
+    openExploreMap({});
+    setTimeout(_majBandeauChoix,300);
+    setTimeout(_majBandeauChoix,1200);
+    return;
+  }catch(e){}
+  // Repli : si la carte principale ne peut pas s'ouvrir, l'ancien selecteur.
+  window._choixMagasin=false;
   var ov=document.getElementById("store-picker");if(!ov)return;
   ov.style.display="block";
   pickerFetchZone();
@@ -6288,35 +6337,69 @@ function _motsNom(s){
     .split(" ").filter(function(m){return m.length>=2;});
 }
 /* Renvoie {drink, distance} si le nom lu designe tres probablement une boisson
-   deja au catalogue, sinon null. Ne decide rien : c'est l'appelant qui demande. */
+   deja au catalogue, sinon null. Ne decide rien : c'est l'appelant qui demande.
+
+   SEUIL : UNE lettre en tout, jamais deux. Un premier essai tolerait deux
+   corrections ; passe sur les 241 860 paires du catalogue, il rapprochait
+   « Fanta Orange » de « Banga Orange », « Looza Poire » de « Looza Pomme » et
+   « Supermalt » de « Hypermalt ». Une faute de lecture, c'est une lettre ;
+   deux lettres, c'est un autre mot.
+
+   TROIS VERROUS en plus de la distance :
+   - deux mots de VARIANTE qui different (poire/pomme, orange/mangue) : refus,
+     ce sont deux parfums, pas une coquille ;
+   - aucun mot identique dans tout le nom : refus, il n'y a aucun temoin
+     (c'est le cas Supermalt/Hypermalt) ;
+   - la marque FILTRE au lieu de simplement departager : deux « Ice Tea Peche »
+     de marques differentes existent au catalogue, seule la marque les separe.
+
+   Et on essaie aussi la forme « marque + nom » : la lecture renvoie souvent le
+   nom SANS la marque (« Orange » pour une canette Fanta). Sans cet essai, 623
+   noms sur 624 restaient introuvables. */
+function _formesNom(nom, marque, marqueOk){
+  var out=[_motsNom(nom)];
+  if(marque&&marqueOk)out.push(_motsNom(marque+" "+nom));
+  return out.filter(function(x){return x.length;});
+}
+function _ecartMots(a,b){
+  if(!a.length||a.length!==b.length)return null;   // un mot en plus = autre produit
+  var total=0, identiques=0;
+  for(var i=0;i<a.length;i++){
+    var x=a[i],y=b[i];
+    if(x===y){identiques++;continue;}
+    // deux mots de variante qui different : deux parfums, pas une coquille
+    if(typeof OFF_VARIANT_WORDS!=="undefined"&&
+       OFF_VARIANT_WORDS.indexOf(x)!==-1&&OFF_VARIANT_WORDS.indexOf(y)!==-1)return null;
+    if(levenshtein(x,y)>1)return null;             // ce mot-la est un AUTRE mot
+    total+=1;
+    if(total>1)return null;                        // une seule faute dans tout le nom
+  }
+  if(total>0&&identiques===0)return null;          // aucun temoin : rien ne prouve rien
+  return total;
+}
 function trouverBoissonProche(nomLu, marqueLue){
   if(typeof DRINKS==="undefined"||!nomLu)return null;
-  var a=_motsNom(nomLu);
-  if(!a.length)return null;
   var mq=normTxt(marqueLue||"").trim();
-  var meilleur=null;
+  var avecMarque=[], sansMarque=[];
   DRINKS.forEach(function(d){
-    var b=_motsNom(d.name);
-    if(b.length!==a.length)return;              // un mot en plus ou en moins = autre produit
-    var total=0;
-    for(var i=0;i<a.length;i++){
-      var x=a[i],y=b[i];
-      if(x===y)continue;
-      var tol=Math.max(x.length,y.length)<=4?1:2;   // mot court : une seule faute toleree
-      var d1=levenshtein(x,y);
-      if(d1>tol)return;                         // ce mot-la est un AUTRE mot
-      total+=d1;
-    }
-    if(total===0)                               // egalite parfaite : on la prend
-      { meilleur={drink:d,distance:0}; return; }
-    if(total>2)return;                          // trop de corrections cumulees
-    /* La marque departage quand elle est connue : « Pales » lu sur une canette
-       Pales pese plus lourd qu'une ressemblance fortuite. */
-    var bonusMarque=(mq&&normTxt(d.brand||"").indexOf(mq)!==-1)?-0.5:0;
-    var score=total+bonusMarque;
-    if(!meilleur||score<meilleur.distance)meilleur={drink:d,distance:score};
+    var dm=normTxt(d.brand||"");
+    var marqueOk=!!(mq&&dm&&(dm.indexOf(mq)!==-1||mq.indexOf(dm)!==-1));
+    var lues=_formesNom(nomLu,marqueLue,marqueOk);
+    var refs=_formesNom(d.name,d.brand,marqueOk);
+    var best=null;
+    lues.forEach(function(a){ refs.forEach(function(b){
+      var e=_ecartMots(a,b);
+      if(e!==null&&(best===null||e<best))best=e;
+    });});
+    if(best===null)return;
+    (marqueOk?avecMarque:sansMarque).push({drink:d,distance:best});
   });
-  return meilleur;
+  /* Quand une marque a ete lue et qu'elle concorde avec au moins un candidat,
+     les autres ne sont plus des candidats du tout. */
+  var pool=(mq&&avecMarque.length)?avecMarque:avecMarque.concat(sansMarque);
+  if(!pool.length)return null;
+  pool.sort(function(a,b){ return (a.distance-b.distance)||(Number(a.drink.id)-Number(b.drink.id)); });
+  return pool[0];
 }
 
 /* Recherche tolerante : accents ignores, et 1 faute de frappe pardonnee
@@ -13699,6 +13782,14 @@ function openExploreMap(opts){
       clearTimeout(window._cityTimer);
       var q=_cq.value.trim();
       if(q.length<2){exploreCitySuggest();return;}
+      /* Les magasins d'abord, tout de suite : c'est local, ca ne coute rien.
+         Le geocodage de villes suit, apres la pause de frappe. */
+      /* Les magasins d'abord : c'est local et instantane. Si on en trouve, on
+         s'arrete la — inutile d'aller demander une ville a l'autre bout du
+         monde alors que la personne cherchait le night shop d'a cote. La
+         touche Entree lance toujours la recherche de lieu si elle la veut. */
+      var nbMag=0; try{ nbMag=exploreSuggereMagasins(q); }catch(e){}
+      if(nbMag)return;
       window._cityTimer=setTimeout(function(){exploreGoCity(true);},450);
     });
     // Champ vide : on propose les villes emblematiques (demo instantanee).
@@ -13850,6 +13941,7 @@ function exploreOpenSheetFull(){
   try{ setExploreSheet("max"); }catch(e){}
 }
 function closeExploreMap(){
+  if(window._choixMagasin){ window._choixMagasin=false; try{_majBandeauChoix();}catch(e){} }
   clearRoute();
   var host=document.getElementById("explore-map-host");
   if(!host)return;
@@ -14163,6 +14255,7 @@ function armerMenuPin(mk,s){
       }
       g.minuteur=setTimeout(function(){
         if(_geste!==g)return;
+        if(window._choixMagasin)return;   // on choisit un magasin : le tap suffit
         g.ouvert=true;
         window._pinMenuVientDeSOuvrir=true;
         ouvrirMenuPin(g.store,g.depart.x,g.depart.y);
@@ -14423,6 +14516,8 @@ function exploreLoadStores(useCache){
       mk.on("click",function(e){
         if(e&&e.originalEvent&&window.L&&L.DomEvent){try{L.DomEvent.stopPropagation(e.originalEvent);}catch(_e){}}
         if(window._pinMenuVientDeSOuvrir){window._pinMenuVientDeSOuvrir=false;return;} // l'appui long a deja agi
+        // Mode « choisir un magasin » : toucher un pin le designe, point.
+        if(window._choixMagasin){ choisirCeMagasin(s); return; }
         try{if(exploreMap.panTo)exploreMap.panTo([s.lat,s.lng]);}catch(_e){}
         // Clic sur un pin = tracer l'itineraire directement (le "traçage partout").
         showRouteToStore(s.lat,s.lng,s);
@@ -14484,6 +14579,52 @@ function exploreCloseCityPanel(){
   exploreAbortCity();
   var box=document.getElementById("explore-city-results");
   if(box)box.innerHTML="";
+}
+/* La barre ne cherchait que des VILLES. Taper « ararat » ne pouvait donc rien
+   donner, alors que le night shop est a deux rues. On propose desormais les
+   magasins deja charges AVANT d'interroger le service de geocodage : c'est
+   instantane, ca ne coute aucune requete, et c'est ce qu'on cherche neuf fois
+   sur dix. Les villes restent proposees en dessous. */
+function exploreSuggereMagasins(q){
+  var box=document.getElementById("explore-city-results");if(!box)return 0;
+  var nq=normTxt((q||"").trim());
+  if(nq.length<2)return 0;
+  var debut=[],dedans=[];
+  (STORES||[]).forEach(function(st){
+    if(typeof st.lat!=="number")return;
+    var nom=normTxt(st.name||""),marque=normTxt(st.brand||"");
+    if(nom.indexOf(nq)===0||marque.indexOf(nq)===0||nom.split(" ").some(function(m){return m.indexOf(nq)===0;}))debut.push(st);
+    else if((nom+" "+marque).indexOf(nq)!==-1)dedans.push(st);
+  });
+  var parDist=function(a,b){return (a.dist==null?9e9:a.dist)-(b.dist==null?9e9:b.dist);};
+  debut.sort(parDist);dedans.sort(parDist);
+  var hits=debut.concat(dedans).slice(0,6);
+  if(!hits.length)return 0;
+  var wrap=document.createElement("div");
+  wrap.style.cssText="background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);margin-bottom:8px";
+  wrap.innerHTML='<div style="font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--s3);padding:4px 6px 8px">Magasins</div>';
+  hits.forEach(function(st){
+    var row=document.createElement("div");
+    row.setAttribute("role","button");row.setAttribute("tabindex","0");
+    row.style.cssText="display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:12px;cursor:pointer;-webkit-tap-highlight-color:transparent";
+    row.innerHTML='<span style="flex:1;min-width:0">'+
+      '<span style="display:block;font-size:13.5px;font-weight:700;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(st.name||"Magasin")+'</span>'+
+      '<span style="display:block;font-size:11px;color:var(--s2)">'+sanitize(st.brand||"")+(st.dist!=null?(st.brand?" · ":"")+fmtDist(st.dist):"")+'</span></span>'+
+      '<span style="font-size:11px;font-weight:800;color:var(--s1)">'+(window._choixMagasin?"C\u2019est ici \u2192":"Voir \u2192")+'</span>';
+    row.onclick=function(){
+      box.innerHTML="";
+      var inp=document.getElementById("explore-city-q");if(inp){inp.value="";inp.blur();}
+      var clr=document.getElementById("explore-city-clear");if(clr)clr.style.display="none";
+      if(window._choixMagasin){ choisirCeMagasin(st); return; }
+      try{ exploreMap.setView([st.lat,st.lng],17); }catch(e){}
+      try{ showRouteToStore(st.lat,st.lng,st); }catch(e){}
+    };
+    row.onkeydown=function(ev){if(ev.key==="Enter")row.onclick();};
+    wrap.appendChild(row);
+  });
+  box.innerHTML="";
+  box.appendChild(wrap);
+  return hits.length;
 }
 function exploreCitySuggest(){
   var box=document.getElementById("explore-city-results");if(!box)return;
