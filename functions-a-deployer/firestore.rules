@@ -65,14 +65,47 @@ service cloud.firestore {
       // pouvait y toucher, il lui suffirait de remettre le champ a zero pour
       // annuler sa sanction : toute la mecanique anti-triche ne servirait plus
       // a rien. C'est LA ligne qui rend la sanction ineffacable.
+      // 'points' etait ABSENT de cette liste : n'importe qui pouvait ouvrir la
+      // console de son navigateur et s'ecrire 999 999 points. Le classement
+      // etait falsifiable sans effort. Desormais le score officiel n'est ecrit
+      // que par les Cloud Functions (Admin SDK, qui contourne ces regles), a
+      // partir des documents que les contributions laissent reellement.
+      //   points        le score officiel, calcule par le serveur
+      //   pointsHerites le solde fige a la bascule — personne ne perd rien
+      //   pointsPreuves ce que les contributions verifiables ont rapporte
+      //   pointsJour/.. le plafond quotidien anti-rafale
+      //   refPoints/..  le parrainage
+      //   refCode       le code court du parrain, attribue par le serveur
       allow update: if isSelf(uid)
         && !changed().hasAny(['emailDay','emailCount','emailStartDay','emailStartCount','emailTestDay','emailTestCount',
-                              'penalty','penaltyAt']);
+                              'penalty','penaltyAt',
+                              'points','pointsHerites','pointsPreuves','pointsJour','pointsJourTotal','pointsMaj',
+                              'refPoints','refCount','refAt','refCode']);
       allow delete: if isSelf(uid) || isAdmin();
       // Sous-collections éventuelles (favoris, etc.) : réservées au propriétaire
       match /{doc=**} {
         allow read, write: if isSelf(uid);
       }
+    }
+
+    // ── Annuaire « code court -> parrain ». Lecture ADMIN seulement : devenir
+    //    connecte prend une seconde et se fait tout seul, donc une lecture
+    //    ouverte aux connectes serait une lecture ouverte a tous — et
+    //    permettrait de remonter d'un code partage vers un profil.
+    //    C'est le serveur qui resout le code, jamais le client.
+    match /refCodes/{code} {
+      allow read: if isAdmin();
+      allow write: if false;          // cree par la Cloud Function monCodeParrain
+    }
+
+    // ── Parrainages. L'identifiant du document EST l'uid du filleul : il ne
+    //    peut donc etre parraine qu'une fois dans sa vie, par construction.
+    //    Le client n'ecrit RIEN ici : c'est la Cloud Function utiliserCodeParrain
+    //    qui cree l'intention, et le serveur seul qui la passe a « paid ».
+    //    Chacun peut lire la sienne, pour savoir ou il en est.
+    match /referrals/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow write: if false;
     }
 
     // ── Sanctions anti-farm : ecrites UNIQUEMENT par la Cloud Function
@@ -289,7 +322,14 @@ service cloud.firestore {
      * arme pour vider le compte d'un innocent. On exige desormais que l'auteur
      * soit celui qui ecrit, et on borne le reste. */
     match /reports/{id} {
-      allow read: if isAdmin();
+      // Chacun peut lire les SIENS : c'est ce qui permet au serveur comme a la
+      // personne de savoir ce qui a deja ete compte. Le reste reste admin.
+      allow read: if isAdmin() || (isSignedIn() && resource.data.by == request.auth.uid);
+      // 'counted', 'credited' et 'raison' sont poses par la Cloud Function
+      // (Admin SDK) : le client ne peut pas les ecrire, sinon il lui suffirait
+      // de marquer ses propres contributions comme deja payees... ou de les
+      // remettre a zero pour se faire recrediter en boucle.
+      allow update: if false;
       allow create: if isSignedIn()
         && request.resource.data.by == request.auth.uid
         && request.resource.data.keys().hasOnly(
