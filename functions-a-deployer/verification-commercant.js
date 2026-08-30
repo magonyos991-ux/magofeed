@@ -60,6 +60,14 @@ const STRIPE_WEBHOOK = defineSecret("STRIPE_WEBHOOK");
 /* Montant de la verification, en centimes. Un euro : assez pour qu'une vraie
    carte bancaire soit engagee, assez peu pour n'arreter aucun commercant
    honnete. Change-le ici si besoin, il n'est ecrit nulle part ailleurs. */
+/* ⚠️ LES FRAIS COMPTENT ENORMEMENT SUR UN PETIT MONTANT. Stripe prend une
+   commission fixe PLUS un pourcentage : sur 1 euro, la part fixe mange
+   l'essentiel, et il te reste environ 70 centimes. Ce n'est pas grave — ce
+   paiement n'est pas la pour gagner de l'argent, mais pour verifier une
+   identite, et 30 centimes est un prix derisoire pour ca. Sache seulement que
+   ce n'est PAS une source de revenus, et ne compte jamais dessus comme telle.
+   Les tarifs exacts sont sur stripe.com/be/pricing : verifie-les toi-meme
+   plutot que de me croire, ils changent. */
 const MONTANT_CENTIMES = 100;
 const APP_URL = "https://magonyos991-ux.github.io/magofeed/";
 
@@ -105,7 +113,13 @@ exports.ouvrirVerificationCommercant = onCall(
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
-      payment_method_types: ["card"],
+      /* PAS de payment_method_types en dur. En le fixant a « card », on
+         excluait Bancontact — le moyen de paiement que la plupart des Belges
+         utilisent vraiment, et que beaucoup de petits commercants ont a la
+         place d'une carte de credit. En l'omettant, Stripe propose ce qui est
+         active dans TON tableau de bord : tu ajoutes ou retires un moyen de
+         paiement sans jamais retoucher a ce fichier. Va l'activer dans
+         Stripe -> Reglages -> Moyens de paiement. */
       /* metadata : c'est ce que le webhook relira. Stripe nous le rend tel
          quel, signe — c'est le seul lien fiable entre le paiement et le
          compte, et il ne transite jamais par le navigateur. */
