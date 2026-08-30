@@ -69,6 +69,33 @@ const STRIPE_WEBHOOK = defineSecret("STRIPE_WEBHOOK");
    Les tarifs exacts sont sur stripe.com/be/pricing : verifie-les toi-meme
    plutot que de me croire, ils changent. */
 const MONTANT_CENTIMES = 100;
+
+/* ═════════════════════════════════════════════════════════════════════════
+   DEUX FACONS DE VERIFIER, ET LA DIFFERENCE EST ENORME POUR TOI.
+
+   "empreinte"  (par defaut) — RIEN N'EST ENCAISSE.
+       Le commercant entre sa carte, Stripe la valide aupres de sa banque, et
+       on n'encaisse pas un centime. On apprend que la carte est vraie et
+       qu'elle lui appartient : c'est exactement la preuve qu'on cherchait.
+       Aucun revenu, donc rien a declarer comme revenu, rien a facturer,
+       aucune TVA, aucun remboursement a gerer. Aucun frais Stripe non plus.
+       C'est le bon choix tant que l'app ne te fait pas vivre.
+
+   "paiement"   — on encaisse reellement le montant ci-dessus.
+       A choisir seulement le jour ou ce paiement a une raison d'exister
+       autrement que comme verification : par exemple s'il ouvre un service
+       qui, lui, se paie. Sinon tu prends de l'argent que tu ne veux pas,
+       avec la comptabilite qui va avec.
+
+   ⚠️ Passer de "empreinte" a "paiement" ne change PAS ta situation fiscale
+   par magie : un euro encaisse est un euro encaisse, qu'il dorme chez Stripe
+   ou qu'il soit vire sur ton compte. Laisser l'argent s'accumuler sur une
+   plateforme ne le rend ni invisible ni non imposable — les plateformes de
+   paiement declarent aux administrations fiscales europeennes. La seule facon
+   honnete de n'avoir rien a declarer, c'est de ne rien encaisser : c'est
+   precisement ce que fait "empreinte".
+   ═════════════════════════════════════════════════════════════════════════ */
+const MODE_VERIF = "empreinte";
 const APP_URL = "https://magonyos991-ux.github.io/magofeed/";
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -111,8 +138,11 @@ exports.ouvrirVerificationCommercant = onCall(
     const Stripe = require("stripe");
     const stripe = new Stripe(STRIPE_CLE.value());
 
+    const empreinte = MODE_VERIF === "empreinte";
     const session = await stripe.checkout.sessions.create({
-      mode: "payment",
+      /* "setup" : Stripe valide la carte aupres de la banque sans rien
+         prelever. "payment" : on encaisse. Voir MODE_VERIF plus haut. */
+      mode: empreinte ? "setup" : "payment",
       /* PAS de payment_method_types en dur. En le fixant a « card », on
          excluait Bancontact — le moyen de paiement que la plupart des Belges
          utilisent vraiment, et que beaucoup de petits commercants ont a la
@@ -125,17 +155,21 @@ exports.ouvrirVerificationCommercant = onCall(
          compte, et il ne transite jamais par le navigateur. */
       metadata: { uid: uid, storeId: storeId },
       client_reference_id: uid,
-      line_items: [{
-        quantity: 1,
-        price_data: {
-          currency: "eur",
-          unit_amount: MONTANT_CENTIMES,
-          product_data: {
-            name: "Verification de commercant - " + String(magasin.name || "ma boutique").slice(0, 60),
-            description: "Confirme que tu tiens bien ce commerce. Le compte commercant est gratuit."
+      /* En mode empreinte il n'y a pas de ligne a facturer : il n'y a pas
+         d'achat. Stripe demande juste la carte et la valide. */
+      ...(empreinte ? { currency: "eur" } : {
+        line_items: [{
+          quantity: 1,
+          price_data: {
+            currency: "eur",
+            unit_amount: MONTANT_CENTIMES,
+            product_data: {
+              name: "Verification de commercant - " + String(magasin.name || "ma boutique").slice(0, 60),
+              description: "Confirme que tu tiens bien ce commerce. Le compte commercant est gratuit."
+            }
           }
-        }
-      }],
+        }]
+      }),
       success_url: APP_URL + "?verif=ok",
       cancel_url: APP_URL + "?verif=annule"
     });
@@ -145,8 +179,9 @@ exports.ouvrirVerificationCommercant = onCall(
        aucune. */
     try {
       await db.collection("verifications").doc(session.id).set({
-        uid: uid, storeId: storeId, etat: "ouverte",
-        montant: MONTANT_CENTIMES, quand: FieldValue.serverTimestamp()
+        uid: uid, storeId: storeId, etat: "ouverte", voie: MODE_VERIF,
+        montant: empreinte ? 0 : MONTANT_CENTIMES,
+        quand: FieldValue.serverTimestamp()
       });
     } catch (e) { console.warn("trace verification:", e && e.message); }
 
@@ -192,7 +227,15 @@ exports.stripeWebhook = onRequest(
       res.status(200).send("metadonnees absentes");
       return;
     }
-    if (session.payment_status !== "paid") {
+    /* Deux formes de reussite, selon MODE_VERIF :
+       - mode "setup"   : Stripe a valide la carte, rien n'a ete preleve. La
+                          preuve, c'est l'existence du setup_intent.
+       - mode "payment" : il faut que ce soit reellement paye.
+       Le mode est celui de la session, pas une valeur que le client choisit. */
+    const parEmpreinte = session.mode === "setup";
+    if (parEmpreinte) {
+      if (!session.setup_intent) { res.status(200).send("carte non validee"); return; }
+    } else if (session.payment_status !== "paid") {
       res.status(200).send("non paye");
       return;
     }
@@ -207,7 +250,8 @@ exports.stripeWebhook = onRequest(
       if (s.exists && (s.data() || {}).etat === "payee") return true;
       t.set(ref, {
         uid: uid, storeId: storeId, etat: "payee",
-        montant: session.amount_total || MONTANT_CENTIMES,
+        voie: parEmpreinte ? "empreinte" : "paiement",
+        montant: parEmpreinte ? 0 : (session.amount_total || MONTANT_CENTIMES),
         payeLe: FieldValue.serverTimestamp()
       }, { merge: true });
       return false;
@@ -222,11 +266,15 @@ exports.stripeWebhook = onRequest(
         return;
       }
       if ((snap.data() || {}).certified === true) {
-        /* Quelqu'un d'autre a ete certifie entre-temps. On ne recouvre pas :
-           on le note pour pouvoir rembourser. */
-        await ref.set({ etat: "a-rembourser", raison: "deja-certifie" }, { merge: true });
-        console.warn("a rembourser (deja certifie):", session.id);
-        res.status(200).send("a rembourser");
+        /* Quelqu'un d'autre a ete certifie entre-temps. On ne recouvre jamais
+           le gerant en place. En mode empreinte il n'y a rien a rembourser
+           (rien n'a ete preleve) ; en mode paiement, si. */
+        await ref.set({
+          etat: parEmpreinte ? "sans-suite" : "a-rembourser",
+          raison: "deja-certifie"
+        }, { merge: true });
+        console.warn("verification sans suite (deja certifie):", session.id);
+        res.status(200).send("sans suite");
         return;
       }
 
@@ -243,7 +291,8 @@ exports.stripeWebhook = onRequest(
       }, { merge: true });
       await db.collection("shopClaims").doc(storeId).set({
         storeId: storeId, by: uid, status: "approved",
-        voie: "paiement", decidedAt: FieldValue.serverTimestamp()
+        voie: parEmpreinte ? "carte verifiee" : "paiement",
+        decidedAt: FieldValue.serverTimestamp()
       }, { merge: true });
 
       console.log("commercant verifie par paiement:", uid, storeId);

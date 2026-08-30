@@ -1,5 +1,18 @@
 # Où va l'argent, et comment on s'y prend
 
+> **Mise à jour importante — par défaut, il n'y a PAS d'argent.**
+> La vérification se fait maintenant par **empreinte de carte** : le commerçant
+> entre sa carte, sa banque confirme qu'elle est bien à lui, et **rien n'est
+> prélevé**. Zéro euro encaissé, donc zéro revenu, zéro TVA, zéro
+> remboursement à gérer, et zéro commission Stripe. Tu obtiens la même preuve
+> d'identité sans jamais toucher à de l'argent.
+> Tout ce qui suit ne te concerne que le jour où tu voudras vraiment encaisser
+> quelque chose. Une seule constante à changer dans le fichier
+> `verification-commercant.js` : `MODE_VERIF`.
+
+---
+
+
 Rien de ce qui suit n'est urgent. Tant que tu n'as pas de numéro d'entreprise,
 la certification manuelle marche et l'app tourne. Ce fichier est là pour le
 jour où tu voudras t'y mettre.
@@ -120,6 +133,33 @@ poser tes deux clés Stripe, déployer deux fonctions, brancher le webhook, et
 passer **une seule ligne** de `false` à `true` dans l'app.
 
 ---
+
+## 3 bis. « Est-ce que je peux laisser l'argent quelque part et me le virer moi-même ? »
+
+Oui, techniquement. Stripe lui-même le fait : tu peux passer les virements en
+manuel et l'argent reste sur ton solde Stripe jusqu'à ce que tu le réclames.
+PayPal, Payoneer, Revolut Business font pareil. Ça existe, c'est légitime, et
+ça sert quand on veut regrouper les virements pour payer moins de frais.
+
+**Mais ça ne fait pas ce que tu espères.** Un euro encaissé est un euro
+encaissé, qu'il dorme chez Stripe ou qu'il soit sur ton compte belge. Le laisser
+sur la plateforme ne le rend ni invisible ni non imposable : les plateformes de
+paiement européennes déclarent aux administrations fiscales. C'est leur
+obligation, pas une option. Tu ne gagnerais rien et tu prendrais un vrai risque
+pour quelques dizaines de centimes.
+
+**La bonne réponse à ton inquiétude, c'est de ne rien encaisser du tout.**
+C'est exactement ce que fait le mode « empreinte » : la carte est vérifiée,
+rien n'est prélevé, il n'y a aucun revenu — donc rien à déclarer, parce qu'il
+n'y a rien.
+
+Et le jour où l'app te rapportera vraiment, tu ne voudras plus cacher quoi que
+ce soit : tu voudras une structure propre, parce que c'est elle qui te permet
+de déduire tes frais, de facturer des marques, et de dormir tranquille.
+
+Le seul point à ne pas oublier : **même sans encaisser un centime, ouvrir un
+compte Stripe pour une activité demande un numéro d'entreprise.** Le mode
+empreinte t'évite la fiscalité, pas l'inscription.
 
 ## 4. Comment on essaie d'arnaquer les gens là-dessus
 
