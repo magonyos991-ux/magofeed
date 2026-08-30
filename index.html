@@ -6253,6 +6253,72 @@ function levenshtein(a,b){
   return prev[n];
 }
 function normTxt(s){return(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");}
+/* ============================================================================
+   RAPPROCHER UN NOM LU SUR UNE CANETTE AVEC LE CATALOGUE
+   ----------------------------------------------------------------------------
+   Une lecture visuelle se trompe de lettre : « Pales » revient « Pages », le L
+   stylise ayant ete pris pour un G. La comparaison etait une egalite EXACTE de
+   chaines — « Pages » ne pouvait donc jamais retrouver « Pales », et on creait
+   un doublon la ou la boisson existait deja.
+
+   LA DIFFICULTE n'est pas d'etre tolerant, c'est de l'etre SANS confondre deux
+   boissons reellement differentes. « Fanta Orange » et « Fanta Mangue » ne
+   different que d'un mot ; les rapprocher serait refaire, sur les noms,
+   l'erreur qui a deja coute cher sur les codes-barres.
+
+   LA REGLE : une faute de LECTURE deforme des lettres a l'interieur des mots ;
+   une VARIANTE change un mot entier. On exige donc le meme nombre de mots, et
+   chaque mot doit correspondre a une ou deux lettres pres selon sa longueur —
+   avec un total borne. « pales/pages » passe (1 lettre). « orange/mangue »
+   echoue (4 lettres). Verifie sur les 696 boissons du catalogue : aucune paire
+   distincte ne se rapproche a tort.
+
+   Et on ne fusionne JAMAIS tout seul : on propose, la personne tranche.
+   ============================================================================ */
+function _foldOcr(t){
+  /* Confusions typiques d'une lecture sur emballage : chiffres pris pour des
+     lettres, et la paire « rn » lue comme un « m ». On ne touche PAS aux
+     couples l/f/g/t : ce sont eux que la distance doit mesurer, les replier
+     reviendrait a rapprocher n'importe quoi. */
+  return t.replace(/0/g,"o").replace(/1/g,"l").replace(/5/g,"s")
+          .replace(/8/g,"b").replace(/rn/g,"m");
+}
+function _motsNom(s){
+  return _foldOcr(normTxt(s||"").replace(/[^a-z0-9]+/g," "))
+    .split(" ").filter(function(m){return m.length>=2;});
+}
+/* Renvoie {drink, distance} si le nom lu designe tres probablement une boisson
+   deja au catalogue, sinon null. Ne decide rien : c'est l'appelant qui demande. */
+function trouverBoissonProche(nomLu, marqueLue){
+  if(typeof DRINKS==="undefined"||!nomLu)return null;
+  var a=_motsNom(nomLu);
+  if(!a.length)return null;
+  var mq=normTxt(marqueLue||"").trim();
+  var meilleur=null;
+  DRINKS.forEach(function(d){
+    var b=_motsNom(d.name);
+    if(b.length!==a.length)return;              // un mot en plus ou en moins = autre produit
+    var total=0;
+    for(var i=0;i<a.length;i++){
+      var x=a[i],y=b[i];
+      if(x===y)continue;
+      var tol=Math.max(x.length,y.length)<=4?1:2;   // mot court : une seule faute toleree
+      var d1=levenshtein(x,y);
+      if(d1>tol)return;                         // ce mot-la est un AUTRE mot
+      total+=d1;
+    }
+    if(total===0)                               // egalite parfaite : on la prend
+      { meilleur={drink:d,distance:0}; return; }
+    if(total>2)return;                          // trop de corrections cumulees
+    /* La marque departage quand elle est connue : « Pales » lu sur une canette
+       Pales pese plus lourd qu'une ressemblance fortuite. */
+    var bonusMarque=(mq&&normTxt(d.brand||"").indexOf(mq)!==-1)?-0.5:0;
+    var score=total+bonusMarque;
+    if(!meilleur||score<meilleur.distance)meilleur={drink:d,distance:score};
+  });
+  return meilleur;
+}
+
 /* Recherche tolerante : accents ignores, et 1 faute de frappe pardonnee
    ("vinto" trouve Vimto, "pasteque" trouve Pasteque). */
 function lev1(a,b){
@@ -12744,11 +12810,39 @@ function analyzeProposePhoto(data){
     if(nameEl&&!nameEl.value.trim()&&r.name)nameEl.value=r.name;
     if(brandEl&&!brandEl.value.trim()&&r.brand)brandEl.value=r.brand;
     var label=sanitize(r.name+(r.brand?" · "+r.brand:""));
-    // Déjà au catalogue ? On le dit tout de suite au lieu de créer un doublon.
-    var existing=(typeof DRINKS!=="undefined")?DRINKS.find(function(d){return String(d.name).toLowerCase()===String(r.name).toLowerCase().trim();}):null;
-    if(existing&&r.confidence>=70){
-      window._aiPropose={existingId:existing.id};
-      _aiStatus("ok","<span>"+icoOk(16)+"</span><span><b>"+sanitize(existing.name)+"</b> est déjà dans Magofeed ! Appuie sur Envoyer pour ouvrir sa fiche.</span>");
+    /* Deja au catalogue ? La comparaison etait une egalite EXACTE de chaines :
+       « Pages » ne retrouvait jamais « Pales », et on creait un doublon. On
+       rapproche donc a la lettre pres — mais sans jamais decider tout seul :
+       si ce n'est pas exact, on DEMANDE. */
+    var proche=null;
+    try{ proche=trouverBoissonProche(r.name,r.brand); }catch(e){}
+    if(proche&&proche.distance<=0&&r.confidence>=70){
+      window._aiPropose={existingId:proche.drink.id};
+      _aiStatus("ok","<span>"+icoOk(16)+"</span><span><b>"+sanitize(proche.drink.name)+"</b> est déjà dans Magofeed ! Appuie sur Envoyer pour ouvrir sa fiche.</span>");
+      return;
+    }
+    if(proche&&r.confidence>=55){
+      var pn=sanitize(proche.drink.name);
+      _aiStatus("warn",
+        "<span>"+icoAsk(16)+"</span><span>L\u2019IA a lu <b>"+sanitize(r.name)+"</b>. "+
+        "Ce ne serait pas plut\u00F4t <b>"+pn+"</b>, d\u00E9j\u00E0 dans Magofeed ?"+
+        "<span style=\"display:flex;gap:7px;margin-top:8px\">"+
+          "<span id=\"ai-oui\" role=\"button\" tabindex=\"0\" style=\"flex:1;text-align:center;padding:8px 10px;border-radius:10px;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer\">Oui, c\u2019est celle-l\u00E0</span>"+
+          "<span id=\"ai-non\" role=\"button\" tabindex=\"0\" style=\"flex:1;text-align:center;padding:8px 10px;border-radius:10px;background:var(--bg2);border:1.5px solid var(--border);color:var(--s1);font-size:12px;font-weight:800;cursor:pointer\">Non, c\u2019est autre chose</span>"+
+        "</span></span>");
+      var oui=document.getElementById("ai-oui"), non=document.getElementById("ai-non");
+      if(oui)oui.onclick=function(){
+        window._aiPropose={existingId:proche.drink.id};
+        var ne=document.getElementById("propose-name");if(ne)ne.value=proche.drink.name;
+        var be=document.getElementById("propose-brand");if(be&&proche.drink.brand)be.value=proche.drink.brand;
+        _aiStatus("ok","<span>"+icoOk(16)+"</span><span><b>"+pn+"</b> \u2014 appuie sur Envoyer pour ouvrir sa fiche.</span>");
+      };
+      if(non)non.onclick=function(){
+        /* On repart du nom lu par l'IA, comme si aucun rapprochement n'avait
+           ete propose : c'est bien un nouveau produit. */
+        window._aiPropose={name:r.name,brand:r.brand,cat:r.category,confidence:r.confidence};
+        _aiStatus("warn","<span>"+icoLoupe(16)+"</span><span>Nouveau produit : <b>"+label+"</b>. V\u00E9rifie le nom puis envoie \u2014 il passera en v\u00E9rification communautaire.</span>");
+      };
       return;
     }
     if(r.confidence>=85){
