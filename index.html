@@ -431,6 +431,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <span style="display:flex;color:#fff"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></span>
         <div style="flex:1;min-width:0">
           <div style="font-size:13.5px;font-weight:800;color:#fff">Inviter un ami</div>
+          <div id="parrainage-info" style="display:none;font-size:11px;font-weight:600;color:rgba(255,255,255,.82);margin-top:3px"></div>
           <div style="font-size:11.5px;font-weight:600;color:#bbf7d0;margin-top:1px">Partage Magofeed — plus on est, plus on trouve</div>
         </div>
         <span style="font-size:16px;color:#bbf7d0">›</span>
@@ -1149,11 +1150,15 @@ window.fbSyncUserStats = function(stats) {
     try { av = JSON.parse(localStorage.getItem("magoAvatar") || "null"); } catch(e) {}
     var favIds = [];
     try { favIds = (JSON.parse(localStorage.getItem("magofavs") || "[]") || []).slice(0, 10); } catch(e) {}
+    /* `points` n'est PLUS ecrit ici. La regle Firestore le refuse desormais,
+       et si on l'envoyait quand meme, c'est le document ENTIER qui serait
+       rejete : le pseudo, l'avatar et les favoris cesseraient de se
+       synchroniser avec lui. Le score officiel est calcule par le serveur a
+       partir des contributions reellement enregistrees. */
     setDoc(userDocRef(user.uid), {
       pseudo: String(localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
       avatar: av,
       favs: favIds,
-      points: stats.pts || 0,
       signals: stats.signals || 0,
       confirms: stats.confirms || 0,
       discAccepted: stats.discAccepted || 0,
@@ -1162,6 +1167,41 @@ window.fbSyncUserStats = function(stats) {
       updatedAt: serverTimestamp()
     }, { merge: true }).catch(function(e) { console.warn("Firestore stats sync error:", e); });
   }, 800);
+};
+
+/* Lit le score OFFICIEL, celui que le serveur a calcule, et le fait adopter par
+   l'application. C'est la seule source de verite : le compteur local sert a
+   l'encouragement immediat, celui-ci fait foi.
+   Appele au demarrage, et quelques secondes apres une contribution — le temps
+   que la fonction serveur ait vu passer le document. */
+window.fbLoadMyScore = async function() {
+  try {
+    var user = auth.currentUser; if (!user) return null;
+    var snap = await getDoc(userDocRef(user.uid));
+    if (!snap.exists()) return null;
+    var d = snap.data() || {};
+    if (typeof d.points !== "number") return null;    // bascule pas encore faite
+    return { points: d.points, refCode: d.refCode || null, refCount: d.refCount || 0 };
+  } catch (e) { console.warn("Lecture du score :", e); return null; }
+};
+/* Le code de parrainage et son usage passent par des fonctions serveur : le
+   client ne connait jamais l'identifiant du parrain, seulement un code court. */
+window.fbMonCodeParrain = async function() {
+  await ensureAuthed();
+  var f = httpsCallable(getFunctions(app, "europe-west1"), "monCodeParrain");
+  return (await f({})).data;
+};
+window.fbUtiliserCodeParrain = async function(code) {
+  await ensureAuthed();
+  var f = httpsCallable(getFunctions(app, "europe-west1"), "utiliserCodeParrain");
+  return (await f({ code: code })).data;
+};
+window.fbMonParrainage = async function() {
+  try {
+    var user = auth.currentUser; if (!user) return null;
+    var snap = await getDoc(doc(db, "referrals", user.uid));
+    return snap.exists() ? snap.data() : null;
+  } catch (e) { return null; }
 };
 
 /* Apres liaison Google : on note l'email dans users/{uid}. C'est l'apparition de
@@ -4261,7 +4301,7 @@ function show(s){
   _showRaw(s);
 }
 function _showRaw(s){
-  if(s==="profile"){try{updateProfileStats();}catch(e){}}
+  if(s==="profile"){try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
   if(s==="settings"){try{renderGeoRow();}catch(e){}}
   if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{renderHunts();}catch(e){}
@@ -5040,6 +5080,23 @@ function renderRewards(){
     '<div style="font-size:11px;line-height:1.5;color:#9a6a2a;margin-top:8px">On te promet une seule chose : <b>rien de faux</b>. Aucune récompense ne sera annoncée tant qu\'elle n\'existe pas vraiment. Tes points, eux, sont déjà en train de s\'accumuler.</div>'+
   '</div>';
   host.innerHTML=h;
+}
+/* Le score officiel, celui que le serveur a calcule, remplace le compteur
+   local des qu'on le connait. Le compteur local reste utile — il donne le
+   retour immediat quand on contribue — mais c'est le serveur qui fait foi.
+   Consequence assumee : les recompenses qui ne laissent aucune trace (serie de
+   jours, missions, note d'une boisson) ne pesent plus au classement. Elles
+   n'etaient verifiables par personne. */
+function adopterScoreServeur(){
+  if(!window.fbLoadMyScore)return;
+  window.fbLoadMyScore().then(function(d){
+    if(!d||typeof d.points!=="number")return;    // bascule serveur pas encore faite
+    if(d.points===userStats.pts)return;
+    /* userStats n'est pas persiste localement : il vit en memoire et dans
+       Firestore. Adopter la valeur du serveur suffit donc. */
+    userStats.pts=d.points;
+    try{updateProfileStats();}catch(e){}
+  }).catch(function(){});
 }
 function updateProfileStats(){
   try{checkBadges();}catch(e){}
@@ -7610,15 +7667,75 @@ function renderNearby(){
 }
 /* \u2500\u2500 Inviter un ami : LE levier viral. Partage natif du telephone si dispo,
    sinon copie du lien. Message tout pret pour donner envie de cliquer. */
+/* Le lien porte maintenant un CODE COURT, pas l'identifiant du parrain : le
+   document users/{uid} est lisible par tout le monde — c'est ce qui fait
+   marcher le classement — donc un identifiant colle dans un groupe WhatsApp
+   serait une cle de lecture permanente vers le profil. Un code se revoque.
+   Le serveur seul sait a qui il appartient. */
+var MAGO_URL="https://magonyos991-ux.github.io/magofeed/";
 function inviteFriend(){
-  var url="https://magonyos991-ux.github.io/magofeed/";
-  var text="Tu cherches une boisson rare pres de chez toi ? Avec Magofeed tu vois direct ou l'acheter. C'est gratuit :";
   try{playSound("pop");}catch(e){}
+  if(!window.fbMonCodeParrain){ partagerLien(MAGO_URL); return; }
+  toast("Pr\u00e9paration de ton lien\u2026");
+  window.fbMonCodeParrain().then(function(r){
+    var code=r&&r.code;
+    partagerLien(code?(MAGO_URL+"#p="+code):MAGO_URL, code);
+    try{ majBlocParrainage(); }catch(e){}
+  }).catch(function(e){
+    console.warn("Code de parrainage :",e);
+    // Sans compte ou sans fonction deployee : on partage quand meme, sans code.
+    partagerLien(MAGO_URL);
+  });
+}
+function partagerLien(url,code){
+  var texte=code
+    ? "Tu cherches une boisson rare pr\u00e8s de chez toi ? Avec Magofeed tu vois direct o\u00f9 l'acheter. Utilise mon code "+code+" \u2014 on gagne des points tous les deux :"
+    : "Tu cherches une boisson rare pr\u00e8s de chez toi ? Avec Magofeed tu vois direct o\u00f9 l'acheter. C'est gratuit :";
   if(navigator.share){
-    navigator.share({title:"Magofeed",text:text,url:url}).catch(function(){});
+    navigator.share({title:"Magofeed",text:texte,url:url}).catch(function(){});
   }else if(navigator.clipboard&&navigator.clipboard.writeText){
-    navigator.clipboard.writeText(text+" "+url).then(function(){toast("Lien copie \u2014 colle-le ou tu veux !");}).catch(function(){prompt("Copie ce lien :",url);});
+    navigator.clipboard.writeText(texte+" "+url).then(function(){toast("Lien copi\u00e9 \u2014 colle-le o\u00f9 tu veux !");}).catch(function(){prompt("Copie ce lien :",url);});
   }else{ prompt("Copie ce lien :",url); }
+}
+/* Quelqu'un arrive par un lien de parrainage : on retient le code et on le
+   declare des qu'une identite existe. On ne PAIE rien ici — le paiement vient
+   plus tard, quand la personne aura reellement contribue. Payer l'arrivee
+   reviendrait a installer une imprimante a points : ouvrir une navigation
+   privee ne coute rien. */
+function capterCodeParrain(){
+  var m=/[#&?]p=([0-9A-Za-z]{4,8})/.exec(location.hash||location.search||"");
+  if(m){ try{ localStorage.setItem("magoParrainCode",m[1].toUpperCase()); }catch(e){} }
+  var code=null; try{ code=localStorage.getItem("magoParrainCode"); }catch(e){}
+  if(!code||!window.fbUtiliserCodeParrain)return;
+  var fait=null; try{ fait=localStorage.getItem("magoParrainFait"); }catch(e){}
+  if(fait)return;
+  window.fbUtiliserCodeParrain(code).then(function(r){
+    try{ localStorage.setItem("magoParrainFait","1"); }catch(e){}
+    toast("Code accept\u00e9 ! Contribue un peu et vous gagnez tous les deux des points.");
+    try{ majBlocParrainage(); }catch(e){}
+  }).catch(function(e){
+    var c=(e&&e.code)||"";
+    // « deja utilise » ou « ton propre code » : inutile de reessayer a chaque
+    // ouverture, on classe l'affaire.
+    if(/already-exists|failed-precondition|not-found/.test(c)){
+      try{ localStorage.setItem("magoParrainFait","1"); }catch(e2){}
+      if(/not-found/.test(c))toast("Ce code de parrainage n'existe pas");
+    }
+  });
+}
+/* Le bloc « Inviter un ami » du profil : il montre le code, le nombre de
+   filleuls deja recompenses, et dit franchement QUAND la recompense tombe. */
+function majBlocParrainage(){
+  var el=document.getElementById("parrainage-info");
+  if(!el||!window.fbLoadMyScore)return;
+  window.fbLoadMyScore().then(function(d){
+    if(!d)return;
+    var bouts=[];
+    if(d.refCode)bouts.push("Ton code : <b>"+sanitize(d.refCode)+"</b>");
+    if(d.refCount)bouts.push(d.refCount+" filleul"+(d.refCount>1?"s":"")+" r\u00e9compens\u00e9"+(d.refCount>1?"s":""));
+    el.innerHTML=bouts.length?bouts.join(" \u00b7 "):"";
+    el.style.display=bouts.length?"block":"none";
+  }).catch(function(){});
 }
 /* \u2500\u2500 Pastille MISSIONS flottante et deplacable \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
    Acces permanent aux missions/chasses depuis n'importe quel ecran. Badge =
@@ -18475,6 +18592,11 @@ function registerServiceWorker(){
     try{reg.update();}catch(e){}
   }).catch(function(e){console.warn("SW registration failed:",e);});
   setTimeout(function(){try{handleDeepLink();}catch(e){}},400);
+  /* Un lien de parrainage a pu amener ici : on retient le code et on le
+     declare des qu'une identite existe. On ne paie rien maintenant — le
+     paiement viendra quand la personne aura reellement contribue. */
+  setTimeout(function(){try{capterCodeParrain();}catch(e){}},2600);
+  setTimeout(function(){try{adopterScoreServeur();}catch(e){}},3600);
   // (showOnboarding retire : il doublonnait l'intro #onboarding — un seul
   //  systeme d'accueil desormais : l'intro 4 ecrans + les bulles par onglet.)
 }
@@ -18747,7 +18869,14 @@ try{
   // Compte + points persistants Firebase
   window.addEventListener("fbUserStatsLoaded", function(e) {
     var d=e.detail||{};
-    userStats.pts=Math.max(userStats.pts,d.points||0);
+    /* Le score vient du SERVEUR et de lui seul : les regles Firestore
+       interdisent desormais au client de l'ecrire. On l'adopte tel quel, sans
+       Math.max — exactement comme penalty juste en dessous, et pour la meme
+       raison : un score qui ne peut que monter n'est plus un score. Il doit
+       pouvoir baisser quand une sanction tombe ou qu'une contribution est
+       annulee. Le repli sur la valeur locale ne sert que le temps que la
+       bascule serveur soit faite. */
+    userStats.pts=(typeof d.points==="number")?d.points:userStats.pts;
     userStats.signals=Math.max(userStats.signals,d.signals||0);
     userStats.confirms=Math.max(userStats.confirms,d.confirms||0);
     userStats.discAccepted=Math.max(userStats.discAccepted||0,d.discAccepted||0);
