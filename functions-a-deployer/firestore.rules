@@ -595,10 +595,28 @@ service cloud.firestore {
     //    incrémente. ⚠️ Donc gonflable par quelqu'un de déterminé, comme les
     //    points. Sans conséquence tant que le chiffre est indicatif ; à passer
     //    en Cloud Function le jour où il justifie une facture.
+    /* FICHE COMMERCANT PRIVEE. merchants/{uid} liste les boutiques qu'une
+       personne tient. Elle seule (et l'administrateur) peut la lire, et seul
+       l'administrateur peut l'ecrire — c'est lui qui approuve une demande.
+       Elle remplace le champ public stores/{id}.owner, qui reliait une
+       boutique certifiee au profil personnel de son gerant : les magasins sont
+       publics en lecture, les profils aussi, deux requetes suffisaient. */
+    match /merchants/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow write: if isAdmin();
+    }
+
     match /stores/{storeId}/stats/{jour} {
+      /* On accepte les deux : la fiche privee (nouveau), et l'ancien champ
+         public pour les magasins certifies avant le changement, qui ne doivent
+         pas perdre leur tableau de bord du jour au lendemain. */
       allow read: if isAdmin()
         || (isSignedIn()
-            && get(/databases/$(database)/documents/stores/$(storeId)).data.owner == request.auth.uid);
+            && (
+              (exists(/databases/$(database)/documents/merchants/$(request.auth.uid))
+               && get(/databases/$(database)/documents/merchants/$(request.auth.uid)).data.stores.hasAny([storeId]))
+              || get(/databases/$(database)/documents/stores/$(storeId)).data.owner == request.auth.uid
+            ));
       allow create, update: if isSignedIn();
       allow delete: if isAdmin();
     }

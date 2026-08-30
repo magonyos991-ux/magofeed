@@ -1229,6 +1229,9 @@ onAuthStateChanged(auth, async function(user) {
     return;
   }
   window._fbUser = user;
+  /* Mes boutiques certifiees : lecture unique, dans un document prive. Elle
+     remplace l'ancien champ public 'owner'. Un compte anonyme n'en a jamais. */
+  try { if (!user.isAnonymous && window.chargerMesMagasins) window.chargerMesMagasins(); } catch (e) {}
   /* Session perdue ? On garde en memoire le dernier vrai compte connecte.
      Si on se reveille en anonyme alors qu'un compte existait, ce n'est pas
      normal : le stockage a ete purge. On le DIT au lieu de laisser la
@@ -2380,6 +2383,27 @@ window.fbAddFormatSuggestion = async function(drinkId, drinkName, barcode, fmt) 
    Un document par magasin (id = storeId) : deux personnes ne peuvent pas
    revendiquer la meme boutique en parallele, et une demande refusee garde sa
    trace. Le telephone n'est lisible QUE par l'administrateur (regles). */
+/* LE LIEN BOUTIQUE <-> GERANT SORT DU DOCUMENT PUBLIC.
+   Le champ stores/{id}.owner contenait l'identifiant du gerant certifie. Or
+   les magasins sont publics en lecture, et les profils aussi : en deux
+   requetes, sans compte, on reliait une boutique certifiee au profil personnel
+   de celui qui la tient — pseudo, boissons preferees, derniere activite.
+   Ce lien vit desormais dans merchants/{uid}, que seul son proprietaire (et
+   l'administrateur) peut lire. Le document public du magasin ne dit plus QUI
+   le tient, seulement qu'il est tenu.
+   L'ancien champ 'owner' reste LU en secours, pour que les magasins certifies
+   avant ce changement ne perdent pas leur tableau de bord — mais il n'est plus
+   jamais ecrit. */
+window.fbMesMagasins = async function() {
+  var u = auth.currentUser;
+  if (!u || u.isAnonymous) return [];
+  try {
+    var snap = await getDoc(doc(db, "merchants", u.uid));
+    if (!snap.exists()) return [];
+    var d = snap.data() || {};
+    return Array.isArray(d.stores) ? d.stores.map(String) : [];
+  } catch (e) { return []; }
+};
 window.fbSubmitShopClaim = async function(store, infos) {
   var user = await ensureAuthed();
   if (!store) throw new Error("magasin inconnu");
@@ -2476,11 +2500,18 @@ window.fbApproveShopClaim = async function(claim) {
      deux demandes pouvaient le pointer sur le meme magasin, et l'admin qui
      approuvait la carte du vrai commercant executait celle de l'autre. */
   var sid = String(claim.docId || claim.storeId);
+  /* On n'ecrit plus 'owner' dans le document public : il liait la boutique au
+     profil personnel de son gerant, tous deux lisibles par n'importe qui. */
   await setDoc(doc(db, "stores", sid), {
     certified: true,
-    certifiedAt: serverTimestamp(),
-    owner: claim.by || null
+    certifiedAt: serverTimestamp()
   }, { merge: true });
+  if (claim.by) {
+    await setDoc(doc(db, "merchants", String(claim.by)), {
+      stores: arrayUnion(sid),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  }
   await setDoc(doc(db, "shopClaims", sid), {
     status: "approved",
     decidedAt: serverTimestamp()
@@ -2522,11 +2553,32 @@ window.fbRejectShopClaim = async function(claim, reason) {
 /* Retirer une certification : une boutique qui ferme, change de main, ou
    annonce n'importe quoi. Sans ce bouton, une erreur serait definitive. */
 window.fbRevokeCertification = async function(storeId) {
-  await setDoc(doc(db, "stores", String(storeId)), {
+  var sid = String(storeId);
+  /* Qui tenait cette boutique ? On le lit AVANT d'effacer, sinon on ne saurait
+     plus de quelle fiche privee la retirer. Deux sources : l'ancien champ
+     public (magasins certifies avant le changement) et la demande. */
+  var ancienGerant = null;
+  try {
+    var snapS = await getDoc(doc(db, "stores", sid));
+    if (snapS.exists()) ancienGerant = (snapS.data() || {}).owner || null;
+    if (!ancienGerant) {
+      var snapC = await getDoc(doc(db, "shopClaims", sid));
+      if (snapC.exists()) ancienGerant = (snapC.data() || {}).by || null;
+    }
+  } catch (e) {}
+  await setDoc(doc(db, "stores", sid), {
     certified: false,
     certifiedAt: null,
-    owner: null
+    owner: deleteField()
   }, { merge: true });
+  if (ancienGerant) {
+    try {
+      await setDoc(doc(db, "merchants", String(ancienGerant)), {
+        stores: arrayRemove(sid),
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (e) { console.warn("retrait fiche commercant:", e); }
+  }
   /* On EFFACE la demande au lieu de la marquer « retiree ». La laisser en
      place condamnait le magasin : plus personne ne pouvait en redeposer une,
      alors qu'une boutique qui change de main doit pouvoir etre revendiquee.
@@ -11755,10 +11807,33 @@ function isMyShop(id){ return myShops().indexOf(String(id))!==-1; }
    l'administrateur, interdit au client par les regles.
    On garde le marquage local comme raccourci de travail (marquer ses boutiques
    avant d'etre certifie), mais il ne donne PLUS acces au tableau de bord. */
+/* MES BOUTIQUES. La liste vient de merchants/{uid}, un document que je suis
+   seul a pouvoir lire — le document public du magasin ne dit plus qui le
+   tient. On la charge une fois a la connexion et on la garde en memoire :
+   estProprietaire est appele a chaque rendu de fiche, il ne peut pas faire une
+   lecture reseau a chaque fois. */
+var _mesMagasins=null;
+window.chargerMesMagasins=chargerMesMagasins;
+function chargerMesMagasins(){
+  if(!window.fbMesMagasins){ _mesMagasins=_mesMagasins||{}; return; }
+  window.fbMesMagasins().then(function(ids){
+    var m={}; (ids||[]).forEach(function(id){ m[String(id)]=1; });
+    _mesMagasins=m;
+    // Une fiche deja ouverte doit reveler ses outils sans qu'on la rouvre.
+    try{ if(curStoreDetail&&typeof renderStoreDetail==="function")renderStoreDetail(); }catch(e){}
+  }).catch(function(){ _mesMagasins={}; });
+}
 function estProprietaire(st){
   try{
     var u=window._fbUser&&window._fbUser.uid;
-    return !!(u&&st&&st.owner&&String(st.owner)===String(u));
+    if(!u||!st)return false;
+    var sid=String(st.fbId||st.id);
+    if(_mesMagasins===null)chargerMesMagasins();
+    if(_mesMagasins&&_mesMagasins[sid])return true;
+    /* Secours : les magasins certifies AVANT ce changement portent encore
+       l'ancien champ public. On le lit pour ne priver personne de son tableau
+       de bord, mais plus rien ne l'ecrit — il s'eteindra de lui-meme. */
+    return !!(st.owner&&String(st.owner)===String(u));
   }catch(e){ return false; }
 }
 function toggleMyShop(id){

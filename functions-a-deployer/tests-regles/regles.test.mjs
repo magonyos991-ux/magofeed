@@ -236,6 +236,25 @@ await doit('bloque : creer un magasin deja mis en avant',
   ()=>assertFails(setDoc(doc(m,'stores','sPub'),
       {name:'Pub',lat:50.8,lng:4.3,partner:true})));
 
+/* ── fiche commercant privee ─────────────────────────────────────────── */
+await env.withSecurityRulesDisabled(async (c)=>{
+  const db=c.firestore();
+  await setDoc(doc(db,'merchants',ALICE),{stores:['s1'],updatedAt:1});
+  await setDoc(doc(db,'stores','s1','stats','2026-08-28'),{vues:12,itineraires:3});
+});
+await doit('legitime : Alice lit sa fiche commercant',
+  ()=>assertSucceeds(getDoc(doc(a,'merchants',ALICE))));
+await doit('bloque : Mallory lit la fiche commercant d Alice',
+  ()=>assertFails(getDoc(doc(m,'merchants',ALICE))));
+await doit('bloque : s ajouter une boutique dans sa fiche',
+  ()=>assertFails(setDoc(doc(m,'merchants',MALLORY),{stores:['s1']})));
+await doit('legitime : la gerante lit l audience de SA boutique',
+  ()=>assertSucceeds(getDoc(doc(a,'stores','s1','stats','2026-08-28'))));
+await doit('bloque : lire l audience de la boutique d en face',
+  ()=>assertFails(getDoc(doc(m,'stores','s1','stats','2026-08-28'))));
+await doit('bloque : un anonyme lit une audience',
+  ()=>assertFails(getDoc(doc(anon,'stores','s1','stats','2026-08-28'))));
+
 await doit('bloque : se declarer administrateur',
   ()=>assertFails(setDoc(doc(m,'admins',MALLORY),{ok:true})));
 
