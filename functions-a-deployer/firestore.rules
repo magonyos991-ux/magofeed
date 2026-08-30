@@ -606,6 +606,16 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    /* Traces de verification par paiement. Ecrites UNIQUEMENT par la Cloud
+       Function (Admin SDK, qui contourne ces regles) : c'est elle qui recoit
+       la confirmation signee de Stripe. Si le client pouvait ecrire ici, il
+       lui suffirait de se declarer « paye ». Aucune donnee de carte n'y
+       figure — Stripe ne nous en transmet aucune. */
+    match /verifications/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     match /stores/{storeId}/stats/{jour} {
       /* On accepte les deux : la fiche privee (nouveau), et l'ancien champ
          public pour les magasins certifies avant le changement, qui ne doivent

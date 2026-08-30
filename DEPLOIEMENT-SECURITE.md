@@ -73,6 +73,57 @@ Une restauration qu'on découvre le jour de l'incident n'est pas une sauvegarde.
   le prochain chantier de sécurité, et il se fait à deux — toi dans la console,
   moi dans le code.
 
+## 5. Le jour où tu auras ton numéro d'entreprise
+
+Tant que tu n'es pas enregistré, **saute cette section** : l'app marche, la
+procédure manuelle de certification aussi, et rien ne casse.
+
+Encaisser un euro en Belgique demande un numéro d'entreprise (BCE) et un compte
+Stripe à ce nom. C'est une démarche du monde réel — guichet d'entreprises,
+quelques centaines d'euros, quelques jours — que personne ne peut faire à ta
+place.
+
+Une fois que tu l'as :
+
+```
+cd functions
+npm install stripe
+firebase functions:secrets:set STRIPE_CLE
+firebase functions:secrets:set STRIPE_WEBHOOK
+```
+
+Colle tes clés Stripe **uniquement** dans ces invites. Jamais dans un fichier,
+jamais dans une conversation, jamais dans un message.
+
+Ajoute au bout de `functions/index.js` :
+
+```js
+Object.assign(exports, require("./verification-commercant"));
+```
+
+Puis :
+
+```
+firebase deploy --only functions:ouvrirVerificationCommercant,functions:stripeWebhook
+```
+
+Le déploiement affiche l'adresse de `stripeWebhook`. Va la coller dans Stripe →
+Développeurs → Webhooks, en écoutant l'événement `checkout.session.completed`.
+Stripe te donne alors une clé de signature `whsec_...` : refais
+`firebase functions:secrets:set STRIPE_WEBHOOK` avec elle, et redéploie
+`stripeWebhook`.
+
+Enfin, **une seule ligne à changer dans l'app** — cherche `VERIF_PAIEMENT` dans
+`index.html` et passe-le de `false` à `true`. Le bouton « Vérifier ma boutique
+— 1 € » apparaît alors dans la fiche de revendication, avec le formulaire
+manuel conservé juste en dessous.
+
+Ce que le paiement pose, et ce qu'il ne pose pas : il prouve **qui** tient la
+boutique, donc il pose le badge « tenu par son gérant » et la fiche privée. Il
+ne pose jamais « rayon vu sur place » (un fait constaté) ni « mis en avant »
+(de la publicité). C'est toute la raison pour laquelle ces trois signaux ont
+été séparés avant d'ouvrir une caisse.
+
 ## Ce que je n'ai pas fait, et pourquoi
 
 - **Une politique de contenu (CSP) complète.** L'app utilise des gestionnaires
@@ -88,9 +139,7 @@ Une restauration qu'on découvre le jour de l'incident n'est pas une sauvegarde.
   choisi d'y mettre : pseudo, avatar, points, dix favoris. Le fermer voudrait
   dire passer ces deux écrans par une Cloud Function.
 
-- **Le champ `owner` d'un magasin certifié est public**, et il pointe vers un
-  profil public : on peut donc relier une boutique certifiée au profil
-  personnel de son gérant. Le corriger proprement demande de tenir la liste des
-  magasins possédés dans un document privé plutôt que dans la fiche publique.
-  C'est une décision à prendre au début du chantier « compte commerçant », pas
-  après.
+- ~~Le champ `owner` d'un magasin certifié est public~~ — **corrigé.** Le lien
+  boutique-gérant vit maintenant dans `merchants/{uid}`, lisible par son seul
+  propriétaire. Les magasins certifiés avant ce changement continuent de
+  fonctionner grâce à l'ancien champ, qui n'est plus jamais écrit.

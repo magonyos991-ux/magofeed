@@ -255,6 +255,12 @@ await doit('bloque : lire l audience de la boutique d en face',
 await doit('bloque : un anonyme lit une audience',
   ()=>assertFails(getDoc(doc(anon,'stores','s1','stats','2026-08-28'))));
 
+await doit('bloque : se declarer paye (traces de verification)',
+  ()=>assertFails(setDoc(doc(m,'verifications','cs_test_1'),
+      {uid:MALLORY,storeId:'s1',etat:'payee'})));
+await doit('bloque : lire les traces de paiement',
+  ()=>assertFails(getDoc(doc(m,'verifications','cs_test_1'))));
+
 await doit('bloque : se declarer administrateur',
   ()=>assertFails(setDoc(doc(m,'admins',MALLORY),{ok:true})));
 

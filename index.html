@@ -2394,6 +2394,22 @@ window.fbAddFormatSuggestion = async function(drinkId, drinkName, barcode, fmt) 
    L'ancien champ 'owner' reste LU en secours, pour que les magasins certifies
    avant ce changement ne perdent pas leur tableau de bord — mais il n'est plus
    jamais ecrit. */
+/* Ouvre la page de paiement Stripe pour verifier un commercant. La Cloud
+   Function decide de tout : c'est elle qui parle a Stripe, et c'est le webhook
+   signe par Stripe qui accorde la certification. Le navigateur ne fait que
+   suivre l'adresse qu'on lui rend — il ne peut rien certifier lui-meme. */
+window.fbOuvrirVerification = async function(storeId) {
+  var fns = getFunctions(app, "europe-west1");
+  var call = httpsCallable(fns, "ouvrirVerificationCommercant", { timeout: 30000 });
+  try {
+    var r = await call({ storeId: String(storeId) });
+    return (r && r.data) || { ok: false, reason: "no-response" };
+  } catch (e) {
+    var code = String((e && e.code) || "");
+    if (/not-found|unimplemented|internal/.test(code)) return { ok: false, reason: "not-deployed" };
+    return { ok: false, reason: (e && (e.message || e.code)) || "erreur" };
+  }
+};
 window.fbMesMagasins = async function() {
   var u = auth.currentUser;
   if (!u || u.isAnonymous) return [];
@@ -12054,6 +12070,12 @@ function mbConfirmer(sid,did){
    remplit un formulaire), puis demande de quoi rappeler la personne. On annonce
    franchement qu'un humain verifie : c'est justement ce qui fait la valeur de
    la pastille, et ca evite d'attendre une reponse instantanee. */
+/* L'INTERRUPTEUR DE LA VERIFICATION PAR PAIEMENT.
+   Laisse-le a false tant que verification-commercant.js n'est pas deploye et
+   que Stripe n'est pas branche : la procedure manuelle reste alors la seule
+   proposee, et personne ne voit un bouton qui ne marche pas.
+   Le jour ou tu deploies : passe-le a true, c'est la seule ligne a changer. */
+var VERIF_PAIEMENT=false;
 function claimThisShop(){
   var s=curStoreDetail; if(!s)return;
   var old=document.getElementById("claim-ov"); if(old)old.remove();
@@ -12068,13 +12090,19 @@ function claimThisShop(){
         'Compte commerçant'+
       '</div>'+
       '<div class="claim-title">Tu tiens '+sanitize(s.name)+' ?</div>'+
-      '<div class="claim-lead">La certification est gratuite pendant le lancement. Elle donne&nbsp;:</div>'+
+      '<div class="claim-lead">Le compte commerçant est gratuit. Il donne&nbsp;:</div>'+
       '<ul class="claim-list">'+
-        '<li><b>La pastille bleue</b> sur ta boutique, visible par tous sur la carte.</li>'+
+        '<li><b>Le badge « tenu par son gérant »</b> sur ta boutique, visible par tous sur la carte.</li>'+
         '<li><b>Ton tableau de bord</b> : ce que les gens cherchent dans ton quartier et que tu n\'as pas.</li>'+
         '<li><b>Le droit de tenir ton rayon à jour</b> — tes clients voient ce que tu as vraiment.</li>'+
       '</ul>'+
-      '<div class="claim-honest">Un humain vérifie chaque demande — visite, appel ou photo de ton rayon. C\'est long, et c\'est exactement ce qui fait que la pastille bleue veut dire quelque chose.</div>'+
+      /* On ne promet pas « rayon vérifié » : ce badge dit qui tient la
+         boutique, pas ce qu'il y a dessus. Deux choses différentes. */
+      (VERIF_PAIEMENT
+        ? '<div class="claim-honest">Pour confirmer que la boutique est bien la tienne, on demande <b>1&nbsp;€ une seule fois</b>, avec une carte au nom du commerce. Ce n\'est pas un abonnement : ta banque a déjà vérifié ton identité, et ça nous évite de te faire attendre des jours. Le compte, lui, reste gratuit.</div>'+
+          '<button class="claim-send" onclick="verifierParPaiement()">Vérifier ma boutique — 1&nbsp;€</button>'+
+          '<div class="claim-lab" style="text-align:center;margin:14px 0 4px;opacity:.75">ou demande une vérification à la main</div>'
+        : '<div class="claim-honest">Un humain vérifie chaque demande — visite, appel ou photo de ton rayon. C\'est long, et c\'est exactement ce qui fait que ce badge veut dire quelque chose.</div>')+
       '<label class="claim-lab" for="claim-contact">Ton nom et un moyen de te joindre</label>'+
       '<input id="claim-contact" class="claim-in" maxlength="80" autocomplete="name" placeholder="Ahmed Belkacem — 0470 12 34 56">'+
       '<label class="claim-lab" for="claim-role">Ton rôle</label>'+
@@ -12107,6 +12135,28 @@ function claimThisShop(){
       card.insertBefore(el,card.querySelector(".claim-lab"));
     }).catch(function(){});
   }
+}
+/* Verification par paiement. Rien n'est decide ici : on demande a la Cloud
+   Function d'ouvrir une page de paiement Stripe, et c'est le webhook signe par
+   Stripe qui posera la certification. Si la fonction n'est pas deployee, on le
+   dit franchement et le formulaire manuel reste juste en dessous. */
+function verifierParPaiement(){
+  var s=curStoreDetail; if(!s)return;
+  if(!window.fbOuvrirVerification){toast("Vérification indisponible — envoie ta demande à la main");playSound("err");return;}
+  var btn=document.querySelector(".claim-send");
+  if(btn){btn.disabled=true;btn.textContent="Ouverture du paiement…";}
+  var rendre=function(msg){
+    playSound("err"); toast(msg);
+    if(btn){btn.disabled=false;btn.innerHTML="Vérifier ma boutique — 1&nbsp;€";}
+  };
+  window.fbOuvrirVerification(String(s.fbId||s.id)).then(function(r){
+    if(r&&r.ok&&r.url){ location.href=r.url; return; }
+    var why=(r&&r.reason)||"erreur";
+    if(why==="not-deployed")return rendre("Le paiement n'est pas encore actif — envoie ta demande à la main");
+    if(/already-exists/.test(why))return rendre("Ce magasin est déjà tenu par un gérant vérifié");
+    if(/permission-denied/.test(why))return rendre("Crée un vrai compte (Google ou e-mail) avant de vérifier ta boutique");
+    rendre("Paiement impossible : "+String(why).slice(0,80));
+  }).catch(function(e){ rendre("Paiement impossible ("+((e&&e.message)||"erreur")+")"); });
 }
 function closeClaim(){
   var ov=document.getElementById("claim-ov"); if(!ov)return;
