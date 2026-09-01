@@ -6141,6 +6141,10 @@ function confirmFamilyFormat(family,barcode,fmt){
   // (le prochain scan du meme code sera reconnu sans OFF)
   if(!family.barcodes)family.barcodes=[];
   if(family.barcodes.indexOf(String(barcode))===-1)family.barcodes.push(String(barcode));
+  /* ET SUR LE DISQUE. Le tableau ci-dessus vit en memoire : il repart a chaque
+     rechargement, et la personne se retrouvait devant la meme question apres
+     avoir deja repondu. */
+  linkBarcodeLocally(barcode,family.id);
   if(fmt&&fmt.type){
     if(!family.formats)family.formats=[];
     var exists=family.formats.some(function(f){return f.type===fmt.type&&Number(f.cl)===Number(fmt.cl);});
@@ -6298,7 +6302,52 @@ function barcodeDisavowed(code,drinkId){
   var l=badLinks()[String(code)];
   return !!l && l.indexOf(Number(drinkId))!==-1;
 }
+/* ── LES LIENS CODE-BARRE ↔ BOISSON POSES PAR LA PERSONNE ELLE-MEME ───────
+   Quand quelqu'un dit « ce code, c'est cette boisson-la », confirmFamilyFormat
+   pousse le code dans DRINKS[].barcodes — EN MEMOIRE seulement. Le catalogue
+   n'est jamais reserialise avec ce tableau (idbSet("catalog:last") range les
+   lignes recues de Firestore, pas DRINKS). Au rechargement suivant, le lien
+   avait disparu et l'app reposait la meme question. La suggestion partait bien
+   a l'administrateur, mais la personne, elle, revoyait son probleme intact.
+   On garde donc le lien ICI, en local, a cote de son exact miroir (magoBadLinks,
+   qui memorise les liens DESAVOUES). L'un dit « si », l'autre dit « non ».
+   Ce n'est pas le catalogue partage — celui-la reste decide par l'admin a
+   partir des suggestions — c'est la memoire de cet appareil. */
+function ownLinks(){
+  try{ return JSON.parse(localStorage.getItem("magoLiensCode")||"{}")||{}; }catch(e){ return {}; }
+}
+function linkBarcodeLocally(code,drinkId){
+  var all=ownLinks();
+  all[String(code)]=Number(drinkId);
+  try{ localStorage.setItem("magoLiensCode",JSON.stringify(all)); }catch(e){}
+}
+/* La recherche « quelle boisson porte ce code ? », en un seul endroit : le
+   catalogue charge, PUIS les liens poses par la personne. Le desaveu
+   (barcodeDisavowed) l'emporte toujours sur les deux — dire « non » doit rester
+   plus fort que dire « oui ». */
+function drinkForBarcode(code){
+  var c=String(code);
+  var d=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(c)!==-1&&!barcodeDisavowed(c,x.id);});
+  if(d)return d;
+  var id=ownLinks()[c];
+  if(id==null||barcodeDisavowed(c,id))return undefined;
+  var perso=DRINKS.find(function(x){return Number(x.id)===Number(id);});
+  /* Le lien remis dans le tableau en memoire : tout le reste de l'app
+     (« nouveau format detecte », renderWhereFound, l'historique) continue de
+     lire drink.barcodes sans rien savoir de ce stockage. */
+  if(perso){ if(!perso.barcodes)perso.barcodes=[]; if(perso.barcodes.indexOf(c)===-1)perso.barcodes.push(c); }
+  return perso;
+}
 function disavowBarcode(code,drinkId){
+  /* Desavouer efface le lien inverse : sans ca, drinkForBarcode le remettrait
+     aussitot dans barcodes et le desaveu ne tiendrait pas un rechargement. */
+  try{
+    var l=ownLinks();
+    if(l[String(code)]!=null&&Number(l[String(code)])===Number(drinkId)){
+      delete l[String(code)];
+      localStorage.setItem("magoLiensCode",JSON.stringify(l));
+    }
+  }catch(e){}
   var all=badLinks(), k=String(code);
   if(!all[k])all[k]=[];
   if(all[k].indexOf(Number(drinkId))===-1)all[k].push(Number(drinkId));
@@ -6340,7 +6389,7 @@ function openBarcodeDispute(drink,code){
     '<div id="dispute-hint" style="font-size:11px;color:var(--s3);text-align:center;margin-top:6px;min-height:14px">Recherche du vrai nom\u2026</div>'+
     '<div id="dispute-new" role="button" tabindex="0" style="margin-top:8px;text-align:center;font-size:12.5px;font-weight:800;color:#fff;background:#e67e22;border-radius:12px;padding:12px;cursor:pointer;-webkit-tap-highlight-color:transparent">Ce produit n\'est pas encore dans Magofeed</div>'+
     '<div id="dispute-other" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:12px;font-weight:700;color:var(--s1);background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:11px;cursor:pointer;-webkit-tap-highlight-color:transparent">C\'est une autre boisson d\u00E9j\u00E0 au catalogue</div>'+
-    '<div id="dispute-cancel" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:11.5px;font-weight:700;color:var(--s3);padding:8px;cursor:pointer;-webkit-tap-highlight-color:transparent">Annuler \u2014 c\'\u00E9tait bien \u00E7a</div>'+
+    '<div id="dispute-cancel" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:11.5px;font-weight:700;color:var(--s2);padding:8px;cursor:pointer;-webkit-tap-highlight-color:transparent">Annuler \u2014 c\'\u00E9tait bien \u00E7a</div>'+
     /* La barre d'onglets flotte au-dessus du contenu : sans cette reserve,
        elle recouvre le dernier choix — celui qui permet de faire marche
        arriere. On reserve sa hauteur, encoche du telephone comprise. */
@@ -6408,12 +6457,52 @@ function onBarcodeDetected(r){
   // sans stopper la caméra ni afficher la fiche produit. C'est ce qui permet de
   // remplir un frigo entier en 2 minutes.
   if(window._rafaleStore){ rafaleAddCode(rawCode); return; }
+  /* Scan lance depuis « relier ce code a la boisson reconnue par l'IA ». On
+     demande confirmation malgre tout : un code-barre vaut pour UNE boisson
+     precise, et une variante (Zero, Peche, Cherry) se lit mal a l'ecran. Le
+     lien pose ici part aussi en suggestion a l'administrateur — il ne modifie
+     pas seul le catalogue partage. */
+  if(window._lienCodePour!=null){
+    var cible=DRINKS.find(function(x){return Number(x.id)===Number(window._lienCodePour);});
+    window._lienCodePour=null;
+    if(cible){
+      stopScan();playSound("beep");
+      var hint=document.getElementById("scan-hint");
+      if(hint)hint.textContent="\u2713 Code : "+rawCode;
+      var rl=document.getElementById("rescan-link");if(rl)rl.style.display="block";
+      var rs=document.getElementById("scan-result");if(rs)rs.style.display="block";
+      if(!confirm("Lier le code "+rawCode+" \u00E0 \u00AB "+cible.name+" \u00BB ?\n\nV\u00E9rifie bien la variante (Zero, P\u00EAche, Cherry...) \u2014 un code = UNE boisson pr\u00E9cise.")){
+        resetScanUI();rescan();return;
+      }
+      confirmFamilyFormat(cible,rawCode,{});
+      recordScan(rawCode,cible.name,cible.brand,cible.cat,"linked");
+      renderWhereFound({drinkId:cible.id});
+      if(rs){
+        rs.className="scan-result found";
+        rs.innerHTML='<div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#166534">\u2713 Code li\u00E9 \u00E0 '+sanitize(cible.name)+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">Ton prochain scan la reconna\u00EEtra direct \u2014 merci !</div></div>';
+      }
+      return;
+    }
+  }
   var code=rawCode;stopScan();playSound("beep");
   document.getElementById("scan-hint").textContent="✓ Code : "+code;
   var btn=document.getElementById("scan-btn"),res=document.getElementById("scan-result");
   var rescanLink=document.getElementById("rescan-link");if(rescanLink)rescanLink.style.display="block";
-  var found=DRINKS.find(function(d){return d.barcodes&&d.barcodes.indexOf(code)!==-1&&!barcodeDisavowed(code,d.id);});
-  var foundDiscovery=DISCOVERIES.find(function(d){return String(d.barcode)===String(code);});
+  var found=drinkForBarcode(code);
+  /* UNE DECOUVERTE REJETEE N'EST PLUS UNE DECOUVERTE.
+     Cette ligne cherchait dans TOUTES les decouvertes, rejetees comprises.
+     renderDiscoveries (« !d.promoted && !d.rejected »), l'ecran admin et le
+     compteur filtrent tous les deux drapeaux ; le scan etait le seul a ne pas
+     le faire. Resultat observe sur le code 4068261032907 : une decouverte que
+     l'administrateur avait rejetee le 11 juillet — et qui a donc disparu de
+     partout ailleurs — s'affichait encore en vert, avec une coche, comme une
+     trouvaille valide ; et comme elle gagnait cette branche, l'app n'allait
+     JAMAIS redemander son vrai nom a OpenFoodFacts. Rejeter ne voulait rien
+     dire ici. Une decouverte promue non plus : elle vit desormais au
+     catalogue, c'est la fiche catalogue qu'il faut montrer. */
+  var foundDiscovery=DISCOVERIES.find(function(d){
+    return String(d.barcode)===String(code)&&!d.rejected&&!d.promoted;
+  });
   res.style.display="block";
   // Nettoie les liens injectes par un scan precedent (« deja au catalogue ? »,
   // « produit different ») : sinon ils restent visibles, figes sur l'ancien
@@ -6457,6 +6546,21 @@ function onBarcodeDetected(r){
       btn.textContent="Voter pour cette découverte";btn.style.background="#e67e22";btn.style.display="block";
       btn.onclick=function(){voteDisc(foundDiscovery.id);};
     }
+    /* LA SORTIE DE SECOURS QUI MANQUAIT ICI.
+       La branche « deja au catalogue » juste au-dessus offre « Ce n'est pas ce
+       produit ? ». Celle-ci n'offrait rien — et quand la personne avait deja
+       vote, meme le bouton disparaissait : plus un seul geste possible devant
+       un nom faux. C'est exactement ce qui s'est passe avec une decouverte
+       nommee « Boisson Energisante » (le libelle generique d'OpenFoodFacts)
+       alors que la canette dit « Golden Power ». On rend donc la main. */
+    var lien=document.createElement("div");
+    lien.className="scan-injected";
+    lien.setAttribute("role","button");lien.setAttribute("tabindex","0");
+    lien.style.cssText="text-align:center;font-size:12px;font-weight:700;color:var(--s2);background:transparent;border:1.5px solid var(--border);border-radius:12px;padding:10px;cursor:pointer;margin-top:8px;-webkit-tap-highlight-color:transparent";
+    lien.textContent="Ce n'est pas le bon nom ?";
+    lien.onclick=function(){ openDiscoveryFix(foundDiscovery,code); };
+    lien.onkeydown=function(ev){if(ev.key==="Enter")lien.onclick();};
+    res.appendChild(lien);
     recordScan(code,foundDiscovery.name,foundDiscovery.brand||"",foundDiscovery.cat||"","discovery");
     renderWhereFound({discoveryId:foundDiscovery.id});
     playSound("win");toast("Déjà connu : "+foundDiscovery.name);
@@ -6470,8 +6574,8 @@ function onBarcodeDetected(r){
     btn.textContent="Ajouter aux découvertes";btn.style.background="#e67e22";btn.style.display="block";
     btn.onclick=function(){addDiscovery(cached.name,cached.brand,code,cached.cat);};
     recordScan(code,cached.name,cached.brand,cached.cat,cached.src);
-    var cachedDrink=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(String(code))!==-1&&!barcodeDisavowed(code,x.id);});
-    var cachedDisc=DISCOVERIES.find(function(x){return String(x.barcode||x.id)===String(code);});
+    var cachedDrink=drinkForBarcode(code);
+    var cachedDisc=DISCOVERIES.find(function(x){return String(x.barcode||x.id)===String(code)&&!x.rejected&&!x.promoted;});
     renderWhereFound(cachedDrink?{drinkId:cachedDrink.id}:(cachedDisc?{discoveryId:cachedDisc.id}:{pendingBarcode:code}));
     playSound("win");toast("Déjà scanné : "+cached.name);
   } else {
@@ -6640,6 +6744,55 @@ function confBornee(s,did){
    code) : l'utilisateur choisit la boisson du catalogue, le code lui est lie
    sur-le-champ en local + suggestion envoyee a l'admin (formatSuggestions,
    pipeline existant). Plus jamais de doublon Pepsi en decouverte. */
+/* « Ce n'est pas le bon nom ? » depuis une decouverte.
+   Deux issues, et aucune ne touche au document partage : renommer une
+   decouverte creee par quelqu'un d'autre est refuse par les regles (seuls son
+   auteur et l'administrateur le peuvent), et surtout la tentative ferait
+   echouer TOUT le lot d'ecriture — le vote compris, en silence. On ne propose
+   donc que ce qui marche vraiment :
+     - relier le code a une boisson du catalogue (le cas le plus frequent : le
+       produit EST deja dans Magofeed, sous son vrai nom, mais sans ce code) ;
+     - ou signaler le nom a l'administrateur, qui a le droit de le corriger. */
+function openDiscoveryFix(disc,code){
+  var res=document.getElementById("scan-result");
+  var btn=document.getElementById("scan-btn");
+  if(!res)return;
+  try{ renderWhereFound(null); }catch(e){}
+  if(btn)btn.style.display="none";
+  Array.prototype.forEach.call(document.querySelectorAll(".scan-injected"),function(n){n.remove();});
+  res.className="scan-result";
+  res.innerHTML=
+    '<div style="text-align:center;margin-bottom:9px">'+
+      '<div style="font-size:13.5px;font-weight:700;color:var(--s1)">Qu\'est-ce que tu as en main ?</div>'+
+      '<div style="font-size:11.5px;color:var(--s2);margin-top:3px;line-height:1.45">Le code '+sanitize(String(code))+' est actuellement annonc\u00E9 comme \u00AB '+sanitize(disc.name||"")+' \u00BB.</div>'+
+    '</div>'+
+    '<div id="dfix-link" role="button" tabindex="0" style="text-align:center;font-size:12.5px;font-weight:800;color:#fff;background:#166534;border-radius:12px;padding:12px;cursor:pointer;-webkit-tap-highlight-color:transparent">C\'est une boisson d\u00E9j\u00E0 au catalogue</div>'+
+    '<div id="dfix-report" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:12px;font-weight:700;color:var(--s1);background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:11px;cursor:pointer;-webkit-tap-highlight-color:transparent">Signaler ce nom \u00E0 l\'\u00E9quipe</div>'+
+    '<div id="dfix-cancel" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:11.5px;font-weight:700;color:var(--s2);padding:8px;cursor:pointer;-webkit-tap-highlight-color:transparent">Annuler \u2014 c\'\u00E9tait bien \u00E7a</div>'+
+    '<div style="height:calc(78px + env(safe-area-inset-bottom))" aria-hidden="true"></div>';
+  try{ res.scrollIntoView({block:"nearest"}); }catch(e){}
+  var bl=document.getElementById("dfix-link");
+  bl.onclick=function(){ openCatalogLinkPicker(code); };
+  bl.onkeydown=function(ev){if(ev.key==="Enter")bl.onclick();};
+  var br=document.getElementById("dfix-report");
+  br.onclick=function(){
+    var nm=prompt("Nom exact lu sur l\'\u00E9tiquette :",disc.name||"");
+    if(nm===null)return;
+    nm=nm.trim();
+    if(nm.length<2){toast("Indique le nom lu sur l\'\u00E9tiquette");playSound("err");return;}
+    /* Meme canal que « ce code pointe vers la mauvaise boisson » : un
+       signalement que l'administrateur voit, pas une ecriture sur le document
+       partage. */
+    if(window.fbReportBadBarcode)window.fbReportBadBarcode(String(code),0,String(disc.name||""),nm);
+    toast("Merci \u2014 l\'\u00E9quipe va corriger ce nom");
+    playSound("win");
+    resetScanUI();rescan();
+  };
+  br.onkeydown=function(ev){if(ev.key==="Enter")br.onclick();};
+  var bc=document.getElementById("dfix-cancel");
+  bc.onclick=function(){ resetScanUI();rescan(); };
+  bc.onkeydown=function(ev){if(ev.key==="Enter")bc.onclick();};
+}
 function openCatalogLinkPicker(code){
   var res=document.getElementById("scan-result");
   var btn=document.getElementById("scan-btn");
@@ -13856,6 +14009,42 @@ function _aiStatus(kind,html){
   el.innerHTML=html;
 }
 function _aiStatusHide(){var el=document.getElementById("propose-ai-status");if(el){el.style.display="none";el.innerHTML="";}}
+/* ── RELIER LE CODE-BARRE A LA BOISSON QUE L'IA VIENT DE RECONNAITRE ──────
+   La photo et le scan ne se parlaient pas. L'IA sait dire « c'est un Golden
+   Power, il est deja dans Magofeed » — elle tient meme l'identifiant exact de
+   la fiche — mais le code-barre n'entrait nulle part dans ce flux. Resultat :
+   on rescanne la canette juste apres et l'app ne fait aucun lien.
+   Pire, une fiche NEE d'une proposition par photo n'a jamais de code-barre :
+   promoteDiscovery n'inscrit le code que s'il est numerique, et une proposition
+   par photo porte un identifiant synthetique « m1783615360754 ». La fiche
+   arrive donc au catalogue avec barcodes:[] — introuvable au scan, a vie.
+   On propose donc le geste manquant, et seulement quand il sert : la fiche
+   n'a pas encore de code. */
+function offreLienCode(drink){
+  if(!drink||(drink.barcodes&&drink.barcodes.length))return "";
+  return '<span style="display:block;margin-top:9px">'+
+    '<span id="ai-lier-code" role="button" tabindex="0" style="display:block;text-align:center;padding:9px 10px;border-radius:10px;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer">'+
+    'Scanner son code-barre pour le relier</span>'+
+    '<span style="display:block;font-size:10.5px;color:var(--s2);margin-top:5px;line-height:1.4">'+
+    'Elle n\u2019a pas encore de code : sans lui, un scan ne la retrouvera jamais.</span></span>';
+}
+function cablerLienCode(drink){
+  var b=document.getElementById("ai-lier-code"); if(!b)return;
+  var go=function(){
+    /* On memorise la cible, on ferme la feuille et on ouvre le scanner. La
+       lecture suivante ira droit sur cette boisson (voir onBarcodeDetected). */
+    window._lienCodePour=drink.id;
+    closeProposeForm();
+    show("scan");
+    try{ resetScanUI(); }catch(e){}
+    var h=document.getElementById("scan-hint");
+    if(h)h.textContent="Vise le code-barre de "+drink.name;
+    try{ startScan(); }catch(e){}
+    playSound("pop");
+  };
+  b.onclick=go;
+  b.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();go();}};
+}
 function analyzeProposePhoto(data){
   window._aiPropose=null;window._aiBlockAlcohol=false;
   var btn0=document.getElementById("propose-send");
@@ -13891,7 +14080,8 @@ function analyzeProposePhoto(data){
     try{ proche=trouverBoissonProche(r.name,r.brand); }catch(e){}
     if(proche&&proche.distance<=0&&r.confidence>=70){
       window._aiPropose={existingId:proche.drink.id};
-      _aiStatus("ok","<span>"+icoOk(16)+"</span><span><b>"+sanitize(proche.drink.name)+"</b> est déjà dans Magofeed ! Appuie sur Envoyer pour ouvrir sa fiche.</span>");
+      _aiStatus("ok","<span>"+icoOk(16)+"</span><span><b>"+sanitize(proche.drink.name)+"</b> est déjà dans Magofeed ! Appuie sur Envoyer pour ouvrir sa fiche."+offreLienCode(proche.drink)+"</span>");
+      cablerLienCode(proche.drink);
       return;
     }
     if(proche&&r.confidence>=55){
@@ -13908,7 +14098,8 @@ function analyzeProposePhoto(data){
         window._aiPropose={existingId:proche.drink.id};
         var ne=document.getElementById("propose-name");if(ne)ne.value=proche.drink.name;
         var be=document.getElementById("propose-brand");if(be&&proche.drink.brand)be.value=proche.drink.brand;
-        _aiStatus("ok","<span>"+icoOk(16)+"</span><span><b>"+pn+"</b> \u2014 appuie sur Envoyer pour ouvrir sa fiche.</span>");
+        _aiStatus("ok","<span>"+icoOk(16)+"</span><span><b>"+pn+"</b> \u2014 appuie sur Envoyer pour ouvrir sa fiche."+offreLienCode(proche.drink)+"</span>");
+        cablerLienCode(proche.drink);
       };
       if(non)non.onclick=function(){
         /* On repart du nom lu par l'IA, comme si aucun rapprochement n'avait
@@ -14744,7 +14935,7 @@ function openExploreMap(opts){
         '<div id="explore-search-row" style="display:flex;margin-top:9px;gap:8px;align-items:center">'+
         '<div style="flex:1;position:relative;display:flex;align-items:center">'+
           '<svg style="position:absolute;left:12px;pointer-events:none;color:var(--s2);opacity:.75" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16.2 16.2 21 21"/></svg>'+
-          '<input id="explore-city-q" autocomplete="off" placeholder="Cherche une ville, un pays\u2026 New York, Japon" style="width:100%;padding:11px 34px 11px 34px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-family:inherit;outline:none">'+
+          '<input id="explore-city-q" autocomplete="off" placeholder="Cherche un magasin, une enseigne, une ville\u2026" style="width:100%;padding:11px 34px 11px 34px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-family:inherit;outline:none">'+
           '<span id="explore-city-clear" role="button" tabindex="0" aria-label="Effacer la recherche" style="display:none;position:absolute;right:6px;width:28px;height:28px;border-radius:50%;background:var(--bg3);color:var(--s2);font-size:12px;align-items:center;justify-content:center;cursor:pointer">\u2715</span>'+
         '</div>'+
         '<button id="explore-city-go" aria-label="Chercher" style="width:42px;height:42px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16.2 16.2 21 21"/></svg></button>'+
@@ -14761,10 +14952,22 @@ function openExploreMap(opts){
       '<div id="explore-status" style="position:absolute;bottom:calc(92px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--app-bg);border:1.5px solid var(--border);border-radius:999px;padding:8px 16px;font-size:12px;font-weight:700;color:var(--s1);box-shadow:0 4px 14px rgba(0,0,0,.18);white-space:nowrap;z-index:1100">Chargement\u2026</div>'+
       '<div id="explore-sheet"><div id="explore-sheet-head" role="button" tabindex="0" aria-label="Glisser pour ouvrir ou fermer la liste des magasins" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();exploreToggleSheet();}"><div id="explore-sheet-grip"></div><div style="display:flex;align-items:center;justify-content:space-between"><div id="explore-sheet-title" style="font-size:13.5px;font-weight:800;color:var(--s1)">Magasins autour de toi</div><div id="explore-sheet-chev" style="font-size:12px;font-weight:700;color:var(--s2);white-space:nowrap">Voir la liste \u25b2</div></div></div><div id="explore-sheet-list"></div></div>';
     document.body.appendChild(host);
-    host.querySelector("#explore-city-go").onclick=function(){exploreGoCity();};
+    /* Le bouton loupe et la touche Entree cherchent d'abord un MAGASIN — c'est
+       ce que la personne tape le plus souvent, et c'est gratuit (local). On ne
+       part interroger le service de lieux que si aucun magasin ne repond. */
+    host.querySelector("#explore-city-go").onclick=function(){
+      var q=(document.getElementById("explore-city-q")||{}).value||"";
+      if(exploreCadrerMagasins(q))return;
+      exploreGoCity();
+    };
     var _cq=host.querySelector("#explore-city-q");
     var _cclr=host.querySelector("#explore-city-clear");
-    _cq.addEventListener("keydown",function(ev){if(ev.key==="Enter"){ev.preventDefault();exploreGoCity();_cq.blur();}});
+    _cq.addEventListener("keydown",function(ev){
+      if(ev.key!=="Enter")return;
+      ev.preventDefault();
+      if(exploreCadrerMagasins(_cq.value))return;   // un magasin repond : on y va
+      exploreGoCity();_cq.blur();
+    });
     // Suggestions en direct : on interroge apres une pause de frappe (le service
     // de geocodage OpenStreetMap demande de ne pas le marteler).
     _cq.addEventListener("input",function(){
@@ -15575,10 +15778,13 @@ function exploreCloseCityPanel(){
    magasins deja charges AVANT d'interroger le service de geocodage : c'est
    instantane, ca ne coute aucune requete, et c'est ce qu'on cherche neuf fois
    sur dix. Les villes restent proposees en dessous. */
-function exploreSuggereMagasins(q){
-  var box=document.getElementById("explore-city-results");if(!box)return 0;
+/* Les magasins qui repondent au texte tape, les plus proches d'abord. Extrait
+   de exploreSuggereMagasins pour que la liste de suggestions ET le cadrage de
+   la carte travaillent sur exactement le meme ensemble : deux definitions du
+   mot « correspondre » finissent toujours par diverger. */
+function magasinsCorrespondants(q){
   var nq=normTxt((q||"").trim());
-  if(nq.length<2)return 0;
+  if(nq.length<2)return [];
   var debut=[],dedans=[];
   (STORES||[]).forEach(function(st){
     if(typeof st.lat!=="number")return;
@@ -15588,7 +15794,39 @@ function exploreSuggereMagasins(q){
   });
   var parDist=function(a,b){return (a.dist==null?9e9:a.dist)-(b.dist==null?9e9:b.dist);};
   debut.sort(parDist);dedans.sort(parDist);
-  var hits=debut.concat(dedans).slice(0,6);
+  return debut.concat(dedans);
+}
+/* VALIDER UNE RECHERCHE DE MAGASIN : la carte VA voir, elle ne masque rien.
+   La tentation etait de filtrer les pins sur le texte tape. C'est un piege :
+   le filtre ne montre que ce qui est deja dans le cadre, donc chercher « Aldi »
+   quand le premier Aldi est a trois rues d'ici VIDE la carte et affiche
+   « Aucun magasin dans cette zone » au-dessus d'une zone qui en contient 22.
+   Un mensonge pire que le bug. Et taper « Bruxelles » filtrerait aussi, parce
+   que les noms viennent d'OpenStreetMap et disent « Carrefour Express
+   Bruxelles-Midi ».
+   Ce que la personne veut en tapant « Aldi », ce n'est pas cacher les autres :
+   c'est trouver les Aldi et y aller. On cadre donc la carte sur eux. */
+function exploreCadrerMagasins(q){
+  var hits=magasinsCorrespondants(q);
+  if(!hits.length||!window.exploreMap)return 0;
+  var proches=hits.slice(0,8);
+  try{
+    if(proches.length===1){
+      exploreMap.setView([proches[0].lat,proches[0].lng],16);
+    }else{
+      var b=L.latLngBounds(proches.map(function(s){return [s.lat,s.lng];}));
+      exploreMap.fitBounds(b,{padding:[60,60],maxZoom:15});
+    }
+  }catch(e){ return 0; }
+  var box=document.getElementById("explore-city-results");if(box)box.innerHTML="";
+  var inp=document.getElementById("explore-city-q");if(inp)inp.blur();
+  toast(hits.length===1?("1 magasin trouv\u00E9 \u00B7 "+(proches[0].name||"")):(hits.length+" magasins trouv\u00E9s \u00B7 la carte s\u2019y d\u00E9place"));
+  playSound("pop");
+  return hits.length;
+}
+function exploreSuggereMagasins(q){
+  var box=document.getElementById("explore-city-results");if(!box)return 0;
+  var hits=magasinsCorrespondants(q).slice(0,6);
   if(!hits.length)return 0;
   var wrap=document.createElement("div");
   wrap.style.cssText="background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);margin-bottom:8px";
