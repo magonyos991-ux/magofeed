@@ -52,17 +52,34 @@ self.addEventListener("fetch", function(event) {
   // Firestore, géocodage, tuiles carte : toujours en réseau direct, jamais interceptés
   if (isLiveOnly(url)) return;
 
-  // Navigation (ouverture de page) : réseau d'abord, repli sur le cache si hors-ligne
+  // Navigation (ouverture de page) : réseau d'abord, MAIS 2,5 s maximum.
+  /* Avant : sans limite de temps. Sur wifi captif ou signal faible, ce fetch
+     pouvait pendre 30-60 s : index.html n'etait jamais livre et l'iPhone
+     affichait l'ecran de lancement de la PWA (fond #1a1714) = la "page noire".
+     Maintenant : si le reseau n'a pas repondu en 2,5 s et qu'on a l'app en
+     cache, on ouvre depuis le cache et le reseau continue de rafraichir. */
   if (req.mode === "navigate") {
-    event.respondWith(
-      fetch(req)
-        .then(function(res) {
-          var copy = res.clone();
-          caches.open(CACHE_NAME).then(function(cache) { cache.put("./index.html", copy); });
-          return res;
-        })
-        .catch(function() { return caches.match("./index.html"); })
-    );
+    event.respondWith(new Promise(function(resolve) {
+      var settled = false;
+      var timer = setTimeout(function() {
+        if (settled) return;
+        caches.match("./index.html").then(function(hit) {
+          if (settled || !hit) return;   // pas de cache : on laisse le reseau finir
+          settled = true; resolve(hit);
+        });
+      }, 2500);
+      fetch(req).then(function(res) {
+        clearTimeout(timer);
+        var copy = res.clone();
+        caches.open(CACHE_NAME).then(function(cache) { cache.put("./index.html", copy); });
+        if (!settled) { settled = true; resolve(res); }
+      }).catch(function() {
+        clearTimeout(timer);
+        if (settled) return;
+        settled = true;
+        resolve(caches.match("./index.html").then(function(hit) { return hit || Response.error(); }));
+      });
+    }));
     return;
   }
 

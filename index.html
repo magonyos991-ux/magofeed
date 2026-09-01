@@ -16,6 +16,40 @@
 window.__MAGOFEED_OWNER__ = atob("SWxpYXMgQmVuYWJkZWxsYWg=");
 window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
 </script>
+<script>
+/* ── FILET DE SECURITE — doit rester le PREMIER script de la page ──────────
+   Avant : la moindre exception au demarrage laissait un ecran NOIR muet (le
+   splash #1a1714 n'est retire qu'a la fin de l'init), et le seul filet, tout
+   en bas du fichier, ecrasait la page par une trace de pile illisible. Ici :
+   un message clair + un bouton Recharger. N'EFFACE RIEN. */
+(function(){
+  var SHOWN=false;
+  function panel(msg){
+    if(SHOWN||window.__MAGO_BOOTED__)return;SHOWN=true;
+    var d=document.createElement("div");d.id="mago-crash";
+    d.style.cssText="position:fixed;inset:0;z-index:2147483647;background:#f4f2ee;color:#1a1714;font:15px/1.5 -apple-system,system-ui,sans-serif;padding:28px 22px;overflow:auto";
+    d.innerHTML='<div style="max-width:340px;margin:12vh auto 0;text-align:center">'
+      +'<div style="font-size:34px;font-weight:800;letter-spacing:-1px">Mago<span style="color:#c69a57">feed</span></div>'
+      +'<p style="margin:14px 0 6px;font-weight:700">L\'appli n\'a pas r&eacute;ussi &agrave; d&eacute;marrer.</p>'
+      +'<p style="margin:0 0 18px;color:#6b6560;font-size:13px">Appuie sur Recharger. Si &ccedil;a recommence, envoie-moi le texte gris ci-dessous.</p>'
+      +'<button id="mago-retry" style="width:100%;padding:14px;border-radius:14px;background:#1a1714;color:#fff;font:700 15px/1 -apple-system,system-ui,sans-serif;border:none">Recharger</button>'
+      +'<pre id="mago-diag" style="margin-top:18px;text-align:left;white-space:pre-wrap;word-break:break-word;font-size:10px;color:#9b948b"></pre></div>';
+    (document.body||document.documentElement).appendChild(d);
+    d.querySelector("#mago-diag").textContent=String(msg).slice(0,600);
+    d.querySelector("#mago-retry").onclick=function(){location.reload();};
+  }
+  window.__magoPanel=panel;
+  window.addEventListener("error",function(e){
+    if(e&&e.target&&e.target!==window)return;
+    panel((e.message||"Erreur")+"\n"+(e.filename||"")+":"+(e.lineno||"")+"\n"+((e.error&&e.error.stack)||""));
+  },true);
+  window.addEventListener("unhandledrejection",function(e){
+    var r=e.reason;panel("Promesse rejetee : "+((r&&(r.message||r.code))||r)+"\n"+((r&&r.stack)||""));
+  });
+  setTimeout(function(){if(!window.__MAGO_BOOTED__)panel("Demarrage bloque (20 s sans reponse).");},20000);
+  window.__magoBootOK=function(){window.__MAGO_BOOTED__=true;};
+})();
+</script>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Magofeed — Trouve ta boisson dans les magasins proches</title>
 <meta name="description" content="Localise en un instant les sodas, ice tea, energy drinks et jus disponibles dans les magasins autour de toi, grâce à une communauté qui confirme le stock en temps réel.">
@@ -674,6 +708,12 @@ body.dark .toast{background:#f0f0f0;color:#111}
 .mago-pin.no .mago-pin-tip{background:#dc2626!important}
 .mago-pin .pin-no{position:absolute;top:-5px;right:-5px;width:15px;height:15px;border-radius:50%;background:#fff;border:2px solid #dc2626;color:#dc2626;font-size:8.5px;font-weight:900;display:flex;align-items:center;justify-content:center;z-index:3}
 .mago-pin.absent{opacity:.35;filter:grayscale(1)}
+  /* Anti-crash iOS au dezoom : c'est l'ANIMATION (transform+opacity) qui force
+     Safari a promouvoir chaque pin en couche composee dediee avec son propre
+     tampon offscreen. A 400 pins d'un coup, ca alloue des dizaines de Mo de
+     surfaces GPU en une frame et l'onglet est tue. On coupe le pop-in
+     UNIQUEMENT sur la carte Explorer. */
+  #explore-map .mago-pin{animation:none}
 .leaflet-marker-icon:hover .mago-pin-head{transform:scale(1.1)}
 /* Etiquette du magasin destination (nom + croix) au-dessus du pin */
 .leaflet-tooltip.mago-dest-tip{background:var(--app-bg);color:var(--s1);border:1.5px solid var(--border);border-radius:12px;box-shadow:0 5px 18px rgba(0,0,0,.3);font-family:'Space Grotesk',sans-serif;padding:6px 8px 6px 11px;display:flex;align-items:center;gap:8px;white-space:nowrap;max-width:230px}
@@ -1799,8 +1839,8 @@ const CACHE_DATA_V = "0617b";
 // Sobriete Firestore : cache "frais" 6h (zero lecture reseau), rafraichi en
 // silence entre 6h et 24h, requete complete au-dela. Les magasins bougent
 // rarement ; les confirmations/prix, eux, arrivent par les mises a jour locales.
-const CACHE_SOFT_TTL_MS = 6 * 60 * 60 * 1000;
-const CACHE_HARD_TTL_MS = 24 * 60 * 60 * 1000;
+const CACHE_SOFT_TTL_MS = 24 * 60 * 60 * 1000;
+const CACHE_HARD_TTL_MS = 48 * 60 * 60 * 1000;
 
 function haversineKm(lat1, lng1, lat2, lng2) {
   var R = 6371, dLat = (lat2 - lat1) * Math.PI / 180, dLng = (lng2 - lng1) * Math.PI / 180;
@@ -1934,7 +1974,15 @@ function saveStoresCache(lat, lng, radiusKm, now, stores) {
   var caps = [slim.length, 1500, 800, 400, 200];
   for (var i = 0; i < caps.length; i++) {
     try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({ v: CACHE_DATA_V, lat: lat, lng: lng, radiusKm: radiusKm, ts: now, stores: slim.slice(0, caps[i]) }));
+      var kept = slim.slice(0, caps[i]);
+      /* Rayon REELLEMENT couvert. Avant : quand le quota localStorage forcait a
+         ne garder que les N plus proches, on enregistrait quand meme le rayon
+         demande — le cache ampute etait alors resservi comme complet (400
+         magasins affiches au lieu de 1853, pendant des heures). */
+      var effR = (kept.length && kept.length < slim.length)
+        ? Math.min(radiusKm, (kept[kept.length - 1].dist || 0) / 1000)
+        : radiusKm;
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ v: CACHE_DATA_V, lat: lat, lng: lng, radiusKm: effR, ts: now, stores: kept }));
       return;
     } catch (e) { /* trop gros : on retente avec moins, les plus proches d'abord */ }
   }
@@ -1954,28 +2002,28 @@ window.fbTouchCache = function() {
     saveStoresCache(q.lat, q.lng, q.radiusKm || 10, (cached && cached.ts) || Date.now(), window.STORES || []);
   } catch (e) { console.warn("touchCache:", e); }
 };
-async function queryLatBand(latMin, latMax, depth) {
-  var q = query(
-    collection(db, "stores"),
-    where("lat", ">=", latMin),
-    where("lat", "<=", latMax),
-    orderBy("lat"),
-    limit(2000)
-  );
-  var snap = await getDocs(q);
-  if (snap.size >= 2000 && depth < 6) {
-    var mid = (latMin + latMax) / 2;
-    var a = await queryLatBand(latMin, mid, depth + 1);
-    var b = await queryLatBand(mid, latMax, depth + 1);
-    return a.concat(b);
+/* Avant : quand une bande saturait la limite de 2000, on JETAIT ces 2000
+   documents et on relisait la bande en deux moities — ils etaient refactures
+   (5253 lectures pour 3253 magasins a Bruxelles) et le lot parent restait en
+   memoire pendant toute la descente. Maintenant : pagination par curseur, on
+   lit chaque document UNE fois. Corrige au passage la troncature silencieuse
+   qui coupait la bande a depth 6. */
+async function queryLatBand(latMin, latMax) {
+  var docs = [], cur = null;
+  for (var p = 0; p < 20; p++) {
+    var q = cur
+      ? query(collection(db, "stores"), where("lat", ">=", latMin), where("lat", "<=", latMax), orderBy("lat"), startAfter(cur), limit(2000))
+      : query(collection(db, "stores"), where("lat", ">=", latMin), where("lat", "<=", latMax), orderBy("lat"), limit(2000));
+    var snap = await getDocs(q);
+    snap.forEach(function(d) { docs.push(d); });
+    if (snap.size < 2000) break;
+    cur = snap.docs[snap.docs.length - 1];
   }
-  var docs = [];
-  snap.forEach(function(d) { docs.push(d); });
   return docs;
 }
 async function queryNearbyStores(lat, lng, radiusKm) {
   var box = boundingBox(lat, lng, radiusKm);
-  var docs = await queryLatBand(box.latMin, box.latMax, 0);
+  var docs = await queryLatBand(box.latMin, box.latMax);
   var out = [], seen = {};
   docs.forEach(function(docSnap) {
     if (seen[docSnap.id]) return; // frontiere de bande : un doc peut arriver 2x
@@ -2101,7 +2149,9 @@ window.fbEnsureStoresForDrink = async function(drinkId, lat, lng) {
   var neg = {};
   try { neg = JSON.parse(localStorage.getItem(negKey) || "{}"); } catch (e) {}
   if (neg[drinkId] && (Date.now() - neg[drinkId]) < 24 * 60 * 60 * 1000) return false;
-  var radii = [25, 50];
+  // 50 km = une bande de latitude qui couvre Anvers/Gand/Namur/Liege : un seul
+  // tap sur une boisson rare coutait plus de la moitie du quota gratuit du jour.
+  var radii = [25];
   for (var i = 0; i < radii.length; i++) {
     await window.fbLoadNearbyStores(centerLat, centerLng, radii[i], { skipCache: true });
     if (hasMatch()) return true;
@@ -3034,12 +3084,25 @@ window.fbLoadCommunityData = async function() {
 
 // Chargement initial : centre par défaut (Bruxelles), rayon 10km.
 // initGPS() (script classique) relance une requête précise dès que la position réelle est connue.
-window.fbLoadNearbyStores(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng, 10);
+/* Avant : ce scan partait TOUT DE SUITE, et celui d'initGPS partait 1 a 3 s
+   plus tard EN PARALLELE — deux scans Firestore complets vivants en meme temps
+   pendant que la page construit son DOM. C'est ce pic qui fait tuer l'onglet
+   par iOS ("l'appli redemarre toute seule"). Ce scan n'est plus qu'un SECOURS :
+   il ne part que si le GPS n'a pas repondu en 2,5 s. */
+window._fbLoading = true;
+window._fbBootTimer = setTimeout(function() {
+  window._fbBootTimer = null;
+  if (window._fbReady) return;
+  window.fbLoadNearbyStores(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng, 10);
+}, 2500);
 window.fbLoadCommunityData();
 </script>
 
 <!-- Quagga -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+<!-- defer : sans lui, ce script BLOQUE le parseur entre le splash noir et
+     toute l'application. Un cdnjs lent = splash noir eternel. Quagga n'est
+     utilise que dans startScan/stopScan, apres un tap : le differer est sur. -->
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
 
 <script>
 /* ================================
@@ -3934,6 +3997,8 @@ function initGPS(){
   // à Melun/Paris alors qu'on est ailleurs). maximumAge court = pas de vieux
   // point recyclé quand on a bougé.
   navigator.geolocation.getCurrentPosition(function(pos){
+    // Le GPS a repondu : le scan de secours "Bruxelles" n'a plus lieu d'etre.
+    if(window._fbBootTimer){clearTimeout(window._fbBootTimer);window._fbBootTimer=null;}
     userLat=pos.coords.latitude;userLng=pos.coords.longitude;
     // Recalcule immédiatement les distances des magasins déjà en mémoire (chargés autour du centre par défaut)
     STORES.forEach(function(s){s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));});
@@ -4725,6 +4790,7 @@ function startScan(){
       btn.style.display="none";
       document.getElementById("scan-result").style.display="none";
       if(quaggaRunning)return;
+      if(typeof Quagga==="undefined"){hint.textContent="Scanner en cours de chargement, r\u00E9essaie dans 2 s";return;}
       Quagga.init({inputStream:{type:"LiveStream",target:video,constraints:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}}},locator:{patchSize:"medium",halfSample:true},decoder:{readers:["ean_reader","ean_8_reader","code_128_reader","upc_reader"]}},
         function(err){
           if(err){hint.textContent="✕ "+err;return;}
@@ -10230,6 +10296,9 @@ function openExploreMap(opts){
 }
 function closeExploreMap(){
   clearRoute();
+  // Les magasins bruts de la derniere zone visitee (jusqu'a ~2000 objets
+  // COMPLETS) restaient en memoire toute la session, meme carte fermee.
+  window._exploreRawList=null;
   var host=document.getElementById("explore-map-host");
   if(!host)return;
   host.classList.remove("in");
@@ -10254,7 +10323,7 @@ function exploreLoadStores(useCache){
   }
   var q;
   if(useCache&&window._exploreRawList){q=Promise.resolve(window._exploreRawList);}
-  else{if(status)status.textContent="Chargement\u2026";q=window.fbQueryZone?window.fbQueryZone(cLat,cLng,Math.min(radiusKm,25)):Promise.resolve(STORES||[]);}
+  else{if(status)status.textContent="Chargement\u2026";q=window.fbQueryZone?window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12)):Promise.resolve(STORES||[]);}
   q.then(function(list){
     list=list||[];
     if(!useCache)window._exploreRawList=list;
@@ -10278,15 +10347,21 @@ function exploreLoadStores(useCache){
       list.sort(function(a,b){
         var da=(a._hasDrink?2:0)+(storeOpenState(a)===false?0:1);
         var db=(b._hasDrink?2:0)+(storeOpenState(b)===false?0:1);
-        return db-da;
+        return db-da||((a.dist==null?9e9:a.dist)-(b.dist==null?9e9:b.dist));
       });
     }
     // fusion douce dans STORES (necessaire pour ouvrir la fiche magasin)
+    /* Index construit une fois (O(n+m)) au lieu d'un .some() par magasin
+       (~3,5 millions de comparaisons a Bruxelles, rejouees a CHAQUE mouvement
+       de carte). Corrige aussi un vrai bug : _exploreSeen n'etait jamais remis
+       a zero quand applyStores remplace STORES par un NOUVEAU tableau, donc un
+       magasin "deja vu" mais absent du nouveau STORES n'y etait jamais remis
+       -> clic sur sa ligne ou son pin sans effet. */
+    var _known={};
+    (STORES||[]).forEach(function(x){_known[String(x.id)]=1;});
     list.forEach(function(s){
-      if(!_exploreSeen[String(s.id)]){
-        _exploreSeen[String(s.id)]=1;
-        if(!(STORES||[]).some(function(x){return String(x.id)===String(s.id);}))STORES.push(s);
-      }
+      var k=String(s.id);
+      if(!_known[k]){_known[k]=1;_exploreSeen[k]=1;STORES.push(s);}
     });
     // En balade sur la carte, chaque zone visitee s'ajoutait a STORES sans
     // limite -> memoire en roue libre -> crash. On coupe aux plus proches.
@@ -10308,7 +10383,16 @@ function exploreLoadStores(useCache){
     try{list=exploreApplyChips(list);}catch(eChip){}
     exploreLayer.clearLayers();
     var shown=0;
-    list.slice(0,400).forEach(function(s){
+    /* Plafond de pins. Avant : 400 pins detruits et recrees a chaque mouvement,
+       et pris dans l'ORDRE DES LATITUDES (orderBy("lat")) — donc les 400 plus
+       au SUD, pas les plus proches. ATTENTION : ne pas retirer le test
+       !exploreFilter, sinon en mode boisson les magasins qui VENDENT la boisson
+       disparaissent de la carte. */
+    var _cap=exploreMap.getZoom()>=13?400:60;
+    if(!exploreFilter&&list.length>_cap){
+      list=list.slice().sort(function(a,c){return (a.dist==null?9e9:a.dist)-(c.dist==null?9e9:c.dist);});
+    }
+    list.slice(0,_cap).forEach(function(s){
       if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
       var pc=brandColor(s.brand);
       var ini=((s.brand||s.name||"?").trim().charAt(0)||"?").toUpperCase();
@@ -10332,7 +10416,7 @@ function exploreLoadStores(useCache){
       exploreLayer.addLayer(mk);
       shown++;
     });
-    try{renderExploreChips();exploreSetHeader(exploreFilter?withDrink:shown,_sureCount);}catch(eHdr){}
+    try{renderExploreChips();exploreSetHeader(exploreFilter?withDrink:list.length,_sureCount);}catch(eHdr){}
     try{renderExploreSheet(exploreFilter?list.filter(function(s){return s._hasDrink;}):list);}catch(eSheet){console.warn("exploreSheet:",eSheet);}
     try{renderInStockArrows();}catch(eArr){}
     if(status){
@@ -10343,7 +10427,7 @@ function exploreLoadStores(useCache){
           status.textContent="Personne ne vend "+exploreFilter.name+" par ici \u2014 magasins alentours en gris";
         }
       }else{
-        status.textContent=shown?(shown+" magasin"+(shown>1?"s":"")+" ici"):"Aucun magasin dans cette zone \u2014 sois le premier \u00E0 en ajouter !";
+        status.textContent=list.length?(list.length+" magasin"+(list.length>1?"s":"")+" ici"):"Aucun magasin dans cette zone \u2014 sois le premier \u00E0 en ajouter !";
       }
     }
   }).catch(function(e){
@@ -11828,6 +11912,9 @@ try{
   window.renderStoreList = renderStoreList;
   // Écouter le chargement Firebase et mettre à jour STORES
   window.addEventListener("fbStoresLoaded", function(e) {
+    // L'app a vraiment demarre (le module Firebase s'execute APRES ce script) :
+    // le filet de securite passe en veille ici, pas avant.
+    try{window.__magoBootOK();}catch(_e){}
     STORES = e.detail;
     if(curSel) renderStoreList();
     try{renderDeals();}catch(err){}
@@ -11986,16 +12073,24 @@ try{
     }catch(e2){}
   });
   // Mode hors-ligne : photographier les donnees recues dans IndexedDB
+  /* Avant : ~3,8 Mo copies et ~22 ms de blocage a CHAQUE evenement, pendant le
+     demarrage. Maintenant : une seule fois, 8 s apres, et seulement les 300
+     magasins LES PLUS PROCHES (list.slice() d'abord : trier list en place
+     trierait window.STORES, qui est le MEME tableau). */
+  var _idbStoresSnapped=false;
   window.addEventListener("fbStoresLoaded", function(e) {
     var list=e.detail||[];
-    if(list.length)idbSet("stores:last",{ts:Date.now(),stores:list});
+    if(!list.length||_idbStoresSnapped)return;
+    _idbStoresSnapped=true;
+    var snap=list.slice().sort(function(a,b){return (a.dist==null?9e9:a.dist)-(b.dist==null?9e9:b.dist);}).slice(0,300);
+    setTimeout(function(){ idbSet("stores:last",{ts:Date.now(),stores:snap}); },8000);
   });
   window.addEventListener("fbDiscoveriesLoaded", function(e) {
     var list=e.detail||[];
     if(list.length)idbSet("discoveries:last",{ts:Date.now(),list:list});
   });
   // Si ni Firestore ni le cache localStorage n'ont repondu, repli IndexedDB
-  setTimeout(offlineFallbackCheck,3500);
+  setTimeout(offlineFallbackCheck,6000);
   // Lien profond de partage (#drink=... / #store=...)
   handleDeepLink();
   // PWA : installation + service worker offline
@@ -12012,11 +12107,17 @@ try{
   });
   registerServiceWorker();
   enhanceA11y();
+  // Si Firebase ne repond jamais (SDK bloque), l'app tourne quand meme en mode
+  // degrade : on met le filet en veille pour ne pas afficher le panneau a tort.
+  setTimeout(function(){try{window.__magoBootOK();}catch(_e){}},15000);
   // Le reset dev de l'onboarding (removeItem magoob/magotuto a chaque ouverture) a ete retire :
   // en production il relançait l'onboarding a chaque visite. Pour le revoir en dev,
   // utiliser le bouton "Revoir l'introduction" dans les parametres (resetOnboarding).
 }catch(e){
-  document.body.innerHTML='<div style="color:red;padding:20px;font-family:monospace;font-size:14px;background:#fff;position:fixed;inset:0;overflow:auto;z-index:9999"><b>ERREUR JS:</b><br>'+e.message+'<br><br><b>Stack:</b><br>'+(e.stack||'').replace(/\n/g,'<br>')+'</div>';
+  // On passe par le panneau lisible s'il existe, sinon on garde l'ancien
+  // affichage brut : cette ligne est la DERNIERE defense.
+  if(window.__magoPanel){window.__magoPanel("ERREUR JS : "+(e&&e.message)+"\n"+((e&&e.stack)||""));}
+  else document.body.innerHTML='<div style="color:red;padding:20px;font-family:monospace;font-size:14px;background:#fff;position:fixed;inset:0;overflow:auto;z-index:9999"><b>ERREUR JS:</b><br>'+e.message+'<br><br><b>Stack:</b><br>'+(e.stack||'').replace(/\n/g,'<br>')+'</div>';
 }
 </script>
 </body>
