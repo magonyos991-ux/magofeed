@@ -452,6 +452,11 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         </div>
         <span style="font-size:16px;color:var(--s3)">›</span>
       </div>
+      <!-- SOUTENIR MAGOFEED : une ligne, discrete, et fermable pour de bon.
+           Remplie par renderDonCard() ; reste vide (et invisible) tant qu'aucun
+           moyen de don n'est configure, ou si la personne l'a fermee, ou si
+           elle a deja donne. -->
+      <div id="don-card" style="display:none"></div>
       <div style="padding:8px 20px 10px" class="t-section" id="t-leaderboard">Classement</div>
       <div id="leaderboard-list" style="padding:0 20px 20px"></div>
       <div style="padding:8px 20px 10px" class="t-section">Boissons favorites</div>
@@ -619,6 +624,17 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <div class="set-row" onclick="window.open('mailto:magofeed@outlook.com','_blank')" role="button" tabindex="0" aria-label="Nous écrire" onkeydown="if(event.key==='Enter'){window.open('mailto:magofeed@outlook.com','_blank');}">
           <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></div>
           <div class="set-txt"><div class="set-title">Nous écrire</div><div class="set-sub">Une question, une idée, un partenariat ?</div></div>
+          <span class="set-chev">›</span>
+        </div>
+        <!-- Le don a sa place ICI, en permanence : c'est l'endroit qu'on va
+             chercher quand on veut soutenir, et celui qui ne derange personne
+             quand on ne le veut pas. La carte du profil, elle, se ferme pour
+             toujours — cette ligne-ci reste, sinon fermer la carte reviendrait
+             a supprimer la fonction. Masquee par renderDonRow() tant qu'aucun
+             moyen de don n'est configure. -->
+        <div id="don-set-row" class="set-row" style="display:none" onclick="openDon('reglages')" role="button" tabindex="0" aria-label="Soutenir Magofeed" onkeydown="if(event.key==='Enter'){openDon('reglages');}">
+          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M12 20.5C7 16.5 3.5 13.2 3.5 9.3 3.5 6.6 5.6 4.5 8.2 4.5c1.6 0 3 .8 3.8 2 .8-1.2 2.2-2 3.8-2 2.6 0 4.7 2.1 4.7 4.8 0 3.9-3.5 7.2-8.5 11.2z"/></svg></div>
+          <div class="set-txt"><div class="set-title">Soutenir Magofeed</div><div class="set-sub" id="don-set-sub">L'app reste gratuite — un coup de main, même petit, aide à la garder en ligne</div></div>
           <span class="set-chev">›</span>
         </div>
         <div class="set-row" onclick="reportBug()" role="button" tabindex="0" aria-label="Signaler un bug" onkeydown="if(event.key==='Enter'){reportBug();}">
@@ -2508,6 +2524,35 @@ window.fbOuvrirVerification = async function(storeId) {
     return { ok: false, reason: (e && (e.message || e.code)) || "erreur" };
   }
 };
+/* ── SOUTENIR LE PROJET ────────────────────────────────────────────────────
+   Meme principe que la verification : le navigateur ne decide de rien. Il
+   demande a la Cloud Function d'ouvrir une page Stripe et suit l'adresse
+   qu'on lui rend. C'est le webhook signe par Stripe qui enregistre le don.
+   Si la fonction n'est pas deployee, on le dit franchement — l'app continue
+   de marcher, il n'y a juste pas de bouton mort a l'ecran. */
+window.fbOuvrirDon = async function(montantCentimes) {
+  var fns = getFunctions(app, "europe-west1");
+  var call = httpsCallable(fns, "ouvrirDon", { timeout: 30000 });
+  try {
+    var r = await call({ montant: Number(montantCentimes) || 0 });
+    return (r && r.data) || { ok: false, reason: "no-response" };
+  } catch (e) {
+    var code = String((e && e.code) || "");
+    if (/not-found|unimplemented|internal/.test(code)) return { ok: false, reason: "not-deployed" };
+    return { ok: false, reason: (e && (e.message || e.code)) || "erreur" };
+  }
+};
+/* « Cette personne a-t-elle deja soutenu ? » Sert a une seule chose : ne plus
+   lui redemander. Repond false a la moindre difficulte (pas de compte, regles,
+   reseau) : dans le doute on prefere afficher une carte de trop, discrete et
+   fermable, plutot que de faire echouer l'affichage du profil. */
+window.fbEstSoutien = async function() {
+  try {
+    var u = auth.currentUser; if (!u) return false;
+    var snap = await getDoc(doc(db, "soutiens", u.uid));
+    return snap.exists();
+  } catch (e) { return false; }
+};
 window.fbMesMagasins = async function() {
   var u = auth.currentUser;
   if (!u || u.isAnonymous) return [];
@@ -4301,9 +4346,9 @@ function show(s){
   _showRaw(s);
 }
 function _showRaw(s){
-  if(s==="profile"){try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}}
+  if(s==="profile"){try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}try{renderDonCard();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
-  if(s==="settings"){try{renderGeoRow();}catch(e){}}
+  if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}}
   if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{renderHunts();}catch(e){}
     // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
     // le filtre boisson de la carte (sinon la carte rouvrait toujours sur la derniere
@@ -7737,6 +7782,222 @@ function majBlocParrainage(){
     el.style.display=bouts.length?"block":"none";
   }).catch(function(){});
 }
+/* ═════════════════════════════════════════════════════════════════════════
+   SOUTENIR MAGOFEED — le don.
+
+   TROIS REGLES, et elles expliquent tout le code qui suit.
+
+   1) Un don ne debloque RIEN. Pas de points, pas de badge, pas de fonction
+      reservee, pas de publicite retiree. Des qu'un paiement donne quelque
+      chose en echange, ce n'est plus un don mais un achat — et un achat dans
+      une app repond aux regles d'Apple et de Google, pas aux tiennes. Ici on
+      demande un coup de main, on ne vend rien.
+
+   2) Ca se ferme, et ca ne revient pas. La carte du profil porte une croix.
+      Une fois fermee, elle ne se reaffiche jamais : ni au bout de trois jours,
+      ni « juste une fois pour rappeler ». La ligne discrete des Reglages, elle,
+      reste — sinon fermer la carte reviendrait a supprimer la fonction, et la
+      personne qui change d'avis dans six mois ne saurait plus ou aller.
+
+   3) Rien ne s'affiche tant que rien n'est branche. Tant que DON_LIEN est vide
+      et DON_FONCTION a false, ni la carte ni la ligne n'existent a l'ecran.
+      Aucun bouton mort. C'est la meme regle que pour la verification des
+      commercants.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+/* ─── LES DEUX SEULES LIGNES A REMPLIR ─────────────────────────────────────
+   VOIE 1 (cinq minutes, aucun deploiement) : cree une page de don chez qui tu
+   veux — Stripe Payment Link, Ko-fi, Liberapay, Buy Me a Coffee — et colle son
+   adresse ici. C'est tout : la carte et la ligne apparaissent, et le bouton
+   ouvre ta page. Tu peux recevoir ton premier don aujourd'hui.
+       var DON_LIEN="https://ko-fi.com/tonpseudo";
+   VOIE 2 (plus tard) : le paiement DANS l'app, avec le choix du montant sur
+   place. Demande de deployer functions-a-deployer/dons.js et un compte Stripe
+   a ton nom (donc un numero d'entreprise). Le jour ou c'est fait, passe
+   DON_FONCTION a true — et laisse DON_LIEN rempli, il sert de secours si la
+   fonction ne repond pas.
+   ───────────────────────────────────────────────────────────────────────── */
+var DON_LIEN="";
+var DON_FONCTION=false;
+
+/* Les montants proposes. 50 centimes en premier, et assume : c'est le montant
+   qui compte le moins pour ta tresorerie et le plus pour ton moral. Le serveur
+   revalide cette liste de son cote (MONTANTS_AUTORISES dans dons.js) — ce qui
+   est ecrit ici n'est qu'une proposition d'affichage. */
+var DON_MONTANTS=[
+  {c:50,  t:"0,50 €"},
+  {c:100, t:"1 €"},
+  {c:200, t:"2 €"},
+  {c:500, t:"5 €"}
+];
+
+function donPossible(){ return !!DON_LIEN||DON_FONCTION; }
+function donMasque(){ try{return localStorage.getItem("magoDonMasque")==="1";}catch(e){return false;} }
+function donDejaFait(){ try{return localStorage.getItem("magoDonFait")==="1";}catch(e){return false;} }
+
+/* La ligne des Reglages : presente des qu'un moyen de don existe, et pour
+   toujours. Elle ne se ferme pas — c'est le point de repere. */
+function renderDonRow(){
+  var r=document.getElementById("don-set-row"); if(!r)return;
+  r.style.display=donPossible()?"":"none";
+  if(!donPossible())return;
+  var sub=document.getElementById("don-set-sub");
+  if(sub&&donDejaFait())sub.textContent="Merci — tu as déjà donné un coup de main. Tu peux recommencer, mais rien ne t'y oblige.";
+}
+
+/* La carte du profil : une ligne, une phrase, une croix. Elle disparait pour
+   de bon des qu'on la ferme, et aussi des qu'on a donne. */
+function renderDonCard(){
+  var el=document.getElementById("don-card"); if(!el)return;
+  if(!donPossible()||donMasque()||donDejaFait()){ el.style.display="none"; el.innerHTML=""; return; }
+  if(el.innerHTML){ el.style.display=""; return; }   // deja posee : on n'y retouche pas
+  el.style.display="";
+  el.innerHTML=
+    '<div style="display:flex;align-items:center;gap:11px;margin:2px 20px 8px;padding:11px 12px 11px 14px;background:var(--bg2);border:1.5px solid var(--border);border-radius:14px">'+
+      '<span style="line-height:0;color:var(--don-vert);flex-shrink:0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5C7 16.5 3.5 13.2 3.5 9.3 3.5 6.6 5.6 4.5 8.2 4.5c1.6 0 3 .8 3.8 2 .8-1.2 2.2-2 3.8-2 2.6 0 4.7 2.1 4.7 4.8 0 3.9-3.5 7.2-8.5 11.2z"/></svg></span>'+
+      '<div role="button" tabindex="0" aria-label="Soutenir Magofeed" onclick="openDon(\'profil\')" onkeydown="if(event.key===\'Enter\'){openDon(\'profil\');}" style="flex:1;min-width:0;cursor:pointer">'+
+        '<div style="font-size:12.5px;font-weight:800;color:var(--s1)">Soutenir Magofeed</div>'+
+        '<div style="font-size:11px;font-weight:600;color:var(--s2);margin-top:1px">L’app reste gratuite. Même 0,50 € aide à la garder en ligne.</div>'+
+      '</div>'+
+      /* La croix : 34 px de cible tactile, un aria-label explicite, et elle
+         ferme pour toujours. Une croix qui ne ferme qu'a moitie est pire que
+         pas de croix du tout. */
+      '<span role="button" tabindex="0" aria-label="Masquer définitivement" onclick="fermerDonCard(event)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();fermerDonCard(event);}" style="flex-shrink:0;width:34px;height:34px;margin:-6px -4px -6px 0;display:flex;align-items:center;justify-content:center;color:var(--s3);cursor:pointer">'+
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>'+
+      '</span>'+
+    '</div>';
+}
+function fermerDonCard(e){
+  if(e){try{e.stopPropagation();}catch(err){}}
+  try{localStorage.setItem("magoDonMasque","1");}catch(err){}
+  var el=document.getElementById("don-card");
+  if(el){el.style.display="none";el.innerHTML="";}
+  try{playSound("pop");}catch(err){}
+  /* On dit ou ca reste. Sans cette phrase, fermer la carte donne l'impression
+     d'avoir supprime la possibilite de donner. */
+  toast("C’est fermé, ça ne reviendra pas · Réglages › Communauté si tu changes d’avis");
+}
+
+/* La feuille de don. Elle dit ce que l'argent paie et ce qu'il ne donne pas.
+   Rien n'est decide ici : soit on ouvre une page de don externe, soit on
+   demande a la Cloud Function d'ouvrir une page Stripe. Dans les deux cas
+   l'argent ne passe ni par l'app ni par un serveur de Magofeed. */
+function openDon(origine){
+  if(!donPossible()){toast("Le don n’est pas encore branché");try{playSound("err");}catch(e){}return;}
+  var old=document.getElementById("don-ov"); if(old)old.remove();
+  var boutons=DON_FONCTION
+    ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:14px 0 4px">'+
+        DON_MONTANTS.map(function(m,i){
+          return '<button class="don-montant" onclick="donChoisir('+m.c+')" style="min-height:52px;padding:13px 10px;border-radius:14px;border:1.5px solid '+(i===0?"#0e7a4d":"var(--border)")+';background:'+(i===0?"#0e7a4d":"var(--bg2)")+';color:'+(i===0?"#fff":"var(--s1)")+';font-size:15px;font-weight:800;font-family:inherit;cursor:pointer">'+m.t+'</button>';
+        }).join("")+
+      '</div>'
+    : '<button class="don-montant" onclick="donChoisir(0)" style="width:100%;min-height:48px;margin:14px 0 4px;padding:14px;border-radius:15px;border:none;background:#0e7a4d;color:#fff;font-size:15px;font-weight:800;font-family:inherit;cursor:pointer">Ouvrir la page de don</button>';
+  var ov=document.createElement("div");
+  ov.id="don-ov";
+  ov.className="claim-ov";
+  ov.innerHTML=
+    '<div class="claim-card" role="dialog" aria-modal="true" aria-label="Soutenir Magofeed">'+
+      '<div class="claim-grip"></div>'+
+      '<div class="claim-badge" style="background:#0e7a4d">'+
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M12 20.5C7 16.5 3.5 13.2 3.5 9.3 3.5 6.6 5.6 4.5 8.2 4.5c1.6 0 3 .8 3.8 2 .8-1.2 2.2-2 3.8-2 2.6 0 4.7 2.1 4.7 4.8 0 3.9-3.5 7.2-8.5 11.2z"/></svg>'+
+        'Soutenir'+
+      '</div>'+
+      '<div class="claim-title">Magofeed tourne grâce à toi</div>'+
+      '<div class="claim-lead">L’app est gratuite et le restera. Mais l’héberger coûte tous les mois, et la faire avancer prend du temps.</div>'+
+      '<ul class="claim-list">'+
+        '<li>Ça paie <b>les serveurs</b> : la carte, la recherche, les alertes.</li>'+
+        '<li>Ça paie <b>le temps</b> passé à corriger et à ajouter ce que vous demandez.</li>'+
+        '<li><b>Même 0,50 €</b> compte — pas pour la somme, pour le signe que ça sert à quelqu’un.</li>'+
+      '</ul>'+
+      /* La ligne la plus importante de la feuille. On ne vend rien, et on le
+         dit avant de demander l'argent, pas apres. */
+      '<div class="claim-honest">Un don ne débloque rien : ni points, ni badge, ni fonction réservée. Tout ce que fait l’app reste accessible à tout le monde, gratuitement, que tu donnes ou non. C’est un coup de main, pas un achat.</div>'+
+      boutons+
+      '<div class="claim-lab" style="text-align:center;margin:12px 0 0;font-weight:600;opacity:.75">Le paiement se fait sur une page sécurisée. Magofeed ne voit jamais ta carte.</div>'+
+      '<button class="claim-cancel" onclick="closeDon()">Une autre fois</button>'+
+    '</div>';
+  ov.addEventListener("click",function(e){ if(e.target===ov)closeDon(); });
+  document.body.appendChild(ov);
+  try{document.body.classList.add("sheet-open");}catch(e){}
+  requestAnimationFrame(function(){ov.classList.add("in");});
+  try{playSound("pop");}catch(e){}
+}
+function closeDon(){
+  var ov=document.getElementById("don-ov"); if(!ov)return;
+  ov.classList.remove("in");
+  try{document.body.classList.remove("sheet-open");}catch(e){}
+  setTimeout(function(){ if(ov.parentNode)ov.remove(); },240);
+}
+/* centimes = 0 : voie « page de don externe », il n'y a pas de montant a
+   choisir ici, la page s'en charge. */
+function donChoisir(centimes){
+  var btns=document.querySelectorAll("#don-ov .don-montant");
+  var ouvrirLien=function(){
+    if(!DON_LIEN)return false;
+    /* noopener : la page ouverte ne doit pas pouvoir manipuler la notre. */
+    try{window.open(DON_LIEN,"_blank","noopener");}catch(e){location.href=DON_LIEN;}
+    closeDon();
+    return true;
+  };
+  if(!centimes||!DON_FONCTION||!window.fbOuvrirDon){
+    if(ouvrirLien())return;
+    toast("Le don n’est pas encore branché");try{playSound("err");}catch(e){}
+    return;
+  }
+  btns.forEach(function(b){b.disabled=true;b.style.opacity=".6";});
+  var rendre=function(msg){
+    try{playSound("err");}catch(e){}
+    toast(msg);
+    btns.forEach(function(b){b.disabled=false;b.style.opacity="";});
+  };
+  window.fbOuvrirDon(centimes).then(function(r){
+    if(r&&r.ok&&r.url){ location.href=r.url; return; }
+    var why=(r&&r.reason)||"erreur";
+    /* La fonction n'est pas deployee : si une page de don externe existe, on
+       bascule dessus sans rien dire — la personne voulait donner, pas
+       apprendre l'etat de notre infrastructure. */
+    if(why==="not-deployed"){
+      if(ouvrirLien())return;
+      return rendre("Le don n’est pas encore actif — reviens bientôt");
+    }
+    rendre("Paiement impossible : "+String(why).slice(0,80));
+  }).catch(function(e){ rendre("Paiement impossible ("+((e&&e.message)||"erreur")+")"); });
+}
+
+/* Retour de la page de paiement. « ?don=merci » ne PROUVE rien — cette adresse
+   se tape a la main — et c'est pour ca qu'elle n'ecrit rien d'important : elle
+   ne fait que dire merci et ranger la carte. Le vrai enregistrement du don,
+   c'est le webhook signe par Stripe qui le fait, cote serveur. */
+function donRetour(){
+  var m=/[?&]don=(merci|annule)/.exec(location.search||"");
+  if(m){
+    if(m[1]==="merci"){
+      try{localStorage.setItem("magoDonFait","1");}catch(e){}
+      setTimeout(function(){toast("Merci. Sincèrement — ça compte plus que tu ne crois.");},900);
+      try{playSound("win");}catch(e){}
+    }
+    /* On nettoie l'adresse : sans ca, un rechargement redirait merci, et le
+       lien partage a un ami afficherait un remerciement qu'il n'a pas merite.
+       On retire UNIQUEMENT « don » : effacer toute la requete emporterait le
+       code de parrainage (« ?p=... ») de quelqu'un arrive par un lien. */
+    try{
+      var reste=(location.search||"").replace(/^\?/,"").split("&")
+        .filter(function(x){return x&&!/^don=/.test(x);}).join("&");
+      history.replaceState(null,"",location.pathname+(reste?"?"+reste:"")+location.hash);
+    }catch(e){}
+  }
+  /* Le serveur a le dernier mot : quelqu'un qui a donne depuis un autre
+     telephone ne doit pas revoir la carte ici. */
+  if(window.fbEstSoutien){
+    window.fbEstSoutien().then(function(oui){
+      if(!oui)return;
+      try{localStorage.setItem("magoDonFait","1");}catch(e){}
+      try{renderDonCard();renderDonRow();}catch(e){}
+    }).catch(function(){});
+  }
+  try{renderDonCard();renderDonRow();}catch(e){}
+}
+
 /* \u2500\u2500 Pastille MISSIONS flottante et deplacable \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
    Acces permanent aux missions/chasses depuis n'importe quel ecran. Badge =
    missions du jour a finir + chasses actives autour. Deplacable a la verticale
@@ -19070,6 +19331,12 @@ try{
     toast("Magofeed installé !");
   });
   registerServiceWorker();
+  /* Retour d'une page de don, et etat du soutien cote serveur. HORS de
+     registerServiceWorker : celle-ci abandonne des la premiere ligne quand
+     le navigateur n'a pas de service worker, et le merci ne serait jamais
+     dit. Le delai laisse le temps a l'authentification de s'etablir, sinon
+     fbEstSoutien n'a personne a regarder. */
+  setTimeout(function(){try{donRetour();}catch(e){}},3000);
   enhanceA11y();
   // Le reset dev de l'onboarding (removeItem magoob/magotuto a chaque ouverture) a ete retire :
   // en production il relançait l'onboarding a chaque visite. Pour le revoir en dev,

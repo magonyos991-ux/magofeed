@@ -161,6 +161,94 @@ Le seul point à ne pas oublier : **même sans encaisser un centime, ouvrir un
 compte Stripe pour une activité demande un numéro d'entreprise.** Le mode
 empreinte t'évite la fiscalité, pas l'inscription.
 
+## 3 ter. Le don — recevoir un coup de main
+
+C'est la seule chose ici qui encaisse vraiment de l'argent, et volontairement.
+Un don, ce n'est pas une vente : personne ne reçoit rien en échange.
+
+### Ce qu'il y a dans l'app
+
+Deux endroits, et pas un de plus :
+
+- **Une petite carte dans le profil**, sous « Donne ton avis ». Une ligne, une
+  phrase, une croix. La croix la ferme **pour toujours** — pas « pour trois
+  jours », pas « jusqu'à la prochaine mise à jour ». Pour toujours.
+- **Une ligne discrète dans Réglages › Communauté**, qui elle ne se ferme
+  jamais. C'est le point de repère : sans elle, fermer la carte reviendrait à
+  supprimer la fonction, et quelqu'un qui change d'avis dans six mois ne
+  saurait plus où aller.
+
+Les deux disparaissent aussi tout seuls dès que la personne a donné. On ne
+redemande pas à quelqu'un qui vient de dire oui.
+
+### Ce qu'un don ne donne PAS, et pourquoi c'est important
+
+Aucun point, aucun badge, aucune fonction réservée, aucune publicité retirée.
+Ce n'est pas de la modestie : **dès qu'un paiement débloque quelque chose, ce
+n'est plus un don, c'est un achat.** Et un achat dans une application obéit aux
+règles d'Apple et de Google — qui exigent alors de passer par LEUR système de
+paiement, et prennent leur commission. Un don pur, qui ne débloque rien,
+échappe à ça et peut passer par une page web. C'est écrit noir sur blanc dans
+la feuille de don, avant qu'on demande l'argent, pas après.
+
+### Deux façons de l'allumer
+
+**Voie 1 — cinq minutes, aucun déploiement, tu peux le faire aujourd'hui.**
+Crée une page de don chez qui tu veux : Stripe Payment Link, Ko-fi, Liberapay,
+Buy Me a Coffee. Colle son adresse dans `index.html`, à la ligne :
+
+```js
+var DON_LIEN="";
+```
+
+C'est tout. La carte et la ligne apparaissent, le bouton ouvre ta page. Aucune
+Cloud Function, aucun secret, rien à déployer.
+
+**Voie 2 — plus tard : le paiement dans l'app, avec le choix du montant.**
+Elle demande `functions-a-deployer/dons.js` déployé et un compte Stripe à ton
+nom (donc un numéro d'entreprise). Le mode d'emploi est en haut de ce fichier.
+Une fois fait, passe `DON_FONCTION` à `true` — et **laisse `DON_LIEN` rempli** :
+il sert de secours si la fonction ne répond pas.
+
+Tant que les deux sont vides/à `false`, **rien ne s'affiche**. Pas de bouton
+mort, pas de promesse en l'air. Même règle que la vérification des commerçants.
+
+### Ce que Stripe prend sur 50 centimes
+
+Il faut que tu le saches, et il faut que tu ne changes rien à cause de ça.
+
+Stripe prend une part **fixe** plus un pourcentage. Sur 50 centimes, la part
+fixe mange grosso modo la moitié. Quatre dons de 50 centimes te laissent
+nettement moins qu'un seul don de 2 €.
+
+Et alors ? **Garde 50 centimes en premier dans la liste.** Quelqu'un qui donne
+50 centimes ne te finance pas — il te dit que ce que tu construis sert à
+quelqu'un. Ça, aucune commission ne te le prend. Ce que tu ne dois pas faire,
+c'est bâtir un budget là-dessus.
+
+Tarifs exacts : **stripe.com/be/pricing**, à lire toi-même.
+
+### Ce que ça change pour tes impôts
+
+Tout. Un don encaissé est de l'argent reçu, point. Ce n'est pas comparable au
+mode « empreinte » de la vérification des commerçants, où rien n'est prélevé et
+où il n'y a donc rien à déclarer. Ici, il y a quelque chose.
+
+Ce n'est pas un problème — c'est juste une décision à prendre les yeux ouverts.
+Les plateformes de paiement déclarent aux administrations fiscales
+européennes : laisser l'argent dormir sur ton solde Stripe ne le rend ni
+invisible ni non imposable. Avant d'allumer les dons, va poser la question à un
+comptable ou à un guichet d'entreprises, avec ta situation à toi (étudiant,
+salarié, demandeur d'emploi — ça change la réponse). Une demi-heure de
+conseil t'évitera des années d'inquiétude.
+
+Et note bien : **même sans encaisser un centime, ouvrir un compte Stripe pour
+une activité demande un numéro d'entreprise.** Ko-fi et Buy Me a Coffee sont
+plus souples à l'inscription — ça ne veut pas dire que l'argent reçu n'existe
+pas aux yeux du fisc.
+
+---
+
 ## 4. Comment on essaie d'arnaquer les gens là-dessus
 
 Tu as dit que tu te sentais manipulable. Alors voilà les règles. Elles sont
