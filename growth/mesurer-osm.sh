@@ -77,8 +77,12 @@ for iso in "${PAYS[@]}"; do
   b=$(compte "$iso" "$ACTUEL" "name");  sleep 20
   c=$(compte "$iso" "$ELARGI" "");      sleep 20
   s=$(compte_stations "$iso");          sleep 20
-  a=${a:-0}; b=${b:-0}; c=${c:-0}; s=${s:-0}
-  printf '%-4s %10s %10s %10s %10s %8s\n' "$iso" "$a" "$b" "$((a-b))" "$c" "$s"
+  # Une requete Overpass qui echoue (429, 504, timeout) renvoie une chaine vide.
+  # L'afficher comme "0" serait indiscernable d'une vraie mesure a zero : on
+  # affiche ECHEC, et la ligne est a relancer.
+  ecart="?"
+  if [ -n "${a:-}" ] && [ -n "${b:-}" ]; then ecart=$((a-b)); fi
+  printf '%-4s %10s %10s %10s %10s %8s\n' "$iso" "${a:-ECHEC}" "${b:-ECHEC}" "$ecart" "${c:-ECHEC}" "${s:-ECHEC}"
 done
 echo
 echo "ACTUEL = ce que l'app POURRAIT importer avec le filtre d'aujourd'hui."
