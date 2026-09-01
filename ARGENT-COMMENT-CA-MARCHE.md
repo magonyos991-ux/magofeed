@@ -213,18 +213,37 @@ il sert de secours si la fonction ne répond pas.
 Tant que les deux sont vides/à `false`, **rien ne s'affiche**. Pas de bouton
 mort, pas de promesse en l'air. Même règle que la vérification des commerçants.
 
-### Ce que Stripe prend sur 50 centimes
+### Aucun montant n'est écrit dans le texte, et c'est voulu
 
-Il faut que tu le saches, et il faut que tu ne changes rien à cause de ça.
+Le texte de la feuille ne cite **aucun chiffre**. Pas de « même 0,50 € », pas
+de « à partir de 1 € », pas de « le prix d'un café ».
 
-Stripe prend une part **fixe** plus un pourcentage. Sur 50 centimes, la part
-fixe mange grosso modo la moitié. Quatre dons de 50 centimes te laissent
-nettement moins qu'un seul don de 2 €.
+Pourquoi : dès que tu écris un montant dans une phrase, tu poses un tarif. Et
+un tarif, ça se compare, ça se juge, ça se refuse. « Même 0,50 € » a l'air
+modeste, mais ça dit deux choses que tu ne veux pas dire — que tu chiffres ce
+que tu vaux, et que tu vises bas.
 
-Et alors ? **Garde 50 centimes en premier dans la liste.** Quelqu'un qui donne
-50 centimes ne te finance pas — il te dit que ce que tu construis sert à
-quelqu'un. Ça, aucune commission ne te le prend. Ce que tu ne dois pas faire,
-c'est bâtir un budget là-dessus.
+Ce que le texte raconte à la place, c'est **qui** est derrière l'app : une
+seule personne, pas d'entreprise, pas d'équipe, pas d'investisseur, qui paie
+l'hébergement de sa poche. C'est vrai, ça ne demande rien, et ça touche
+beaucoup plus qu'un chiffre.
+
+Les montants ne vivent que sur les boutons, pour répondre à « combien, alors ? »
+une fois la question déjà posée. Et **aucun des quatre n'est mis en avant** :
+en colorer un, c'est désigner le bon choix, donc pousser.
+
+### Ce que Stripe prend sur les petits montants
+
+Stripe prend une part **fixe** plus un pourcentage. Sur un très petit montant,
+la part fixe mange une grosse moitié : quatre petits dons te laissent nettement
+moins qu'un seul don moyen.
+
+Ce n'est pas une raison pour retirer le plus petit montant. Il reste proposé
+parce que c'est le minimum que Stripe accepte en euros, et surtout parce que
+**personne ne doit avoir honte de son montant**. Quelqu'un qui donne peu ne te
+finance pas : il te dit que ce que tu construis sert à quelqu'un. Ça, aucune
+commission ne te le prend. Ce que tu ne dois pas faire, c'est bâtir un budget
+là-dessus.
 
 Tarifs exacts : **stripe.com/be/pricing**, à lire toi-même.
 
