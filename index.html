@@ -6254,6 +6254,23 @@ function renderBrandKinChoice(kin,best,code,p,tout){
 function scanCatEmoji(cat){
   return{Energy:"",Sport:"",Soda:"","Ice Tea":"",Jus:"",Eau:"",Exotique:"",Autre:""}[cat]||"";
 }
+/* Derniers scans. Avant : une icone code-barre generique pour tout le monde,
+   et un tap sur un produit hors catalogue qui ouvrait l'onglet Decouvertes...
+   sur rien. Maintenant : la vraie vignette (dessin du catalogue, ou la photo
+   envoyee avec la decouverte), le statut (au catalogue / votes / promue), et
+   un tap qui ouvre la boisson ou fait defiler jusqu'a SA carte decouverte. */
+var _scanPhotoCache={};
+function _scanThumbPhoto(code,host){
+  var box=host.querySelector(".sh-thumb");if(!box)return;
+  var paint=function(data){
+    if(!data)return;
+    var s=/^data:/.test(data)?data:"data:image/jpeg;base64,"+data;
+    box.innerHTML='<img src="'+s+'" alt="" style="width:100%;height:100%;object-fit:cover;display:block">';
+  };
+  if(_scanPhotoCache[code]!==undefined){paint(_scanPhotoCache[code]);return;}
+  if(!window.fbLoadDiscoveryPhoto)return;
+  window.fbLoadDiscoveryPhoto(code).then(function(data){_scanPhotoCache[code]=data||null;paint(data);}).catch(function(){});
+}
 function renderScanHistory(){
   var el=document.getElementById("scan-history");if(!el)return;
   var wrap=document.getElementById("scan-history-wrap");
@@ -6261,20 +6278,45 @@ function renderScanHistory(){
   if(wrap)wrap.style.display="block";
   el.innerHTML="";
   scanHist.slice(0,8).forEach(function(e){
+    var code=String(e.code||"");
+    var inCatalog=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(code)!==-1;});
+    var disc=(DISCOVERIES||[]).find(function(x){return String(x.id)===code||String(x.barcode||"")===code;});
     var div=document.createElement("div");
-    div.style.cssText="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)";
+    div.style.cssText="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer";
     var d=e.ts?new Date(e.ts):null;
     var when=d?d.toLocaleDateString("fr-BE",{day:"numeric",month:"short"}):"";
-    div.innerHTML='<div style="width:34px;height:34px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--s2)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6v12M8 6v12M12 6v12M16 6v12M20 6v12"/></svg></div>'+
+    var thumb=inCatalog?drinkIconHTML(inCatalog):'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6v12M8 6v12M12 6v12M16 6v12M20 6v12"/></svg>';
+    var statut="",statCol="var(--s2)",statBg="var(--bg2)";
+    if(inCatalog){statut="Au catalogue";}
+    else if(disc&&disc.promoted){statut="Promue";statCol="#15803d";statBg="#dcfce7";}
+    else if(disc){var v=nbSur(disc.votes);statut=v+"/"+ADMIN_VOTE_THRESHOLD+" votes";statCol="#b45309";statBg="#fef3c7";}
+    div.innerHTML='<div class="sh-thumb" style="width:40px;height:40px;border-radius:12px;background:var(--bg2);overflow:hidden;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--s2)">'+thumb+'</div>'+
       '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(e.name)+'</div>'+
-      '<div style="font-size:11px;font-weight:500;color:var(--s2)">'+(e.cat?e.cat+" \u00B7 ":"")+when+'</div></div>'+
+      '<div style="display:flex;align-items:center;gap:6px;margin-top:2px;font-size:11px;font-weight:500;color:var(--s2)">'+
+        (statut?'<span style="padding:2px 7px;border-radius:999px;background:'+statBg+';color:'+statCol+';font-weight:800;font-size:10px">'+statut+'</span>':'')+
+        '<span>'+(e.cat?e.cat+" \u00B7 ":"")+when+'</span></div></div>'+
       '<span class="c3" style="font-size:16px">\u203A</span>';
+    if(!inCatalog)_scanThumbPhoto(code,div);
     div.onclick=function(){
-      var inCatalog=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(e.code)!==-1;});
       if(inCatalog){pick(inCatalog);return;}
+      // Decouverte promue : elle est au catalogue sous son nouvel id
+      if(disc&&disc.promoted&&disc.catalogId){
+        var prom=DRINKS.find(function(x){return Number(x.id)===Number(disc.catalogId);});
+        if(prom){pick(prom);return;}
+      }
       show("discover");
+      setTimeout(function(){
+        var card=document.querySelector('.disc-card[data-disc-id="'+code.replace(/["\\]/g,"")+'"]');
+        if(card){
+          card.scrollIntoView({behavior:"smooth",block:"center"});
+          card.style.transition="box-shadow .3s";card.style.boxShadow="0 0 0 3px #e5a93a";
+          setTimeout(function(){card.style.boxShadow="";},1800);
+        }else{
+          toast(disc?"Cette proposition n'est plus en attente":"Proposition pas encore charg\u00E9e \u2014 r\u00E9essaie dans un instant");
+        }
+      },380);
     };
-    a11yCard(div,e.name+(e.cat?", "+e.cat:""));
+    a11yCard(div,e.name+(e.cat?", "+e.cat:"")+(statut?", "+statut:""));
     el.appendChild(div);
   });
 }
@@ -16252,7 +16294,7 @@ function renderDiscoveries(){
     var ready=votes>=ADMIN_VOTE_THRESHOLD;
     var pct=Math.min(100,Math.round(votes/ADMIN_VOTE_THRESHOLD*100));
     var missing=ADMIN_VOTE_THRESHOLD-votes;
-    var div=document.createElement("div");div.className="disc-card";
+    var div=document.createElement("div");div.className="disc-card";div.dataset.discId=String(d.id);
     div.innerHTML='<div class="disc-img">'+discGlyph(22)+'</div>'+
       '<div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:8px"><div style="font-size:14px;font-weight:700;color:var(--s1);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.3;word-break:break-word">'+sanitize(d.name)+'</div>'+
       (ready?'<span class="disc-ready" style="flex-shrink:0">PR\u00CATE </span>':"")+'</div>'+
