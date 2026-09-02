@@ -268,6 +268,11 @@ await doit('bloque : se declarer paye (traces de verification)',
 await doit('bloque : lire les traces de paiement',
   ()=>assertFails(getDoc(doc(m,'verifications','cs_test_1'))));
 
+await doit('bloque : marquer une zone Overture comme faite (client)',
+  ()=>assertFails(setDoc(doc(m,'zonesOverture','z_792_406'),{etat:'faite',quand:1})));
+await doit('bloque : lire les zones Overture (client)',
+  ()=>assertFails(getDoc(doc(m,'zonesOverture','z_792_406'))));
+
 await doit('bloque : se declarer administrateur',
   ()=>assertFails(setDoc(doc(m,'admins',MALLORY),{ok:true})));
 

@@ -761,7 +761,8 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div class="t-label" style="margin-bottom:8px">Sous-traitants</div>
           <div style="font-size:13.5px;line-height:1.7;color:var(--s1)">
             <b>• Google Firebase</b> (Firestore) — hébergement de la base de données des magasins, boissons signalées et statistiques communautaires.<br>
-            <b>• OpenStreetMap / Nominatim</b> — géocodage inverse (transformer tes coordonnées GPS en nom de rue) et fond de carte.<br>
+            <b>• OpenStreetMap / Nominatim</b> — géocodage inverse (transformer tes coordonnées GPS en nom de rue), fond de carte et commerces.<br>
+            <b>• Overture Maps Foundation</b> — commerces des zones que OpenStreetMap ne couvre pas (données ouvertes, licence CDLA-Permissive 2.0). Aucune donnée personnelle ne leur est transmise : la requête part de nos serveurs, pas de ton téléphone.<br>
             <b>• GitHub Pages</b> — hébergement du site.<br>
             Ces prestataires peuvent traiter des données techniques (adresse IP, requêtes réseau) dans le cadre de leur propre politique de confidentialité.
           </div>
@@ -2506,6 +2507,25 @@ window.fbOuvrirVerification = async function(storeId) {
     var code = String((e && e.code) || "");
     if (/not-found|unimplemented|internal/.test(code)) return { ok: false, reason: "not-deployed" };
     return { ok: false, reason: (e && (e.message || e.code)) || "erreur" };
+  }
+};
+/* LES COMMERCES DU MONDE ENTIER. OpenStreetMap ne connait presque rien en
+   dehors de l'Europe de l'Ouest : a Filiates (Grece) il connaissait UN
+   commerce — un salon funeraire — la ou Google en montre sept supermarches.
+   La Cloud Function chercherCommerces interroge Overture Maps (74 millions de
+   lieux, licence libre) pour la zone demandee, ecrit les commerces trouves
+   dans la base avec un rayon VIDE, et l'app les recharge par la voie normale.
+   Elle ne fait rien si la zone a deja ete interrogee ce mois-ci. */
+window.fbChercherCommercesMonde = async function(lat, lng) {
+  var fns = getFunctions(app, "europe-west1");
+  var call = httpsCallable(fns, "chercherCommerces", { timeout: 120000 });
+  try {
+    var r = await call({ lat: Number(lat), lng: Number(lng) });
+    return (r && r.data) || { ok: false, reason: "no-response" };
+  } catch (e) {
+    var code = String((e && e.code) || "");
+    if (/not-found|unimplemented/.test(code)) return { ok: false, reason: "not-deployed" };
+    return { ok: false, reason: (e && (e.code || e.message)) || "erreur" };
   }
 };
 window.fbMesMagasins = async function() {
@@ -11001,7 +11021,7 @@ window._leafletState = window._leafletState || null;   // null | "loading" | "re
    etre a l'ecran. Si les conditions d'Esri posaient probleme un jour, il suffit
    de renvoyer toujours l'URL OSM ci-dessous pour revenir en arriere.
    ============================================================================ */
-var FOND_ATTRIB='Esri, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+var FOND_ATTRIB='Esri, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, commerces <a href="https://overturemaps.org">Overture Maps</a>';
 function fondMago(sombre){
   /* UN SEUL FOND, SOBRE, A TOUS LES ZOOMS.
      On basculait sur OpenStreetMap une fois proche, pour gagner en detail.
@@ -13173,10 +13193,54 @@ function autoImportZone(cLat,cLng){
   var cell="v2_"+Math.round(cLat*20)+"_"+Math.round(cLng*20);
   var zones={};
   try{zones=JSON.parse(localStorage.getItem("magoAutoZones")||"{}");}catch(e){}
-  if(zones[cell]&&Date.now()-zones[cell]<7*86400000)return; // deja tente cette semaine
+  if(zones[cell]&&Date.now()-zones[cell]<7*86400000)return; // deja FAITE cette semaine
+  /* Un echec recent (Overpass sature, reseau coupe) : on laisse dix minutes
+     avant de reessayer, mais on ne marque PAS la zone comme faite. Avant, la
+     case etait marquee AVANT la requete, succes ou pas : un simple depassement
+     de delai chez Overpass rendait la zone « vide » pour une semaine, et
+     l'utilisateur lisait « aucun magasin » sans savoir que rien n'avait ete
+     cherche. */
+  var echecs={};
+  try{echecs=JSON.parse(localStorage.getItem("magoAutoEchecs")||"{}");}catch(e){}
+  if(echecs[cell]&&Date.now()-echecs[cell]<10*60000)return;
   _autoImportBusy=true;
-  zones[cell]=Date.now();
-  try{localStorage.setItem("magoAutoZones",JSON.stringify(zones));}catch(e){}
+  var _marquerFaite=function(){
+    zones[cell]=Date.now();
+    try{localStorage.setItem("magoAutoZones",JSON.stringify(zones));}catch(e){}
+  };
+  var _marquerEchec=function(){
+    echecs[cell]=Date.now();
+    try{localStorage.setItem("magoAutoEchecs",JSON.stringify(echecs));}catch(e){}
+    window._exploreDerniereRecherche={etat:"echec",quand:Date.now()};
+    try{if(typeof exploreStatutHonnete==="function")exploreStatutHonnete();}catch(e){}
+  };
+  /* Quand OpenStreetMap en connait moins de cinq, on demande au serveur
+     d'interroger Overture Maps. Une fois par mois par zone, quel que soit le
+     nombre de personnes qui l'ouvrent. */
+  var _relaisMonde=function(nOsm){
+    if(!window.fbChercherCommercesMonde||nOsm>=5){ _autoImportBusy=false; return; }
+    window._exploreDerniereRecherche={etat:"monde",quand:Date.now()};
+    try{if(typeof exploreStatutHonnete==="function")exploreStatutHonnete();}catch(e){}
+    window.fbChercherCommercesMonde(cLat,cLng).then(function(r){
+      _autoImportBusy=false;
+      if(r&&r.ok){
+        window._exploreDerniereRecherche={etat:"faite",quand:Date.now(),monde:true,ajoutes:r.ajoutes||0};
+        if(r.ajoutes>0){
+          try{if(typeof exploreLoadStores==="function")exploreLoadStores();}catch(e){}
+          try{if(window.fbLoadNearbyStores)window.fbLoadNearbyStores(cLat,cLng,10);}catch(e){}
+        }
+      }else if(r&&r.reason==="not-deployed"){
+        window._exploreDerniereRecherche={etat:"faite",quand:Date.now(),monde:false};
+      }else{
+        window._exploreDerniereRecherche={etat:"echec",quand:Date.now()};
+      }
+      try{if(typeof exploreStatutHonnete==="function")exploreStatutHonnete();}catch(e){}
+    }).catch(function(){
+      _autoImportBusy=false;
+      window._exploreDerniereRecherche={etat:"echec",quand:Date.now()};
+      try{if(typeof exploreStatutHonnete==="function")exploreStatutHonnete();}catch(e){}
+    });
+  };
   var km=2.5;
   var dLat=km/111,dLng=km/(111*Math.cos(cLat*Math.PI/180));
   var bbox=(cLat-dLat)+","+(cLng-dLng)+","+(cLat+dLat)+","+(cLng+dLng);
@@ -13201,7 +13265,9 @@ function autoImportZone(cLat,cLng){
         return {id:"o"+el.id,osm:el.id,name:name,emoji:osmShopEmoji(el.tags.shop),lat:lat,lng:lng,hours:(el.tags.opening_hours||null),
           brand:(el.tags.brand||null),type:gcat?("\u00e9picerie "+gcat):null,drinks:[],drinksVerified:null,verifiedSource:null};
       }).filter(Boolean).filter(function(s){var k=s.id;if(seen[k])return false;seen[k]=1;return true;});
-      if(!found.length){_autoImportBusy=false;return;}
+      _marquerFaite();   // la requete a REPONDU : c'est maintenant qu'on note la zone
+      window._exploreDerniereRecherche={etat:"faite",quand:Date.now(),osm:found.length};
+      if(!found.length){_relaisMonde(0);return;}
       var zone=window.fbQueryZone?window.fbQueryZone(cLat,cLng,km+0.5):Promise.resolve(STORES||[]);
       return zone.then(function(existing){
         var news=found.filter(function(c){
@@ -13212,7 +13278,7 @@ function autoImportZone(cLat,cLng){
             return Math.sqrt(dLa*dLa+dLo*dLo)<60&&(normTxt(s.name)===normTxt(c.name)||fuzzyIncludes(c.name,s.name)||fuzzyIncludes(s.name,c.name));
           });
         }).slice(0,150);
-        if(!news.length){_autoImportBusy=false;return;}
+        if(!news.length){_relaisMonde(found.length);return;}
         return window.fbImportStores(news,null).then(function(done){
           news.forEach(function(c){
             if(!(STORES||[]).some(function(s){return String(s.id)===c.id;})){
@@ -13231,10 +13297,11 @@ function autoImportZone(cLat,cLng){
           try{if(curSel)renderStoreList();}catch(e2){}
           try{renderNearby();}catch(e4){}
           try{if(exploreMap)exploreMap.fire("moveend");}catch(e3){} // la carte explore se remplit sous les yeux
+          _relaisMonde(found.length);   // peu de resultats OSM : Overture complete
         });
       });
     })
-    .catch(function(e){console.warn("autoImport OSM:",e);_autoImportBusy=false;});
+    .catch(function(e){console.warn("autoImport OSM:",e);_autoImportBusy=false;_marquerEchec();});
 }
 function osmRunImport(){
   if(!osmCandidates||!osmCandidates.length)return;
@@ -13279,6 +13346,7 @@ function osmRunImport(){
 var AUTO_OSM=true;
 var _autoOsmBusy=false;
 var _autoOsmSeen=(function(){try{return JSON.parse(localStorage.getItem("magoAutoOsmSeen")||"{}");}catch(e){return {};}})();
+var _autoOsmEchec={};
 function autoOsmForArea(lat,lng,zoom){
   try{
     if(!AUTO_OSM||_autoOsmBusy)return;
@@ -13287,8 +13355,10 @@ function autoOsmForArea(lat,lng,zoom){
     var key=lat.toFixed(2)+","+lng.toFixed(2);     // ~1 km
     var now=Date.now();
     if(_autoOsmSeen[key]&&(now-_autoOsmSeen[key])<7*24*3600*1000)return; // 1×/semaine/zone
-    _autoOsmSeen[key]=now;
-    try{localStorage.setItem("magoAutoOsmSeen",JSON.stringify(_autoOsmSeen));}catch(e){}
+    /* La zone n'est notee qu'a la REPONSE (voir plus bas), plus avant la
+       requete : un echec d'Overpass ne doit pas rendre une zone « vide » pour
+       une semaine. Entre deux echecs, on laisse dix minutes. */
+    if(_autoOsmEchec[key]&&(now-_autoOsmEchec[key])<10*60000)return;
     _autoOsmBusy=true;
     var km=2.5,dLat=km/111,dLng=km/(111*Math.cos(lat*Math.PI/180));
     var bbox=(lat-dLat)+","+(lng-dLng)+","+(lat+dLat)+","+(lng+dLng);
@@ -13296,6 +13366,8 @@ function autoOsmForArea(lat,lng,zoom){
     fetchWithTimeout("https://overpass-api.de/api/interpreter?data="+encodeURIComponent(q),45000)
       .then(function(r){return r.json();})
       .then(function(data){
+        _autoOsmSeen[key]=Date.now();
+        try{localStorage.setItem("magoAutoOsmSeen",JSON.stringify(_autoOsmSeen));}catch(e){}
         var els=(data&&data.elements)||[];
         var found=els.map(function(e){
           var la=e.lat!=null?e.lat:(e.center&&e.center.lat);
@@ -13332,7 +13404,7 @@ function autoOsmForArea(lat,lng,zoom){
           _autoOsmBusy=false;
         }).catch(function(e){console.warn("autoOsm persist",e);_autoOsmBusy=false;});
       })
-      .catch(function(e){console.warn("autoOsm",e);_autoOsmBusy=false;});   // fail-safe : rien ne casse
+      .catch(function(e){console.warn("autoOsm",e);_autoOsmBusy=false;_autoOsmEchec[key]=Date.now();});   // fail-safe : rien ne casse
   }catch(e){console.warn("autoOsm",e);_autoOsmBusy=false;}
 }
 
@@ -15267,13 +15339,27 @@ function exploreLoadStores(useCache){
           status.textContent="Personne ne vend "+exploreFilter.name+" par ici \u2014 magasins alentours en gris";
         }
       }else{
-        status.textContent=shown?(shown+" magasin"+(shown>1?"s":"")+" ici"):"Aucun magasin dans cette zone \u2014 sois le premier \u00E0 en ajouter !";
+        status.textContent=shown?(shown+" magasin"+(shown>1?"s":"")+" ici"):exploreStatutHonnete(true);
       }
     }
   }).catch(function(e){
     console.warn("explore:",e);
     if(status)status.textContent="Chargement impossible, r\u00E9essaie";
   });
+}
+/* « Aucun magasin » n'avait qu'une seule voix, qu'on n'ait rien cherche, que
+   la recherche ait echoue, ou qu'elle ait vraiment rendu zero. Trois etats,
+   trois phrases : celui qui lit sait ce qui s'est passe. */
+function exploreStatutHonnete(retourner){
+  var d=window._exploreDerniereRecherche||null;
+  var txt;
+  if(d&&d.etat==="monde")txt="Recherche des commerces dans le monde\u2026";
+  else if(d&&d.etat==="echec")txt="La recherche des commerces a \u00E9chou\u00E9 \u2014 r\u00E9essaie dans un moment";
+  else if(d&&d.etat==="faite")txt="Aucun commerce connu ici (OpenStreetMap, Overture) \u2014 sois le premier \u00E0 en ajouter";
+  else txt="Aucun magasin dans cette zone \u2014 sois le premier \u00E0 en ajouter !";
+  if(retourner)return txt;
+  var st=document.getElementById("explore-status");
+  if(st&&/Aucun|Recherche des commerces|a \u00E9chou\u00E9/.test(st.textContent))st.textContent=txt;
 }
 /* Villes emblematiques : le champ vide propose un tour du monde en un tap.
    C'est la demo qui parle a quelqu'un a qui on montre l'app pour la premiere
