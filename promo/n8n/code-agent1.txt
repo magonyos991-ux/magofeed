@@ -1,0 +1,107 @@
+// AGENT 1 (image) — LA BOISSON EST CHOISIE PAR LE CALENDRIER, PAS PAR L'IA.
+//
+// Avant, le modele choisissait dans le menu avec la consigne « pas deux fois
+// la meme ». Une consigne s'oublie : deux Pocari sont sortis la meme semaine.
+// Maintenant : rotation fixe sur 12 boissons, une par jour — une repetition
+// est MATHEMATIQUEMENT impossible en moins de 12 jours. L'IA ne decide plus
+// que de l'angle du texte (anecdote, question, defi...).
+const prev = $('Memoire et aiguillage').first().json;
+const MENU = [
+  { slug: "guarana-antarctica", nom: "Guaraná Antarctica", info: "soda guarana, le prefere du Bresil depuis 1921" },
+  { slug: "ramune", nom: "Ramune", info: "soda japonais avec une bille de verre dans le goulot" },
+  { slug: "calpico", nom: "Calpico", info: "soda lacte japonais au gout yaourt, cree en 1919" },
+  { slug: "mogu-mogu", nom: "Mogu Mogu", info: "jus thailandais avec cubes de nata de coco qui se machent" },
+  { slug: "inca-kola", nom: "Inca Kola", info: "soda dore peruvien qui bat le cola chez lui" },
+  { slug: "milkis", nom: "Milkis", info: "soda lacte coreen doux et petillant" },
+  { slug: "mountain-dew", nom: "Mountain Dew", info: "le soda vert culte des Etats-Unis, version americaine introuvable en Europe" },
+  { slug: "ciao-energy", nom: "Ciao Energy", info: "energy drink introuvable dont tout le monde parle" },
+  { slug: "jarritos", nom: "Jarritos", info: "sodas mexicains aux vrais fruits depuis 1950" },
+  { slug: "sumol", nom: "Sumol", info: "soda portugais a l'ananas, culte a Lisbonne" },
+  { slug: "pocari-sweat", nom: "Pocari Sweat", info: "boisson desalterante n°1 au Japon" },
+  { slug: "vimto", nom: "Vimto", info: "boisson fruitee anglaise de Manchester, depuis 1908" },
+  { slug: "chupa-chups", nom: "Chupa Chups Sparkling", info: "la sucette devenue soda petillant, Coree" }
+];
+// Ordre volontairement melange pour alterner les continents d'un jour a l'autre.
+const ORDRE = ["ramune","jarritos","milkis","guarana-antarctica","sumol","pocari-sweat",
+               "mountain-dew","mogu-mogu","vimto","calpico","ciao-energy","inca-kola","chupa-chups"];
+/* ══ CHOIX DE LA BOISSON — TROIS VERROUS SUPERPOSES ══════════════════════
+   Objectif : un doublon doit etre IMPOSSIBLE, pas seulement improbable.
+
+   Verrou 1 — l'identifiant d'execution. n8n donne a chaque passage un
+     numero unique et croissant. Deux passages, meme lances a la meme
+     seconde, ne peuvent donc pas tomber sur la meme boisson. C'est ce qui
+     manquait : le calendrier seul donnait le meme resultat a deux passages
+     partageant un creneau (le cas des deux Milkis), et la memoire ne
+     rattrapait rien puisqu'elle n'est ecrite qu'en FIN de chaine — deux
+     passages simultanes lisent la meme memoire.
+
+   Verrou 2 — le calendrier, en repli si l'identifiant manque : trois
+     creneaux par jour (9h, 13h, 19h Bruxelles), bornes valables l'ete
+     (UTC+2) comme l'hiver (UTC+1).
+
+   Verrou 3 — la memoire des sujets deja publies : on avance tant que la
+     boisson visee y figure. On y cherche le premier mot du nom ET le slug,
+     pour resister aux variantes d'ecriture du modele (« Mtn Dew »,
+     « Chupa Chups » sans « Sparkling »...).
+   ═══════════════════════════════════════════════════════════════════════ */
+const jour = Math.floor(Date.now() / 86400000);
+const hUTC = new Date().getUTCHours();
+const creneau = hUTC < 10 ? 0 : (hUTC < 15 ? 1 : 2);
+
+let base = NaN;
+try { base = Number(String($execution.id).replace(/\D/g, "")); } catch (e) {}
+if (!Number.isFinite(base) || base <= 0) base = jour * 3 + creneau;
+let idx = ((base % ORDRE.length) + ORDRE.length) % ORDRE.length;
+
+const sansAccent = (t) => String(t).toLowerCase()
+  .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const dejaHay = sansAccent(prev.usedTopicsList || "");
+/* Table d'ALIAS, ecrite a la main plutot que devinee. Le modele redige les
+   sujets librement : il ecrit « Mtn Dew » pour Mountain Dew, « Calpis » pour
+   Calpico, « Chupa Chups » sans « Sparkling ». Une heuristique sur le premier
+   mot laissait passer ces variantes, et la boisson repassait en double. */
+const CLES = {
+  "ramune":             ["ramune"],
+  "jarritos":           ["jarritos"],
+  "milkis":             ["milkis"],
+  "guarana-antarctica": ["guarana", "antarctica"],
+  "sumol":              ["sumol"],
+  "pocari-sweat":       ["pocari"],
+  "mountain-dew":       ["mountain dew", "mountain", "mtn dew"],
+  "mogu-mogu":          ["mogu"],
+  "vimto":              ["vimto"],
+  "calpico":            ["calpico", "calpis"],
+  "ciao-energy":        ["ciao energy"],
+  "inca-kola":          ["inca kola", "inca"],
+  "chupa-chups":        ["chupa"]
+};
+const dejaPubliee = (s) => (CLES[s] || []).some(k => dejaHay.includes(k));
+for (let tour = 0; tour < ORDRE.length && dejaPubliee(ORDRE[idx]); tour++) {
+  idx = (idx + 1) % ORDRE.length;
+}
+const slug = ORDRE[idx];
+const m = MENU.find(x => x.slug === slug);
+const prompt =
+  "Tu es le responsable marketing de Magofeed, appli belge (Bruxelles) qui aide a TROUVER des boissons rares et exotiques SANS ALCOOL dans les magasins proches. Public familial, ton fun et curieux, langue: FRANCAIS.\n\n" +
+  "LA BOISSON DU JOUR EST IMPOSEE (ne la change sous aucun pretexte) :\n" +
+  "- " + m.nom + " : " + m.info + "\n\n" +
+  "Cree le post Instagram + Facebook pour CETTE boisson.\n\n" +
+  "REGLES ABSOLUES:\n" +
+  "- JAMAIS d'alcool, meme 0.0%. Univers 100% famille. Aucun emoji.\n" +
+  "- La boisson ne change pas ; ce qui doit changer, c'est L'ANGLE. Regarde les posts deja publies ci-dessous : si cette boisson y figure, prends un angle RADICALEMENT different (anecdote historique, le-savais-tu, question communaute, defi, comparaison, souvenir d'enfance, recette d'accompagnement...).\n" +
+  "- CTA vers l'appli: " + prev.appLink + "\n" +
+  "- Instagram: accroche forte + 8-12 hashtags. Facebook: conversationnel, 2-4 hashtags.\n\n" +
+  "POSTS DEJA PUBLIES (pour varier l'angle): " + prev.usedTopicsList;
+return [{ json: { claudeBody: {
+  model: "claude-opus-5", max_tokens: 4000,
+  output_config: { effort: "low", format: { type: "json_schema", schema: {
+    "type": "object", "additionalProperties": false,
+    "required": ["topic", "image_query", "caption_instagram", "caption_facebook"],
+    "properties": {
+      "topic": {"type": "string", "description": "Sujet court et unique du post (inclut le nom de la boisson ET l'angle choisi)"},
+      "image_query": {"type": "string", "enum": [slug], "description": "slug de la boisson du jour (impose)"},
+      "caption_instagram": {"type": "string", "description": "Legende Instagram: accroche forte, corps, CTA appli, 8-12 hashtags"},
+      "caption_facebook": {"type": "string", "description": "Version Facebook conversationnelle, 2-4 hashtags, CTA appli"}
+    }} } },
+  messages: [{ role: "user", content: prompt }]
+} } }];

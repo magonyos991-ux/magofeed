@@ -2,7 +2,22 @@
    Les données Firestore, la géocodification et les tuiles de carte restent toujours en direct (jamais mises en cache). */
 /* © 2026 Magofeed — Tous droits réservés. Titulaire des droits (mention légale) : Ilias Benabdellah.
    Marqueur de propriété intellectuelle — ne pas retirer. Antériorité : historique Git horodaté. */
-const CACHE_NAME = "magofeed-v11";
+/* VERSION DU CACHE — remplacée automatiquement au déploiement par l'empreinte
+   du commit (voir .github/workflows/pages.yml).
+
+   Avant, cette ligne se changeait à la main : 14 fois en 8 jours, et deux
+   commits pour réparer les oublis (« les changements de la fiche magasin
+   doivent arriver »). C'est cet oubli-là qui avait imposé le mode « réseau
+   d'abord » : par sécurité, l'app attendait le réseau à chaque lancement,
+   même quand une copie valide dormait déjà dans le cache. Sur une mauvaise
+   connexion, c'est plusieurs secondes d'écran d'attente pour rien.
+
+   Le numéro de version n'étant plus écrit par un humain, il ne peut plus être
+   oublié : chaque déploiement produit un cache neuf, l'ancien est effacé, et
+   l'app peut enfin repartir du cache — c'est-à-dire s'ouvrir instantanément.
+
+   La valeur ci-dessous n'est utilisée qu'en local (fichier non déployé). */
+const CACHE_NAME = "magofeed-__BUILD_ID__";
 /* Chemins RELATIFS au scope du service worker : fonctionne aussi bien a la racine
    d'un domaine (Netlify) que dans un sous-dossier (GitHub Pages /magofeed/).
    Les chemins absolus "/index.html" pointaient hors du sous-dossier sur GitHub
@@ -10,11 +25,21 @@ const CACHE_NAME = "magofeed-v11";
 const APP_SHELL = [
   "./",
   "./index.html",
+  "./app.css",
+  "./data/drinks.js",
+  "./data/state.js",
+  "./data/ui.js",
+  "./data/i18n.js",
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/apple-touch-icon.png"
 ];
+
+/* Chemin de la racine de l'app ("/" ou "/magofeed/"). Sert à distinguer
+   l'application des pages de partage /f/<id>.html, qui vivent dans le même
+   scope mais sont des pages à part entière. */
+const APP_ROOT = new URL("./", self.location).pathname;
 
 self.addEventListener("install", function(event) {
   event.waitUntil(
@@ -52,49 +77,48 @@ self.addEventListener("fetch", function(event) {
   // Firestore, géocodage, tuiles carte : toujours en réseau direct, jamais interceptés
   if (isLiveOnly(url)) return;
 
-  // Navigation (ouverture de page) : réseau d'abord, MAIS 2,5 s maximum.
-  /* Avant : sans limite de temps. Sur wifi captif ou signal faible, ce fetch
-     pouvait pendre 30-60 s : index.html n'etait jamais livre et l'iPhone
-     affichait l'ecran de lancement de la PWA (fond #1a1714) = la "page noire".
-     Maintenant : si le reseau n'a pas repondu en 2,5 s et qu'on a l'app en
-     cache, on ouvre depuis le cache et le reseau continue de rafraichir. */
+  /* ── OUVERTURE DE L'APP : le cache d'abord, donc instantanée ──────────────
+     Le cache porte l'empreinte du commit : il contient TOUJOURS une version
+     entière et cohérente de l'app (index.html + css + data/), jamais un
+     mélange. Une mise en ligne crée un cache neuf ; le service worker
+     l'installe, prend la main, et index.html recharge la page (écouteur
+     "controllerchange"). Personne ne reste bloqué sur une vieille version, et
+     plus personne n'attend 306 Ko pour voir l'écran d'accueil.
+
+     ATTENTION : seule la RACINE est l'app. Les pages de partage
+     /f/<id>.html sont dans le même scope ; les servir depuis le cache de
+     l'app renverrait l'application à la place de l'aperçu — et l'ancienne
+     version écrasait carrément l'index.html mis en cache avec le contenu de
+     la page de partage, ce qui cassait le mode hors-ligne dès qu'on avait
+     ouvert un lien partagé. */
   if (req.mode === "navigate") {
-    event.respondWith(new Promise(function(resolve) {
-      var settled = false;
-      var timer = setTimeout(function() {
-        if (settled) return;
-        caches.match("./index.html").then(function(hit) {
-          if (settled || !hit) return;   // pas de cache : on laisse le reseau finir
-          settled = true; resolve(hit);
-        });
-      }, 2500);
-      fetch(req).then(function(res) {
-        clearTimeout(timer);
-        var copy = res.clone();
-        caches.open(CACHE_NAME).then(function(cache) { cache.put("./index.html", copy); });
-        if (!settled) { settled = true; resolve(res); }
-      }).catch(function() {
-        clearTimeout(timer);
-        if (settled) return;
-        settled = true;
-        resolve(caches.match("./index.html").then(function(hit) { return hit || Response.error(); }));
-      });
-    }));
-    return;
+    if (url.pathname.replace(/index\.html$/, "") === APP_ROOT) {
+      event.respondWith(
+        caches.match("./index.html").then(function(cached) {
+          return cached || fetch(req).then(function(res) {
+            if (res && res.status === 200) {
+              var copy = res.clone();
+              caches.open(CACHE_NAME).then(function(cache) { cache.put("./index.html", copy); });
+            }
+            return res;
+          });
+        })
+      );
+    }
+    return; // page de partage ou autre : réseau normal, on ne s'en mêle pas
   }
 
-  // Même origine (app shell, icônes) : cache d'abord, réseau en secours + rafraîchissement silencieux
+  // Coquille de l'app (css, data/*.js, icônes) : cache d'abord, même logique.
   if (url.origin === self.location.origin) {
     event.respondWith(
       caches.match(req).then(function(cached) {
-        var network = fetch(req).then(function(res) {
+        return cached || fetch(req).then(function(res) {
           if (res && res.status === 200) {
             var copy = res.clone();
             caches.open(CACHE_NAME).then(function(cache) { cache.put(req, copy); });
           }
           return res;
-        }).catch(function() { return cached; });
-        return cached || network;
+        });
       })
     );
     return;

@@ -18,6 +18,7 @@
  * Firebase Functions v2 (Node 18+). Déploiement : voir README.md.
  */
 const { onDocumentUpdated, onDocumentWritten } = require("firebase-functions/v2/firestore");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
@@ -58,6 +59,41 @@ async function pushToUser(uid, title, body, data, link) {
   }
 }
 
+/* TEST — l'utilisateur appuie sur "Tester la notification" dans les réglages.
+   On lui envoie un VRAI push FCM sur son propre téléphone : s'il ferme l'app
+   juste après et voit quand même la notif, il a la preuve que tout marche
+   (app fermée incluse). N'envoie qu'à SON propre token (req.auth.uid) : aucun
+   risque d'abus. Renvoie une raison claire si le token manque, pour guider. */
+exports.sendTestPush = onCall({ region: REGION }, async (req) => {
+  const uid = req.auth && req.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi d'abord.");
+  const snap = await db.collection("pushTokens").doc(String(uid)).get();
+  const token = snap.exists && snap.data().token;
+  if (!token) return { ok: false, reason: "no-token" };
+  try {
+    await getMessaging().send({
+      token: token,
+      notification: {
+        title: "Ca marche",
+        body: "Tu recois bien les notifications Magofeed, meme app fermee. Bonne chasse."
+      },
+      data: { type: "test" },
+      webpush: {
+        notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png" },
+        fcmOptions: { link: APP_URL }
+      }
+    });
+    return { ok: true };
+  } catch (e) {
+    if (e && (e.code === "messaging/registration-token-not-registered" ||
+              e.code === "messaging/invalid-registration-token")) {
+      try { await db.collection("pushTokens").doc(String(uid)).delete(); } catch (_) {}
+      return { ok: false, reason: "stale-token" };
+    }
+    throw new HttpsError("internal", (e && e.message) || "push failed");
+  }
+});
+
 /* Découverte promue au catalogue -> push "🎉 Ta découverte est dans Magofeed".
    Se déclenche quand le champ `promoted` passe à true. On lit l'auteur dans
    `by` (l'app l'enregistre à la création de la découverte). */
@@ -72,8 +108,8 @@ exports.notifyDiscoveryPromoted = onDocumentUpdated(
     const name = String(after.name || "Ta boisson").slice(0, 40);
     await pushToUser(
       by,
-      "🎉 Ta découverte est dans Magofeed !",
-      "« " + name + " » fait maintenant partie du catalogue. +50 points de découvreur 🏆",
+      "Ta decouverte est dans Magofeed",
+      "\u00AB " + name + " \u00BB fait maintenant partie du catalogue. +50 points de decouvreur.",
       { type: "promoted", barcode: String(after.barcode || "") }
     );
   }
@@ -92,7 +128,7 @@ exports.notifyPhotoRejected = onDocumentUpdated(
     const name = String(after.name || "ta découverte").slice(0, 40);
     await pushToUser(
       by,
-      "📸 Photo à refaire",
+      "Photo a refaire",
       "Ta photo de « " + name + " » ne correspondait pas au produit. Peux-tu en reprendre une bien nette ?",
       { type: "photoRejected", barcode: String(after.barcode || "") }
     );
@@ -102,7 +138,7 @@ exports.notifyPhotoRejected = onDocumentUpdated(
 /* CHASSE DE ZONE — push temps réel « à la chasse ! ».
    Quand un NOUVEAU chercheur rejoint une chasse (hunts/{drinkId}.seekers gagne
    un uid), on prévient les gens autour (pushTokens à moins de ~15 km) qu'une
-   boisson est activement recherchée près d'eux : « 🎯 Quelqu'un cherche X — si
+   boisson est activement recherchée près d'eux : « Quelqu'un cherche X — si
    tu la vois, signale-la et gagne des points ». On ne notifie pas le chercheur
    lui-même, ni au-delà du rayon. Distance = pushTokens.lat/lng (déjà stockés).
    ⚠️ Sur une grosse base, filtre par geohash au lieu de tout charger. */
@@ -121,27 +157,51 @@ exports.notifyHuntNearby = onDocumentWritten(
     // Nouveaux chercheurs (uid présent maintenant, absent ou nul avant)
     const newSeekers = Object.keys(aSeek).filter(function(u){ return aSeek[u] && !bSeek[u]; });
     if (!newSeekers.length) return;
-    // Centre = position (arrondie) du nouveau chercheur le plus récent
+    /* Centre = position (arrondie) du nouveau chercheur le plus recent.
+       AVANT : s'il n'y avait pas de position, on notifiait TOUT LE MONDE.
+       Comme n'importe quel compte pouvait ecrire un chercheur sans position
+       dans un document de son choix, cette ligne etait un envoi de masse a
+       toute la base, declenchable en boucle. Sans centre, on ne diffuse plus. */
     let center = null;
     newSeekers.forEach(function(u){ const s = aSeek[u]; if (s && s.lat != null && (!center || s.at > center.at)) center = s; });
     if (!center) return;
     const seekerUids = new Set(Object.keys(aSeek).filter(function(u){ return aSeek[u]; }));
     const name = String(after.drinkName || "une boisson").slice(0, 40);
-    // Anti-spam : au plus un push "chasse" par tranche de 6 h par boisson
+    /* Anti-spam. Il etait range dans le document des chasses, que le client
+       ecrit : creer un document neuf le sautait, et y ecrire une date lointaine
+       eteignait definitivement les alertes d'une boisson. Le verrou vit
+       desormais dans _meta, ferme au client par les regles, et il y en a DEUX :
+       un par boisson (une vague par boisson toutes les 6 h) et un par personne
+       (une vague par compte toutes les 6 h). Le second est celui qui compte :
+       un compte s'obtient gratuitement, mais chacun ne declenche qu'une vague. */
     const now = Date.now();
-    if (before._lastPush && now - before._lastPush < 6 * 3600 * 1000) return;
-    try { await event.data.after.ref.set({ _lastPush: now }, { merge: true }); } catch (e) {}
-    // Diffusion aux tokens proches (hors chercheurs)
-    const tokensSnap = await db.collection("pushTokens").get();
+    const _cle = function (v) { return String(v).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80); };
+    const lanceur = newSeekers[0];
+    const verrous = [
+      db.collection("_meta").doc("huntPush_d_" + _cle(after.drinkId != null ? after.drinkId : event.params.drinkId)),
+      db.collection("_meta").doc("huntPush_u_" + _cle(lanceur))
+    ];
+    for (const ref of verrous) {
+      const snap = await ref.get();
+      const at = (snap.exists && Number(snap.data().at)) || 0;
+      if (now - at < 6 * 3600 * 1000) return;
+    }
+    for (const ref of verrous) { try { await ref.set({ at: now }); } catch (e) {} }
+    /* Diffusion aux tokens proches (hors chercheurs). Borne : sans limite, une
+       vague lisait la collection entiere — le cout grandit avec la base. */
+    const tokensSnap = await db.collection("pushTokens").limit(3000).get();
     const msgs = [];
     tokensSnap.forEach(function(d){
       if (seekerUids.has(d.id)) return;         // pas le(s) chercheur(s)
       const t = d.data();
       if (!t.token) return;
-      if (_dist(center.lat, center.lng, t.lat, t.lng) > 15) return; // hors zone
+      // On EXCLUT seulement quand on est SÛR que c'est trop loin (centre connu ET
+      // position du destinataire connue ET distance > 15 km). Sinon on notifie
+      // quand même (position manquante d'un côté = on ne cache pas la chasse).
+      if (center && t.lat != null && _dist(center.lat, center.lng, t.lat, t.lng) > 15) return;
       msgs.push({
         token: t.token,
-        notification: { title: "🎯 Chasse près de toi", body: "Quelqu'un cherche « " + name + " ». Si tu la vois en magasin, signale-la et gagne des points !" },
+        notification: { title: "Chasse pres de toi", body: "Quelqu'un cherche « " + name + " ». Si tu la vois en magasin, signale-la et gagne des points." },
         data: { type: "hunt", drinkId: String(after.drinkId || "") },
         webpush: { fcmOptions: { link: "https://magonyos991-ux.github.io/magofeed/" } }
       });
@@ -156,9 +216,9 @@ exports.notifyHuntNearby = onDocumentWritten(
 
 /* CHASSE TROUVÉE — l'autre moitié : quand un chasseur AJOUTE une boisson à un
    magasin (le tableau `drinks` du magasin gagne un id), on prévient ceux qui la
-   guettaient (collection `watches`) et qui sont à proximité : « ✅ Trouvée près
+   guettaient (collection `watches`) et qui sont à proximité : « Trouvée près
    de toi — voilà où l'acheter ». Le chasseur, lui, a déjà son bonus in-app.
-   ⚠️ ADAPTE : casse de la collection magasins ("stores" vs "Stores"). */
+   ADAPTE : casse de la collection magasins ("stores" vs "Stores"). */
 exports.notifyStockToWatchers = onDocumentUpdated(
   { document: "stores/{id}", region: REGION },
   async (event) => {
@@ -166,21 +226,38 @@ exports.notifyStockToWatchers = onDocumentUpdated(
     const after = event.data.after.data() || {};
     const bd = new Set((before.drinks || []).map(String));
     const added = (after.drinks || []).map(String).filter(function(x){ return !bd.has(x); });
+    /* GARDE-FOU CONTRE LA TEMPETE. Une vraie observation en rayon ajoute une
+       boisson, parfois deux. Un remplissage d'enseigne en ajoute jusqu'a mille
+       deux cents, sur des milliers de magasins : ce declencheur partait alors
+       une fois par boisson et par magasin, chacune avec sa requete watches —
+       de quoi noyer les utilisateurs de notifications et faire exploser la
+       facture, sur un seul clic d'administration. Au-dela de trois boissons
+       d'un coup, ce n'est plus quelqu'un qui a vu quelque chose : on se tait. */
+    if (added.length > 3) return;
+
     if (!added.length) return;
     const sLat = after.lat, sLng = after.lng, sName = String(after.name || "un magasin");
     for (const drinkId of added) {
       let watchSnap;
       try {
-        watchSnap = await db.collection("watches").where("drinkId", "==", Number(drinkId) || drinkId).get();
+        watchSnap = await db.collection("watches").where("drinkId", "==", Number(drinkId) || drinkId).limit(200).get();
       } catch (e) { console.warn("watches query:", e && e.message); continue; }
       for (const w of watchSnap.docs) {
         const wd = w.data();
-        if (sLat != null && wd.lat != null && _dist(sLat, sLng, wd.lat, wd.lng) > 12) continue;
+        /* Le champ uid d'une veille est ecrit par le client. Les regles Firestore le
+           verrouillent desormais des deux cotes, mais on ne fait pas dependre d'un seul
+           verrou l'envoi d'un message a une personne : l'identifiant du document EST
+           « uid_boisson » (fbSyncWatch), on recoupe donc le champ avec le nom du
+           document. Une veille repointee sur quelqu'un d'autre ne passe plus. */
+        if (!wd.uid || !String(w.id).startsWith(String(wd.uid) + "_")) continue;
+        // Rayon choisi par la personne (curseur 1 → 20 km) ; 10 par défaut.
+        const radius = (typeof wd.radius === "number" && wd.radius >= 1 && wd.radius <= 20) ? wd.radius : 10;
+        if (sLat != null && wd.lat != null && _dist(sLat, sLng, wd.lat, wd.lng) > radius) continue;
         const dName = String(wd.drinkName || "Ta boisson").slice(0, 40);
         const storeId = String(event.params.id);
         await pushToUser(
           wd.uid,
-          "✅ Trouvée près de toi !",
+          "Trouvee pres de toi",
           "« " + dName + " » vient d'être repérée chez " + sName + ". Fonce l'acheter avant qu'elle parte !",
           { type: "found", drinkId: String(drinkId), storeId: storeId },
           // Tap sur la notif -> ouvre directement la fiche du magasin (+ carte) :

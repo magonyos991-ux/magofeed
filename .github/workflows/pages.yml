@@ -26,12 +26,80 @@ jobs:
       - uses: actions/checkout@v4
       - name: Configure Pages
         uses: actions/configure-pages@v5
+      # Régénère les pages de partage "Où trouver X" (/f/<id>.html) à partir du
+      # catalogue actuel d'index.html, pour que les aperçus de lien soient
+      # toujours à jour sans intervention manuelle. Non bloquant : si la
+      # génération échoue, les pages déjà committées dans /f/ sont déployées.
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          enablement: true
+          node-version: 20
+      # Garde-fou AVANT publication : ESLint n'applique que des règles qui
+      # attrapent des bugs (déclarations en double, variable inexistante, code
+      # inatteignable), jamais du style. Si ça casse ici, c'est qu'il y a un
+      # vrai défaut dans le code — mieux vaut ne pas le mettre en ligne.
+      # Pour livrer malgré tout en urgence : retirer ces deux étapes.
+      - name: Install ESLint
+        run: npm install eslint@9.15.0 eslint-plugin-html@8.1.2 --no-save
+      - name: Lint (bloque le déploiement en cas d'erreur)
+        run: npx eslint .
+      - name: Generate share pages
+        run: |
+          npm install playwright@1.55.0 --no-save
+          npx playwright install --with-deps chromium
+          node growth/build-share-pages.js
+        continue-on-error: true
+      # Version du cache = empreinte du commit. C'est ce qui remplace le bump
+      # manuel de CACHE_NAME dans sw.js — oublié plusieurs fois, ce qui bloquait
+      # les gens sur une vieille version et avait imposé le mode "réseau
+      # d'abord" : l'app attendait le réseau à chaque lancement, même avec une
+      # copie valide en cache. Maintenant : chaque déploiement = un cache neuf,
+      # donc l'app peut partir du cache et s'ouvrir instantanément, sans jamais
+      # rester périmée.
+      - name: Stamp service worker cache version
+        run: |
+          sed -i "s/magofeed-__BUILD_ID__/magofeed-${GITHUB_SHA::12}/" sw.js
+          grep -n 'CACHE_NAME =' sw.js
+      # Le site publiait la RACINE ENTIERE du depot. Tout ce qui n'est pas
+      # destine au navigateur etait donc servi a une adresse devinable : le
+      # plan anti-triche, les notes de strategie, le code d'automatisation n8n,
+      # les guides internes. On assemble desormais une liste blanche : ce qui
+      # est en ligne est ce que le site utilise, et rien d'autre.
+      # Les fichiers .js de functions-a-deployer restent publies : le mode
+      # d'emploi PowerShell les telecharge depuis cette adresse.
+      - name: Rassembler le site
+        run: |
+          set -e
+          mkdir -p _site
+          cp index.html app.css sw.js manifest.json privacy.html terms.html _site/
+          # La licence, oui : on veut qu'elle soit publique. Le dossier
+          # PROPRIETE-INTELLECTUELLE, non — ce sont des notes de depot de
+          # marque et des preuves d'anteriorite, servies jusqu'ici a une
+          # adresse devinable.
+          cp LICENSE _site/ 2>/dev/null || true
+          cp -r data icons screenshots f _site/
+          mkdir -p _site/growth
+          cp growth/partenaire-marque.html growth/waitlist.html _site/growth/ 2>/dev/null || true
+          mkdir -p _site/promo
+          cp -r promo/cards _site/promo/ 2>/dev/null || true
+          cp -r promo/carrousel _site/promo/ 2>/dev/null || true
+          # Les notes de legende accompagnent les images, elles n'ont rien a
+          # faire en ligne.
+          find _site/promo -name '*.md' -delete 2>/dev/null || true
+          mkdir -p _site/promo/cards-src
+          cp -r promo/cards-src/bottles _site/promo/cards-src/ 2>/dev/null || true
+          mkdir -p _site/functions-a-deployer
+          cp functions-a-deployer/*.js _site/functions-a-deployer/ 2>/dev/null || true
+          echo "--- contenu publie ---"
+          find _site -maxdepth 2 | head -40
+          echo "--- ce qui ne doit PAS y etre ---"
+          ! find _site -name '*.md' | grep . || (echo "ECHEC : un .md est publie" && exit 1)
+          ! test -d _site/promo/n8n || (echo "ECHEC : promo/n8n est publie" && exit 1)
+          ! test -d _site/functions-a-deployer/tests-regles || (echo "ECHEC : tests publies" && exit 1)
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4

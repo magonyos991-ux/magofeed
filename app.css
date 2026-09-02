@@ -1,0 +1,1482 @@
+/* ── Reset ── */
+*{box-sizing:border-box;margin:0;padding:0}
+::-webkit-scrollbar{display:none}
+input,button{font-family:'Space Grotesk',sans-serif;outline:none;border:none;background:none}
+
+/* ── Design tokens ── */
+:root{
+  --cr:#e7e5df;
+  --app-bg:#f4f2ee;
+  --s1:#1a1714;
+  --s2:#5f5b55;
+  --s3:#716e6a;
+  --txt2:#5c554d;   /* texte secondaire LISIBLE (6,2:1) */
+  --bg2:#eceae4;
+  --bg3:#e8e5df;
+  --border:#dedad3;
+  --card-bg:#ffffff;
+  --nav-bg:rgba(244,242,238,.9);
+  --card-shadow:0 1px 3px rgba(0,0,0,.04),0 6px 20px rgba(0,0,0,.06);
+  --accent:#1a1714;
+  --accent-rgb:26,23,20;
+  --radius-app:46px;
+  --radius-card:20px;
+  --radius-chip:999px;
+  --radius-input:15px;
+  --nav-border:#e0ddd7;
+}
+body.dark{
+  /* Sombre RÉCHAUFFÉ : fond brun très foncé (pas gris) + bordures douces, pour
+     un rendu premium cohérent avec le doré de la marque. */
+  --app-bg:#151210;
+  --s1:#f4f0e9;
+  --s2:#9a8f80;
+  --s3:#827c74;
+  --txt2:#b9ae9e;   /* texte secondaire LISIBLE (7,4:1) */
+  --bg2:#201b16;
+  --bg3:#29221b;
+  --border:#312a21;
+  --card-bg:#211c17;
+  --nav-bg:rgba(20,16,13,.86);
+  --card-shadow:0 1px 3px rgba(0,0,0,.35),0 10px 28px rgba(0,0,0,.32);
+  --nav-border:#312a21;
+}
+
+/* ── Shell ── */
+body{
+  font-family:'Space Grotesk',sans-serif;
+  background:var(--cr);
+  display:flex;justify-content:center;
+  padding:20px;min-height:100vh;
+}
+#app{
+  position:relative;
+  width:100%;max-width:402px;
+  border-radius:var(--radius-app);
+  overflow:hidden;
+  height:874px;
+  max-height:calc(100vh - 40px);
+  background:var(--app-bg);
+  transition:background .25s;
+  display:flex;
+  flex-direction:column;
+}
+
+/* ── Screen system ── */
+.screen{
+  display:none;
+  flex-direction:column;
+  flex:1;
+  min-height:0;
+  background:var(--app-bg);
+  /* Meme ressort que la pastille de nav : l'ecran qui arrive depasse d'un
+     cheveu puis se pose — toute l'app respire pareil. */
+  transition:background .25s,opacity .3s cubic-bezier(.22,1,.36,1),transform .48s cubic-bezier(.3,1.38,.44,1);
+  overflow:hidden;
+  opacity:1;
+  transform:translateY(0);
+}
+.screen.on{display:flex}
+.screen.s-enter{opacity:0;transform:translateY(12px)}
+.screen.s-leave{opacity:0;transform:translateY(-7px)}
+.scroll{flex:1;overflow-y:auto;overflow-x:hidden;padding:56px 20px calc(92px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
+/* Les defilements des ecrans passent SOUS la barre translucide : chaque
+   conteneur garde une respiration en bas pour que le dernier element
+   remonte au-dessus du dock quand on arrive en fin de liste. */
+.screen>div[style*="overflow-y:auto"],.screen>div[style*="overflow-y: auto"]{padding-bottom:calc(92px + env(safe-area-inset-bottom))}
+
+/* ── Skeleton loaders ── */
+.skel{background:linear-gradient(90deg,var(--bg2) 25%,var(--bg3) 37%,var(--bg2) 63%);background-size:400% 100%;animation:skel-shimmer 1.4s ease infinite;border-radius:8px}
+@keyframes skel-shimmer{0%{background-position:100% 50%}100%{background-position:0% 50%}}
+.mago-live-dot{animation:magoLivePulse 2s ease-out infinite}
+@keyframes magoLivePulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}70%{box-shadow:0 0 0 6px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+.skel-circle{width:42px;height:42px;border-radius:13px;flex-shrink:0}
+.skel-line{height:11px}
+.skel-btn{width:64px;height:32px;border-radius:12px;flex-shrink:0}
+
+/* ── Barre de navigation (moderne : onglet actif en pastille icône + texte) ── */
+#nav{
+  position:absolute;left:14px;right:14px;
+  bottom:calc(env(safe-area-inset-bottom) + 12px);
+  display:flex;justify-content:space-evenly;align-items:center;
+  padding:15px 10px;
+  border:1px solid var(--nav-border);
+  border-radius:28px;
+  background:var(--nav-bg);
+  backdrop-filter:blur(28px) saturate(1.9);
+  -webkit-backdrop-filter:blur(28px) saturate(1.9);
+  box-shadow:0 16px 40px rgba(12,10,8,.26),0 4px 12px rgba(12,10,8,.13),inset 0 1px 0 rgba(255,255,255,.55);
+  z-index:50;
+}
+body.dark #nav{
+  box-shadow:0 18px 46px rgba(0,0,0,.52),0 4px 14px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.07);
+}
+.ntab{
+  flex:1;
+  display:flex;flex-direction:column;align-items:center;gap:5px;
+  cursor:pointer;color:var(--s3);
+  padding:4px 0;
+  transition:color .25s ease;
+  -webkit-tap-highlight-color:transparent;
+}
+.ntab svg{width:26px;height:26px;transition:transform .34s cubic-bezier(.34,1.5,.5,1)}
+.ntab:active svg{transform:scale(.84)}
+/* Onglet actif = icône dorée qui se soulève avec un léger ressort (stable) */
+.ntab.on{color:#c69a57}
+.ntab.on svg{transform:scale(1.12)}
+/* Navigation minimaliste : icônes seules (les libellés restent en aria-label
+   pour l'accessibilité, mais ne sont plus affichés). */
+.ntab-lbl{display:none}
+body.dark .ntab{color:#7c7c7c}
+body.dark .ntab.on{color:#e2b571}
+
+/* ── Pastille de navigation : glisse d'un onglet à l'autre avec un ressort,
+   s'étire en "gelée" pendant le trajet, et toute la barre ondule très légèrement
+   à l'impact. Les icônes restent au-dessus (z-index). ── */
+.ntab{position:relative;z-index:1}
+#nav-pill{
+  position:absolute;top:50%;left:0;width:56px;height:44px;margin-top:-22px;
+  border-radius:17px;z-index:0;pointer-events:none;opacity:0;
+  background:rgba(198,154,87,.13);
+  border:1px solid rgba(198,154,87,.22);
+  box-shadow:0 2px 10px rgba(198,154,87,.16) inset;
+  transition:transform .52s cubic-bezier(.3,1.38,.44,1),opacity .25s ease;
+  will-change:transform;
+}
+#nav-pill.ready{opacity:1}
+body.dark #nav-pill{background:rgba(226,181,113,.12);border-color:rgba(226,181,113,.2);box-shadow:0 2px 10px rgba(226,181,113,.12) inset}
+@keyframes navwob{
+  0%{transform:scaleX(1) scaleY(1)}
+  30%{transform:scaleX(1.012) scaleY(.97)}
+  62%{transform:scaleX(.995) scaleY(1.012)}
+  100%{transform:scaleX(1) scaleY(1)}
+}
+#nav.wob{animation:navwob .44s cubic-bezier(.36,.07,.19,.97);transform-origin:50% 100%}
+/* ── RETOUR A L'ACCUEIL ───────────────────────────────────────────────────
+   La barre du bas n'est jamais masquee, mais sur les ecrans profonds (fiche
+   boisson, fiche magasin, recompenses, admin…) AUCUN onglet n'est allume :
+   ses icones tombent a var(--s3), soit 1,6:1 sur fond clair. Elle est
+   illisible, pas absente — d'ou l'impression qu'il n'y a pas de bouton
+   d'accueil et qu'il faut enchainer les retours.
+   Ce bouton est translucide pour ne pas manger l'interface, et lisible.
+   z-index 45 (et pas plus) : le geste de retour par le bord met l'ecran
+   courant en z-index 60 : au-dessus, le bouton resterait fige pendant que
+   l'ecran glisse. ── */
+#home-fab{
+  position:absolute;z-index:45;left:14px;
+  bottom:calc(env(safe-area-inset-bottom,0px) + 88px);
+  width:40px;height:40px;border-radius:50%;
+  display:none;align-items:center;justify-content:center;
+  background:var(--nav-bg);border:1px solid var(--border);color:var(--txt2);
+  -webkit-backdrop-filter:blur(20px) saturate(1.6);backdrop-filter:blur(20px) saturate(1.6);
+  opacity:.82;cursor:pointer;-webkit-tap-highlight-color:transparent;
+  transition:opacity .2s ease,color .2s ease
+}
+#home-fab.on{display:flex}
+#home-fab.side-right{left:auto;right:14px}
+#home-fab:active,#home-fab:focus-visible{opacity:1;color:var(--s1)}
+#home-fab:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){#home-fab{transition:none}}
+@keyframes ntpop{
+  0%{transform:scale(.88)}
+  55%{transform:scale(1.24)}
+  100%{transform:scale(1.12)}
+}
+.ntab.pop svg{animation:ntpop .4s cubic-bezier(.34,1.56,.64,1)}
+@media (prefers-reduced-motion:reduce){
+  #nav-pill{transition:opacity .25s ease}
+  #nav.wob{animation:none}
+  .ntab.pop svg{animation:none}
+}
+
+/* ── Typography helpers ── */
+.t-hero{font-size:22px;font-weight:800;letter-spacing:-.5px;color:var(--s1)}
+.t-section{font-size:17.5px;font-weight:800;color:var(--s1);letter-spacing:-.3px}
+.t-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--s2)}
+.c1{color:var(--s1)}
+.c2{color:var(--s2)}
+.c3{color:var(--s3)}
+
+/* ── Search mode toggle ── */
+.search-mode-btn{flex:1;text-align:center;padding:10px 6px;border-radius:999px;font-size:12.5px;font-weight:700;cursor:pointer;color:var(--s2);transition:all .22s cubic-bezier(.2,.8,.3,1);-webkit-tap-highlight-color:transparent}
+.search-mode-btn.on{background:var(--s1);color:var(--app-bg);box-shadow:0 3px 10px rgba(26,23,20,.2)}
+body.dark .search-mode-btn.on{background:#f0f0f0;color:#1a1714}
+
+/* ── Search box ── */
+.searchbox{
+  display:flex;align-items:center;gap:10px;
+  padding:14px 18px;border-radius:999px;
+  background:var(--bg2);cursor:pointer;margin-bottom:18px;
+  border:1.5px solid var(--border);
+  box-shadow:0 2px 10px rgba(12,10,8,.06);
+  transition:border-color .2s,box-shadow .2s;
+}
+.searchbox:focus-within{border-color:var(--accent)}
+.searchbox input{flex:1;font-size:15px;color:var(--s1)}
+.searchbox input::placeholder{color:var(--s3)}
+
+/* ── Chips ── */
+.chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;margin-bottom:22px}
+.brands-rail{display:flex;gap:10px;overflow-x:auto;padding:2px 0 8px;margin-bottom:14px;-webkit-overflow-scrolling:touch}
+.brands-letters{display:flex;gap:3px;overflow-x:auto;padding:2px 0 12px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.brands-letters::-webkit-scrollbar{display:none}
+.bl-chip{flex:none;min-width:32px;height:32px;padding:0 7px;border:none;background:transparent;color:var(--s3);font-size:14.5px;font-weight:800;cursor:pointer;font-family:inherit;border-radius:999px;-webkit-tap-highlight-color:transparent;transition:background .24s cubic-bezier(.2,.8,.2,1),color .2s,transform .12s}
+.bl-chip:active{transform:scale(.85)}
+.bl-chip.all{padding:0 13px;font-size:13.5px}
+.bl-chip.on{background:var(--s1);color:var(--app-bg)}
+@keyframes brandsSwap{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+.brands-rail.swap{animation:brandsSwap .3s ease}
+.brand-tile{
+  flex:none;display:flex;flex-direction:column;align-items:center;gap:7px;
+  cursor:pointer;padding:4px;border-radius:16px;
+  transition:transform .15s;-webkit-tap-highlight-color:transparent;
+}
+.brand-tile:active{transform:scale(.93)}
+.brand-tile .bt-ico{width:60px;height:60px;margin:0 auto 6px;border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:26px;border:1.5px solid var(--border);position:relative}
+.brand-tile .bt-count{position:absolute;bottom:-4px;right:-4px;background:var(--s1);color:var(--app-bg);font-size:9.5px;font-weight:800;border-radius:999px;padding:2px 6px;border:2px solid var(--app-bg)}
+.brand-tile .bt-name{font-size:11px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brand-banner{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;padding:12px 14px;margin-bottom:14px;cursor:pointer}
+.chip{
+  flex:none;cursor:pointer;
+  display:inline-flex;align-items:center;gap:6px;
+  padding:9px 17px;border-radius:999px;
+  font-size:12.5px;font-weight:700;
+  background:var(--bg3);color:var(--s2);
+  border:1.5px solid var(--border);
+  transition:all .18s;
+  -webkit-tap-highlight-color:transparent;
+}
+.chip:active{transform:scale(.95)}
+.chip.on{background:var(--s1);color:var(--app-bg);border-color:var(--s1);box-shadow:0 3px 10px rgba(26,23,20,.18)}
+
+/* ── Section header ── */
+.sec-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.sec-count{font-size:12px;font-weight:600;color:var(--s3)}
+
+/* ── Grid cards ── */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-bottom:20px}
+.dcard{
+  border-radius:20px;overflow:hidden;
+  cursor:pointer;
+  background:var(--bg2);
+  border:1px solid var(--border);
+  box-shadow:0 4px 16px rgba(12,10,8,.07);
+  transition:transform .16s cubic-bezier(.2,.8,.3,1),box-shadow .16s;
+  -webkit-tap-highlight-color:transparent;
+}
+.dcard:active{transform:scale(.965);box-shadow:0 2px 8px rgba(12,10,8,.1)}
+body.dark .dcard{background:#2a2a2a}
+.dcard:active{transform:scale(.96);box-shadow:none}
+.dcard.selected{
+  outline:2.5px solid var(--glow,var(--accent));
+  outline-offset:2px;
+  animation:glowpulse 1.6s ease-in-out infinite;
+}
+@keyframes glowpulse{0%,100%{outline-color:var(--glow,var(--accent))}50%{outline-color:transparent}}
+.dcard-photo{
+  position:relative;height:96px;
+  display:flex;align-items:flex-end;overflow:hidden;padding:8px;
+}
+.dcard-rating{
+  position:absolute;top:9px;left:9px;
+  display:flex;align-items:center;gap:3px;
+  background:rgba(255,255,255,.92);border-radius:var(--radius-chip);
+  padding:3px 8px;z-index:2;box-shadow:0 1px 4px rgba(0,0,0,.08);
+}
+.dcard-rating .star{color:#c69a57;font-size:10px}
+.dcard-rating .val{font-size:10.5px;font-weight:700;color:#1a1714}
+@keyframes heartPop{0%{transform:scale(1)}40%{transform:scale(1.35)}70%{transform:scale(.92)}100%{transform:scale(1)}}
+.dcard-fav{
+  position:absolute;top:8px;right:8px;
+  width:26px;height:26px;border-radius:50%;
+  background:rgba(255,255,255,.9);
+  display:flex;align-items:center;justify-content:center;
+  z-index:2;font-size:13px;cursor:pointer;
+}
+.dcard-tag{
+  font-size:8px;letter-spacing:1.2px;
+  color:rgba(40,36,30,.4);font-weight:700;
+  position:relative;z-index:1;
+}
+.dcard-info{padding:8px 11px 10px}
+.dcard-name{font-size:12.5px;font-weight:700;line-height:1.2;color:var(--s1);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.dcard-bottom{display:flex;align-items:center;justify-content:space-between;margin-top:4px}
+.dcard-cat{font-size:10px;color:var(--s2)}
+
+/* ── Recent items ── */
+.ritem{
+  display:flex;align-items:center;gap:13px;
+  padding:10px 0;border-bottom:1px solid var(--border);
+  cursor:pointer;
+  transition:transform .12s ease, opacity .12s ease;
+}
+.ritem:active{transform:scale(.985);opacity:.75}
+@media (prefers-reduced-motion:reduce){ .ritem{transition:none} .ritem:active{transform:none} }
+.rphoto{
+  width:48px;height:48px;border-radius:13px;
+  display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;
+}
+.rname{font-size:14px;font-weight:600;margin-bottom:2px;color:var(--s1)}
+.rsub{font-size:11.5px;color:var(--s2)}
+
+/* ── Back button ── */
+.back-ico{
+  width:34px;height:34px;border-radius:11px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:15px;flex-shrink:0;cursor:pointer;
+  background:var(--bg2);color:var(--s1);
+  transition:background .15s;
+}
+.back-ico:active{background:var(--bg3)}
+
+/* ── Results header ── */
+.res-hd{padding:50px 20px 18px;background:linear-gradient(135deg,#1a1714,#3a3330)}
+.res-back{display:flex;align-items:center;gap:10px;margin-bottom:16px;cursor:pointer}
+.res-product{display:flex;align-items:center;gap:14px}
+.res-emoji{
+  width:56px;height:56px;border-radius:17px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:28px;flex-shrink:0;background:rgba(255,255,255,.18);
+  color:#fff;   /* sinon le pictogramme herite du noir et disparait */
+}
+.rbadge{
+  font-size:11px;font-weight:600;
+  padding:3px 10px;border-radius:20px;
+  background:rgba(0,0,0,.15);color:rgba(255,255,255,.9);
+}
+.fmt-row{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
+.fmt-chip{padding:5px 12px;border-radius:999px;font-size:11.5px;font-weight:700;cursor:pointer;background:rgba(255,255,255,.14);color:rgba(255,255,255,.85);transition:all .15s}
+.fmt-chip.on{background:#fff;color:#1a1714}
+
+/* ── GPS bar ── */
+.gps-bar{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  margin:2px auto 8px;width:fit-content;max-width:88%;
+  padding:7px 16px;font-size:11.5px;font-weight:600;
+  background:var(--bg2);border:1px solid var(--border);border-radius:999px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+body:not(.dark) .gps-bar{background:#f0fdf4;border-bottom:1px solid #dcfce7;color:#166534}
+body.dark .gps-bar{background:#052e16;border-bottom:1px solid #14532d;color:#86efac}
+
+/* ── Map ── */
+.map-box{
+  margin:12px 14px;border-radius:18px;overflow:hidden;
+  height:250px;border:1px solid var(--border);
+  position:relative;
+}
+.map-box iframe{width:100%;height:100%;border:none;display:block}
+/* Carte embarquee (repliee) : autorise le defilement vertical de la page par-dessus
+   la carte, pour atteindre la liste des magasins en dessous. En plein ecran, la carte
+   reprend la main sur les gestes tactiles. */
+.map-box:not(.map-fullscreen) .leaflet-container{touch-action:pan-y!important}
+.map-locate-btn{
+  position:absolute;bottom:10px;right:10px;z-index:1000;
+  width:36px;height:36px;border-radius:50%;
+  background:#fff;border:1.5px solid var(--border);
+  box-shadow:0 2px 8px rgba(0,0,0,.25);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+}
+body.dark .map-locate-btn{background:#2a2a2a}
+.map-locate-btn:active{transform:scale(.92)}
+@keyframes navpulse{0%{box-shadow:0 0 0 0 rgba(22,163,74,.55)}70%{box-shadow:0 0 0 8px rgba(22,163,74,0)}100%{box-shadow:0 0 0 0 rgba(22,163,74,0)}}
+/* Toggle "en stock seulement" sur la carte : etat actif = vert plein */
+#map-instock-btn.on{background:#16a34a!important;color:#fff!important;border-color:#16a34a!important}
+#map-instock-btn.on span{background:#fff!important}
+#map-instock-btn:active{transform:scale(.95)}
+/* Feuille "liste des magasins" sur la carte Explorer : repliee par defaut
+   (poignee + resume), depliee au tap sur la poignee. Pas de drag = robuste. */
+/* Bottom-sheet a paliers : hauteur fixe, on le fait coulisser au doigt via
+   translateY (le transform est fluide et fiable, contrairement a l'animation de
+   height qui restait bloquee ici). 3 paliers : apercu / moitie / plein. */
+#explore-sheet{position:absolute;left:0;right:0;bottom:0;z-index:1180;background:var(--app-bg);border-top:1px solid var(--border);border-radius:20px 20px 0 0;box-shadow:0 -8px 26px rgba(0,0,0,.28);height:calc(100% - var(--exhead, 190px));display:flex;flex-direction:column;transform:translateY(calc(100% - 88px));transition:transform .34s cubic-bezier(.32,.72,0,1);padding-bottom:env(safe-area-inset-bottom,0px);will-change:transform}
+#explore-sheet-head{position:relative;padding:12px 16px 10px;min-height:44px;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;flex-shrink:0}
+/* Zone de prehension invisible qui deborde de 14 px vers le haut : le doigt
+   vise rarement le trait au pixel pres. */
+#explore-sheet-head::before{content:"";position:absolute;left:0;right:0;top:-14px;height:18px}
+#explore-sheet-head:active{cursor:grabbing}
+#explore-sheet.dragging{transition:none!important}
+#explore-sheet-grip{width:48px;height:6px;border-radius:99px;background:var(--s3);opacity:.55;margin:0 auto 11px;transition:background .15s,opacity .15s}
+#explore-sheet-head:active #explore-sheet-grip{opacity:1;background:var(--s2)}
+#explore-sheet-list{overflow-y:auto;flex:1;padding:0 14px 14px;-webkit-overflow-scrolling:touch;touch-action:pan-y;overscroll-behavior:contain}
+/* Boutons de zoom +/- de la carte explore : plus gros, thematises, au-dessus du sheet. */
+#explore-map .leaflet-bottom.leaflet-left{bottom:calc(104px + env(safe-area-inset-bottom,0px));left:10px}
+#explore-map .leaflet-control-zoom{border:none!important;box-shadow:0 3px 12px rgba(0,0,0,.28);border-radius:12px}
+#explore-map .leaflet-control-zoom a{width:40px;height:40px;line-height:40px;font-size:22px;font-weight:700;background:var(--app-bg);color:var(--s1);border:1px solid var(--border)}
+#explore-map .leaflet-control-zoom a:first-child{border-radius:12px 12px 0 0}
+#explore-map .leaflet-control-zoom a:last-child{border-radius:0 0 12px 12px;border-top:none}
+#explore-map .leaflet-control-zoom a:hover{background:var(--bg2)}
+.exsheet-row{display:flex;align-items:center;gap:11px;padding:11px 2px;border-top:1px solid var(--border);cursor:pointer}
+.exsheet-row:active{opacity:.6}
+
+/* ── Store cards ── */
+.store-card{
+  margin:7px 20px;border-radius:20px;overflow:hidden;
+  background:var(--bg2);border:1px solid var(--border);
+  box-shadow:0 4px 16px rgba(12,10,8,.07);
+  transition:transform .16s;
+}
+.store-card:active{transform:scale(.985)}
+body.dark .store-card{background:#2a2a2a}
+.store-top{display:flex;align-items:center;gap:12px;padding:14px}
+.store-ico{
+  width:42px;height:42px;border-radius:13px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:20px;flex-shrink:0;
+}
+.store-name{font-size:14px;font-weight:700;margin-bottom:3px;color:var(--s1)}
+.store-meta{font-size:11px;display:flex;align-items:center;gap:6px;color:var(--s2)}
+.status{padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700}
+.gobtn{
+  padding:9px 16px;border-radius:999px;
+  border:none;
+  font-size:12px;font-weight:800;
+  cursor:pointer;flex-shrink:0;
+  background:var(--s1);color:var(--app-bg);
+  box-shadow:0 3px 10px rgba(26,23,20,.16);
+  font-family:'Space Grotesk',sans-serif;
+  transition:transform .15s;
+}
+.gobtn:active{transform:scale(.93)}
+body.dark .gobtn{background:#f0f0f0;color:#1a1714}
+.gobtn.closed{background:var(--bg2);color:var(--s2);border-color:var(--border);cursor:default}
+body.dark .gobtn.closed{background:var(--bg2);color:var(--s2)}
+.trust-wrap{padding:0 14px 10px}
+.trust-bar-bg{height:3px;border-radius:2px;background:var(--bg3)}
+.trust-fill{height:100%;border-radius:2px;transition:width .5s}
+.comm-bar{
+  padding:10px 14px;display:flex;align-items:center;gap:8px;
+  border-top:1px solid var(--border);background:var(--bg2);
+}
+.cfbtn{
+  padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;
+  border:1.5px solid var(--border);cursor:pointer;
+  background:var(--bg2);color:var(--s1);
+  transition:background .15s;
+}
+.cfbtn:active{background:var(--bg3)}
+.cfbtn.yes{background:#f0fdf4;border-color:#bbf7d0;color:#15803d}
+.cfbtn.no{background:#fef2f2;border-color:#fecaca;color:#b91c1c}
+.cfbtn.sig{background:var(--s1);color:var(--app-bg);border-color:var(--s1)}
+/* ── Store-detail drink row (refonte : lignes propres + pastille de statut) ── */
+.sd-row{display:flex;align-items:center;gap:12px;padding:13px 14px;cursor:pointer}
+.sd-row .store-ico{width:44px;height:44px}
+.sd-txt{flex:1;min-width:0}
+.sd-txt .store-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.store-meta .sd-stat{font-weight:800;margin-left:5px;white-space:nowrap}
+.sd-stat.ok{color:#16a34a}
+body.dark .sd-stat.ok{color:#4ade80}
+.sd-stat.todo{color:var(--s3)}
+.sd-chev{color:var(--s3);font-size:20px;flex-shrink:0;margin-left:2px}
+/* ── Carte "mission" (rétention : incite à scanner/contribuer sur place) ── */
+.sd-mission{margin:14px 20px 2px;border-radius:18px;padding:14px 16px;position:relative;overflow:hidden;
+  background:linear-gradient(135deg,rgba(230,126,34,.13),rgba(240,184,64,.10));border:1px solid rgba(230,126,34,.28)}
+.sd-mission .top{display:flex;gap:12px;align-items:flex-start}
+.sd-mission .ic{font-size:26px;line-height:1;animation:sdpulse 2.4s ease-in-out infinite}
+@keyframes sdpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.16)}}
+.sd-mission b{display:block;font-size:14.5px;font-weight:800;color:var(--s1)}
+.sd-mission .desc{font-size:12px;color:var(--txt2);margin-top:2px;line-height:1.4}
+.sd-mission .cta{margin-top:11px;display:flex;gap:8px}
+.sd-mission .btn{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:11px;border-radius:13px;border:none;
+  background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;cursor:pointer;font-family:inherit;transition:transform .12s}
+.sd-mission .btn.ghost{background:transparent;color:var(--s1);border:1.5px solid var(--border)}
+.sd-mission .btn:active{transform:scale(.95)}
+.sd-mission .prog{margin-top:11px;font-size:11px;font-weight:800;color:var(--s2);display:flex;align-items:center;gap:9px}
+.sd-mission .bar{flex:1;height:6px;border-radius:4px;background:rgba(0,0,0,.10);overflow:hidden}
+body.dark .sd-mission .bar{background:rgba(255,255,255,.13)}
+.sd-mission .bar i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#e67e22,#f0b840);transition:width .6s ease}
+/* apparition en cascade des lignes de boissons (magasin) */
+@keyframes sdRowIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+/* confettis au passage de niveau */
+@keyframes confFall{to{transform:translateY(104vh) rotate(680deg);opacity:.35}}
+@keyframes fbSheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+@media (prefers-reduced-motion:reduce){
+  .store-card{animation:none!important}
+  .sd-mission .ic{animation:none!important}
+}
+
+/* ── External buttons ── */
+.extrow{display:flex;gap:10px;padding:10px 20px 4px}
+.extbtn{
+  flex:1;text-align:center;font-size:13px;font-weight:700;
+  padding:11px;border-radius:999px;cursor:pointer;
+  border:1.5px solid var(--border);color:var(--s2);background:var(--bg2);
+  transition:transform .15s;-webkit-tap-highlight-color:transparent;
+}
+.extbtn:active{transform:scale(.95)}
+
+/* ── Fiche magasin : barre d'actions ──────────────────────────────────────
+   Avant : quatre boutons de largeur egale, dont un intitule « Google Maps »
+   qui ouvrait en realite la carte interne. Texte coupe en deux lignes, aucune
+   hierarchie, et un bouton qui mentait sur ce qu'il faisait.
+   Maintenant : UNE action principale evidente (y aller), trois raccourcis
+   secondaires. Chacun fait exactement ce que son libelle annonce. ── */
+.sd-actions{padding:14px 20px 8px;display:flex;flex-direction:column;gap:9px}
+.sd-go{display:flex;align-items:center;gap:13px;width:100%;padding:14px 17px;border-radius:18px;border:none;
+  background:var(--s1);color:var(--app-bg);cursor:pointer;font-family:inherit;text-align:left;
+  -webkit-tap-highlight-color:transparent;transition:transform .12s;box-shadow:var(--card-shadow)}
+.sd-go:active{transform:scale(.985)}
+.sd-go:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.sd-go .ic{flex-shrink:0;width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.14)}
+.sd-go .tx{flex:1;min-width:0}
+.sd-go b{display:block;font-size:15px;font-weight:800;line-height:1.2}
+.sd-go i{display:block;font-style:normal;font-size:11.5px;font-weight:600;opacity:.74;margin-top:2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sd-go .arw{flex-shrink:0;opacity:.5}
+.sd-mini{display:flex;gap:8px}
+.sd-icon{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  padding:11px 4px;min-height:62px;border-radius:16px;border:1.5px solid var(--border);background:var(--bg2);
+  color:var(--txt2);font-size:11px;font-weight:700;font-family:inherit;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;transition:transform .12s,background .15s}
+.sd-icon:active{transform:scale(.96);background:var(--bg3)}
+.sd-icon:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.sd-icon svg{width:19px;height:19px;display:block}
+.sd-icon span{line-height:1;white-space:nowrap}
+/* ── Outils administrateur de la fiche magasin ────────────────────────────
+   Ils vivaient dans l'en-tete sous forme de petits carres SANS AUCUN
+   libelle — et deux d'entre eux etaient carrement vides. Personne ne peut
+   deviner ce que fait un carre gris. Ici chaque outil dit son nom et ce
+   qu'il fait, et la section annonce qu'elle est reservee. ── */
+.sd-adm-title{padding:14px 20px 8px;font-size:10.5px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--s2)}
+.sd-adm-row{display:flex;flex-direction:column;gap:8px;padding:0 20px}
+.sd-adm{display:grid;grid-template-columns:34px 1fr;grid-template-rows:auto auto;column-gap:12px;row-gap:2px;
+  width:100%;text-align:left;padding:12px 14px;border-radius:16px;border:1.5px solid var(--border);
+  background:var(--bg2);color:var(--s1);font-family:inherit;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;transition:transform .12s,background .15s}
+.sd-adm:active{transform:scale(.985);background:var(--bg3)}
+.sd-adm:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.sd-adm svg{grid-row:1 / span 2;align-self:center;width:22px;height:22px;justify-self:center}
+.sd-adm b{font-size:13.5px;font-weight:800}
+.sd-adm i{font-style:normal;font-size:11.5px;font-weight:600;color:var(--txt2);line-height:1.4}
+.sd-adm.danger{border-color:rgba(220,38,38,.35)}
+.sd-adm.danger b{color:#dc2626}
+@media (prefers-reduced-motion:reduce){.sd-adm{transition:none}.sd-adm:active{transform:none}}
+@media (prefers-reduced-motion:reduce){.sd-go,.sd-icon{transition:none}.sd-go:active,.sd-icon:active{transform:none}}
+
+/* ── Scanner ── */
+.scan-area{
+  margin:0 20px;border-radius:22px;overflow:hidden;
+  position:relative;background:radial-gradient(120% 90% at 50% 0%,#25211c,#0d0b09);height:270px;flex-shrink:0;
+  box-shadow:0 10px 30px rgba(12,10,8,.18);
+}
+#scan-video{width:100%;height:100%;object-fit:cover;display:block}
+.scan-overlay{
+  position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;pointer-events:none;
+}
+.scan-frame.reading{animation:framePulse .55s ease-in-out infinite}
+@keyframes framePulse{0%,100%{box-shadow:0 0 0 9999px rgba(10,9,7,.55)}50%{box-shadow:0 0 0 9999px rgba(10,9,7,.55),0 0 0 3px rgba(240,184,64,.9)}}
+.scan-frame{
+  width:238px;height:150px;
+  border:1.5px solid rgba(255,255,255,.28);border-radius:18px;position:relative;
+  box-shadow:0 0 0 9999px rgba(8,6,4,.5);
+}
+/* Ligne de scan animée (visible seulement caméra active) */
+.scan-line{
+  position:absolute;left:9%;right:9%;top:12%;height:2px;border-radius:2px;
+  background:linear-gradient(90deg,transparent,rgba(240,184,64,.95),transparent);
+  box-shadow:0 0 12px 1px rgba(240,184,64,.6);opacity:0;
+}
+.scan-area.live .scan-line{opacity:1;animation:scanSweep 2.1s cubic-bezier(.5,0,.5,1) infinite}
+@keyframes scanSweep{0%{top:16%}50%{top:80%}100%{top:16%}}
+.scan-area:not(.live) .scan-frame{opacity:.45}
+/* Placeholder au repos (caméra éteinte) */
+.scan-idle{
+  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:10px;color:rgba(255,255,255,.85);pointer-events:none;text-align:center;padding:0 30px;
+}
+.scan-area.live .scan-idle{display:none}
+.scan-idle .si-ico{width:60px;height:60px;border-radius:18px;background:rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;font-size:30px;border:1.5px solid rgba(255,255,255,.16)}
+.scan-idle .si-t{font-size:14px;font-weight:800}
+.scan-idle .si-s{font-size:11.5px;font-weight:500;color:rgba(255,255,255,.6);max-width:220px;line-height:1.45}
+.vote-progress{height:6px;border-radius:999px;background:var(--bg3);overflow:hidden;margin-top:7px}
+.vote-progress>div{height:100%;border-radius:999px;background:linear-gradient(90deg,#c69a57,#e0b478);transition:width .4s ease}
+.disc-ready{font-size:10px;font-weight:800;background:#dcfce7;color:#166534;padding:3px 8px;border-radius:999px}
+.scan-frame::before,.scan-frame::after{
+  content:'';position:absolute;width:24px;height:24px;
+  border-color:#f0b840;border-style:solid;
+}
+.scan-frame::before{top:-2px;left:-2px;border-width:3px 0 0 3px;border-radius:7px 0 0 0}
+.scan-frame::after{bottom:-2px;right:-2px;border-width:0 3px 3px 0;border-radius:0 0 7px 0}
+.scan-corners{position:absolute;inset:0;pointer-events:none}
+.scan-corners::before,.scan-corners::after{
+  content:'';position:absolute;width:24px;height:24px;border-color:#f0b840;border-style:solid;
+}
+.scan-corners::before{top:-2px;right:-2px;border-width:3px 3px 0 0;border-radius:0 7px 0 0}
+.scan-corners::after{bottom:-2px;left:-2px;border-width:0 0 3px 3px;border-radius:0 0 0 7px}
+.scan-result{margin:12px 20px;padding:14px;border-radius:16px;border:1.5px solid var(--border);display:none;background:var(--bg2)}
+.scan-result.found{border-color:var(--s1)}
+.scan-result.notfound{border-color:var(--s3)}
+.scan-btn{
+  display:block;margin:12px 20px;
+  padding:16px;border-radius:18px;
+  border:none;font-size:15px;font-weight:800;
+  cursor:pointer;text-align:center;color:#fff;
+  width:calc(100% - 40px);
+  box-shadow:0 6px 18px rgba(26,23,20,.22);
+  transition:transform .15s,box-shadow .15s;
+  -webkit-tap-highlight-color:transparent;
+}
+.scan-btn:active{transform:scale(.975);box-shadow:0 3px 10px rgba(26,23,20,.25)}
+
+/* ── Discover ── */
+.disc-card{
+  margin:7px 20px;border-radius:20px;overflow:hidden;
+  display:flex;align-items:center;gap:14px;padding:14px;
+  background:var(--bg2);border:1px solid var(--border);
+  box-shadow:0 4px 16px rgba(12,10,8,.07);
+}
+body.dark .disc-card{background:#2a2a2a}
+.disc-img{
+  width:58px;height:58px;border-radius:14px;
+  display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;
+  background:var(--bg2);
+}
+.vote-btn{
+  padding:9px 16px;border-radius:999px;
+  font-size:12px;font-weight:800;border:none;cursor:pointer;color:#fff;flex-shrink:0;
+  box-shadow:0 3px 10px rgba(26,23,20,.16);
+  transition:transform .15s;-webkit-tap-highlight-color:transparent;
+}
+.vote-btn:active{transform:scale(.93)}
+
+/* ── Profile ── */
+.stat-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:0 20px 20px}
+.stat-card{
+  border-radius:18px;padding:15px 10px;text-align:center;
+  background:var(--bg2);border:1px solid var(--border);
+  box-shadow:0 3px 12px rgba(12,10,8,.05);
+}
+.stat-num{font-size:24px;font-weight:800;margin-bottom:2px;color:var(--s1)}
+.stat-lbl{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--s2)}
+.badge-row{display:flex;gap:12px;padding:0 20px 20px;overflow-x:auto}
+.badge-item{flex-shrink:0;width:64px;text-align:center}
+.badge-ico{
+  width:46px;height:46px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;margin:0 auto 6px;
+}
+.badge-nm{font-size:9px;font-weight:500;color:var(--s2)}
+.act-item{
+  display:flex;align-items:center;gap:12px;
+  padding:12px 20px;border-bottom:1px solid var(--border);
+}
+
+/* ── Settings ── */
+.theme-row{display:flex;gap:8px;padding:0 20px 20px}
+.theme-btn{
+  flex:1;padding:12px;border-radius:14px;border:1.5px solid var(--border);
+  cursor:pointer;font-size:13px;font-weight:500;text-align:center;
+  background:var(--bg2);color:var(--s1);
+  transition:all .18s;
+}
+.theme-btn.on{color:#fff !important;border-color:transparent !important}
+
+/* ── Settings : listes groupees facon iOS (propre, gros, lisible) ── */
+.set-sec{padding:20px 22px 8px;font-size:11.5px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--s2)}
+.set-group{margin:0 16px 4px;background:var(--bg2);border-radius:18px;overflow:hidden}
+.set-row{display:flex;align-items:center;gap:13px;padding:15px 15px;cursor:pointer;min-height:58px;-webkit-tap-highlight-color:transparent;transition:background .15s}
+.set-row.static{cursor:default}
+.set-row+.set-row{border-top:1px solid var(--border)}
+.set-row:not(.static):active{background:var(--bg3)}
+/* Pas d'icones/emojis dans les reglages : rendu texte monochrome, sobre et pro. */
+.set-ico{display:none!important}
+.set-txt{flex:1;min-width:0}
+.set-title{font-size:15px;font-weight:700;color:var(--s1)}
+.set-sub{font-size:12.5px;color:var(--s2);margin-top:2px;line-height:1.4}
+.set-chev{color:var(--s3);font-size:22px;font-weight:400;flex-shrink:0;margin-left:2px}
+/* ── Interrupteur : UN seul composant, partout. Avant, chaque interrupteur
+   avait ses styles ecrits a la main dans le HTML : trois tailles differentes,
+   trois comportements. Ici c'est une classe unique -> tout se ressemble. ── */
+.sw{pointer-events:none;width:48px;height:28px;border-radius:999px;background:var(--bg3);border:1.5px solid var(--border);cursor:pointer;position:relative;flex-shrink:0;transition:background .18s ease,border-color .18s ease}
+.sw-knob{position:absolute;top:2.5px;left:2.5px;width:21px;height:21px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.28);transition:transform .18s cubic-bezier(.2,.8,.3,1)}
+.sw.on{background:var(--s1);border-color:var(--s1)}
+.sw.on .sw-knob{transform:translateX(20px)}
+.sw.busy{opacity:.5;pointer-events:none}
+.set-row.sw-row{cursor:pointer}
+.set-row.sw-row:active{background:var(--bg3)}
+.set-row.sw-row:focus-visible{outline:2px solid var(--s1);outline-offset:-2px;border-radius:14px}
+/* ── Bouton discret : remplace les anciens mots soulignes facon lien web.
+   Une pastille bordee, ca se voit, ca se touche, et ca fait application. ── */
+.ghost-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 15px;border-radius:999px;border:1.5px solid var(--border);background:var(--bg2);color:var(--txt2);font-size:12.5px;font-weight:700;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .15s,border-color .15s,transform .12s;min-height:38px}
+.ghost-btn:active{transform:scale(.97);background:var(--bg3)}
+.ghost-btn:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.ghost-btn.quiet{border-color:transparent;background:transparent;color:var(--txt2)}
+.ghost-btn.quiet:active{background:var(--bg3)}
+/* Note affichee par-dessus la photo du produit : une pastille translucide
+   plutot qu'un mot souligne facon lien web. Vide = rien du tout. */
+.res-rate-chip{display:inline-flex;align-items:center;gap:5px;margin-top:5px;min-height:30px;padding:5px 11px;border-radius:999px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.24);color:#fff;font-size:11px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .15s}
+.res-rate-chip:active{background:rgba(255,255,255,.26)}
+.res-rate-chip:empty{display:none}
+.res-rate-chip:focus-visible{outline:2px solid #fff;outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.sw,.sw-knob,.ghost-btn{transition:none}.ghost-btn:active{transform:none}}
+.set-val{font-size:13.5px;font-weight:700;color:var(--s2);flex-shrink:0}
+.set-row.danger .set-title{color:#dc2626}
+.set-row.danger .set-ico{background:#fef2f2;color:#dc2626}
+body.dark .set-row.danger .set-ico{background:rgba(220,38,38,.16)}
+
+/* ── Curseur "Rayon d'alerte des chasses" : slider premium doré ── */
+.hr-block{display:block;padding:16px 15px 18px;cursor:default}
+.hr-value-wrap{display:flex;align-items:baseline;justify-content:flex-end;gap:3px;flex-shrink:0}
+#hr-value{font-size:30px;font-weight:800;color:var(--s1);line-height:1;display:inline-block;transition:transform .18s cubic-bezier(.34,1.56,.64,1);font-variant-numeric:tabular-nums}
+.hr-km{font-size:14px;font-weight:800;color:#c69a57}
+.hr-range{-webkit-appearance:none;appearance:none;width:100%;height:8px;border-radius:6px;background:var(--border);outline:none;cursor:pointer;margin:0}
+.hr-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:28px;height:28px;border-radius:50%;background:#c69a57;border:3px solid var(--app-bg);box-shadow:0 3px 12px rgba(198,154,87,.55),0 1px 3px rgba(0,0,0,.2);cursor:grab;transition:transform .15s cubic-bezier(.34,1.56,.64,1)}
+.hr-range:active::-webkit-slider-thumb{transform:scale(1.22);cursor:grabbing}
+.hr-range:focus-visible::-webkit-slider-thumb{outline:2px solid #c69a57;outline-offset:3px}
+.hr-range::-moz-range-thumb{width:28px;height:28px;border-radius:50%;background:#c69a57;border:3px solid var(--app-bg);box-shadow:0 3px 12px rgba(198,154,87,.55),0 1px 3px rgba(0,0,0,.2);cursor:grab}
+.hr-range:active::-moz-range-thumb{transform:scale(1.22)}
+.hr-range::-moz-range-track{height:8px;border-radius:6px;background:transparent}
+.hr-ends{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;font-weight:800;color:var(--s3)}
+
+/* ── Modal ── */
+#report-modal{
+  position:fixed;inset:0;background:rgba(0,0,0,.5);
+  display:none;align-items:flex-end;justify-content:center;z-index:100;
+}
+.rsheet{
+  border-radius:24px 24px 0 0;padding:20px 20px 36px;
+  width:100%;max-width:402px;
+  background:#ffffff;
+  animation:sheetUp .5s cubic-bezier(.3,1.38,.44,1);
+}
+body.dark .rsheet{background:#2a2a2a}
+@keyframes sheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.ropt{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:15px;border-radius:18px;cursor:pointer;margin-bottom:9px;
+  background:var(--bg2);border:1.5px solid var(--border);
+  transition:transform .15s,border-color .15s;
+}
+.ropt:active{transform:scale(.98);border-color:var(--s1)}
+.ropt:active{background:var(--bg2)}
+
+/* ── Toast ── */
+.toast{
+  position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);
+  background:var(--s1);color:var(--app-bg);
+  padding:13px 22px;border-radius:999px;
+  font-size:13px;font-weight:700;
+  box-shadow:0 8px 24px rgba(12,10,8,.3);
+  opacity:0;pointer-events:none;
+  transition:opacity .25s,transform .25s cubic-bezier(.2,.8,.3,1);
+  z-index:5000;max-width:82vw;text-align:center;
+}
+body.dark .toast{background:#f0f0f0;color:#111}
+/* Uniquement quand le bouton d'accueil est affiche : sinon on viendrait
+   se poser sur le « + Magasin » de la carte, qui vit a 150 px. */
+body.homefab .toast{bottom:calc(150px + env(safe-area-inset-bottom))}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+/* La carte entre en scene : montee + fondu avec un leger ressort,
+   au lieu d'apparaitre brutalement */
+#map-box.map-fullscreen{position:fixed!important;inset:0!important;z-index:8500!important;width:100vw!important;height:100vh!important;border-radius:0!important;margin:0!important}
+/* En plein ecran, l'encoche iPhone recouvrait le bouton fermer et la legende
+   -> impossible de revenir en arriere. On les descend sous la zone sure et on
+   grossit le bouton. */
+#map-box.map-fullscreen #map-full-btn{top:calc(env(safe-area-inset-top,0px) + 14px)!important;right:calc(env(safe-area-inset-right,0px) + 14px)!important;width:48px!important;height:48px!important;font-size:22px!important;font-weight:700!important;background:#fff!important;color:#1a1714!important;border:none!important;border-radius:50%!important;backdrop-filter:none!important;box-shadow:0 4px 16px rgba(0,0,0,.45)!important;z-index:1200!important}
+#map-box.map-fullscreen > div:first-of-type + div{top:calc(env(safe-area-inset-top,0px) + 12px)!important}
+/* La disposition en colonne est portee par le CSS, plus par un style en ligne :
+   effacer ce style faisait retomber l'hote en display:block, et #explore-map
+   (flex:1) s'ecrasait a zero — un grand vide noir sous l'en-tete. */
+#explore-map-host{display:flex;flex-direction:column;opacity:0;transform:translateY(8%) scale(.93);transition:opacity .28s ease,transform .44s cubic-bezier(.22,1.22,.36,1)}
+/* Ceinture et bretelles : meme dans un parent non-flex, la carte garde une hauteur. */
+#explore-map{flex:1;min-height:260px}
+#explore-map-host.in{opacity:1;transform:none}
+/* ── Marqueurs de carte : pins pro (fond clair CARTO, ombres, pop-in) ── */
+.mago-pin{position:relative;width:34px;height:44px;filter:drop-shadow(0 4px 8px rgba(0,0,0,.28));transform-origin:50% 100%;animation:pinIn .28s cubic-bezier(.22,1.5,.36,1)}
+@keyframes pinIn{from{transform:scale(.4) translateY(8px);opacity:0}to{transform:scale(1) translateY(0);opacity:1}}
+.mago-pin-head{position:absolute;top:0;left:0;width:34px;height:34px;border-radius:50%;background:var(--pc,#1a1714);border:2.5px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13.5px;font-family:'Space Grotesk',sans-serif;letter-spacing:.3px;z-index:2;transition:transform .15s}
+.mago-pin-tip{position:absolute;left:50%;bottom:3px;width:12px;height:12px;background:var(--pc,#1a1714);border-right:2.5px solid #fff;border-bottom:2.5px solid #fff;transform:translateX(-50%) rotate(45deg);z-index:1}
+.mago-pin.closed{filter:drop-shadow(0 3px 5px rgba(0,0,0,.18)) grayscale(.55);opacity:.72}
+.mago-pin.sure .mago-pin-head{border-color:#16a34a;border-width:3px;box-shadow:0 0 0 3px rgba(22,163,74,.25)}
+.mago-pin.sure{filter:drop-shadow(0 5px 10px rgba(22,163,74,.35))}
+.mago-pin .pin-check{position:absolute;top:-5px;right:-5px;width:16px;height:16px;border-radius:50%;background:#16a34a;border:2px solid #fff;color:#fff;font-size:9px;font-weight:900;display:flex;align-items:center;justify-content:center;z-index:3}
+/* Anti-crash iOS au dezoom : c'est l'ANIMATION (transform+opacity) qui force
+   Safari a promouvoir chaque pin en couche composee dediee, avec son propre
+   tampon offscreen. Sur la carte Explorer, des centaines de pins peuvent
+   apparaitre d'un coup : on coupe le pop-in la, et la seulement. */
+#explore-map .mago-pin{animation:none}
+/* ── BLEU = magasin certifie ──────────────────────────────────────────────
+   Le vert parle d'une BOISSON (« elle est en stock ici »), le bleu parle de
+   l'ETABLISSEMENT (rayon verifie sur place). Les deux se cumulent.
+   Quand un magasin est certifie ET a la boisson, le VERT garde l'anneau :
+   c'est l'information qui fait se deplacer. Le bleu reste en pastille, a
+   gauche, face a la coche verte — deux signaux, deux places, aucune
+   confusion possible. ── */
+.mago-pin.certif .mago-pin-head{border-color:#2563eb;border-width:3px;box-shadow:0 0 0 3px rgba(37,99,235,.25)}
+.mago-pin.certif{filter:drop-shadow(0 5px 10px rgba(37,99,235,.35))}
+.mago-pin.certif.sure .mago-pin-head{border-color:#16a34a;box-shadow:0 0 0 3px rgba(22,163,74,.25)}
+.mago-pin.certif.sure{filter:drop-shadow(0 5px 10px rgba(22,163,74,.35))}
+.mago-pin .pin-certif{position:absolute;top:-5px;left:-5px;width:16px;height:16px;border-radius:50%;
+  background:#2563eb;border:2px solid #fff;display:flex;align-items:center;justify-content:center;z-index:3}
+.mago-pin.maybe{opacity:.62}
+.mago-pin.maybe .mago-pin-head{font-size:11px}
+.mago-pin .pin-maybe{position:absolute;top:-5px;right:-5px;width:15px;height:15px;border-radius:50%;background:#f59e0b;border:2px solid #fff;color:#fff;font-size:9.5px;font-weight:900;display:flex;align-items:center;justify-content:center;z-index:3}
+.mago-pin.no{opacity:.55}
+.mago-pin.no .mago-pin-head{background:#dc2626!important;font-size:11px}
+.mago-pin.no .mago-pin-tip{background:#dc2626!important}
+.mago-pin .pin-no{position:absolute;top:-5px;right:-5px;width:15px;height:15px;border-radius:50%;background:#fff;border:2px solid #dc2626;color:#dc2626;font-size:8.5px;font-weight:900;display:flex;align-items:center;justify-content:center;z-index:3}
+.mago-pin.absent{opacity:.35;filter:grayscale(1)}
+.leaflet-marker-icon:hover .mago-pin-head{transform:scale(1.1)}
+/* Etiquette du magasin destination (nom + croix) au-dessus du pin */
+.leaflet-tooltip.mago-dest-tip{background:var(--app-bg);color:var(--s1);border:1.5px solid var(--border);border-radius:12px;box-shadow:0 5px 18px rgba(0,0,0,.3);font-family:'Space Grotesk',sans-serif;padding:6px 8px 6px 11px;display:flex;align-items:center;gap:8px;white-space:nowrap;max-width:230px}
+.leaflet-tooltip.mago-dest-tip::before{border-top-color:var(--border)}
+.mago-dest-name{font-size:13px;font-weight:800;overflow:hidden;text-overflow:ellipsis;max-width:132px;padding:4px 10px;border-radius:999px;background:var(--bg3);border:1.5px solid var(--s3);color:var(--s1);cursor:pointer}
+/* Puce d'action dans la liste des decouvertes : un bouton, pas un lien. */
+.disc-locate{display:inline-flex;align-items:center;min-height:32px;padding:6px 13px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:11px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .12s}
+.disc-locate:active{transform:scale(.95)}
+.disc-locate:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.mago-dest-dist{font-size:12px;font-weight:800;color:#16a34a;flex-shrink:0}
+.mago-dest-x{width:22px;height:22px;border-radius:50%;background:var(--bg2);color:var(--s1);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;cursor:pointer;flex-shrink:0;border:1px solid var(--border)}
+.mago-dest-x:active{transform:scale(.9)}
+.mago-cluster{display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--cc,#1a1714);color:#fff;font-weight:800;font-family:'Space Grotesk',sans-serif;border:3px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.25),0 0 0 5px color-mix(in srgb,var(--cc,#1a1714) 22%,transparent);transition:transform .15s}
+.leaflet-marker-icon:hover .mago-cluster{transform:scale(1.06)}
+.mago-me{position:relative;width:20px;height:20px}
+.mago-me-dot{position:absolute;inset:3px;border-radius:50%;background:#1a73e8;border:2.5px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.35);z-index:2}
+.mago-me-halo{position:absolute;inset:-12px;border-radius:50%;background:rgba(26,115,232,.22);animation:meHalo 2.2s ease-out infinite}
+@keyframes meHalo{0%{transform:scale(.5);opacity:.9}70%{transform:scale(1);opacity:0}100%{transform:scale(1);opacity:0}}
+.leaflet-container{background:#eae6df;font-family:'Space Grotesk',sans-serif}
+body.dark .leaflet-container{background:#23211f}
+.leaflet-control-attribution{font-size:9px!important;opacity:.65;background:rgba(255,255,255,.7)!important}
+.leaflet-control-zoom{opacity:.5;transition:opacity .2s;border:none!important;box-shadow:0 2px 8px rgba(0,0,0,.18)!important;border-radius:12px!important;overflow:hidden}
+.leaflet-control-zoom:hover,.leaflet-control-zoom:active{opacity:1}
+.leaflet-control-zoom a{border:none!important;color:#1a1714!important;font-weight:700;background:rgba(255,255,255,.85)!important}
+body.dark .leaflet-control-zoom a{background:rgba(42,42,42,.85)!important;color:#eee!important}
+#explore-store-card{transform:translateY(12px);opacity:0;transition:transform .3s cubic-bezier(.22,1.2,.36,1),opacity .2s}
+#explore-store-card.in{transform:none;opacity:1}
+
+/* Physique des interactions : la pression est instantanee (70ms), le
+   relachement rebondit avec un leger depassement elastique — la sensation
+   "app native" que les transitions symetriques ne donnent jamais. */
+.rail-tile:active{transform:scale(.94)}
+.dcard,.store-card,.chip,.ntab,.scan-btn,.extbtn,.vote-btn,.gobtn,.ropt,.lang-btn,.brand-tile,.search-mode-btn,.searchbox,.rail-tile{
+  transition:transform .32s cubic-bezier(.22,1.35,.36,1),box-shadow .32s cubic-bezier(.22,1.35,.36,1),background .2s,color .2s,border-color .2s;
+}
+.dcard:active,.store-card:active,.chip:active,.ntab:active,.scan-btn:active,.extbtn:active,.vote-btn:active,.gobtn:active,.ropt:active,.lang-btn:active,.brand-tile:active,.searchbox:active{
+  transition-duration:.07s;
+}
+.store-card:active{transform:scale(.98)}
+.searchbox:active{transform:scale(.985)}
+
+/* ── Spinner ── */
+.spinner{
+  width:26px;height:26px;
+  border:3px solid var(--bg3);border-top-color:var(--accent);
+  border-radius:50%;animation:spin .8s linear infinite;margin:10px auto;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Header utility ── */
+.hd-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.avatar{
+  width:40px;height:40px;border-radius:50%;
+  background:repeating-linear-gradient(45deg,#eceae5 0 6px,#f4f2ee 6px 12px);
+  cursor:pointer;flex-shrink:0;
+}
+
+/* ── GPS label ── */
+#gps-label{font-size:12px;padding:4px 20px;font-weight:500;text-align:center;color:var(--s2)}
+
+/* ── Firebase loading banner ── */
+#fb-status{
+  position:fixed;top:0;left:0;right:0;
+  background:#1a1714;color:#c69a57;
+  font-size:12px;font-weight:600;
+  text-align:center;padding:8px;
+  z-index:9999;
+  display:none;
+}
+
+/* ── Onboarding ── */
+#onboarding{
+  position:absolute;inset:0;
+  background:var(--app-bg);
+  display:flex;flex-direction:column;
+  z-index:200;
+  transition:opacity .35s;
+}
+#onboarding.hidden{opacity:0;pointer-events:none}
+.ob-slides{
+  flex:1;
+  display:flex;
+  overflow:hidden;
+  position:relative;
+}
+.ob-slide{
+  position:absolute;inset:0;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  padding:40px 32px;
+  opacity:0;
+  transform:translateX(40px);
+  transition:opacity .35s,transform .35s;
+  pointer-events:none;
+}
+.ob-slide.active{opacity:1;transform:translateX(0);pointer-events:auto;}
+.ob-slide.exit{opacity:0;transform:translateX(-40px);}
+.ob-visual{
+  width:140px;height:140px;
+  border-radius:40px;
+  background:var(--bg2);
+  display:flex;align-items:center;justify-content:center;
+  margin-bottom:36px;
+  position:relative;
+  overflow:hidden;
+}
+.ob-chip-demo{position:absolute;bottom:-1px;left:50%;transform:translateX(-50%);display:flex;gap:6px;}
+.ob-chip-sm{padding:5px 10px;border-radius:999px;font-size:10px;font-weight:700;background:var(--s1);color:var(--app-bg);white-space:nowrap;}
+.ob-tag{font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--s3);text-transform:uppercase;margin-bottom:12px;}
+.ob-title{font-size:24px;font-weight:800;letter-spacing:-.5px;color:var(--s1);text-align:center;line-height:1.2;margin-bottom:14px;}
+.ob-desc{font-size:14px;font-weight:400;line-height:1.6;color:var(--s2);text-align:center;max-width:280px;}
+.ob-footer{padding:24px 28px 36px;display:flex;flex-direction:column;gap:12px;flex-shrink:0;}
+.ob-dots{display:flex;gap:7px;justify-content:center;margin-bottom:4px;}
+.ob-dot{width:6px;height:6px;border-radius:3px;background:var(--bg3);transition:width .25s,background .25s;}
+.ob-dot.active{width:20px;background:var(--s1)}
+body.dark .ob-dot.active{background:#f0f0f0}
+body.dark .ob-dot{background:var(--bg3)}
+.ob-btn-primary{width:100%;padding:15px;border-radius:var(--radius-chip);border:none;cursor:pointer;background:var(--s1);color:#fff;font-size:15px;font-weight:700;font-family:'Space Grotesk',sans-serif;transition:opacity .15s;}
+body.dark .ob-btn-primary{background:#f0f0f0;color:#1a1714}
+.ob-btn-primary:active{opacity:.8}
+.ob-btn-skip{background:none;border:none;cursor:pointer;font-size:13px;font-weight:500;color:var(--s3);font-family:'Space Grotesk',sans-serif;padding:4px;}
+.ob-store-mini{position:absolute;background:#fff;border-radius:12px;padding:7px 10px;box-shadow:0 2px 12px rgba(0,0,0,.1);display:flex;align-items:center;gap:7px;font-size:11px;font-weight:600;color:#1a1714;white-space:nowrap;}
+body.dark .ob-store-mini{background:#2a2a2a;color:#f0f0f0}
+.ob-store-dot{width:6px;height:6px;border-radius:50%;background:#22c55e;flex-shrink:0}
+.ob-pts{position:absolute;background:var(--s1);color:var(--app-bg);border-radius:999px;padding:5px 12px;font-size:13px;font-weight:800;}
+
+/* ── Tutorial ── */
+#tuto-overlay{position:absolute;inset:0;z-index:250;display:none;opacity:0;transition:opacity .4s;}
+#tuto-overlay.active{display:block;opacity:1;}
+.tuto-hole{position:absolute;border-radius:14px;box-shadow:0 0 0 9999px rgba(0,0,0,.65);transition:all .35s cubic-bezier(.4,0,.2,1);pointer-events:none;z-index:1;}
+.tuto-card{position:absolute;background:#fff;border-radius:18px;padding:16px 18px;width:240px;box-shadow:0 8px 32px rgba(0,0,0,.25);transition:all .35s cubic-bezier(.4,0,.2,1);z-index:2;pointer-events:all;}
+body.dark .tuto-card{background:#2a2a2a}
+body.dark .tuto-title{color:#f0f0f0}
+body.dark .tuto-arrow.down{border-top-color:#2a2a2a}
+body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
+.tuto-arrow{position:absolute;width:0;height:0;z-index:2;pointer-events:none;}
+.tuto-arrow.down{border-left:10px solid transparent;border-right:10px solid transparent;border-top:12px solid #fff;}
+.tuto-arrow.up{border-left:10px solid transparent;border-right:10px solid transparent;border-bottom:12px solid #fff;}
+.tuto-step{font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#9b948b;margin-bottom:6px}
+.tuto-title{font-size:15px;font-weight:800;color:#1a1714 !important;margin-bottom:4px;line-height:1.3}
+.tuto-desc{font-size:12px;color:#6b6560;line-height:1.5;margin-bottom:14px}
+.tuto-btns{display:flex;align-items:center;justify-content:space-between}
+.tuto-skip{font-size:12px;font-weight:500;color:#c8c2bb;cursor:pointer;padding:4px}
+.tuto-next{padding:8px 18px;border-radius:999px;background:#1a1714;color:#fff !important;font-size:13px;font-weight:700;cursor:pointer;border:none;font-family:'Space Grotesk',sans-serif}
+
+/* ── Splash ── */
+#splash{
+  position:absolute;inset:0;
+  background:#1a1714;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  z-index:300;
+  opacity:1;
+  transition:opacity .5s ease;
+  gap:10px;
+}
+#splash.hidden{opacity:0;pointer-events:none}
+.splash-logo{font-size:48px;font-weight:800;letter-spacing:-2px;color:#fff;animation:splashIn .6s cubic-bezier(.16,1,.3,1) both;}
+.splash-sub{font-size:14px;font-weight:500;color:rgba(255,255,255,.45);letter-spacing:.5px;animation:splashIn .6s .15s cubic-bezier(.16,1,.3,1) both;}
+.splash-dot{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.3);margin-top:32px;animation:splashPulse 1s .4s ease-in-out infinite alternate;}
+@keyframes splashIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes splashPulse{from{opacity:.3}to{opacity:.8}}
+
+/* ── Respecte la préférence système "réduire les animations" ── */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.001ms!important;
+    animation-iteration-count:1!important;
+    transition-duration:.001ms!important;
+    scroll-behavior:auto!important;
+  }
+}
+
+/* ── Focus clavier visible sur les éléments interactifs personnalisés ── */
+.ntab:focus-visible,.back-ico:focus-visible,[role="button"]:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;border-radius:8px;
+}
+
+/* ── Etats vides soignes : visuel + phrase + action (partout le meme bloc) ── */
+.mt-empty{text-align:center;padding:26px 18px 22px;animation:mtEmptyIn .5s cubic-bezier(.3,1.38,.44,1) both}
+.mt-empty-i{
+  width:62px;height:62px;margin:0 auto 13px;border-radius:20px;
+  background:var(--bg2);border:1.5px solid var(--border);color:var(--s2);
+  display:flex;align-items:center;justify-content:center;
+}
+.mt-empty-t{font-size:14.5px;font-weight:800;color:var(--s1);margin-bottom:6px}
+.mt-empty-s{font-size:12.5px;color:var(--s2);line-height:1.55;max-width:270px;margin:0 auto}
+.mt-empty-b{
+  margin-top:14px;padding:10px 18px;border-radius:999px;border:none;cursor:pointer;
+  background:var(--s1);color:var(--app-bg);font-size:12.5px;font-weight:800;font-family:inherit;
+  transition:transform .15s;
+}
+.mt-empty-b:active{transform:scale(.95)}
+@keyframes mtEmptyIn{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
+
+/* ── Feuilles montantes a styles inline (Proposer, choix magasin) : meme
+   ressort que .rsheet — l'animation repart a chaque affichage du parent. ── */
+#propose-sheet>div,#store-picker>div,#lang-sheet>div,#rate-sheet>div{animation:sheetUp .5s cubic-bezier(.3,1.38,.44,1)}
+
+/* ── Mouvement reduit : aucune de ces animations n'est essentielle ── */
+@media (prefers-reduced-motion:reduce){
+  .rsheet,#propose-sheet>div,#store-picker>div,#lang-sheet>div,#rate-sheet>div,.mt-empty{animation:none}
+  .screen{transition:background .25s}
+}
+
+/* ── Intro premier lancement : visuels vectoriels (refonte 4 ecrans) ── */
+.ob-visual{position:relative;overflow:visible}
+.ob-visual-brand{background:transparent}
+.ob-spark{position:absolute;top:18px;right:16px}
+@keyframes obRing{0%{transform:scale(.8);opacity:.9}75%{transform:scale(1.25);opacity:0}100%{transform:scale(1.25);opacity:0}}
+.ob-ring{transform-box:fill-box;transform-origin:center;animation:obRing 2.6s ease-out infinite}
+@media (prefers-reduced-motion:reduce){.ob-ring{animation:none}}
+
+/* ── Bulle d'accueil (coach-mark) : un conseil par onglet, une seule fois ── */
+#coach-bubble{
+  position:absolute;left:16px;right:16px;z-index:170;
+  display:flex;align-items:flex-start;gap:9px;
+  background:#1a1714;color:#f4f2ee;border-radius:16px;padding:13px 16px;
+  font-size:12.8px;font-weight:600;line-height:1.5;
+  box-shadow:0 12px 36px rgba(12,10,8,.4);
+  animation:coachIn .55s cubic-bezier(.3,1.38,.44,1) both;transition:opacity .25s;
+}
+#coach-bubble b{color:#e2b571;font-weight:800}
+#coach-bubble .cb-dot{width:8px;height:8px;border-radius:50%;background:#e2b571;flex-shrink:0;margin-top:5px}
+#coach-bubble .cb-arrow{position:absolute;width:13px;height:13px;background:#1a1714;transform:rotate(45deg);border-radius:2px}
+body.dark #coach-bubble{background:#f0ece4;color:#221c15;box-shadow:0 12px 36px rgba(0,0,0,.5)}
+body.dark #coach-bubble b{color:#7a561d}
+body.dark #coach-bubble .cb-dot{background:#7a561d}
+body.dark #coach-bubble .cb-arrow{background:#f0ece4}
+@keyframes coachIn{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){#coach-bubble{animation:none}}
+
+/* ── CENTRE D'ACTIVITE (cloche) ───────────────────────────────────────────
+   Avant : trois lignes de texte empilees, meme graisse, meme gris, aucune
+   image — on ne pouvait que LIRE, ligne apres ligne, pour comprendre ce qui
+   s'etait passe. Maintenant chaque evenement porte la photo de la boisson
+   concernee, une etiquette coloree qui dit son type, et l'heure a droite.
+   La couleur du type arrive par la variable --tag posee sur la ligne : une
+   seule regle CSS sert les cinq types. ── */
+.act-row{display:flex;gap:12px;align-items:flex-start;padding:12px 13px;margin-bottom:8px;
+  border-radius:16px;background:var(--bg2);border:1.5px solid var(--border);position:relative}
+.act-row.act-tap{cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .12s,background .15s}
+.act-row.act-tap:active{transform:scale(.985);background:var(--bg3)}
+.act-row.act-tap:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+/* Non-lu : un liseré de la couleur du type, plus lisible qu'une pastille. */
+.act-row.act-unread{border-color:color-mix(in srgb,var(--tag) 45%,var(--border))}
+.act-row.act-unread::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;
+  border-radius:0 3px 3px 0;background:var(--tag)}
+.act-thumb{width:44px;height:44px;border-radius:13px;overflow:hidden;background:#fff;
+  border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.act-txt{flex:1;min-width:0}
+.act-head{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+.act-tag{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--tag);background:color-mix(in srgb,var(--tag) 13%,transparent);
+  padding:3px 8px;border-radius:999px;white-space:nowrap}
+.act-when{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--s3);white-space:nowrap;flex-shrink:0}
+.act-title{font-size:13.5px;font-weight:800;color:var(--s1);line-height:1.35;
+  overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.act-body{font-size:12px;color:var(--txt2);margin-top:2px;line-height:1.45}
+.act-chev{color:var(--s3);font-size:17px;flex-shrink:0;align-self:center}
+@media (prefers-reduced-motion:reduce){.act-row.act-tap{transition:none}.act-row.act-tap:active{transform:none}}
+
+/* ── GLISSER POUR SUPPRIMER ───────────────────────────────────────────────
+   touch-action:pan-y est la piece maitresse : le navigateur garde le
+   defilement vertical (donc la liste defile normalement), et nous laisse
+   l'horizontal. Sans ca, le geste volerait le scroll une fois sur deux. ── */
+.swp{position:relative;overflow:hidden;border-radius:14px}
+.swp-bg{position:absolute;inset:0;display:flex;align-items:center;justify-content:flex-end;
+  gap:7px;padding-right:18px;background:#dc2626;color:#fff;font-size:12px;font-weight:800}
+.swp-fg{position:relative;background:var(--swp-face,var(--app-bg));touch-action:pan-y;
+  transition:transform .24s cubic-bezier(.2,.8,.2,1)}
+.swp.swp-dragging .swp-fg{transition:none}
+.swp.swp-armed .swp-bg{background:#b91c1c}
+.swp.swp-gone{transition:max-height .17s ease,opacity .17s ease,margin .17s ease;
+  max-height:0;opacity:0;margin:0!important}
+@media (prefers-reduced-motion:reduce){.swp-fg{transition:none}.swp.swp-gone{transition:none}}
+/* Bouton de suppression d'une notification : discret, mais toujours la —
+   le glissement ne doit jamais etre le SEUL moyen de supprimer. */
+.act-del{flex-shrink:0;align-self:center;width:32px;height:32px;border:none;border-radius:50%;
+  background:transparent;color:var(--s3);cursor:pointer;display:flex;align-items:center;justify-content:center;
+  font-family:inherit;transition:color .15s,background .15s}
+.act-del:active{background:var(--bg3);color:#dc2626}
+.act-del:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.act-del{transition:none}}
+
+/* ── Feuilles montantes : plus d'elastique de page derriere ────────────────
+   Sur iPhone, tirer sur une feuille faisait rebondir la PAGE en dessous et
+   laissait apparaitre le fond blanc du navigateur : l'application avait l'air
+   de se decoller. On verrouille le fond tant qu'une feuille est ouverte. ── */
+html{overscroll-behavior-y:none}
+/* Verrou du fond de page pendant qu'une feuille est ouverte.
+   ATTENTION : surtout PAS de touch-action:none ici. Sur iOS, WebKit remonte
+   la chaine des parents pour decider si un geste de defilement est permis :
+   un « none » sur le body ecrase le « pan-y » de la liste a l'interieur de la
+   feuille, et plus rien ne defile. C'etait la cause du panneau Activite
+   impossible a faire descendre. overflow + overscroll-behavior suffisent a
+   empecher la page de rebondir derriere. */
+body.sheet-open{overflow:hidden;overscroll-behavior:none}
+#act-card{transition:transform .28s cubic-bezier(.2,.8,.2,1)}
+@media (prefers-reduced-motion:reduce){#act-card{transition:none}}
+
+/* ── Curseur de distance : compact, sous les puces, ne recouvre rien ───────
+   Avant il fallait taper cinq fois pour atteindre 10 km. ── */
+.near-bar{display:flex;align-items:center;gap:11px;margin:8px 12px 0;padding:8px 12px;
+  border-radius:14px;background:var(--bg2);border:1.5px solid var(--border);
+  opacity:0;transform:translateY(-6px);transition:opacity .18s ease,transform .18s ease}
+.near-bar.in{opacity:1;transform:none}
+.near-bar .near-off{flex-shrink:0;padding:6px 11px;border-radius:999px;border:1.5px solid var(--border);
+  background:var(--app-bg);color:var(--txt2);font-size:11.5px;font-weight:800;font-family:inherit;cursor:pointer}
+.near-bar .near-off:active{background:var(--bg3)}
+.near-bar input[type=range]{flex:1;min-width:0;accent-color:var(--s1);height:26px}
+.near-bar #near-val{flex-shrink:0;min-width:46px;text-align:right;font-size:12.5px;font-weight:800;color:var(--s1)}
+/* ── Choix d'enseigne : fondu du fond, panneau qui descend ── */
+.brand-ov{background:rgba(0,0,0,0);transition:background .24s ease}
+.brand-ov.in{background:rgba(0,0,0,.45)}
+.brand-ov .brand-card{transform:translateY(-14px);opacity:0;
+  transition:transform .26s cubic-bezier(.2,.9,.3,1),opacity .2s ease}
+.brand-ov.in .brand-card{transform:none;opacity:1}
+@media (prefers-reduced-motion:reduce){
+  .near-bar,.brand-ov,.brand-ov .brand-card{transition:none}
+}
+
+/* ── Barre de niveau du profil : c'est un BOUTON, il doit s'en apercevoir ──
+   Avant, on tapait dessus et il ne se passait rien. ── */
+.lvl-card{margin:0 20px 10px;background:var(--bg2);border:1.5px solid var(--border);
+  border-radius:16px;padding:12px 15px;cursor:pointer;-webkit-tap-highlight-color:transparent;
+  transition:transform .16s ease,background .16s ease}
+.lvl-card:active{transform:scale(.985);background:var(--bg3)}
+.lvl-card:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.lvl-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:7px}
+.lvl-name{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:800;color:var(--s1);min-width:0}
+.lvl-num{width:22px;height:22px;border-radius:7px;background:rgba(240,184,64,.16);border:1px solid #f0b840;
+  color:#c69a57;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;flex-shrink:0}
+.lvl-count{font-size:10.5px;font-weight:700;color:var(--s2);flex-shrink:0}
+.lvl-track{height:7px;border-radius:99px;background:var(--bg3);overflow:hidden}
+.lvl-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#c69a57,#e0b878);
+  transition:width .6s cubic-bezier(.2,.8,.3,1)}
+.lvl-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:8px;
+  font-size:11px;font-weight:600;color:var(--txt2,var(--s2))}
+.lvl-foot b{font-weight:800;color:var(--s1)}
+.lvl-go{display:inline-flex;align-items:center;font-weight:800;color:#c69a57;flex-shrink:0}
+/* ── Liste des paliers : le PROCHAIN se voit tout de suite ── */
+.perk-row{display:flex;align-items:center;gap:11px;padding:12px 14px;border-top:1px solid var(--border)}
+.perk-row:first-child{border-top:0}
+.perk-row.locked{opacity:.55}
+.perk-row.next{opacity:1;background:rgba(240,184,64,.10);border-left:3px solid #f0b840;padding-left:11px}
+.perk-num{width:26px;height:26px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;
+  justify-content:center;font-size:11.5px;font-weight:900;background:var(--bg3);color:var(--s2)}
+.perk-row.next .perk-num{background:#f0b840;color:#3a2c1e}
+.perk-name{font-size:12.5px;font-weight:800}
+.perk-desc{font-size:11.5px;font-weight:600;color:var(--s2);margin-top:1px}
+.perk-todo{font-size:11px;font-weight:800;color:#a9741f;margin-top:4px}
+.perk-ok{display:inline-flex;flex-shrink:0}
+.perk-tag{flex-shrink:0;font-size:10px;font-weight:900;letter-spacing:.4px;text-transform:uppercase;
+  color:#7a4a10;background:#f0b840;border-radius:999px;padding:4px 9px}
+@media (prefers-reduced-motion:reduce){.lvl-card,.lvl-fill{transition:none}}
+
+/* ── Introuvables pres de toi ─────────────────────────────────────────────
+   Une mission, pas une liste. Le bloc ne s'affiche que s'il y a une demande
+   REELLE derriere (chasse ouverte ou alerte) : voir renderUnfound. ── */
+.unf-card{background:linear-gradient(160deg,#1f1a15,#3a2c1e);border-radius:20px;padding:16px 16px 8px;color:#f6f1e9}
+.unf-head{font-size:14.5px;font-weight:800;letter-spacing:-.2px}
+.unf-lead{font-size:11.5px;line-height:1.55;color:rgba(246,241,233,.72);margin:5px 0 12px}
+.unf-row{display:flex;align-items:center;gap:11px;padding:10px 0;border-top:1px solid rgba(255,255,255,.10);
+  cursor:pointer;-webkit-tap-highlight-color:transparent}
+.unf-row:focus-visible{outline:2px solid #f0b840;outline-offset:2px;border-radius:12px}
+.unf-thumb{width:42px;height:42px;border-radius:12px;overflow:hidden;background:#fff;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center}
+.unf-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+/* Le nom peut tomber sur deux lignes : mieux vaut une ligne un peu plus haute
+   qu'un « Fanta Oran... » que personne ne reconnait. */
+.unf-name{font-size:13.5px;font-weight:800;line-height:1.25;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.unf-sub{font-size:11px;font-weight:600;color:#f0b840;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unf-go{flex-shrink:0;min-height:34px;padding:8px 13px;border-radius:11px;border:none;background:#f0b840;
+  color:#2a2018;font-size:12px;font-weight:800;font-family:inherit;cursor:pointer}
+.unf-go:active{transform:scale(.96)}
+.unf-share{flex-shrink:0;width:34px;height:34px;border-radius:11px;border:1.5px solid rgba(255,255,255,.22);
+  background:transparent;color:rgba(246,241,233,.82);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.unf-share:active{background:rgba(255,255,255,.10)}
+@media (prefers-reduced-motion:reduce){.unf-go:active{transform:none}}
+
+/* ── Legende de la carte : repliee, discrete, jamais dans le chemin ────────
+   Un code couleur qu'on n'explique nulle part reste une devinette. ── */
+#explore-legend-btn{position:absolute;right:14px;top:calc(var(--exhead,190px) + 12px);z-index:1160;
+  width:34px;height:34px;border-radius:50%;background:color-mix(in srgb,var(--app-bg) 92%,transparent);
+  backdrop-filter:blur(6px);border:1.5px solid var(--border);color:var(--s2);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.16)}
+#explore-legend-btn:active{transform:scale(.93)}
+#explore-legend{position:absolute;right:14px;left:14px;top:calc(var(--exhead,190px) + 54px);z-index:1210;
+  max-width:330px;margin-left:auto;background:var(--app-bg);border:1.5px solid var(--border);
+  border-radius:18px;padding:14px 15px 12px;box-shadow:0 10px 30px rgba(0,0,0,.26);
+  opacity:0;transform:translateY(-8px) scale(.97);pointer-events:none;transition:opacity .18s ease,transform .2s cubic-bezier(.2,.9,.3,1)}
+#explore-legend.in{opacity:1;transform:none;pointer-events:auto}
+#explore-legend .lg-title{font-size:13px;font-weight:800;color:var(--s1);margin-bottom:10px}
+#explore-legend .lg-row{display:flex;align-items:center;gap:12px;padding:7px 0;
+  font-size:11.5px;font-weight:600;line-height:1.45;color:var(--s2)}
+#explore-legend .lg-row b{color:var(--s1);font-weight:800}
+#explore-legend .lg-pin{position:relative;flex-shrink:0;width:30px;height:30px;display:block;margin-left:5px}
+#explore-legend .lg-pin .mago-pin-head{position:absolute;top:0;left:0;width:30px;height:30px;font-size:12px;
+  background:#c0392b;border:2.5px solid #fff;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;color:#fff;font-weight:800}
+#explore-legend .lg-pin.certif .mago-pin-head{border-color:#2563eb;border-width:3px;box-shadow:0 0 0 3px rgba(37,99,235,.25)}
+#explore-legend .lg-pin.sure .mago-pin-head{border-color:#16a34a;border-width:3px;box-shadow:0 0 0 3px rgba(22,163,74,.25)}
+#explore-legend .lg-close{width:100%;margin-top:9px;padding:9px;border-radius:12px;border:1.5px solid var(--border);
+  background:var(--bg2);color:var(--s1);font-size:12px;font-weight:800;font-family:inherit;cursor:pointer}
+@media (prefers-reduced-motion:reduce){#explore-legend{transition:none}}
+
+/* ── Tableau de bord du gerant ────────────────────────────────────────────
+   Le produit qu'on vendra : ce que le quartier cherche, et qu'aucun
+   fournisseur ne peut lui dire. ── */
+.mb-card{background:var(--bg2);border:1.5px solid var(--border);border-radius:18px;
+  padding:14px 15px 10px;margin-top:10px}
+.mb-load{font-size:12px;font-weight:600;color:var(--s3);padding:6px 0}
+.mb-head{font-size:14px;font-weight:800;color:var(--s1);margin-bottom:4px}
+.mb-rayon{font-size:10.5px;font-weight:800;color:var(--s2);background:var(--bg3);
+  border-radius:999px;padding:2px 8px;margin-left:5px;vertical-align:2px;white-space:nowrap}
+.mb-sec{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--s3);margin:13px 0 4px}
+.mb-sec.hot{color:#15803d}
+.mb-row{display:flex;align-items:center;gap:11px;padding:9px 0;border-top:1px solid var(--border)}
+.mb-thumb{width:38px;height:38px;border-radius:11px;overflow:hidden;background:#fff;flex-shrink:0;
+  border:1px solid var(--border);display:flex;align-items:center;justify-content:center}
+.mb-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.mb-name{font-size:13px;font-weight:800;color:var(--s1);line-height:1.25;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.mb-sub{font-size:11px;font-weight:700;color:var(--s2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mb-go{flex-shrink:0;min-height:34px;padding:8px 12px;border-radius:11px;border:1.5px solid var(--border);
+  background:var(--app-bg);color:var(--s1);font-size:12px;font-weight:800;font-family:inherit;cursor:pointer}
+.mb-go.hot{background:#16a34a;border-color:#16a34a;color:#fff}
+.mb-go:active{transform:scale(.96)}
+.mb-note{font-size:11px;line-height:1.55;font-weight:600;color:var(--s3);margin:8px 0 2px}
+.mb-vide{font-size:11.5px;line-height:1.6;font-weight:600;color:var(--s3);padding:8px 0 4px}
+@media (prefers-reduced-motion:reduce){.mb-go:active{transform:none}}
+
+/* ── Demande de compte commercant ─────────────────────────────────────────
+   On annonce d'abord ce que ca donne, on demande ensuite. Personne ne remplit
+   un formulaire dont il ignore la contrepartie. ── */
+.claim-ov{position:fixed;inset:0;z-index:10050;display:flex;align-items:flex-end;justify-content:center;
+  background:rgba(0,0,0,0);transition:background .24s ease}
+.claim-ov.in{background:rgba(12,10,8,.55)}
+.claim-card{width:100%;max-width:440px;max-height:88vh;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  background:var(--app-bg);border-radius:24px 24px 0 0;padding:12px 20px calc(20px + env(safe-area-inset-bottom));
+  box-shadow:0 -10px 40px rgba(0,0,0,.3);transform:translateY(100%);
+  transition:transform .32s cubic-bezier(.2,.9,.3,1)}
+.claim-ov.in .claim-card{transform:none}
+.claim-grip{width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 14px}
+.claim-badge{display:inline-flex;align-items:center;gap:7px;background:#2563eb;color:#fff;
+  font-size:11px;font-weight:800;padding:5px 11px;border-radius:999px;margin-bottom:10px}
+.claim-title{font-size:19px;font-weight:800;color:var(--s1);line-height:1.25;margin-bottom:6px}
+.claim-lead{font-size:12.5px;font-weight:600;color:var(--s2);margin-bottom:8px}
+.claim-list{margin:0 0 12px;padding-left:18px}
+.claim-list li{font-size:12.5px;line-height:1.6;color:var(--s2);margin-bottom:5px}
+.claim-list b{color:var(--s1);font-weight:800}
+.claim-honest{font-size:11.5px;line-height:1.6;font-weight:600;color:var(--s3);
+  background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;padding:11px 13px;margin-bottom:16px}
+.claim-etat{font-size:11.5px;line-height:1.55;font-weight:700;color:#1e40af;background:#eff6ff;
+  border:1.5px solid #bfdbfe;border-radius:14px;padding:11px 13px;margin-bottom:14px}
+.claim-etat.ko{color:#991b1b;background:#fef2f2;border-color:#fecaca}
+.claim-lab{display:block;font-size:11.5px;font-weight:800;color:var(--s2);margin:0 0 5px}
+.claim-in{width:100%;box-sizing:border-box;padding:12px 13px;border-radius:13px;border:1.5px solid var(--border);
+  background:var(--bg2);color:var(--s1);font-size:14px;font-family:inherit;outline:none;margin-bottom:13px;resize:vertical}
+.claim-in:focus{border-color:#2563eb}
+.claim-send{width:100%;min-height:48px;padding:14px;border-radius:15px;border:none;background:#2563eb;
+  color:#fff;font-size:15px;font-weight:800;font-family:inherit;cursor:pointer}
+.claim-send:disabled{opacity:.6}
+.claim-cancel{width:100%;min-height:44px;margin-top:8px;padding:11px;border-radius:14px;border:none;
+  background:transparent;color:var(--s2);font-size:13px;font-weight:700;font-family:inherit;cursor:pointer}
+@media (prefers-reduced-motion:reduce){.claim-ov,.claim-card{transition:none}}
+
+/* ── Administration : demandes de certification ───────────────────────────
+   Approuver, c'est poser une pastille que les visiteurs vont croire. Tout ce
+   qui permet de decider est affiche, jamais un bouton seul. ── */
+.cl-head{font-size:13px;font-weight:800;color:var(--s1);margin:4px 0 10px;display:flex;align-items:center;gap:8px}
+.cl-count{font-size:10.5px;font-weight:800;color:#b45309;background:#fffbeb;border:1px solid #fde68a;
+  border-radius:999px;padding:2px 9px}
+.cl-card{background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:13px 14px;margin-bottom:10px}
+.cl-card.hot{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.10)}
+.cl-top{display:flex;align-items:center;gap:10px;margin-bottom:7px}
+.cl-name{flex:1;min-width:0;font-size:14px;font-weight:800;color:var(--s1);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cl-chip{flex-shrink:0;font-size:10.5px;font-weight:800;border-radius:999px;padding:3px 9px}
+.cl-line{font-size:12px;line-height:1.55;color:var(--s2);margin-top:2px;word-break:break-word}
+.cl-line b{color:var(--s1);font-weight:800;margin-right:5px}
+.cl-line.quiet{font-size:11px;color:var(--s3)}
+.cl-acts{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
+.cl-btn{flex:1;min-width:110px;min-height:38px;padding:9px 12px;border-radius:12px;
+  border:1.5px solid var(--border);background:var(--app-bg);color:var(--s1);
+  font-size:12px;font-weight:800;font-family:inherit;cursor:pointer}
+.cl-btn.ok{background:#2563eb;border-color:#2563eb;color:#fff}
+.rp-row{display:flex;align-items:center;gap:8px;padding:9px 0;border-top:1px solid var(--border)}
+.rp-txt{flex:1;min-width:0}
+.rp-name{font-size:13px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rp-sub{font-size:11px;font-weight:600;color:var(--s3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cl-err{font-size:12px;line-height:1.55;font-weight:700;color:#b91c1c;background:#fef2f2;
+  border:1.5px solid #fecaca;border-radius:14px;padding:11px 13px;margin-bottom:10px}
+
+/* Audience d'une fiche magasin (tableau de bord commerçant) : trois chiffres
+   lisibles d'un coup d'œil, sans graphique. Un commerçant regarde ça debout
+   derrière son comptoir, pas assis devant un écran. */
+.mb-stats{display:flex;gap:8px;margin:10px 0 2px}
+.mb-stat{flex:1;min-width:0;background:var(--bg3);border-radius:12px;padding:10px 8px;text-align:center}
+.mb-stat-n{font-size:21px;font-weight:800;color:var(--s1);line-height:1.1}
+.mb-stat-l{font-size:10.5px;font-weight:600;color:var(--s2);margin-top:3px;line-height:1.25}
+.mb-stat-w{font-size:10px;font-weight:600;color:#16a34a;margin-top:4px}
+/* Une fonctionnalite qui attend sa regle n'est pas une panne : ton neutre. */
+.cl-info{font-size:12px;line-height:1.6;font-weight:600;color:var(--s2);background:var(--bg2);
+  border:1.5px solid var(--border);border-radius:14px;padding:11px 13px;margin-bottom:10px}
+.cl-info b{color:var(--s1);font-weight:800}
+
+/* Pastille de regroupement sur la carte Explorer. Reprend le noir/or de
+   l'app plutôt que les ronds bleus par défaut du greffon, qui juraient. */
+.mago-cluster{display:flex;align-items:center;justify-content:center;border-radius:50%;
+  background:var(--s1);color:var(--app-bg);border:2.5px solid var(--app-bg);
+  box-shadow:0 3px 12px rgba(0,0,0,.35);font-weight:800;cursor:pointer}
+.mago-cluster span{font-size:13px;line-height:1;letter-spacing:-.02em}
+.marker-cluster,.marker-cluster div{background:transparent!important;border:none!important}
+
+/* Photo plein écran : fondu à l'ouverture ET à la fermeture. L'image part
+   légèrement réduite et se pose — ouvrir une photo doit être aussi léger que
+   la regarder. */
+#img-zoom{opacity:0;transition:opacity .22s ease}
+#img-zoom.in{opacity:1}
+#img-zoom-pic{transform:scale(.92);transition:transform .26s cubic-bezier(.32,.72,0,1)}
+#img-zoom.in #img-zoom-pic{transform:scale(1)}
+.rphoto{cursor:zoom-in}
+
+/* ── COMPARATEUR DE PRIX ────────────────────────────────────────────────────
+   Le meilleur prix connu, en tête de la liste des magasins. Le prix est la
+   question qu'on se pose à chaque achat : il mérite mieux qu'une petite
+   étiquette perdue sur une carte. */
+.pricebar{display:flex;align-items:center;gap:12px;margin:4px 20px 10px;padding:12px 14px;
+  border-radius:16px;background:linear-gradient(135deg,rgba(22,163,74,.12),rgba(22,163,74,.04));
+  border:1.5px solid rgba(22,163,74,.28)}
+.pricebar.solo{background:var(--bg2);border-color:var(--border)}
+.pb-ico{flex-shrink:0;font-size:16px;font-weight:800;color:#15803d;background:var(--app-bg);
+  border-radius:12px;padding:8px 12px;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.pricebar.solo .pb-ico{color:var(--s1)}
+.pb-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.pb-txt b{font-size:13.5px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pb-txt i{font-size:11.5px;font-style:normal;font-weight:600;color:var(--s2)}
+.rbadge.price{background:rgba(22,163,74,.14);color:#15803d;font-weight:800}
+.pchip{font-size:12px;font-weight:800;color:var(--s1);background:var(--bg2);padding:2px 8px;border-radius:999px}
+.pchip.best{background:rgba(22,163,74,.15);color:#15803d}
+
+/* Le fond de carte est desormais SOBRE A LA SOURCE (voir fondMago) : il n'y a
+   plus rien a desaturer. On retire donc le filtre qui s'appliquait a CHAQUE
+   tuile, en permanence, dans les deux themes — un tampon hors ecran par tuile,
+   soit la depense de composition la plus lourde de la carte sur iPhone.
+   Un filtre enlevait de toute facon la COULEUR, jamais le DETAIL : c'est le
+   changement de source qui supprime les numeros de maison, pas lui.
+   Le theme sombre est servi par les tuiles nocturnes du fournisseur.
+   Il reste un tres leger adoucissement au zoom rue, la ou OSM reprend la main. */
+/* Le fond est sobre a la source et existe en version nocturne : aucune tuile
+   n'a plus besoin d'etre filtree. C'est autant de composition en moins a
+   chaque image — le filtre par tuile etait la depense la plus lourde de la
+   carte sur telephone. */
+
+/* ── Menu à l'appui long sur un pin ────────────────────────────────────────
+   Même vocabulaire que les puces de filtre de l'app : au repos --bg3 sur
+   bordure, sélectionné rempli avec l'encre inversée. Le menu doit avoir l'air
+   d'appartenir à Magofeed, pas d'être un widget posé dessus.
+
+   RÈGLE DE PERFORMANCE, non négociable : on n'anime QUE transform et opacity.
+   La première version passait chaque image dans un filtre SVG de fusion — beau
+   sur un ordinateur, hachures garanties sur iPhone : Safari refait alors une
+   passe de flou hors GPU à chaque image, par-dessus une carte qui se redessine
+   déjà. Rien ici ne déclenche de repeinte : pas de filter, pas de blur, pas
+   d'ombre animée. */
+
+.pin-menu{position:fixed;z-index:5000;pointer-events:none;transform:translate(-50%,-50%);
+  --ex:0px;--ey:0px;                                   /* aimantation vers le doigt */
+  --ressort:cubic-bezier(.32,1.4,.5,1);
+  --retour:cubic-bezier(.4,0,.2,1)}
+
+/* Un seul anneau au départ, comme une pression qui se propage. Transform seul. */
+.pm-onde{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;
+  border-radius:50%;border:2px solid var(--s1);opacity:0}
+.pin-menu.in .pm-onde{animation:pm-onde .5s cubic-bezier(.2,.7,.3,1) forwards}
+@keyframes pm-onde{
+  0%{opacity:.4;transform:scale(.5)}
+  100%{opacity:0;transform:scale(3.4)}
+}
+
+.pm-face{position:absolute;left:0;top:0}
+
+.pm-face-item{position:absolute;left:0;top:0;width:52px;height:52px;margin:-26px 0 0 -26px;
+  display:flex;align-items:center;justify-content:center;
+  border-radius:50%;
+  background:var(--bg3);color:var(--s2);
+  border:1.5px solid var(--border);
+  box-shadow:0 3px 12px rgba(0,0,0,.16);            /* fixe : jamais animée */
+  transform:translate(0,0) scale(.4);opacity:0;
+  transition:transform .34s var(--ressort),opacity .16s linear,
+             background-color .15s ease,color .15s ease,border-color .15s ease;
+  transition-delay:var(--r,0ms),var(--r,0ms),0s,0s,0s}
+.pin-menu.in .pm-face-item{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}
+
+/* Sélection : on remplit, exactement comme .chip.on. Les autres s'effacent. */
+.pin-menu.in.vise .pm-face-item:not(.on):not(.pm-prix){
+  transform:translate(var(--dx),var(--dy)) scale(.86);opacity:.55}
+.pin-menu.in .pm-face-item.on{
+  background:var(--c);color:var(--app-bg);border-color:var(--c);
+  transform:translate(calc(var(--dx) + var(--ex)),calc(var(--dy) + var(--ey))) scale(1.18)}
+
+/* La goutte de prix : elle ne naît que si le pouce s'attarde sur « en stock ».
+   État caché écrit avec la même force que la règle d'ouverture, sinon cette
+   dernière l'emporte et la bulle apparaît trop tôt. */
+.pm-prix{width:42px;height:42px;margin:-21px 0 0 -21px}
+.pin-menu.in .pm-face-item.pm-prix{
+  transform:translate(var(--ox),var(--oy)) scale(.15);opacity:0;
+  transition:transform .3s var(--ressort),opacity .15s linear,
+             background-color .15s ease,color .15s ease,border-color .15s ease;
+  transition-delay:0s}
+.pin-menu.in.prix-la .pm-face-item.pm-prix{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}
+.pin-menu.in.prix-la.vise .pm-face-item.pm-prix:not(.on){
+  transform:translate(var(--dx),var(--dy)) scale(.92);opacity:.9}
+.pin-menu.in.prix-la .pm-face-item.pm-prix.on{
+  transform:translate(calc(var(--dx) + var(--ex)),calc(var(--dy) + var(--ey))) scale(1.16)}
+
+/* L'étiquette reprend la puce active de l'app, au mot près. */
+.pm-lab{position:absolute;left:50%;top:36px;transform:translateX(-50%) translateY(6px);
+  white-space:nowrap;pointer-events:none;opacity:0;max-width:230px;overflow:hidden;text-overflow:ellipsis;
+  transition:opacity .16s linear,transform .24s var(--ressort)}
+.pin-menu.in .pm-lab{opacity:1;transform:translateX(-50%) translateY(0)}
+.pin-menu.bas .pm-lab{top:176px;bottom:auto}
+.pm-lab span{display:inline-block;background:var(--c,var(--s1));color:var(--app-bg);
+  font-family:'Space Grotesk',sans-serif;
+  font-size:12px;font-weight:800;letter-spacing:-.01em;padding:6px 14px;border-radius:999px;
+  box-shadow:0 3px 10px rgba(26,23,20,.18);transition:background-color .15s ease}
+
+/* Au relâchement, le choix se pose et les autres se retirent vers le pin. */
+.pin-menu.absorbe .pm-face-item:not(.on){transform:translate(0,0) scale(.4);opacity:0;
+  transition-duration:.15s;transition-delay:0s}
+.pin-menu.absorbe .pm-face-item.on{
+  transform:translate(var(--dx),var(--dy)) scale(1.3);transition-duration:.14s}
+
+.pin-menu.out .pm-face-item{transform:translate(0,0) scale(.4);opacity:0;
+  transition:transform .18s var(--retour),opacity .14s linear;transition-delay:0s}
+.pin-menu.out .pm-lab{opacity:0}
+
+@media (prefers-reduced-motion:reduce){
+  .pm-onde{display:none}
+  .pm-face-item,.pm-lab{transition-duration:.01ms!important;transition-delay:0s!important}
+}
+
+
+/* ── Niveau de détail des marqueurs selon le zoom ──
+   À l'échelle d'une ville, un pin complet est illisible et coûte 4 à 6 nœuds
+   DOM. On le remplace par un point. Seuls les magasins à information sûre
+   restent lisibles de loin. */
+.mago-dot{width:9px;height:9px;border-radius:50%;background:var(--pc,#8a8a8a);
+  border:1.5px solid var(--app-bg);box-shadow:0 1px 3px rgba(0,0,0,.3);box-sizing:border-box}
+.mago-dot.fort{width:16px;height:16px;background:var(--app-bg);border:2.5px solid var(--pc,#8a8a8a);
+  display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;color:#16a34a;line-height:1}
+.mago-dot.moyen{width:20px;height:20px;background:var(--pc,#8a8a8a);border:2px solid var(--app-bg);
+  display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff;line-height:1}
+.mago-dot.moyen.sure{box-shadow:0 0 0 2px #16a34a,0 1px 4px rgba(0,0,0,.3)}
+.mago-dot.moyen.certif{box-shadow:0 0 0 2px #2563eb,0 1px 4px rgba(0,0,0,.3)}
+.mago-dot.moyen.sure.certif{box-shadow:0 0 0 2px #16a34a,0 0 0 4px #2563eb,0 1px 4px rgba(0,0,0,.3)}
+.mago-dot.closed{opacity:.45;filter:saturate(.3)}
