@@ -372,14 +372,29 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
   </div>
 
   <!-- SCAN -->
-  <div id="s-scan" class="screen">
+  <div id="s-scan" class="screen" data-state="idle">
     <div style="flex:1;overflow-y:auto">
-      <div style="padding:50px 20px 16px">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
-          <div class="back-ico" onclick="stopScan();show('home')">←</div>
-          <span class="t-section" id="t-scanner">Scanner un produit</span>
+      <div style="padding:50px 20px 14px">
+        <span class="t-section" id="t-scanner">Scanner</span>
+        <p style="font-size:12.5px;margin-top:3px;font-weight:500;line-height:1.4" class="c2" id="t-scan-sub">Ton journal de trouvailles</p>
+      </div>
+      <!-- Etat « idle » : la carte d'appel remplace la zone camera (voir setScanState) -->
+      <div id="scan-cta" style="margin:0 20px 10px;background:var(--card-bg);border:1.5px solid var(--border);border-radius:20px;padding:18px 16px 16px;display:flex;flex-direction:column;gap:14px;box-shadow:0 1px 3px rgba(0,0,0,.06),0 10px 28px rgba(0,0,0,.08)">
+        <div style="display:flex;align-items:center;gap:14px">
+          <div style="width:56px;height:56px;border-radius:16px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#c69a57"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></svg></div>
+          <div style="min-width:0">
+            <div style="font-size:15px;font-weight:800;color:var(--s1)" data-i18n="inStoreQ">Tu es en magasin ?</div>
+            <div style="font-size:12px;font-weight:500;color:var(--txt2);line-height:1.4;margin-top:3px" data-i18n="inStoreSub">Scanne ce que tu vois en rayon : ça compte pour tout le monde autour.</div>
+          </div>
         </div>
-        <p style="font-size:12px;margin-left:44px;font-weight:500" class="c2" id="t-scan-sub">Pointe la caméra vers le code-barre</p>
+        <div style="display:flex;gap:8px">
+          <button id="scan-cta-go" onclick="startScan()" style="flex:1;min-height:46px;border-radius:14px;border:none;background:#e5a93a;color:#1a1714;font-size:13.5px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;font-family:inherit"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M8 9v6M11 9v6M14 9v6M16 9v6"/></svg><span data-i18n="scanBarcode">Scanner un code-barre</span></button>
+          <button id="scan-cta-manual" class="ghost-btn" style="min-height:46px;border-radius:14px;padding:0 16px" onclick="toggleManualCode()" data-i18n="typeCode">Saisir</button>
+        </div>
+      </div>
+      <div id="scan-manual-row" style="display:none;margin:0 20px 12px;gap:8px;justify-content:center;align-items:center">
+        <input id="scan-manual-input" type="tel" inputmode="numeric" maxlength="14" placeholder="Ex : 5449000000996" onkeydown="if(event.key==='Enter'){submitManualCodeFromInput();}" style="flex:1;max-width:230px;box-sizing:border-box;padding:12px 14px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:15px;font-weight:700;letter-spacing:.5px;font-family:'Space Grotesk',sans-serif;outline:none">
+        <button onclick="submitManualCodeFromInput()" style="flex-shrink:0;padding:12px 18px;border-radius:13px;border:none;background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">OK</button>
       </div>
       <div class="scan-area">
         <video id="scan-video" autoplay playsinline muted></video>
@@ -402,16 +417,19 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <span style="font-size:11px;font-weight:600;color:var(--s3);background:var(--bg2);border:1px solid var(--border);padding:5px 11px;border-radius:999px">Garde le code bien à plat</span>
         <span style="font-size:11px;font-weight:600;color:var(--s3);background:var(--bg2);border:1px solid var(--border);padding:5px 11px;border-radius:999px">Assez de lumière</span>
       </div>
-      <div style="padding:2px 20px 12px;text-align:center">
+      <div style="padding:2px 20px 12px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px">
         <button id="scan-manual-toggle" class="ghost-btn" onclick="toggleManualCode()">Le code ne scanne pas ? Saisis-le à la main</button>
-        <div id="scan-manual-row" style="display:none;margin-top:11px;gap:8px;justify-content:center;align-items:center">
-          <input id="scan-manual-input" type="tel" inputmode="numeric" maxlength="14" placeholder="Ex : 5449000000996" onkeydown="if(event.key==='Enter'){submitManualCodeFromInput();}" style="flex:1;max-width:230px;box-sizing:border-box;padding:12px 14px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:15px;font-weight:700;letter-spacing:.5px;font-family:'Space Grotesk',sans-serif;outline:none">
-          <button onclick="submitManualCodeFromInput()" style="flex-shrink:0;padding:12px 18px;border-radius:13px;border:none;background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">OK</button>
-        </div>
+        <button id="scan-cancel" class="ghost-btn quiet" onclick="stopScan();resetScanUI()" data-i18n="closeCam">Fermer la caméra</button>
       </div>
-      <div id="scan-history-wrap" style="display:none;padding:6px 20px 24px">
-        <div class="t-section" style="margin-bottom:4px" data-i18n="lastScans">Derniers scans</div>
-        <div id="scan-history"></div>
+      <div id="scan-history-wrap" style="padding:6px 20px 24px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="display:flex;align-items:baseline;gap:8px"><span class="t-section" data-i18n="myFinds">Mes trouvailles</span><span id="finds-count" style="font-size:11px;font-weight:700;color:var(--txt2)"></span></div>
+          <button id="finds-all" class="ghost-btn quiet" onclick="toggleFindsAll()" style="display:none;min-height:44px">Tout voir</button>
+        </div>
+        <div id="finds-filters" style="display:flex;gap:6px;overflow-x:auto;margin:0 -20px 12px;padding:0 20px 2px;scrollbar-width:none">
+          <span class="chip on find-chip" data-f="all" onclick="setFindsFilter('all')" data-i18n="fAll">Toutes</span><span class="chip find-chip" data-f="catalog" onclick="setFindsFilter('catalog')" data-i18n="fCatalog">Au catalogue</span><span class="chip find-chip" data-f="pending" onclick="setFindsFilter('pending')" data-i18n="fPending">À valider</span><span class="chip find-chip" data-f="promoted" onclick="setFindsFilter('promoted')" data-i18n="fPromoted">Promues</span>
+        </div>
+        <div id="scan-history" class="finds-grid"></div>
       </div>
     </div>
   </div>
@@ -419,20 +437,35 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
   <!-- DISCOVER -->
   <div id="s-discover" class="screen">
     <div style="flex:1;overflow-y:auto">
-      <div style="padding:50px 20px 16px">
+      <div style="padding:50px 20px 14px">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
           <div style="min-width:0">
-            <div style="display:flex;align-items:baseline;gap:8px"><span class="t-section" id="t-disc">Découvertes</span><span id="disc-count" style="font-size:11px;font-weight:700;color:var(--s3)"></span></div>
-            <p style="font-size:12.5px;margin-top:3px;font-weight:500;line-height:1.4" class="c2" id="t-disc-sub">Les boissons rares proposées par la communauté</p>
+            <div style="display:flex;align-items:baseline;gap:8px"><span class="t-section" id="t-disc">La chasse</span><span id="disc-count" style="font-size:11px;font-weight:700;color:var(--txt2);white-space:nowrap"></span></div>
+            <p style="font-size:12.5px;margin-top:3px;font-weight:500;line-height:1.4" class="c2" id="t-disc-sub">Des gens cherchent. Toi, tu passes devant.</p>
           </div>
-          <button id="btn-propose" onclick="openProposeForm()" style="flex-shrink:0;display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:14px;border:none;background:#e67e22;color:#fff;font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit;box-shadow:0 5px 14px rgba(230,126,34,.3)"><span style="font-size:14px">＋</span> Proposer</button>
+          <button id="btn-propose" onclick="openProposeForm()" style="flex-shrink:0;display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 16px;border-radius:14px;border:none;background:#e67e22;color:#1a1714;font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit;box-shadow:0 5px 14px rgba(230,126,34,.3)"><span style="font-size:14px">＋</span> <span data-i18n="proposeShort">Proposer</span></button>
         </div>
       </div>
-      <div id="unfound" style="padding:0 20px 18px"></div>
-      <div style="padding:0 20px 8px;display:flex;align-items:center;gap:7px"><span class="t-section" data-i18n="mostSearched" style="padding:0">Les plus recherchées</span></div>
-      <div id="top-scanned" style="padding:0 20px 20px"></div>
-      <div style="padding:0 20px 8px;display:flex;align-items:center;gap:7px"><span class="t-section" data-i18n="suggestionsT" style="padding:0">En attente de tes votes</span></div>
-      <div id="disc-list"></div>
+      <div id="chasse-seg" class="chasse-seg" role="tablist" style="margin:0 20px 14px">
+        <button type="button" role="tab" data-chasse-tab="trouver" class="on" onclick="chasseSegTap('trouver')"><span data-i18n="segFind">À trouver</span></button>
+        <button type="button" role="tab" data-chasse-tab="valider" onclick="chasseSegTap('valider')"><span data-i18n="segValidate">À valider</span><span id="chasse-seg-valider-n"></span></button>
+        <button type="button" role="tab" data-chasse-tab="tendances" onclick="chasseSegTap('tendances')"><span data-i18n="segTrends">Tendances</span></button>
+      </div>
+      <div id="chasse-trouver">
+        <div id="chasse-tips" style="padding:0 20px"></div>
+        <div id="chasse-mine" style="padding:0 20px 12px"></div>
+        <div id="chasse-list" style="padding:0 20px 18px"></div>
+        <div id="chasse-found" style="padding:0 20px 20px"></div>
+      </div>
+      <div id="chasse-valider" style="display:none">
+        <div style="padding:0 20px 8px;display:flex;align-items:center;gap:7px"><span class="t-section" data-i18n="suggestionsT" style="padding:0;font-size:15px">En attente de tes votes</span></div>
+        <div id="disc-list"></div>
+      </div>
+      <div id="chasse-tendances" style="display:none">
+        <div id="chasse-recent" style="padding:0 20px 18px"></div>
+        <div style="padding:0 20px 8px;display:flex;align-items:center;gap:7px"><span class="t-section" data-i18n="mostSearched" style="padding:0;font-size:15px">Les plus consultées</span></div>
+        <div id="top-scanned" style="padding:0 20px 20px"></div>
+      </div>
     </div>
   </div>
 
@@ -1471,7 +1504,7 @@ const CACHE_KEY = "magoNearbyCache";
 // tranche pendant des heures apres la mise a jour.
 // 0617c : ajout de certified/owner/verifiedSource au cache. Le bump jette les
 // caches ecrits sans ces champs, qui feraient disparaitre les pastilles bleues.
-const CACHE_DATA_V = "0617c";
+const CACHE_DATA_V = "0902a";
 // Sobriete Firestore : cache "frais" 6h (zero lecture reseau), rafraichi en
 // silence entre 6h et 24h, requete complete au-dela. Les magasins bougent
 // rarement ; les confirmations/prix, eux, arrivent par les mises a jour locales.
@@ -1755,6 +1788,12 @@ function compactStore(s) {
     lat: s.lat, lng: s.lng, type: s.type || "", hours: s.hours || null,
     dist: s.dist, drinks: s.drinks || [], drinksVerified: s.drinksVerified || [],
     confirmations: s.confirmations || {}, community: s.community || false,
+    /* Fraicheur et auteur des observations : sans eux, le cache servait des
+       stocks « a reconfirmer » et anonymes pendant 24 h apres chaque
+       redemarrage, alors que la base savait qui avait vu quoi, et quand. */
+    seenAt: s.seenAt || {},
+    confirmedBy: s.confirmedBy || {}, confirmedAt: s.confirmedAt || {},
+    absentBy: s.absentBy || {}, absentAt: s.absentAt || {},
     /* SANS CES TROIS CHAMPS, le cache effacait la certification. Il est servi
        tel quel pendant 6 h sans requete : un commercant certifie rouvrait
        l'app le lendemain sans pastille bleue et sans tableau de bord.
@@ -1985,7 +2024,18 @@ window.fbConfirmStock = async function(storeId, drinkId, value) {
     updates["confirmations."+drinkId] = window.fbIncrement(value);
     // Fraicheur : une confirmation POSITIVE horodate la derniere observation
     // (un "non, absente" n'est pas une observation du produit).
-    if (value > 0) updates["seenAt."+drinkId] = Date.now();
+    /* « Vu par qui, quand » : le pseudo est deja public partout ailleurs
+       (classement, decouvertes, signalements). La date reste grossiere a
+       l'affichage (jour, jamais l'heure) — voir vuParInfo. */
+    var qui = (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24), quand = Date.now();
+    if (value > 0) {
+      updates["seenAt."+drinkId] = quand;
+      updates["confirmedBy."+drinkId] = qui;
+      updates["confirmedAt."+drinkId] = quand;
+    } else {
+      updates["absentBy."+drinkId] = qui;
+      updates["absentAt."+drinkId] = quand;
+    }
     await window.fbUpdateDoc(window.fbDoc(window.db, "stores", s.fbId), updates);
   } catch(e) {
     console.warn("Firebase update error:", e);
@@ -2330,7 +2380,7 @@ window.fbLoadLeaderboard = async function() {
 };
 
 // Ajouter un signalement dans Firebase
-window.fbAddReport = async function(storeId, drinkId, type) {
+window.fbAddReport = async function(storeId, drinkId, type, plus) {
   try {
     var uid = null;
     try { var u = await ensureAuthed(); uid = u && u.uid; } catch(e) {}
@@ -2360,7 +2410,7 @@ window.fbAddReport = async function(storeId, drinkId, type) {
       by: uid || null,
       byPseudo: (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
       createdAt: window.fbServerTimestamp()
-    }, extra));
+    }, extra, (plus && plus.note != null) ? { note: String(plus.note).slice(0, 300) } : {}));
   } catch(e) {
     console.warn("Firebase report error:", e);
   }
@@ -2490,6 +2540,8 @@ window.fbAddDrinkToStore = async function(storeId, drinkId) {
   updates["drinks"] = arrayUnion(Number(drinkId) || drinkId);
   updates["confirmations." + drinkId] = increment(1);
   updates["seenAt." + drinkId] = Date.now();
+  updates["confirmedBy." + drinkId] = (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24);
+  updates["confirmedAt." + drinkId] = Date.now();
   await window.fbUpdateDoc(window.fbDoc(window.db, "stores", s.fbId), updates);
 };
 
@@ -3009,17 +3061,20 @@ window.fbLoadNearbyHunts = async function(lat, lng, radiusKm) {
     var R = radiusKm && radiusKm > 15 ? radiusKm : 100, fresh = Date.now() - 365 * 86400000;
     snap.forEach(function(d) {
       var h = d.data(); var seekers = h.seekers || {};
-      var near = 0, mine = false;
+      var near = 0, mine = false, distKm = null, lastAt = null;
       Object.keys(seekers).forEach(function(uid) {
         var s = seekers[uid]; if (!s) return;                 // chercheur parti
         if (s.at && s.at < fresh) return;                     // vraiment très ancien
         if (lat != null && s.lat != null) {
           var dLa = (lat - s.lat) * 111, dLo = (lng - s.lng) * 111 * Math.cos(lat * Math.PI / 180);
-          if (Math.sqrt(dLa * dLa + dLo * dLo) > R) return;
+          var dk = Math.sqrt(dLa * dLa + dLo * dLo);
+          if (dk > R) return;
+          if (distKm == null || dk < distKm) distKm = dk;   // positions arrondies (~10 km) : indicatif
         }
+        if (s.at && (lastAt == null || s.at > lastAt)) lastAt = s.at;
         near++; if (uid === myUid) mine = true;
       });
-      if (near > 0) out.push({ drinkId: h.drinkId, drinkName: h.drinkName, emoji: h.emoji, seekers: near, mine: mine });
+      if (near > 0) out.push({ drinkId: h.drinkId, drinkName: h.drinkName, emoji: h.emoji, seekers: near, mine: mine, distKm: distKm, lastAt: lastAt });
     });
     out.sort(function(a, b) { return b.seekers - a.seekers; });
     return out;
@@ -4415,7 +4470,13 @@ function _showRaw(s){
   try{moveNavPill(true);}catch(e){}
   try{showCoach(s);}catch(e){}
   if(s==="search"){try{renderList();}catch(e){}setTimeout(function(){var q=document.getElementById("q");if(q)q.focus();},transitioning?260:120);}
-  if(s==="discover"){renderDiscoveries();renderTopScanned();try{renderUnfound();}catch(e){}}
+  if(s==="discover"){renderDiscoveries();try{renderChasse();}catch(e){}}
+  if(s==="scan"){
+    // Camera coupee en quittant l'onglet, et aucun resultat en cours : on
+    // revient a la carte d'appel plutot qu'a un cadre noir.
+    try{var _sr=document.getElementById("scan-result");if(!scanActive&&!(_sr&&_sr.innerHTML))resetScanUI();}catch(e){}
+    try{renderScanHistory();}catch(e){}
+  }
   if(s==="profile"){renderLeaderboard();refreshLeaderboard();renderStreak();}
   if(s==="admin")renderAdmin();
   if(s==="scan"){if(!scanActive)resetScanUI();renderScanHistory();}
@@ -4480,6 +4541,61 @@ function freshnessInfo(s,did){
   var lbl=days<60?"vu il y a "+days+" j · à reconfirmer":"à reconfirmer";
   return{label:lbl,col:"var(--s2)",bg:"var(--bg3)",f:.4};
 }
+/* ── « VU PAR QUI, QUAND » ───────────────────────────────────────────────
+   Un stock anonyme et sans date ne rassure personne. On garde, par boisson
+   et par magasin, le pseudo et le jour de la derniere observation — positive
+   (confirmedBy/At) ou negative (absentBy/At). A l'affichage, la date est
+   volontairement grossiere : le jour, jamais l'heure (on ne trace pas les
+   allees et venues d'une personne a la minute). */
+function _noterObservation(s,did,positif){
+  if(!s)return;
+  var qui=(localStorage.getItem("magopseudo")||"Explorateur").slice(0,24),quand=Date.now();
+  if(positif){
+    if(!s.seenAt)s.seenAt={};s.seenAt[did]=quand;
+    if(!s.confirmedBy)s.confirmedBy={};s.confirmedBy[did]=qui;
+    if(!s.confirmedAt)s.confirmedAt={};s.confirmedAt[did]=quand;
+  }else{
+    if(!s.absentBy)s.absentBy={};s.absentBy[did]=qui;
+    if(!s.absentAt)s.absentAt={};s.absentAt[did]=quand;
+  }
+}
+function jourGrossier(ts){
+  var ms=Number(ts);if(!ms||!isFinite(ms))return null;
+  var days=Math.floor((Date.now()-ms)/86400000);if(days<0)days=0;
+  if(days===0)return "aujourd'hui";
+  if(days===1)return "hier";
+  if(days<30)return "il y a "+days+" j";
+  if(days<60)return "il y a un mois";
+  return "il y a plus d'un mois";
+}
+/* Renvoie la derniere observation connue de cette boisson dans ce magasin :
+   {positif, qui, quand(ts), jour(label), vieux} — ou null s'il n'y en a pas. */
+function vuParInfo(s,did){
+  if(!s)return null;
+  var cAt=Number(s.confirmedAt&&s.confirmedAt[did])||Number(s.seenAt&&s.seenAt[did])||0;
+  var aAt=Number(s.absentAt&&s.absentAt[did])||0;
+  if(!cAt&&!aAt)return null;
+  var positif=cAt>=aAt;
+  var qui=positif?(s.confirmedBy&&s.confirmedBy[did]):(s.absentBy&&s.absentBy[did]);
+  var quand=positif?cAt:aAt;
+  return{positif:positif,qui:qui?String(qui).slice(0,24):null,quand:quand,jour:jourGrossier(quand),vieux:(Date.now()-quand)>30*86400000};
+}
+/* Pastille complete (fiche boisson) : « Vu par Zdoudex · hier ». */
+function vuParHTML(s,did){
+  var v=vuParInfo(s,did);if(!v)return "";
+  var dark=document.body.classList.contains("dark");
+  var col,bg;
+  if(v.positif&&!v.vieux){col=dark?"#4ade80":"#15803d";bg=dark?"rgba(22,163,74,.18)":"#dcfce7";}
+  else if(v.positif){col="var(--txt2)";bg="var(--bg3)";}
+  else{col=dark?"#fca5a5":"#b91c1c";bg=dark?"rgba(220,38,38,.18)":"#fee2e2";}
+  var txt=(v.positif?"Vu":"Absente")+(v.qui?" par "+sanitize(v.qui):"")+" · "+v.jour;
+  return '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;background:'+bg+';color:'+col+';white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis">'+txt+'</span>';
+}
+/* Version en ligne, discrete (fiche magasin, trouvailles) : « vu par Zdoudex hier ». */
+function vuParTexte(s,did){
+  var v=vuParInfo(s,did);if(!v)return "";
+  return (v.positif?"vu":"absente")+(v.qui?" par "+sanitize(v.qui):"")+" "+v.jour;
+}
 function doConfirm(btn,sid,did,val){
   var bar;
   if(!awardFree("conf:"+sid+":"+did,24)){
@@ -4498,6 +4614,7 @@ function doConfirm(btn,sid,did,val){
     var s=STORES.find(function(x){return x.id===sid||x.id===String(sid);});if(!s)return;
     if(!s.confirmations[did])s.confirmations[did]=0;
     s.confirmations[did]--; // negatif autorise : signal communautaire "pas en stock ici"
+    _noterObservation(s,did,false);
     awardOnce("conf:"+sid+":"+did,24);
     userStats.confirms++;userStats.pts+=3;flyPts(3);bumpDaily("confirms");
     trackStoreContribution(sid);
@@ -4515,7 +4632,7 @@ function confirmWithPrice(sid,did){
   var s=STORES.find(function(x){return x.id===sid||x.id===String(sid);});if(!s)return;
   if(!s.confirmations[did])s.confirmations[did]=0;
   s.confirmations[did]++;
-  if(!s.seenAt)s.seenAt={};s.seenAt[did]=Date.now();
+  _noterObservation(s,did,true);
   // Meme fourchette que fbSavePrice : un prix hors de la, on ne l'enregistre pas.
   if(price>=0.20&&price<=25){
     if(!storePrices[sid])storePrices[sid]={};
@@ -5231,6 +5348,9 @@ function startScan(){
   // magasins (ceux autour de lui MAINTENANT, pas ceux du demarrage de l'app).
   try{refreshLocation();}catch(e){}
   var sa=document.querySelector("#s-scan .scan-area");if(sa)sa.classList.add("live");
+  // L'etat « live » AVANT getUserMedia : la video doit etre affichee quand le
+  // flux s'attache, sinon elle peut rester noire sur iOS (videoWidth 0).
+  setScanState("live");
   var video=document.getElementById("scan-video"),hint=document.getElementById("scan-hint"),btn=document.getElementById("scan-btn");
   if(scanActive)return;
   if(!navigator.mediaDevices){hint.textContent="✕ Caméra non disponible";return;}
@@ -5267,8 +5387,19 @@ function startScan(){
           quaggaRunning=true;Quagga.start();
           Quagga.offDetected(onBarcodeDetected);Quagga.onDetected(onBarcodeDetected);
         });
-    }).catch(function(){hint.textContent="✕ Accès caméra refusé";});
+    }).catch(function(){
+      hint.textContent="✕ Accès caméra refusé";
+      // Pas de camera : on revient a la carte et on ouvre la saisie manuelle
+      // plutot que de laisser un cadre noir sans issue.
+      setScanState("idle");
+      toast("Accès caméra refusé — saisis le code à la main");
+      try{var row=document.getElementById("scan-manual-row");if(row&&row.style.display!=="flex")toggleManualCode();}catch(e){}
+    });
 }
+/* Etat de l'onglet Scanner : « idle » (carte d'appel + journal), « live »
+   (camera), « result » (fiche du code lu). Les regles CSS #s-scan[data-state]
+   font le reste : rien a masquer a la main. */
+function setScanState(st){var el=document.getElementById("s-scan");if(el)el.dataset.state=st;}
 /* ── COUPER LA CAMERA POUR DE BON ─────────────────────────────────────────
    Une camera qu'on croit eteinte est LA cause classique de « l'app se relance
    toute seule » sur iPhone : Safari voit un flux video vivant, la memoire ne
@@ -5344,6 +5475,7 @@ function submitManualCodeFromInput(){
   submitManualCode(i.value);
 }
 function resetScanUI(){
+  setScanState("idle");
   renderWhereFound(null);
   var btn=document.getElementById("scan-btn");
   var res=document.getElementById("scan-result");
@@ -5477,12 +5609,45 @@ function fetchOFFProduct(code){
 function findCachedScan(code){
   return scanHist.find(function(e){return String(e.code)===String(code);});
 }
-function recordScan(code,name,brand,cat,src){
+function recordScan(code,name,brand,cat,src,drinkId){
+  var ancien=scanHist.find(function(e){return String(e.code)===String(code);})||{};
   scanHist=scanHist.filter(function(e){return String(e.code)!==String(code);});
-  scanHist.unshift({code:String(code),name:name,brand:brand||"",cat:cat||"",ts:Date.now(),src:src||""});
+  var entree={code:String(code),name:name,brand:brand||"",cat:cat||"",ts:Date.now(),src:src||""};
+  if(drinkId!=null)entree.drinkId=Number(drinkId)||drinkId;
+  else if(ancien.drinkId!=null)entree.drinkId=ancien.drinkId;
+  // Un rescan du meme code ne doit pas oublier ou on l'avait trouve ni a quel prix.
+  ["storeId","storeFbId","storeName","storeLat","storeLng","taggedAt","price","priceAt","disc"].forEach(function(k){if(ancien[k]!=null)entree[k]=ancien[k];});
+  if(src==="discovery")entree.disc=true;
+  scanHist.unshift(entree);
   scanHist=scanHist.slice(0,50);
   try{localStorage.setItem("magoScanHist",JSON.stringify(scanHist));}catch(e){/* quota */}
   renderScanHistory();
+}
+/* Complete une entree du journal (magasin, prix...) sans la recreer. */
+function patchScanEntry(code,patch){
+  if(code==null)return null;
+  var e=(scanHist||[]).find(function(x){return String(x.code)===String(code);});
+  if(!e)return null;
+  Object.assign(e,patch||{});
+  try{localStorage.setItem("magoScanHist",JSON.stringify(scanHist));}catch(err){}
+  try{renderScanHistory();}catch(err){}
+  return e;
+}
+/* Le code-barre du journal vise par un contexte de scan : celui qu'il porte,
+   sinon (boisson du catalogue rattachee depuis une fiche) le premier code
+   connu de la boisson present dans le journal. */
+function _findsCodeFor(ctx){
+  if(!ctx)return null;
+  if(ctx.code!=null)return String(ctx.code);
+  if(ctx.pendingBarcode!=null)return String(ctx.pendingBarcode);
+  if(ctx.discoveryId!=null)return String(ctx.discoveryId);
+  if(ctx.drinkId!=null){
+    var d=DRINKS.find(function(x){return Number(x.id)===Number(ctx.drinkId);});
+    var codes=(d&&d.barcodes)||[];
+    var e=(scanHist||[]).find(function(x){return codes.indexOf(String(x.code))!==-1;});
+    return e?String(e.code):null;
+  }
+  return null;
 }
 /* ================================
    "OU L'AS-TU TROUVE ?"
@@ -6006,6 +6171,7 @@ function renderStorePicker(){
    une decouverte n'a pas encore d'identite catalogue pour porter un prix) */
 function renderPriceAfterTag(s,did){
   var host=document.getElementById("scan-where");if(!host)return;
+  var codeJournal=_findsCodeFor(lastScanContext); // capture AVANT que le contexte soit remis a zero
   host.innerHTML='<div style="display:flex;align-items:center;gap:8px;background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;padding:10px 12px">'+
     '<span style="font-size:12px;font-weight:600;color:var(--s2);flex-shrink:0">Prix vu ? (facultatif)</span>'+
     '<input id="scan-price-input" type="number" step="0.10" min="0" max="20" placeholder="1.30" style="flex:1;min-width:0;padding:8px 10px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:13px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none">'+
@@ -6028,6 +6194,8 @@ function renderPriceAfterTag(s,did){
     if(!s.priceHistory[did])s.priceHistory[did]=[];
     s.priceHistory[did].push({p:v,t:Date.now()});
     if(window.fbSavePrice)window.fbSavePrice(s.fbId||sid,did,v);
+    try{patchScanEntry(codeJournal,{price:v,priceAt:Date.now()});}catch(e){}
+    if(window.fbAddReport)try{window.fbAddReport(s.fbId||sid,did,"prix",{note:String(v)});}catch(e){}
     if(awardOnce("price:"+sid+":"+did,24)){userStats.pts+=2;toast(""+v.toFixed(2)+"\u20AC enregistr\u00E9 \u00B7 +2 pts");}
     else{toast("Prix mis \u00e0 jour");}
     updateProfileStats();
@@ -6046,8 +6214,12 @@ function tagScanToStore(s){
     var did=ctx.drinkId;
     if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
     if(!s.confirmations)s.confirmations={};
-    s.confirmations[did]=(s.confirmations[did]||0)+1;if(!s.seenAt)s.seenAt={};s.seenAt[did]=Date.now();
+    s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
     if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||sid,did).catch(function(e){console.warn(e);});
+    /* La PREUVE que le serveur saura crediter (reports type "stock", +3) :
+       ce chemin etait le seul a n'en laisser aucune. La carte l'ecrit deja
+       elle-meme (mapStockReport), on ne double pas. */
+    if(ctx.from!=="map"&&window.fbAddReport)try{window.fbAddReport(s.fbId||sid,did,"stock");}catch(e){}
     if(window.fbTouchCache)window.fbTouchCache();
   }else if(ctx.pendingBarcode!=null){
     // Produit pas encore ajoute en decouverte : on retient le magasin,
@@ -6063,6 +6235,9 @@ function tagScanToStore(s){
     if(window.fbTagDiscoveryStore)window.fbTagDiscoveryStore(ctx.discoveryId,sid).catch(function(e){console.warn(e);});
     renderDiscoveries();
   }
+  // Le journal retient OU la trouvaille a ete faite (nom, position pour la
+  // distance meme hors zone chargee) : c'est ce que la carte « Mes trouvailles » affiche.
+  try{patchScanEntry(_findsCodeFor(ctx),{storeId:sid,storeFbId:s.fbId||null,storeName:String(s.name||"").slice(0,60),storeLat:(typeof s.lat==="number"?s.lat:null),storeLng:(typeof s.lng==="number"?s.lng:null),taggedAt:Date.now()});}catch(e){}
   var tagKey="tag:"+(ctx.drinkId!=null?ctx.drinkId:(ctx.discoveryId!=null?"d"+ctx.discoveryId:"b"+ctx.pendingBarcode))+":"+sid;
   if(awardOnce(tagKey,FOREVER)){
     userStats.pts+=3;flyPts(3);
@@ -6265,60 +6440,177 @@ function _scanThumbPhoto(code,host){
   var paint=function(data){
     if(!data)return;
     var s=/^data:/.test(data)?data:"data:image/jpeg;base64,"+data;
-    box.innerHTML='<img src="'+s+'" alt="" style="width:100%;height:100%;object-fit:cover;display:block">';
+    // On remplace le pictogramme, mais on garde la pastille de statut.
+    Array.prototype.slice.call(box.children).forEach(function(c){if(!c.classList||!c.classList.contains("find-badge"))c.remove();});
+    box.insertAdjacentHTML("afterbegin",'<img src="'+s+'" alt="" style="width:100%;height:100%;object-fit:cover;display:block">');
   };
   if(_scanPhotoCache[code]!==undefined){paint(_scanPhotoCache[code]);return;}
   if(!window.fbLoadDiscoveryPhoto)return;
   window.fbLoadDiscoveryPhoto(code).then(function(data){_scanPhotoCache[code]=data||null;paint(data);}).catch(function(){});
 }
+/* ── MES TROUVAILLES — le journal des scans ─────────────────────────────
+   Avant : « Derniers scans », huit lignes grises sans photo, et un tap qui
+   menait parfois nulle part. Maintenant : une grille de cartes, chacune avec
+   sa vraie vignette, son statut (au catalogue / N votes / promue), l'endroit
+   ou on l'a trouvee (magasin, distance), le prix vu et la date. Tout vient de
+   ce que l'app sait deja : le journal local (magoScanHist, enrichi au
+   rattachement et au prix), DRINKS, DISCOVERIES, STORES et la position.
+   Source d'affichage = le journal LOCAL : zero lecture Firestore a
+   l'ouverture, hors-ligne compris. */
+var _findsFilter="all",_findsAll=false;
+function _tr(k){var T=LANGS[curLang]||LANGS.fr;return (T&&T[k]!=null)?T[k]:((LANGS.fr&&LANGS.fr[k])||"");}
+function dateCourte(ts){
+  var j=jourGrossier(ts);
+  if(j==="aujourd'hui")return _tr("today")||j;
+  if(j==="hier")return _tr("yesterday")||j;
+  try{return new Date(Number(ts)).toLocaleDateString("fr-BE",{day:"numeric",month:"short"});}catch(e){return "";}
+}
+/* Statut d'une entree du journal : au catalogue, en attente de votes, promue,
+   refusee, ou jamais proposee. barcodeDisavowed est respecte (un code conteste
+   ne fait plus dire « au catalogue »). */
+function findStatus(e){
+  var code=String(e.code||"");
+  var drink=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(code)!==-1&&!barcodeDisavowed(code,x.id);});
+  if(!drink&&e.drinkId!=null)drink=DRINKS.find(function(x){return Number(x.id)===Number(e.drinkId);})||null;
+  // Entrees d'avant : reconnues au catalogue au moment du scan (src catalog /
+  // format) mais sans identifiant memorise — on retrouve la boisson par son nom.
+  if(!drink&&(e.src==="catalog"||e.src==="format")&&e.name){
+    var nom=String(e.name).replace(/\s*\(.*\)$/,"").toLowerCase();
+    drink=DRINKS.find(function(x){return String(x.name).toLowerCase()===nom;})||null;
+  }
+  var disc=(DISCOVERIES||[]).find(function(x){return String(x.id)===code||String(x.barcode||"")===code;})||null;
+  if(drink)return{k:"catalog",label:_tr("stCatalog"),cls:"",drink:drink,disc:disc};
+  if(disc&&disc.promoted){
+    var p=DRINKS.find(function(x){return Number(x.id)===Number(disc.catalogId);})||null;
+    return{k:"promoted",label:_tr("stPromoted"),cls:"ok",drink:p,disc:disc};
+  }
+  if(disc&&disc.rejected)return{k:"rejected",label:_tr("stRejected"),cls:"",drink:null,disc:disc};
+  if(disc)return{k:"pending",label:nbSur(disc.votes)+"/"+ADMIN_VOTE_THRESHOLD+" votes",cls:"warn",drink:null,disc:disc};
+  if(e.disc||e.src==="discovery")return{k:"pending",label:_tr("stPending"),cls:"warn",drink:null,disc:null};
+  return{k:"unknown",label:_tr("stPropose"),cls:"",drink:null,disc:null};
+}
+function _findStore(e){
+  if(!e||(e.storeId==null&&e.storeFbId==null))return null;
+  return (STORES||[]).find(function(x){
+    return (e.storeId!=null&&String(x.id)===String(e.storeId))||(e.storeFbId&&String(x.fbId)===String(e.storeFbId));
+  })||null;
+}
+function _findDist(e,s){
+  if(s&&typeof s.dist==="number"&&isFinite(s.dist))return s.dist;
+  if(typeof e.storeLat==="number"&&typeof e.storeLng==="number"&&typeof userLat==="number"&&userLat){
+    var dLa=(userLat-e.storeLat)*111000,dLo=(userLng-e.storeLng)*111000*Math.cos(e.storeLat*Math.PI/180);
+    return Math.sqrt(dLa*dLa+dLo*dLo);
+  }
+  return null;
+}
+/* Deuxieme ligne de la carte : ou on l'a trouvee, ou ce qu'on en sait. */
+function _findWhere(e,st,s){
+  var name=s?s.name:(e.storeName||null);
+  if(name){var d=_findDist(e,s);return sanitize(name)+(d!=null?" \u00B7 "+fmtDist(d):"");}
+  if(st.disc&&st.disc.foundIn&&st.disc.foundIn.length){
+    var sid=st.disc.foundIn[0];
+    var s2=(STORES||[]).find(function(x){return String(x.id)===String(sid)||String(x.fbId)===String(sid);});
+    if(s2){var d2=(typeof s2.dist==="number")?s2.dist:null;return sanitize(s2.name)+(d2!=null?" \u00B7 "+fmtDist(d2):"");}
+    var n0=st.disc.foundIn.length;return _tr("seenInStores").replace("{n}",n0).replace("{s}",n0>1?"s":"");
+  }
+  if(st.drink){
+    var did=st.drink.id,n=0;
+    (STORES||[]).forEach(function(x){
+      if(!(x.drinks||[]).some(function(y){return Number(y)===Number(did);}))return;
+      if(((x.confirmations||{})[did]||0)<0)return;
+      if(typeof x.dist==="number"&&x.dist>10000)return;
+      n++;
+    });
+    if(n)return _tr("nearStores").replace("{n}",n).replace("{s}",n>1?"s":"");
+    return _tr("notLocated");
+  }
+  if(st.k==="pending"||st.k==="unknown")return _tr("whereSeen");
+  return _tr("notLocated");
+}
+function setFindsFilter(f){_findsFilter=f||"all";try{playSound("pop");}catch(e){}renderScanHistory();}
+function toggleFindsAll(){_findsAll=!_findsAll;try{playSound("pop");}catch(e){}renderScanHistory();}
+function _findOpen(e,st){
+  var code=String(e.code||"");
+  if(st.k==="catalog"&&st.drink){pick(st.drink);return;}
+  if(st.k==="promoted"){if(st.drink){pick(st.drink);return;}toast(_tr("promotedGone"));return;}
+  if(st.k==="rejected"){toast(_tr("stRejectedSub"));return;}
+  if(st.k==="pending"&&st.disc){
+    show("discover");
+    setTimeout(function(){
+      try{if(typeof setChasseSeg==="function")setChasseSeg("valider");}catch(err){}
+      var card=document.querySelector('.disc-card[data-disc-id="'+code.replace(/["\\]/g,"")+'"]');
+      if(card){
+        card.scrollIntoView({behavior:"smooth",block:"center"});
+        card.style.transition="box-shadow .3s";card.style.boxShadow="0 0 0 3px #e5a93a";
+        setTimeout(function(){card.style.boxShadow="";},1800);
+      }else toast(_tr("discNotLoaded"));
+    },380);
+    return;
+  }
+  // Jamais proposee (ou proposition pas chargee) : on rejoue la resolution du
+  // code, qui aboutit au bouton « Ajouter aux decouvertes ».
+  if(/^\d{8,14}$/.test(code)){try{submitManualCode(code);}catch(err){}}
+}
+function _findAction(e,st){
+  if(st.k==="catalog"||st.k==="promoted")return{label:_tr("onMap"),go:function(){_findOpen(e,st);}};
+  if(st.k==="pending"){
+    var me=null;try{me=(window.fbAuth&&window.fbAuth.currentUser)?window.fbAuth.currentUser.uid:null;}catch(err){}
+    var auteur=!st.disc||!st.disc.by||(me&&st.disc.by===me);
+    if(auteur&&!(e.storeId||e.storeName))return{label:_tr("sayWhere"),go:function(){lastScanContext={discoveryId:String(e.code),code:String(e.code),from:"finds"};try{playSound("pop");}catch(err){}openStorePicker();}};
+    return{label:_tr("seeVotes"),go:function(){_findOpen(e,st);}};
+  }
+  if(st.k==="unknown")return{label:_tr("proposeAct"),go:function(){_findOpen(e,st);}};
+  return null;
+}
 function renderScanHistory(){
   var el=document.getElementById("scan-history");if(!el)return;
-  var wrap=document.getElementById("scan-history-wrap");
-  if(!scanHist.length){if(wrap)wrap.style.display="none";return;}
-  if(wrap)wrap.style.display="block";
-  el.innerHTML="";
-  scanHist.slice(0,8).forEach(function(e){
-    var code=String(e.code||"");
-    var inCatalog=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(code)!==-1;});
-    var disc=(DISCOVERIES||[]).find(function(x){return String(x.id)===code||String(x.barcode||"")===code;});
-    var div=document.createElement("div");
-    div.style.cssText="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer";
-    var d=e.ts?new Date(e.ts):null;
-    var when=d?d.toLocaleDateString("fr-BE",{day:"numeric",month:"short"}):"";
-    var thumb=inCatalog?drinkIconHTML(inCatalog):'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6v12M8 6v12M12 6v12M16 6v12M20 6v12"/></svg>';
-    var statut="",statCol="var(--s2)",statBg="var(--bg2)";
-    if(inCatalog){statut="Au catalogue";}
-    else if(disc&&disc.promoted){statut="Promue";statCol="#15803d";statBg="#dcfce7";}
-    else if(disc){var v=nbSur(disc.votes);statut=v+"/"+ADMIN_VOTE_THRESHOLD+" votes";statCol="#b45309";statBg="#fef3c7";}
-    div.innerHTML='<div class="sh-thumb" style="width:40px;height:40px;border-radius:12px;background:var(--bg2);overflow:hidden;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--s2)">'+thumb+'</div>'+
-      '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(e.name)+'</div>'+
-      '<div style="display:flex;align-items:center;gap:6px;margin-top:2px;font-size:11px;font-weight:500;color:var(--s2)">'+
-        (statut?'<span style="padding:2px 7px;border-radius:999px;background:'+statBg+';color:'+statCol+';font-weight:800;font-size:10px">'+statut+'</span>':'')+
-        '<span>'+(e.cat?e.cat+" \u00B7 ":"")+when+'</span></div></div>'+
-      '<span class="c3" style="font-size:16px">\u203A</span>';
-    if(!inCatalog)_scanThumbPhoto(code,div);
-    div.onclick=function(){
-      if(inCatalog){pick(inCatalog);return;}
-      // Decouverte promue : elle est au catalogue sous son nouvel id
-      if(disc&&disc.promoted&&disc.catalogId){
-        var prom=DRINKS.find(function(x){return Number(x.id)===Number(disc.catalogId);});
-        if(prom){pick(prom);return;}
-      }
-      show("discover");
-      setTimeout(function(){
-        var card=document.querySelector('.disc-card[data-disc-id="'+code.replace(/["\\]/g,"")+'"]');
-        if(card){
-          card.scrollIntoView({behavior:"smooth",block:"center"});
-          card.style.transition="box-shadow .3s";card.style.boxShadow="0 0 0 3px #e5a93a";
-          setTimeout(function(){card.style.boxShadow="";},1800);
-        }else{
-          toast(disc?"Cette proposition n'est plus en attente":"Proposition pas encore charg\u00E9e \u2014 r\u00E9essaie dans un instant");
-        }
-      },380);
-    };
-    a11yCard(div,e.name+(e.cat?", "+e.cat:"")+(statut?", "+statut:""));
+  var cnt=document.getElementById("finds-count");if(cnt)cnt.textContent=scanHist.length?String(scanHist.length):"";
+  var allBtn=document.getElementById("finds-all");
+  if(allBtn){allBtn.style.display=scanHist.length>8?"":"none";allBtn.textContent=_findsAll?_tr("seeLess"):_tr("seeAll");}
+  document.querySelectorAll("#finds-filters .chip").forEach(function(c){c.classList.toggle("on",c.getAttribute("data-f")===_findsFilter);});
+  var filt=document.getElementById("finds-filters");if(filt)filt.style.display=scanHist.length?"flex":"none";
+  if(!scanHist.length){el.className="";el.innerHTML=emptyStateHTML("spark",_tr("noFinds"),_tr("noFindsSub"));return;}
+  var rows=scanHist.map(function(e){return{e:e,st:findStatus(e)};}).filter(function(r){
+    if(_findsFilter==="catalog")return r.st.k==="catalog";
+    if(_findsFilter==="pending")return r.st.k==="pending"||r.st.k==="unknown";
+    if(_findsFilter==="promoted")return r.st.k==="promoted";
+    return true;
+  });
+  if(!rows.length){el.className="";el.innerHTML='<div class="mt-empty-s" style="padding:18px 0 8px">'+_tr("noFindsFilter")+'</div>';return;}
+  if(!_findsAll)rows=rows.slice(0,8);
+  el.className="finds-grid";el.innerHTML="";
+  var needPhoto=false;
+  rows.forEach(function(r){
+    var e=r.e,st=r.st,code=String(e.code||"");
+    var s=_findStore(e);
+    var thumb;
+    if(st.drink){
+      if(!getCachedDrinkImage(st.drink)){needPhoto=true;try{fetchVerifiedOFFImage(st.drink);}catch(err){}}
+      thumb='<span class="drink-fill" style="display:flex;align-items:center;justify-content:center">'+drinkIconHTML(st.drink)+'</span>';
+    }else{
+      thumb='<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6v12M8 6v12M12 6v12M16 6v12M20 6v12"/></svg>';
+    }
+    var price=(typeof e.price==="number"&&e.price>0)?e.price:((s&&st.drink)?getStorePrice(s,st.drink.id):null);
+    var act=price?null:_findAction(e,st);
+    var where=_findWhere(e,st,s);
+    var div=document.createElement("div");div.className="find-card";div.dataset.code=code;
+    div.innerHTML='<div class="find-thumb sh-thumb">'+thumb+'<span class="find-badge '+st.cls+'">'+sanitize(st.label)+'</span></div>'+
+      '<div class="find-body"><div class="find-name">'+sanitize(e.name||"")+'</div>'+
+      '<div class="find-where">'+where+'</div>'+
+      '<div class="find-foot">'+(price?'<span class="find-price">'+fmtPrix(price)+'</span>':(act?'<span class="find-act">'+sanitize(act.label)+'</span>':'<span></span>'))+
+      '<span class="find-date">'+dateCourte(e.ts)+'</span></div></div>';
+    if(st.k==="pending"&&st.disc&&st.disc.hasPhoto)_scanThumbPhoto(code,div);
+    div.onclick=function(){_findOpen(e,st);};
+    var actEl=div.querySelector(".find-act");
+    if(actEl&&act)actEl.onclick=function(ev){ev.stopPropagation();act.go();};
+    a11yCard(div,(e.name||"")+", "+st.label+(where?", "+where.replace(/<[^>]+>/g,""):"")+(price?", "+fmtPrix(price):"")+", "+dateCourte(e.ts));
     el.appendChild(div);
   });
+  // Les photos OpenFoodFacts arrivent en asynchrone : on redessine UNE fois.
+  if(needPhoto&&!window._findsReflow){
+    window._findsReflow=true;
+    setTimeout(function(){window._findsReflow=false;try{var sc=document.getElementById("s-scan");if(sc&&sc.classList.contains("on"))renderScanHistory();}catch(err){}},1800);
+  }
 }
 /* ================================
    VERROUS ANTI-LECTURE-ERRONEE
@@ -6469,7 +6761,7 @@ function onBarcodeDetected(r){
   // sans stopper la caméra ni afficher la fiche produit. C'est ce qui permet de
   // remplir un frigo entier en 2 minutes.
   if(window._rafaleStore){ rafaleAddCode(rawCode); return; }
-  var code=rawCode;stopScan();playSound("beep");
+  var code=rawCode;stopScan();playSound("beep");setScanState("result");
   document.getElementById("scan-hint").textContent="✓ Code : "+code;
   var btn=document.getElementById("scan-btn"),res=document.getElementById("scan-result");
   var rescanLink=document.getElementById("rescan-link");if(rescanLink)rescanLink.style.display="block";
@@ -6505,8 +6797,8 @@ function onBarcodeDetected(r){
     res.appendChild(nope);
     btn.textContent="Voir les magasins";btn.style.background=found.color;btn.style.display="block";
     btn.onclick=function(){stopScan();pick(found);};
-    recordScan(code,found.name,found.brand,found.cat,"catalog");
-    renderWhereFound({drinkId:found.id});
+    recordScan(code,found.name,found.brand,found.cat,"catalog",found.id);
+    renderWhereFound({drinkId:found.id,code:code});
     playSound("win");toast("✓ "+found.name+" !");
   } else if(foundDiscovery){
     var alreadyVoted=hasVotedDiscovery(foundDiscovery.id);
@@ -6519,7 +6811,7 @@ function onBarcodeDetected(r){
       btn.onclick=function(){voteDisc(foundDiscovery.id);};
     }
     recordScan(code,foundDiscovery.name,foundDiscovery.brand||"",foundDiscovery.cat||"","discovery");
-    renderWhereFound({discoveryId:foundDiscovery.id});
+    renderWhereFound({discoveryId:foundDiscovery.id,code:code});
     playSound("win");toast("Déjà connu : "+foundDiscovery.name);
   } else if(findCachedScan(code)){
     // Deja scanne par cet utilisateur : reponse instantanee depuis la memoire locale,
@@ -6533,7 +6825,7 @@ function onBarcodeDetected(r){
     recordScan(code,cached.name,cached.brand,cached.cat,cached.src);
     var cachedDrink=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(String(code))!==-1&&!barcodeDisavowed(code,x.id);});
     var cachedDisc=DISCOVERIES.find(function(x){return String(x.barcode||x.id)===String(code);});
-    renderWhereFound(cachedDrink?{drinkId:cachedDrink.id}:(cachedDisc?{discoveryId:cachedDisc.id}:{pendingBarcode:code}));
+    renderWhereFound(cachedDrink?{drinkId:cachedDrink.id,code:code}:(cachedDisc?{discoveryId:cachedDisc.id,code:code}:{pendingBarcode:code}));
     playSound("win");toast("Déjà scanné : "+cached.name);
   } else {
     res.className="scan-result";
@@ -6605,8 +6897,8 @@ function onBarcodeDetected(r){
               alt.style.display="none";
               addDiscovery(nm,best.brand,code,best.cat);
             };
-            recordScan(code,family.name+" ("+fmtLabel+")",family.brand,family.cat,"format");
-            renderWhereFound({drinkId:family.id});
+            recordScan(code,family.name+" ("+fmtLabel+")",family.brand,family.cat,"format",family.id);
+            renderWhereFound({drinkId:family.id,code:code});
             playSound("win");
             return;
           }
@@ -6734,7 +7026,7 @@ function openCatalogLinkPicker(code){
         if(!confirm("Lier le code "+code+" \u00E0 \u00AB "+d.name+" \u00BB ?\n\nV\u00E9rifie bien la variante (Zero, P\u00EAche, Cherry...) \u2014 un code = UNE boisson pr\u00E9cise."))return;
         confirmFamilyFormat(d,code,{});
         recordScan(code,d.name,d.brand,d.cat,"linked");
-        renderWhereFound({drinkId:d.id});
+        renderWhereFound({drinkId:d.id,code:code});
         res.className="scan-result found";
         res.innerHTML='<div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#166534">\u2713 Code li\u00E9 \u00E0 '+sanitize(d.name)+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">Ton prochain scan le reconna\u00EEtra direct \u2014 merci !</div></div>';
         playSound("win");
@@ -7897,7 +8189,7 @@ function ensureMissionFab(){
   fab.style.top=top+"px";
   fab.style.left=(savedSide==="left"?12:(vw-W-12))+"px";
   fab.innerHTML='<svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 1.5px 1.5px rgba(0,0,0,.35))"><circle cx="12" cy="12" r="7.2" stroke="#fff" stroke-width="2"/><path d="M12 1.8v3.4M12 18.8v3.4M1.8 12h3.4M18.8 12h3.4" stroke="#fff" stroke-width="2"/><circle cx="12" cy="12" r="2.6" fill="#37d98c"/></svg>'+
-    '<span id="mission-fab-badge" style="position:absolute;top:-4px;right:-4px;min-width:21px;height:21px;padding:0 5px;border-radius:11px;background:#e67e22;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2.5px solid var(--app-bg);box-shadow:0 2px 6px rgba(0,0,0,.25)">0</span>';
+    '<span id="mission-fab-badge" style="position:absolute;top:-4px;right:-4px;min-width:21px;height:21px;padding:0 5px;border-radius:11px;background:#e67e22;color:#1a1714;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2.5px solid var(--app-bg);box-shadow:0 2px 6px rgba(0,0,0,.25)">0</span>';
   document.body.appendChild(fab);
   var sx=0,sy=0,ox=0,oy=0,moved=false,dragging=false,idleT=null,lpT=null;
   function idle(){if(idleT)clearTimeout(idleT);fab.style.opacity="1";idleT=setTimeout(function(){fab.style.opacity="0.6";},2600);}
@@ -10979,7 +11271,7 @@ function mapStockReport(storeId,inStock){
     if(!awardFree("mapstk:"+sid+":"+did,24)){toast("Déjà signalé aujourd'hui");playSound("err");return;}
     if(window.fbAddReport)window.fbAddReport(s.fbId||sid,did,"rupture"); // trace admin (pseudo)
     if(!s.confirmations)s.confirmations={};
-    s.confirmations[did]=(s.confirmations[did]||0)-1;
+    s.confirmations[did]=(s.confirmations[did]||0)-1;_noterObservation(s,did,false);
     userStats.signals=(userStats.signals||0)+1;userStats.pts+=5;flyPts(5);
     if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||sid,did,-1);
     if(window.fbTouchCache)window.fbTouchCache();
@@ -11457,7 +11749,7 @@ function renderStoreList(){
           '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">'+
             '<div class="store-name">'+sanitize(s.name)+'</div>'+
             '<span style="flex-shrink:0;display:inline-flex;align-items:center;gap:3px;padding:2px 9px;border-radius:999px;background:'+stBg+';color:'+stTxt+';font-size:10px;font-weight:800;letter-spacing:.2px;white-space:nowrap">'+stIco+' '+stLbl+'</span>'+
-            (storePrice?'<span class="pchip'+(estMoinsCher?' best':'')+'">'+storePrice+(estMoinsCher?' \u00b7 le moins cher':'')+'</span>':'<span style="font-size:11px;color:var(--s3);font-weight:500">Prix inconnu</span>')+
+            (storePrice?'<span class="pchip'+(estMoinsCher?' best':'')+'">'+storePrice+(estMoinsCher?' \u00b7 le moins cher':'')+'</span>':'<span style="font-size:11px;color:var(--txt2);font-weight:500">Prix inconnu</span>')+
           '</div>'+
           '<div class="store-meta"><span>'+dist+'</span><span>·</span>'+
           (storeOpenState(s)!==null?'<span class="status" style="background:'+(storeOpenState(s)?"#f0fdf4":"#fef2f2")+';color:'+(storeOpenState(s)?"#15803d":"#b91c1c")+'">'+openLabel(s)+(s.hours?" · "+s.hours:"")+'</span>':'<span class="status" style="background:var(--bg3);color:var(--s2)">Horaires inconnus</span>')+'</div>'+
@@ -11471,9 +11763,9 @@ function renderStoreList(){
        (confN<0?
         '<div style="display:inline-flex;align-items:center;gap:5px;margin-bottom:7px;padding:3px 10px;border-radius:999px;background:#fef2f2;border:1px solid #fecaca;font-size:10.5px;font-weight:700;color:#b91c1c">Tu la vois ici ? confirme pour aider !</div>':''))+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;gap:8px">'+
-        '<span style="font-size:10px;font-weight:600;color:var(--s3)">Fiabilité</span>'+
+        '<span style="font-size:10px;font-weight:600;color:var(--txt2)">Fiabilité</span>'+
         '<span style="display:inline-flex;align-items:center;gap:6px">'+
-          (fr?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;background:'+fr.bg+';color:'+fr.col+';white-space:nowrap">'+fr.label+'</span>':'')+
+          (vuParHTML(s,sid)||(fr?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;background:'+fr.bg+';color:'+fr.col+';white-space:nowrap">'+fr.label+'</span>':''))+
           '<span style="font-size:10px;font-weight:600;color:var(--s2)">'+confs+' confirmation'+(confs>1?"s":"")+'</span>'+
         '</span>'+
       '</div>'+
@@ -12189,7 +12481,7 @@ function renderStoreDetail(){
     div.innerHTML=
       '<div class="sd-row" onclick="pick(DRINKS.find(function(x){return x.id==='+d.id+'}))">'+
         '<div class="store-ico" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
-        '<div class="sd-txt"><div class="store-name">'+d.name+'</div><div class="store-meta">'+d.cat+starSuffix(d)+stat+'</div></div>'+
+        '<div class="sd-txt"><div class="store-name">'+d.name+'</div><div class="store-meta">'+d.cat+starSuffix(d)+stat+(vuParTexte(s,d.id)?'<span style="color:var(--txt2)"> · '+vuParTexte(s,d.id)+'</span>':'')+'</div></div>'+
         toggles+
       '</div>';
     listEl.appendChild(div);
@@ -12223,12 +12515,12 @@ function sdSetStock(did,wantStock){
   if(wantStock){
     if(!s.drinks)s.drinks=[];
     if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
-    s.confirmations[did]=Math.max(1,cur+1);
+    s.confirmations[did]=Math.max(1,cur+1);_noterObservation(s,did,true);
     if(window.fbConfirmStock)window.fbConfirmStock(sid,did,1);
     if(window.fbAddReport)try{window.fbAddReport(sid,did,"stock");}catch(e){}
     playSound("win");toast("Marqué en stock");
   }else{
-    s.confirmations[did]=Math.min(-1,cur-1);
+    s.confirmations[did]=Math.min(-1,cur-1);_noterObservation(s,did,false);
     if(window.fbConfirmStock)window.fbConfirmStock(sid,did,-1);
     if(window.fbAddReport)try{window.fbAddReport(sid,did,"rupture");}catch(e){}
     if(typeof resetWatchTrigger==="function")try{resetWatchTrigger(did,sid);}catch(e){}
@@ -13866,7 +14158,7 @@ function submitProposal(){
   }
 }
 function discLocate(discId){
-  lastScanContext={discoveryId:discId};
+  lastScanContext={discoveryId:discId,code:String(discId)};
   openStorePicker();
 }
 /* "Je sais ou la trouver" depuis la fiche d'une boisson du catalogue :
@@ -16177,62 +16469,112 @@ function drinkLocate(){
   lastScanContext={drinkId:curSel.id,from:"fiche"};
   openStorePicker();
 }
-/* ── INTROUVABLES PRES DE TOI ──────────────────────────────────────────────
-   Une carte pleine de boissons deja localisees ne donne rien a faire. Ce qui
-   fait sortir quelqu'un de chez lui, c'est un manque precis : « trois
-   personnes cherchent ca ici, personne ne l'a encore trouvee ». C'est une
-   mission, pas une liste.
+/* ── LA CHASSE ────────────────────────────────────────────────────────────
+   L'onglet Decouvertes etait beau et inutile : une liste de propositions a
+   voter, et des « tendances » polluees par les tests. Il devient LA CHASSE :
+   d'abord ce que des gens cherchent PRES DE TOI (avec la recompense et deux
+   gestes : « Je l'ai vue en rayon », « Je sais ou »), puis les indications
+   qu'on t'a donnees a valider, puis les propositions a voter, puis ce qui a
+   ete vu en rayon recemment autour de toi.
 
-   REGLE ABSOLUE DE CETTE SECTION : ne jamais inventer la demande. On ne liste
-   QUE des boissons que quelqu'un cherche pour de vrai — une chasse ouverte
-   autour (Firestore) ou une de tes propres alertes. Sans demande reelle, la
-   section reste VIDE. Lister « tout ce qui n'a pas de magasin » donnerait, sur
-   une base jeune, la totalite du catalogue : un mur de faux manques, le meme
-   piege que le « +0 magasins » d'avant. */
-function introuvableJeLaiVue(did){
+   REGLE ABSOLUE, inchangee : on ne liste QUE des boissons que quelqu'un
+   cherche pour de vrai (chasse ouverte autour, ou une de tes alertes). Sans
+   demande reelle, la section reste vide et le dit. */
+var _chasseSeg=null;
+function _chasseSegCourant(){
+  if(_chasseSeg)return _chasseSeg;
+  try{_chasseSeg=localStorage.getItem("magoChasseSeg")||"trouver";}catch(e){_chasseSeg="trouver";}
+  return _chasseSeg;
+}
+function setChasseSeg(name){
+  if(["trouver","valider","tendances"].indexOf(name)===-1)name="trouver";
+  _chasseSeg=name;
+  try{localStorage.setItem("magoChasseSeg",name);}catch(e){}
+  document.querySelectorAll("#chasse-seg [data-chasse-tab]").forEach(function(b){
+    var on=b.getAttribute("data-chasse-tab")===name;
+    b.classList.toggle("on",on);b.setAttribute("aria-selected",on?"true":"false");
+  });
+  ["trouver","valider","tendances"].forEach(function(k){
+    var p=document.getElementById("chasse-"+k);if(p)p.style.display=(k===name)?"block":"none";
+  });
+  if(name==="tendances"){try{renderVuesRecentes();}catch(e){}try{renderTopScanned();}catch(e){}}
+  if(name==="valider"){try{renderDiscoveries();}catch(e){}}
+}
+function chasseSegTap(name){try{playSound("pop");}catch(e){}setChasseSeg(name);}
+function _majCompteurValider(){
+  var n=(DISCOVERIES||[]).filter(function(d){return !d.promoted&&!d.rejected;}).length;
+  var el=document.getElementById("chasse-seg-valider-n");if(el)el.textContent=n?" · "+n:"";
+}
+/* « Je l'ai vue en rayon » (mode vue : je suis devant) / « Je sais ou »
+   (mode sais : de memoire). Meme selecteur de magasin ; le mode voyage dans
+   le contexte de scan pour que le rattachement puisse le transmettre. */
+function chasseJeLaiVue(did,mode){
   var d=(DRINKS||[]).find(function(x){return Number(x.id)===Number(did);});
   if(!d){toast("Boisson introuvable");return;}
-  // On NE touche pas a curSel : on vient de l'onglet Decouvertes, pas d'une
-  // fiche. lastScanContext suffit au selecteur de magasin.
-  lastScanContext={drinkId:d.id,from:"introuvable"};
+  lastScanContext={drinkId:d.id,from:"chasse",mode:(mode==="sais"?"sais":"vue")};
   try{playSound("pop");}catch(e){}
   openStorePicker();
 }
-/* La ligne entiere mene a la fiche : c'est la qu'on voit la photo en grand,
-   la carte, et le bouton de partage. Un bouton « partager » de plus dans une
-   ligne deja serree coupait le nom en deux — on prefere un tap de plus a un
-   nom illisible. */
-function introuvableOuvrir(did){
+function chasseOuvrir(did){
   var d=(DRINKS||[]).find(function(x){return Number(x.id)===Number(did);});
   if(d)try{pick(d);}catch(e){}
 }
-function renderUnfound(){
-  var host=document.getElementById("unfound");if(!host)return;
+/* Distance d'une chasse : les positions des chercheurs sont arrondies (~10 km)
+   par construction (_coarse). On ne fabrique donc pas un chiffre precis. */
+function _chasseDistLabel(distKm){
+  if(distKm==null||!isFinite(distKm))return _tr("huntNear");
+  if(distKm<=12)return _tr("huntNear");
+  return _tr("huntAbout").replace("{km}",Math.round(distKm));
+}
+function renderChasse(){
+  _majCompteurValider();
+  setChasseSeg(_chasseSegCourant());
+  renderMesChasses();
   /* Tant que les magasins ne sont pas charges, TOUT parait introuvable. On se
      tait plutot que d'annoncer un manque qui n'existe pas. */
-  if(!(window.STORES&&STORES.length)){host.innerHTML="";return;}
   var demande={};
-  (drinkWatches||[]).forEach(function(w){
-    if(w.triggered)return;
-    demande[String(w.id)]={id:Number(w.id),chercheurs:1,moi:true};
-  });
-  _peindreIntrouvables(demande);
-  // Puis les chasses des AUTRES autour : c'est ce qui transforme « ma liste
-  // d'envies » en « la commu attend ca ici ».
-  if(window.fbLoadNearbyHunts){
+  if(window.STORES&&STORES.length){
+    (drinkWatches||[]).forEach(function(w){
+      if(w.triggered)return;
+      demande[String(w.id)]={id:Number(w.id),chercheurs:1,moi:true,distKm:0,lastAt:w.created||null};
+    });
+  }
+  _peindreChasse(demande);
+  if(window.fbLoadNearbyHunts&&window.STORES&&STORES.length){
     window.fbLoadNearbyHunts(userLat,userLng,15).then(function(hunts){
       (hunts||[]).forEach(function(h){
         var k=String(h.drinkId);
         var n=h.seekers||0;
-        if(demande[k]){demande[k].chercheurs=Math.max(demande[k].chercheurs,n);demande[k].moi=demande[k].moi||!!h.mine;}
-        else demande[k]={id:Number(h.drinkId),chercheurs:n,moi:!!h.mine};
+        if(demande[k]){
+          demande[k].chercheurs=Math.max(demande[k].chercheurs,n);
+          demande[k].moi=demande[k].moi||!!h.mine;
+          if(h.lastAt&&(!demande[k].lastAt||h.lastAt>demande[k].lastAt))demande[k].lastAt=h.lastAt;
+        }else demande[k]={id:Number(h.drinkId),chercheurs:n,moi:!!h.mine,distKm:(h.distKm!=null?h.distKm:null),lastAt:h.lastAt||null};
       });
-      _peindreIntrouvables(demande);
+      _peindreChasse(demande);
     }).catch(function(){/* on garde l'affichage local */});
   }
+  try{if(typeof renderTipsAValider==="function")renderTipsAValider();}catch(e){}
+  try{if(typeof renderTrouveesSemaine==="function")renderTrouveesSemaine();}catch(e){}
 }
-function _peindreIntrouvables(demande){
-  var host=document.getElementById("unfound");if(!host)return;
+/* Mes propres chasses, en une ligne : ce que JE cherche, et ce qui a deja
+   ete trouve (par l'alerte). Tap -> la fiche. */
+function renderMesChasses(){
+  var host=document.getElementById("chasse-mine");if(!host)return;
+  var ws=(drinkWatches||[]);
+  if(!ws.length){host.innerHTML="";return;}
+  var parts=ws.slice(0,4).map(function(w){
+    var found=!!w.triggered;
+    return '<span role="button" tabindex="0" onclick="chasseOuvrir('+nbSur(w.id)+')" onkeydown="if(event.key===\'Enter\')this.click()" style="display:inline-flex;align-items:center;gap:5px;min-height:34px;padding:0 11px;border-radius:999px;background:var(--bg2);border:1px solid var(--border);font-size:11.5px;font-weight:700;color:var(--s1);cursor:pointer;max-width:100%">'+
+      (found?'<span style="width:6px;height:6px;border-radius:50%;background:#16a34a;flex-shrink:0"></span>':'<span class="mago-live-dot" style="width:6px;height:6px;border-radius:50%;background:#f59e0b;flex-shrink:0"></span>')+
+      '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(w.name)+(found&&w.storeName?' · '+sanitize(w.storeName):'')+'</span></span>';
+  }).join("");
+  host.innerHTML='<div style="font-size:11.5px;font-weight:700;color:var(--txt2);margin:0 0 6px">'+_tr("youHunt")+(ws.length>4?' ('+ws.length+')':'')+'</div>'+
+    '<div style="display:flex;flex-wrap:wrap;gap:6px">'+parts+'</div>';
+}
+function _peindreChasse(demande){
+  var host=document.getElementById("chasse-list");if(!host)return;
+  var cnt=document.getElementById("disc-count");
   var lignes=Object.keys(demande).map(function(k){return demande[k];})
     .filter(function(x){
       var d=(DRINKS||[]).find(function(y){return Number(y.id)===Number(x.id);});
@@ -16240,46 +16582,85 @@ function _peindreIntrouvables(demande){
       if(magasinProcheAvec(x.id))return false;  // quelqu'un l'a deja trouvee ici
       x.d=d;return true;
     })
-    .sort(function(a,b){return b.chercheurs-a.chercheurs;})
-    .slice(0,5);
-  if(!lignes.length){host.innerHTML="";return;}
+    .sort(function(a,b){
+      if(b.chercheurs!==a.chercheurs)return b.chercheurs-a.chercheurs;
+      return (a.distKm==null?99:a.distKm)-(b.distKm==null?99:b.distKm);
+    })
+    .slice(0,8);
+  var autres=lignes.filter(function(x){return !x.moi;}).length;
+  if(cnt)cnt.textContent=lignes.length?_tr("huntCount").replace("{n}",lignes.length):"";
+  if(!lignes.length){
+    host.innerHTML=emptyStateHTML("spark",_tr("noHunt"),_tr("noHuntSub"));
+    return;
+  }
   var besoinPhoto=false;
-  var corps=lignes.map(function(x){
+  var corps=lignes.map(function(x,i){
     var d=x.d;
     if(!getCachedDrinkImage(d)){besoinPhoto=true;try{fetchVerifiedOFFImage(d);}catch(e){}}
     var n=x.chercheurs;
-    var qui=(n>1)?(n+" personnes la cherchent"):(x.moi?"Tu la cherches":"1 personne la cherche");
-    return '<div class="unf-row" role="button" tabindex="0" '+
-      'aria-label="'+attr(d.name)+' — '+qui+', rien trouvé dans 10 km autour de toi. Ouvrir la fiche" '+
-      'onclick="introuvableOuvrir('+d.id+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();introuvableOuvrir('+d.id+');}">'+
-      '<span class="unf-thumb">'+drinkIconHTML(d)+'</span>'+
-      '<span class="unf-txt">'+
-        '<span class="unf-name">'+sanitize(d.name)+'</span>'+
-        '<span class="unf-sub">'+qui+'</span>'+
-      '</span>'+
-      '<button class="unf-go" onclick="event.stopPropagation();introuvableJeLaiVue('+d.id+')">Je l\'ai vue</button>'+
+    var qui=(n>1)?_tr("huntSeekersN").replace("{n}",n):(x.moi?_tr("huntYou"):_tr("huntSeekers1"));
+    var ou=x.moi&&n<=1?"":(" · "+_chasseDistLabel(x.distKm));
+    var quand=x.lastAt?(_tr("huntAsked")+" "+jourGrossier(x.lastAt)):"";
+    var actions=x.moi?'<div class="ch-mine">'+_tr("huntMineNote")+'</div>':
+      (i===0
+        ?'<div class="ch-actions"><button class="ch-btn main" onclick="event.stopPropagation();chasseJeLaiVue('+d.id+',\'vue\')">'+_tr("seenInStore")+'</button><button class="ch-btn" onclick="event.stopPropagation();chasseJeLaiVue('+d.id+',\'sais\')">'+_tr("knowWhere")+'</button></div>'
+        :'');
+    var pill=(!x.moi&&i>0)?'<button class="ch-pill" onclick="event.stopPropagation();chasseJeLaiVue('+d.id+',\'vue\')"><b>+5</b><span class="ch-dot">·</span>'+_tr("seenShort")+' \u2192</button>':'';
+    return '<div class="ch-card'+(i===0?" first":"")+'" role="button" tabindex="0" aria-label="'+attr(d.name)+' \u2014 '+attr(qui.replace(/<[^>]+>/g,""))+'" onclick="chasseOuvrir('+d.id+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();chasseOuvrir('+d.id+');}">'+
+      '<div class="ch-row">'+
+        '<span class="ch-thumb">'+drinkIconHTML(d)+'</span>'+
+        '<span class="ch-txt">'+
+          '<span class="ch-name">'+sanitize(d.name)+'</span>'+
+          '<span class="ch-sub">'+qui+ou+'</span>'+
+          (i===0&&quand?'<span class="ch-when">'+quand+'</span>':'')+
+        '</span>'+
+        (i===0&&!x.moi?'<span class="ch-reward">+5 pts</span>':pill)+
+      '</div>'+actions+
     '</div>';
   }).join("");
-  host.innerHTML='<div class="unf-card">'+
-    '<div class="unf-head">Personne ne les a encore trouvées ici</div>'+
-    '<div class="unf-lead">Si tu en vois une en rayon, dis-le : tout le monde qui la cherche est prévenu dans la seconde, et tu gagnes des points.</div>'+
-    corps+
-  '</div>';
-  // Les photos arrivent en asynchrone : on redessine UNE fois, et une seule.
-  if(besoinPhoto&&!window._unfReflow){
-    window._unfReflow=true;
+  host.innerHTML='<div class="ch-head">'+_tr("huntHead")+'</div>'+
+    '<div class="ch-lead">'+_tr("huntLead")+'</div>'+corps;
+  if(besoinPhoto&&!window._chasseReflow){
+    window._chasseReflow=true;
     setTimeout(function(){
-      window._unfReflow=false;
-      try{var e=document.getElementById("s-discover");if(e&&e.classList.contains("on"))_peindreIntrouvables(demande);}catch(err){}
+      window._chasseReflow=false;
+      try{var e=document.getElementById("s-discover");if(e&&e.classList.contains("on"))_peindreChasse(demande);}catch(err){}
     },1800);
   }
 }
+/* « Vues en rayon recemment pres de toi » : les dernieres observations
+   positives (stores.seenAt / confirmedBy), a moins de 10 km, sur 7 jours. La
+   seule tendance qu'on peut afficher honnetement : des faits dates, pas un
+   compteur global pollue par les tests. */
+function renderVuesRecentes(){
+  var host=document.getElementById("chasse-recent");if(!host)return;
+  var depuis=Date.now()-7*86400000,rows=[];
+  (STORES||[]).forEach(function(s){
+    if(!s.seenAt)return;
+    if(typeof s.dist==="number"&&s.dist>10000)return;
+    Object.keys(s.seenAt).forEach(function(did){
+      var ts=Number(s.seenAt[did]);if(!ts||ts<depuis)return;
+      if(((s.confirmations||{})[did]||0)<0)return;
+      var d=(DRINKS||[]).find(function(x){return Number(x.id)===Number(did);});if(!d)return;
+      rows.push({d:d,s:s,ts:ts,qui:(s.confirmedBy&&s.confirmedBy[did])||null});
+    });
+  });
+  rows.sort(function(a,b){return b.ts-a.ts;});
+  rows=rows.slice(0,10);
+  if(!rows.length){host.innerHTML='<div class="ch-head">'+_tr("recentHead")+'</div><div class="mt-empty-s" style="padding:6px 0 16px;margin:0">'+_tr("recentEmpty")+'</div>';return;}
+  host.innerHTML='<div class="ch-head">'+_tr("recentHead")+'</div>'+rows.map(function(r){
+    var meta=sanitize(r.s.name)+(typeof r.s.dist==="number"?" \u00B7 "+fmtDist(r.s.dist):"")+" \u00B7 "+(r.qui?_tr("seenBy").replace("{p}",sanitize(String(r.qui).slice(0,24))):_tr("seenWord"))+" "+jourGrossier(r.ts);
+    return '<div class="ch-line" role="button" tabindex="0" onclick="openStoreDetail(\''+String(r.s.id).replace(/'/g,"\\'")+'\')" onkeydown="if(event.key===\'Enter\')this.click()">'+
+      '<span class="ch-thumb small">'+drinkIconHTML(r.d)+'</span>'+
+      '<span class="ch-txt"><span class="ch-name">'+sanitize(r.d.name)+'</span><span class="ch-sub muted">'+meta+'</span></span>'+
+      '<span class="ch-chev">\u203A</span></div>';
+  }).join("");
+}
 function renderDiscoveries(){
   var el=document.getElementById("disc-list");if(!el)return;el.innerHTML="";
-  var T=LANGS[curLang];
+  var T=LANGS[curLang];var _discDark=document.body.classList.contains("dark");
   var pending=DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected;});
-  var cnt=document.getElementById("disc-count");
-  if(cnt)cnt.textContent=pending.length?pending.length+" en attente":"";
+  try{_majCompteurValider();}catch(e){}
   if(!pending.length){
     var TE=LANGS[curLang]||LANGS.fr;
     el.innerHTML='<div style="text-align:center;padding:30px 30px 40px"><div style="width:64px;height:64px;margin:0 auto 14px;border-radius:20px;background:var(--bg2);border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--s2)"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14l-1.2 15.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z"/><path d="M5 9h14"/></svg></div>'+
@@ -16301,9 +16682,9 @@ function renderDiscoveries(){
       '<div style="font-size:12px;margin-top:2px;color:var(--s2)">'+sanitize(desc)+'</div>'+
       '<div class="vote-progress" role="progressbar" aria-valuemin="0" aria-valuemax="'+ADMIN_VOTE_THRESHOLD+'" aria-valuenow="'+nbSur(votes)+'"><div style="width:'+pct+'%"></div></div>'+
       discFoundInHTML(d)+
-      '<div style="font-size:11px;font-weight:600;margin-top:5px;color:'+(ready?"#16a34a":"#c69a57")+'">'+
+      '<div style="font-size:11px;font-weight:600;margin-top:5px;color:'+(ready?(_discDark?"#4ade80":"#15803d"):(_discDark?"#e5a93a":"#8a5408"))+'">'+
       (ready?"Pr\u00EAte \u00E0 entrer au catalogue !":votes+"/"+ADMIN_VOTE_THRESHOLD+" votes \u00B7 encore "+missing+" pour le catalogue")+'</div></div>'+
-      (voted?'<span style="font-size:12px;font-weight:700;color:var(--s3);flex-shrink:0">✓ Voté</span>':'<button class="vote-btn" style="background:'+(document.body.classList.contains("dark")?"#f0f0f0":accentColor)+';color:'+(document.body.classList.contains("dark")?"#1a1714":"#fff")+'" data-vote="'+attr(String(d.id))+'">'+T.vote+'</button>');
+      (voted?'<span style="font-size:12px;font-weight:700;color:var(--txt2);flex-shrink:0">✓ Voté</span>':'<button class="vote-btn" style="background:var(--s1);color:var(--app-bg);min-height:44px" data-vote="'+attr(String(d.id))+'">'+T.vote+'</button>');
     el.appendChild(div);
   });
   /* L'identifiant d'une decouverte est choisi par celui qui cree le document
@@ -18989,7 +19370,7 @@ try{
     try{renderNearby();}catch(err){}
     // Les magasins viennent d'arriver : ce qui semblait introuvable ne l'est
     // peut-etre plus. On redessine si on est sur l'onglet.
-    try{var _dv=document.getElementById("s-discover");if(_dv&&_dv.classList.contains("on"))renderUnfound();}catch(err){}
+    try{var _dv=document.getElementById("s-discover");if(_dv&&_dv.classList.contains("on"))renderChasse();}catch(err){}
   });
   // Compte + points persistants Firebase
   window.addEventListener("fbUserStatsLoaded", function(e) {
