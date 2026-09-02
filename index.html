@@ -493,6 +493,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <div class="stat-card"><div class="stat-num" id="stat-confirms">0</div><div class="stat-lbl" id="t-conf">Confirmations</div></div>
         <div class="stat-card"><div class="stat-num" id="stat-signals">0</div><div class="stat-lbl" id="t-sig">Signalements</div></div>
       </div>
+      <div id="pending-line" role="button" tabindex="0" onkeydown="if(event.key==='Enter')this.click()" style="display:none;align-items:center;justify-content:space-between;gap:8px;margin:0 20px 8px;padding:11px 14px;background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;cursor:pointer"></div>
       <div id="streak-pill" style="display:flex;align-items:center;justify-content:center;gap:7px;margin:0 20px 6px;padding:10px 14px;background:var(--bg2);border-radius:14px"></div>
       <div onclick="inviteFriend()" role="button" tabindex="0" aria-label="Inviter un ami" onkeydown="if(event.key==='Enter'){inviteFriend();}" style="display:flex;align-items:center;gap:12px;margin:6px 20px;padding:14px 16px;background:linear-gradient(135deg,#0e7a4d,#14532d);border-radius:16px;cursor:pointer">
         <span style="display:flex;color:#fff"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></span>
@@ -2027,7 +2028,8 @@ window.fbConfirmStock = async function(storeId, drinkId, value) {
     /* « Vu par qui, quand » : le pseudo est deja public partout ailleurs
        (classement, decouvertes, signalements). La date reste grossiere a
        l'affichage (jour, jamais l'heure) — voir vuParInfo. */
-    var qui = (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24), quand = Date.now();
+    var qui = (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24);
+    var quand = Math.floor(Date.now() / 3600000) * 3600000;   // a l'heure, jamais a la minute
     if (value > 0) {
       updates["seenAt."+drinkId] = quand;
       updates["confirmedBy."+drinkId] = qui;
@@ -2539,9 +2541,10 @@ window.fbAddDrinkToStore = async function(storeId, drinkId) {
   var updates = {};
   updates["drinks"] = arrayUnion(Number(drinkId) || drinkId);
   updates["confirmations." + drinkId] = increment(1);
-  updates["seenAt." + drinkId] = Date.now();
+  var heure = Math.floor(Date.now() / 3600000) * 3600000;   // a l'heure, jamais a la minute
+  updates["seenAt." + drinkId] = heure;
   updates["confirmedBy." + drinkId] = (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24);
-  updates["confirmedAt." + drinkId] = Date.now();
+  updates["confirmedAt." + drinkId] = heure;
   await window.fbUpdateDoc(window.fbDoc(window.db, "stores", s.fbId), updates);
 };
 
@@ -3009,9 +3012,8 @@ window.fbWipeAllHunts = async function() {
 window.fbJoinHunt = async function(drinkId, drinkName, emoji, lat, lng) {
   try {
     var user = await ensureAuthed();
-    var moi = {
-      lat: lat != null ? _coarse(lat) : null, lng: lng != null ? _coarse(lng) : null, at: Date.now()
-    };
+    var pos = { lat: lat != null ? _coarse(lat) : null, lng: lng != null ? _coarse(lng) : null };
+    var moi = { lat: pos.lat, lng: pos.lng, at: Date.now() };
     var ref = doc(db, "hunts", String(drinkId));
     var commun = {
       drinkName: String(drinkName || "").slice(0, 60),
@@ -3022,11 +3024,21 @@ window.fbJoinHunt = async function(drinkId, drinkName, emoji, lat, lng) {
     try {
       await updateDoc(ref, maj);
     } catch (e) {
-      // La chasse n'existe pas encore : on la cree avec soi comme seul chercheur.
-      await setDoc(ref, Object.assign({
-        drinkId: Number(drinkId) || drinkId,
-        seekers: (function(){ var o = {}; o[user.uid] = moi; return o; })()
-      }, commun));
+      /* Deja chercheur : les regles figent `at` (la date d'inscription, qui
+         prouve qu'on chassait AVANT qu'on nous reponde). On ne bouge alors
+         que la position, par chemins pointes imbriques. */
+      try {
+        var bouge = Object.assign({}, commun);
+        bouge["seekers." + user.uid + ".lat"] = pos.lat;
+        bouge["seekers." + user.uid + ".lng"] = pos.lng;
+        await updateDoc(ref, bouge);
+      } catch (e2) {
+        // La chasse n'existe pas encore : on la cree avec soi comme seul chercheur.
+        await setDoc(ref, Object.assign({
+          drinkId: Number(drinkId) || drinkId,
+          seekers: (function(){ var o = {}; o[user.uid] = moi; return o; })()
+        }, commun));
+      }
     }
   } catch (e) { console.warn("join hunt:", e); }
 };
@@ -3582,8 +3594,9 @@ window.fbCommunityAddDrinks = async function(storeId, ids) {
   const nums = ids.map(Number).filter(n => !isNaN(n));
   if (!nums.length) return 0;
   const upd = { drinks: arrayUnion.apply(null, nums) };
-  const seenNow = Date.now();
-  nums.forEach(function(id) { upd["confirmations." + id] = increment(1); upd["seenAt." + id] = seenNow; });
+  const seenNow = Math.floor(Date.now() / 3600000) * 3600000;
+  const quiNow = (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24);
+  nums.forEach(function(id) { upd["confirmations." + id] = increment(1); upd["seenAt." + id] = seenNow; upd["confirmedBy." + id] = quiNow; upd["confirmedAt." + id] = seenNow; });
   await updateDoc(doc(db, "stores", String(storeId)), upd);
   return nums.length;
 };
@@ -3601,8 +3614,9 @@ window.fbAssignListToStore = async function(storeId, ids) {
     certified: true,
     certifiedAt: serverTimestamp()
   };
-  var seenNowV = Date.now();
-  nums.forEach(function(id) { updV["seenAt." + id] = seenNowV; });
+  var seenNowV = Math.floor(Date.now() / 3600000) * 3600000;
+  var quiV = (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24);
+  nums.forEach(function(id) { updV["seenAt." + id] = seenNowV; updV["confirmedBy." + id] = quiV; updV["confirmedAt." + id] = seenNowV; });
   await updateDoc(doc(db, "stores", String(storeId)), updV);
   return nums.length;
 };
@@ -4423,7 +4437,7 @@ function _showRaw(s){
   if(s==="profile"){try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
   if(s==="settings"){try{renderGeoRow();}catch(e){}}
-  if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{renderHunts();}catch(e){}
+  if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{_verifierAides();}catch(e){}try{renderHunts();}catch(e){}
     // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
     // le filtre boisson de la carte (sinon la carte rouvrait toujours sur la derniere
     // boisson cherchee, ex. "Red Bull", au lieu de montrer tous les magasins).
@@ -4475,6 +4489,7 @@ function _showRaw(s){
     // Camera coupee en quittant l'onglet, et aucun resultat en cours : on
     // revient a la carte d'appel plutot qu'a un cadre noir.
     try{var _sr=document.getElementById("scan-result");if(!scanActive&&!(_sr&&_sr.innerHTML))resetScanUI();}catch(e){}
+    try{_verifierAides();}catch(e){}
     try{renderScanHistory();}catch(e){}
   }
   if(s==="profile"){renderLeaderboard();refreshLeaderboard();renderStreak();}
@@ -4503,7 +4518,7 @@ function report(type){
   var pts={stock:10,rupture:5,contrefacon:15,nouveau:20};
   var msgs={stock:"✓ +10 pts",rupture:"✕ +5 pts",contrefacon:"+15 pts",nouveau:"+20 pts"};
   var now=new Date(),time=now.getHours()+":"+String(now.getMinutes()).padStart(2,"0");
-  if(type==="stock"){if(!s.confirmations[d.id])s.confirmations[d.id]=0;s.confirmations[d.id]++;if(!s.seenAt)s.seenAt={};s.seenAt[d.id]=Date.now();userStats.confirms++;}
+  if(type==="stock"){if(!s.confirmations[d.id])s.confirmations[d.id]=0;s.confirmations[d.id]++;_noterObservation(s,d.id,true);userStats.confirms++;}
   else{
     userStats.signals++;
     if(type==="rupture"){
@@ -4549,7 +4564,8 @@ function freshnessInfo(s,did){
    allees et venues d'une personne a la minute). */
 function _noterObservation(s,did,positif){
   if(!s)return;
-  var qui=(localStorage.getItem("magopseudo")||"Explorateur").slice(0,24),quand=Date.now();
+  // Arrondi a l'heure : la base ne dit jamais a la minute qui etait ou.
+  var qui=_moiPseudo(),quand=Math.floor(Date.now()/3600000)*3600000;
   if(positif){
     if(!s.seenAt)s.seenAt={};s.seenAt[did]=quand;
     if(!s.confirmedBy)s.confirmedBy={};s.confirmedBy[did]=qui;
@@ -4577,6 +4593,7 @@ function vuParInfo(s,did){
   if(!cAt&&!aAt)return null;
   var positif=cAt>=aAt;
   var qui=positif?(s.confirmedBy&&s.confirmedBy[did]):(s.absentBy&&s.absentBy[did]);
+  if(qui==="Explorateur")qui=null; // pseudo par defaut : pas une personne nommee
   var quand=positif?cAt:aAt;
   return{positif:positif,qui:qui?String(qui).slice(0,24):null,quand:quand,jour:jourGrossier(quand),vieux:(Date.now()-quand)>30*86400000};
 }
@@ -4615,6 +4632,7 @@ function doConfirm(btn,sid,did,val){
     if(!s.confirmations[did])s.confirmations[did]=0;
     s.confirmations[did]--; // negatif autorise : signal communautaire "pas en stock ici"
     _noterObservation(s,did,false);
+    if(window.fbAddReport)try{window.fbAddReport(s.fbId||sid,did,"rupture");}catch(e){} // la preuve pour le serveur
     awardOnce("conf:"+sid+":"+did,24);
     userStats.confirms++;userStats.pts+=3;flyPts(3);bumpDaily("confirms");
     trackStoreContribution(sid);
@@ -4649,6 +4667,7 @@ function confirmWithPrice(sid,did){
     if(window.fbSavePrice)window.fbSavePrice(s.fbId||sid,did,price);
   }
   if(!awardOnce("conf:"+sid+":"+did,24)){toast("D\u00e9j\u00e0 confirm\u00e9 aujourd'hui");renderStoreList();return;}
+  if(window.fbAddReport)try{window.fbAddReport(s.fbId||sid,did,"stock");}catch(e){} // la preuve pour le serveur
   userStats.confirms++;userStats.pts+=3;flyPts(3);bumpDaily("confirms");
   trackStoreContribution(sid);
   // Firebase
@@ -4700,15 +4719,23 @@ function trackStoreContribution(storeId){if(storeId!=null)contributedStores[Stri
    aidé une vraie demande. Le(s) demandeur(s), eux, sont prévenus par leur veille
    (checkWatches à l'ouverture, + push téléphone si la Cloud Function est
    déployée) : chacun reçoit ce qui le concerne. */
-function maybeRewardHuntHelp(drinkId,store){
+function maybeRewardHuntHelp(drinkId,store,code,mode){
   if(!window.fbHuntSeekers)return;
   window.fbHuntSeekers(drinkId).then(function(n){
-    if(n>0&&awardOnce("huntHelp:"+drinkId+":"+((store&&store.id)||""),24)){
+    if(!(n>0))return;
+    var sid=String((store&&store.id)||"");
+    var d=(DRINKS||[]).find(function(x){return Number(x.id)===Number(drinkId);});
+    if(awardOnce("huntHelp:"+drinkId+":"+sid,24)){
       userStats.pts+=5;try{flyPts(5);}catch(e){}updateProfileStats();
       if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
       playSound("win");
-      toast("Tu as aidé une chasse ! "+n+" personne"+(n>1?"s":"")+" cherchai"+(n>1?"ent":"t")+" ça · +5 pts");
+      // +15 de plus quand un chercheur confirme sur place : en attente, pas promis.
+      pendingAdd("hunt:"+drinkId+":"+sid,15,"« "+(d?d.name:"")+" » "+_tr("atStore")+" "+((store&&store.name)||""));
+      toast(_tr("huntHelped").replace("{n}",n).replace("{s}",n>1?"s":"").replace("{v}",n>1?"ent":"t"));
     }
+    // Le journal sait que cette trouvaille repond a une chasse : c'est la
+    // qu'on affichera « confirmee par X » ou « pas trouvee ».
+    try{if(code)patchScanEntry(code,{hunt:true,huntMode:(mode==="sais"?"sais":"vue")});}catch(e){}
   }).catch(function(){});
 }
 /* ================================
@@ -5288,6 +5315,7 @@ function updateProfileStats(){
   _st("stat-signals",userStats.signals);
   _st("stat-confirms",userStats.confirms);
   _st("stat-pts",ptsNets());
+  try{majLignePending();}catch(e){}
   var lvHost=document.getElementById("level-bar");
   if(!lvHost){
     lvHost=document.createElement("div");
@@ -6249,7 +6277,12 @@ function tagScanToStore(s){
   // Rattacher une boisson que des gens attendent rend le meme service qu'un
   // « en stock » signale depuis la fiche : meme bonus. L'oubli faisait que le
   // chemin le plus utile — repondre a une chasse — payait le moins.
-  if(ctx.drinkId!=null){try{maybeRewardHuntHelp(ctx.drinkId,s);}catch(e){}}
+  if(ctx.drinkId!=null){
+    // « Vue en rayon » depuis son canape (> 1,5 km du magasin) = « je sais ou », de memoire.
+    var _mode=ctx.mode||"vue";
+    if(_mode==="vue"&&typeof s.dist==="number"&&s.dist>1500)_mode="sais";
+    try{maybeRewardHuntHelp(ctx.drinkId,s,_findsCodeFor(ctx),_mode);}catch(e){}
+  }
   updateProfileStats();
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
   playSound("win");
@@ -6594,7 +6627,8 @@ function renderScanHistory(){
     var act=price?null:_findAction(e,st);
     var where=_findWhere(e,st,s);
     var div=document.createElement("div");div.className="find-card";div.dataset.code=code;
-    div.innerHTML='<div class="find-thumb sh-thumb">'+thumb+'<span class="find-badge '+st.cls+'">'+sanitize(st.label)+'</span></div>'+
+    var huntBadge=e.hunt?'<span class="find-badge right '+(e.helpStatus==="ok"?"ok":(e.helpStatus==="ko"?"ko":""))+'">'+(e.helpStatus==="ok"?_tr("helpOk"):(e.helpStatus==="ko"?_tr("helpKo"):_tr("helpWait")))+'</span>':'';
+    div.innerHTML='<div class="find-thumb sh-thumb">'+thumb+'<span class="find-badge '+st.cls+'">'+sanitize(st.label)+'</span>'+huntBadge+'</div>'+
       '<div class="find-body"><div class="find-name">'+sanitize(e.name||"")+'</div>'+
       '<div class="find-where">'+where+'</div>'+
       '<div class="find-foot">'+(price?'<span class="find-price">'+fmtPrix(price)+'</span>':(act?'<span class="find-act">'+sanitize(act.label)+'</span>':'<span></span>'))+
@@ -9484,7 +9518,7 @@ function submitAddDrinks(){
     var pts=0;
     ids.forEach(function(id){
       if(s.drinks.indexOf(id)===-1)s.drinks.push(id);
-      s.confirmations[id]=(s.confirmations[id]||0)+1;if(!s.seenAt)s.seenAt={};s.seenAt[id]=Date.now();
+      s.confirmations[id]=(s.confirmations[id]||0)+1;_noterObservation(s,id,true);
       if(awardOnce("tag:"+id+":"+(s.fbId||s.id),FOREVER))pts+=2;
     });
     var live=(STORES||[]).find(function(x){return String(x.id)===String(s.id);});
@@ -10749,6 +10783,9 @@ var ACT_META={
   promoted:     {label:"Au catalogue",col:"#c69a57"},
   hunt:         {label:"Chasse",      col:"#e67e22"},
   photoRejected:{label:"Photo à refaire", col:"#dc2626"},
+  tip:          {label:"On t'a dit où", col:"#e67e22"},
+  tipOk:        {label:"Confirmée",   col:"#16a34a"},
+  tipKo:        {label:"Pas trouvée", col:"#dc2626"},
   penalty:      {label:"Points retirés", col:"#dc2626"}
 };
 function _actMeta(type){ return ACT_META[type]||{label:"Info",col:"var(--s2)"}; }
@@ -10765,7 +10802,10 @@ function _actThumb(a){
 }
 /* Petit symbole SVG par type — style trait, aucun emoji (cohérent avec l'app). */
 function _activityIcon(type){
-  var col=type==="found"?"#16a34a":type==="promoted"?"#c69a57":type==="hunt"?"#e67e22":(type==="photoRejected"||type==="penalty")?"#dc2626":"var(--s2)";
+  // Entraide : « on t'a dit ou » (tip), « confirmee grace a toi » (tipOk), « pas trouvee » (tipKo).
+  var colTip=type==="tip"?"#e67e22":type==="tipOk"?"#16a34a":type==="tipKo"?"#dc2626":null;
+  if(type==="tip"||type==="tipKo")type="hunt";else if(type==="tipOk")type="found";
+  var col=colTip||(type==="found"?"#16a34a":type==="promoted"?"#c69a57":type==="hunt"?"#e67e22":(type==="photoRejected"||type==="penalty")?"#dc2626":"var(--s2)");
   var p="";
   if(type==="found")p='<path d="M20 6 9 17l-5-5"/>';
   else if(type==="promoted")p='<path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3"/><path d="M7 5H4v2a3 3 0 0 0 3 3"/>';
@@ -11050,6 +11090,214 @@ function magasinProcheAvec(did){
   });
   return best;
 }
+/* ── ENTRAIDE : « on t'a dit où » ─────────────────────────────────────────
+   Quelqu'un rattache une boisson que TU chasses a un magasin (« Je l'ai vue
+   en rayon » / « Je sais ou »). Ton alerte se declenche a l'ouverture
+   suivante (checkWatches, comme avant) — mais maintenant elle dit QUI, et
+   elle te demande une reponse : « Je l'ai trouvee » ou « Pas la », meme si
+   tu n'as rien achete. Sans reponse, on te relance le lendemain, puis une
+   derniere fois trois jours apres. Ta reponse est une confirmation de stock
+   ordinaire (reports + stores.confirmations) : c'est elle qui decide si la
+   personne qui t'a aide touche ses +15 — et le serveur, quand il sera
+   deploye, la lira dans les memes documents que tout le reste.
+
+   ZERO nouvelle collection, rien de lisible en plus par les autres : la
+   presence de quelqu'un dans un magasin n'est jamais publiee a la minute
+   (les dates de stock sont arrondies a l'heure et affichees au jour). */
+function _moiPseudo(){return (localStorage.getItem("magopseudo")||"Explorateur").slice(0,24);}
+
+/* Registre LOCAL des points en attente d'une validation (par une autre
+   personne, ou par le serveur). Separe de userStats.pts : ce compteur-la est
+   ecrase par le score serveur a chaque ouverture du profil. */
+function _pendingAll(){try{return JSON.parse(localStorage.getItem("magoPending")||"{}")||{};}catch(e){return {};}}
+function _pendingSave(o){try{localStorage.setItem("magoPending",JSON.stringify(o));}catch(e){}}
+function pendingAdd(key,pts,label){
+  var o=_pendingAll();if(o[key])return false;
+  o[key]={pts:Number(pts)||0,label:String(label||"").slice(0,80),ts:Date.now()};
+  _pendingSave(o);try{majLignePending();}catch(e){}return true;
+}
+function pendingResolve(key){
+  var o=_pendingAll();if(!o[key])return null;
+  var e=o[key];delete o[key];_pendingSave(o);try{majLignePending();}catch(err){}return e;
+}
+function pendingTotal(){var o=_pendingAll(),t=0;Object.keys(o).forEach(function(k){t+=Number(o[k].pts)||0;});return t;}
+function majLignePending(){
+  var el=document.getElementById("pending-line");if(!el)return;
+  var t=pendingTotal();
+  if(!t){el.style.display="none";el.innerHTML="";return;}
+  var n=Object.keys(_pendingAll()).length;
+  el.style.display="flex";
+  el.innerHTML='<span style="font-size:12.5px;font-weight:800;color:var(--s1)">+'+t+' pts '+_tr("pendingPts")+'</span>'+
+    '<span style="font-size:11px;font-weight:700;color:var(--txt2)">'+n+' ›</span>';
+  el.onclick=openPendingSheet;
+}
+function openPendingSheet(){
+  if(document.getElementById("pending-ov"))return;
+  var o=_pendingAll(),keys=Object.keys(o).sort(function(a,b){return (o[b].ts||0)-(o[a].ts||0);});
+  var ov=document.createElement("div");ov.id="pending-ov";
+  ov.style.cssText="position:fixed;inset:0;z-index:10001;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px)";
+  var card=document.createElement("div");
+  card.style.cssText="width:100%;max-width:440px;max-height:78vh;overflow-y:auto;background:var(--app-bg);border-radius:24px 24px 0 0;padding:18px 22px calc(26px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28)";
+  card.innerHTML='<div style="width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 16px"></div>'+
+    '<div style="font-size:17px;font-weight:800;color:var(--s1)">'+_tr("pendingTitle")+'</div>'+
+    '<div style="font-size:12.5px;color:var(--txt2);line-height:1.5;margin:6px 0 14px">'+_tr("pendingSub")+'</div>'+
+    (keys.length?keys.map(function(k){var e=o[k];return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)"><span style="min-width:0;font-size:13px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(e.label)+'</span><span style="flex-shrink:0;font-size:12px;font-weight:800;color:var(--s1)">+'+e.pts+' · <span style="font-weight:600;color:var(--txt2)">'+jourGrossier(e.ts)+'</span></span></div>';}).join(""):'<div class="mt-empty-s">'+_tr("pendingNone")+'</div>')+
+    '<div style="text-align:center;margin-top:14px"><button class="ghost-btn quiet" id="pending-close">OK</button></div>';
+  ov.appendChild(card);document.body.appendChild(ov);
+  var close=function(){try{ov.remove();}catch(e){}};
+  ov.onclick=function(e){if(e.target===ov)close();};
+  var b=document.getElementById("pending-close");if(b)b.onclick=close;
+  try{playSound("pop");}catch(e){}
+}
+
+/* ── COTE CHERCHEUR ── */
+function indicationsEnAttente(){
+  var now=Date.now();
+  return (drinkWatches||[]).filter(function(w){return w.triggered&&w.verdict==null&&w.triggeredAt&&(now-w.triggeredAt)<7*86400000&&w.storeId!=null;});
+}
+/* Relances a l'ouverture : J+1 puis J+3, jamais plus. Sans serveur, « le
+   lendemain » veut dire « a la premiere ouverture au moins 24 h apres ». */
+function _rappelsIndications(){
+  var now=Date.now(),changed=false;
+  (drinkWatches||[]).forEach(function(w){
+    if(!w.triggered||w.verdict!=null||!w.triggeredAt||w.storeId==null)return;
+    var age=now-w.triggeredAt,n=w.reminders||0,txt=null,niveau=0;
+    if(age>=72*3600000&&n<2){niveau=2;txt=_tr("tipRemind2");}
+    else if(age>=24*3600000&&n<1){niveau=1;txt=_tr("tipRemind1");}
+    if(!txt)return;
+    txt=txt.replace("{d}",w.name).replace("{s}",w.storeName||"");
+    w.reminders=niveau;changed=true;
+    toast(txt);
+    pushActivity({type:"tip",title:_tr("tipRemindTitle").replace("{d}",w.name),body:txt,
+      action:{kind:"store",storeId:w.storeId,drinkId:w.id},drinkId:w.id,key:"tiprem"+niveau+":"+w.id+":"+w.storeId});
+  });
+  if(changed)saveWatches();
+}
+function repondreIndication(did,sid,ok){
+  var w=(drinkWatches||[]).find(function(x){return Number(x.id)===Number(did)&&String(x.storeId)===String(sid);});
+  var s=(STORES||[]).find(function(x){return String(x.id)===String(sid)||String(x.fbId)===String(sid);});
+  if(!s){toast(_tr("storeNotLoaded"));try{playSound("err");}catch(e){}return;}
+  var storeId=String(s.id);
+  var libre=awardFree("conf:"+storeId+":"+did,24);
+  if(!s.confirmations)s.confirmations={};
+  if(ok){
+    if(!s.drinks)s.drinks=[];
+    if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
+    s.confirmations[did]=Math.max(1,(s.confirmations[did]||0)+1);_noterObservation(s,did,true);
+    if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||storeId,did,1);
+    if(window.fbAddReport)try{window.fbAddReport(s.fbId||storeId,did,"stock");}catch(e){}
+    if(w){w.verdict="ok";w.verdictAt=Date.now();}
+  }else{
+    s.confirmations[did]=Math.min(-1,(s.confirmations[did]||0)-1);_noterObservation(s,did,false);
+    if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||storeId,did,-1);
+    if(window.fbAddReport)try{window.fbAddReport(s.fbId||storeId,did,"rupture");}catch(e){}
+    if(w){w.verdict="ko";w.verdictAt=Date.now();}
+  }
+  if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
+  var gagne=false;
+  if(libre&&awardOnce("conf:"+storeId+":"+did,24)){
+    gagne=true;userStats.confirms=(userStats.confirms||0)+1;userStats.pts+=3;
+    try{flyPts(3);}catch(e){}try{bumpDaily("confirms");}catch(e){}
+  }
+  trackStoreContribution(storeId);
+  updateProfileStats();
+  if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+  saveWatches();
+  if(ok){
+    try{playSound("win");}catch(e){}
+    toast(_tr("tipThanksOk").replace("{s}",s.name)+(gagne?" · +3 pts":""));
+  }else{
+    try{playSound("err");}catch(e){}
+    toast(_tr("tipThanksKo")+(gagne?" · +3 pts":""));
+    // La chasse continue : l'alerte repart chercher ailleurs.
+    try{resetWatchTrigger(did,storeId);}catch(e){}
+  }
+  try{renderTipsAValider();}catch(e){}
+  try{renderAlertsCard();}catch(e){}
+  try{renderIndicationBanner(curStoreDetail);}catch(e){}
+  try{if(curStoreDetail&&(String(curStoreDetail.id)===storeId))renderStoreDetail();}catch(e){}
+}
+function _idAttr(v){return String(v==null?"":v).replace(/[^A-Za-z0-9_\-]/g,"");}
+function _tipTitre(w){
+  return (w.by?_tr("tipWho").replace("{p}",sanitize(w.by)):_tr("tipWhoAnon"))+" « "+sanitize(w.name)+" »";
+}
+function renderTipsAValider(){
+  var host=document.getElementById("chasse-tips");if(!host)return;
+  var list=indicationsEnAttente();
+  if(!list.length){host.innerHTML="";return;}
+  host.innerHTML='<div class="ch-head">'+_tr("tipHead")+'</div><div class="ch-lead">'+_tr("tipLead")+'</div>'+list.map(function(w){
+    var d=(DRINKS||[]).find(function(x){return Number(x.id)===Number(w.id);});
+    var s=(STORES||[]).find(function(x){return String(x.id)===String(w.storeId)||String(x.fbId)===String(w.storeId);});
+    var dist=(s&&typeof s.dist==="number")?s.dist:(typeof w.dist==="number"?w.dist:null);
+    return '<div class="tip-card">'+
+      '<div class="ch-row"><span class="ch-thumb">'+(d?drinkIconHTML(d):"")+'</span>'+
+        '<span class="ch-txt"><span class="ch-name" style="white-space:normal">'+_tipTitre(w)+'</span>'+
+        '<span class="ch-sub muted">'+sanitize(w.storeName||"")+(dist!=null?" · "+fmtDist(dist):"")+(w.triggeredAt?" · "+jourGrossier(w.triggeredAt):"")+'</span></span></div>'+
+      '<div class="tip-q">'+_tr("tipQuestion")+'</div>'+
+      '<div class="ch-actions"><button class="ch-btn main" onclick="repondreIndication('+nbSur(w.id)+',\''+_idAttr(w.storeId)+'\',true)">'+_tr("tipYes")+'</button>'+
+      '<button class="ch-btn" onclick="repondreIndication('+nbSur(w.id)+',\''+_idAttr(w.storeId)+'\',false)">'+_tr("tipNo")+'</button></div>'+
+      '<button class="ghost-btn quiet" style="margin-top:4px;width:100%;min-height:44px" onclick="openWatchStore(\''+_idAttr(w.storeId)+'\','+nbSur(w.id)+')">'+_tr("tipSeeStore")+'</button>'+
+    '</div>';
+  }).join("");
+}
+/* Bandeau sur la fiche du magasin concerne : la question au bon endroit. */
+function renderIndicationBanner(s){
+  var host=document.getElementById("sd-tip-banner");
+  if(!host){
+    var anchor=document.getElementById("sd-mission");if(!anchor)return;
+    host=document.createElement("div");host.id="sd-tip-banner";host.style.padding="0 20px";
+    anchor.parentNode.insertBefore(host,anchor);
+  }
+  if(!s){host.innerHTML="";return;}
+  var list=indicationsEnAttente().filter(function(w){return String(w.storeId)===String(s.id)||(s.fbId&&String(w.storeId)===String(s.fbId));});
+  if(!list.length){host.innerHTML="";return;}
+  host.innerHTML=list.map(function(w){
+    return '<div class="tip-card" style="margin:0 0 12px">'+
+      '<div class="tip-q" style="margin-top:0">'+_tipTitre(w)+' '+_tr("tipHereQ")+'</div>'+
+      '<div class="ch-actions"><button class="ch-btn main" onclick="repondreIndication('+nbSur(w.id)+',\''+_idAttr(w.storeId)+'\',true)">'+_tr("tipYes")+'</button>'+
+      '<button class="ch-btn" onclick="repondreIndication('+nbSur(w.id)+',\''+_idAttr(w.storeId)+'\',false)">'+_tr("tipNo")+'</button></div>'+
+    '</div>';
+  }).join("");
+}
+
+/* ── COTE AIDANT ── */
+/* Quelqu'un a-t-il confirme (ou contredit) une trouvaille que j'ai
+   rattachee pour une chasse ? On compare la derniere observation du magasin
+   (publique : confirmedAt/absentAt, arrondies a l'heure) a la date de mon
+   rattachement. Une confirmation par quelqu'un d'autre = +15 (local ; le
+   serveur credite a partir des memes documents reports quand il tourne). */
+function _verifierAides(){
+  var me=_moiPseudo(),changed=false;
+  (scanHist||[]).forEach(function(e){
+    if(!e.hunt||e.helpStatus||!e.taggedAt)return;
+    var st=findStatus(e);
+    var did=st.drink?st.drink.id:e.drinkId;if(did==null)return;
+    var s=_findStore(e);if(!s)return;
+    var heure=Math.floor(e.taggedAt/3600000)*3600000;
+    var cAt=Number(s.confirmedAt&&s.confirmedAt[did])||0,cBy=s.confirmedBy&&s.confirmedBy[did];
+    var aAt=Number(s.absentAt&&s.absentAt[did])||0,aBy=s.absentBy&&s.absentBy[did];
+    var sid=String(s.id),key="hunt:"+did+":"+sid;
+    var d=st.drink||(DRINKS||[]).find(function(x){return Number(x.id)===Number(did);});
+    var nom=d?d.name:(e.name||"");
+    if(cAt>=heure&&cBy&&cBy!==me&&cAt>=aAt){
+      e.helpStatus="ok";e.helpBy=String(cBy).slice(0,24);changed=true;
+      pendingResolve(key);
+      var txt=_tr("helpOkToast").replace("{p}",e.helpBy).replace("{d}",nom).replace("{s}",s.name);
+      if(awardOnce("huntok:"+did+":"+sid,FOREVER)){userStats.pts+=15;try{flyPts(15);}catch(err){}try{playSound("win");}catch(err){}toast(txt);}
+      pushActivity({type:"tipOk",title:_tr("helpOkTitle").replace("{d}",nom),body:txt,action:{kind:"store",storeId:sid,drinkId:did},drinkId:did,key:"tipok:"+did+":"+sid});
+    }else if(aAt>=heure&&aBy&&aBy!==me){
+      e.helpStatus="ko";e.helpBy=String(aBy).slice(0,24);changed=true;
+      pendingResolve(key);
+      var txt2=_tr("helpKoToast").replace("{p}",e.helpBy).replace("{d}",nom).replace("{s}",s.name);
+      pushActivity({type:"tipKo",title:_tr("helpKoTitle").replace("{d}",nom),body:txt2,action:{kind:"store",storeId:sid,drinkId:did},drinkId:did,key:"tipko:"+did+":"+sid});
+    }
+  });
+  if(changed){
+    try{localStorage.setItem("magoScanHist",JSON.stringify(scanHist));}catch(e){}
+    updateProfileStats();
+    if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+  }
+}
 function checkWatches(){
   var fired=false;
   drinkWatches.forEach(function(w){
@@ -11063,6 +11311,12 @@ function checkWatches(){
       w.storeId=best.store.id;
       w.storeName=best.store.name;
       w.dist=best.dist;
+      // Qui l'a signalee, et quand : c'est ce qui permet de demander une
+      // reponse (« elle y etait ? ») et de relancer le lendemain.
+      w.triggeredAt=Date.now();
+      w.by=(best.store.confirmedBy&&best.store.confirmedBy[w.id])||null;
+      if(w.by==="Explorateur")w.by=null;
+      w.verdict=null;w.reminders=0;
       fired=true;
       playSound("win");
       toast(""+w.name+" signal\u00E9e chez "+sanitize(best.store.name)+(best.dist!=null?" ("+fmtDist(best.dist)+")":"")+" !");
@@ -11076,6 +11330,7 @@ function checkWatches(){
     }
   });
   if(fired){saveWatches();try{renderAlertsCard();}catch(e){}}
+  try{_rappelsIndications();}catch(e){}
 }
 /* Depuis la notif de veille : ouvrir la fiche du magasin (position + rayon complet).
    Si le magasin n'est plus dans le rayon charge en memoire, on recharge la zone
@@ -11207,7 +11462,7 @@ function renderAlertsCard(){
     var last=(i===drinkWatches.length-1);
     var found=!!w.triggered;
     var pill=found
-      ?'<span style="display:inline-flex;align-items:center;gap:5px;max-width:100%;font-size:11px;font-weight:800;color:#15803d;background:rgba(21,128,61,.11);padding:3px 9px;border-radius:999px;overflow:hidden"><span style="width:6px;height:6px;border-radius:50%;background:#16a34a;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Trouvée'+(w.storeName?" · "+sanitize(w.storeName):"")+(w.dist!=null?" · "+fmtDist(w.dist):"")+'</span></span>'
+      ?'<span style="display:inline-flex;align-items:center;gap:5px;max-width:100%;font-size:11px;font-weight:800;color:#15803d;background:rgba(21,128,61,.11);padding:3px 9px;border-radius:999px;overflow:hidden"><span style="width:6px;height:6px;border-radius:50%;background:#16a34a;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(w.verdict==="ok"?_tr("confirmedByYou"):"Trouvée")+(w.storeName?" · "+sanitize(w.storeName):"")+(w.dist!=null?" · "+fmtDist(w.dist):"")+(w.by&&w.verdict!=="ok"?" · "+_tr("saidBy").replace("{p}",sanitize(w.by)):"")+'</span></span>'
       :'<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#b45309;background:rgba(217,119,6,.12);padding:3px 9px;border-radius:999px"><span class="mago-live-dot" style="width:6px;height:6px;border-radius:50%;background:#f59e0b;flex-shrink:0"></span>En recherche</span>';
     var lineAction=w.triggered?"openWatchStore('"+String(w.storeId).replace(/'/g,"\\'")+"',"+w.id+")":"var d=DRINKS.find(function(x){return x.id==="+w.id+"});if(d)pick(d)";
     var wd=DRINKS.find(function(x){return Number(x.id)===Number(w.id);});
@@ -12001,6 +12256,7 @@ function openStoreDetail(storeId){
   if(admBadge)admBadge.style.display=isAdmin?"inline-block":"none";
   var sdSearch=document.getElementById("sd-search");if(sdSearch)sdSearch.value="";
   renderStoreDetail();
+  try{renderIndicationBanner(s);}catch(e){}
   show("storedetail");
   playSound("pop");
 }
@@ -12212,7 +12468,7 @@ function openFridgeResults(res){
     ids.forEach(function(id){
       if(s.drinks.indexOf(id)===-1)s.drinks.push(id);
       s.confirmations[id]=(s.confirmations[id]||0)+1;
-      s.seenAt[id]=Date.now();
+      _noterObservation(s,id,true);
     });
     // Partage : la meme ecriture Firestore que l'assignation communautaire.
     var p=window.fbCommunityAddDrinks?window.fbCommunityAddDrinks(s.fbId||s.id,ids):Promise.resolve();
@@ -13005,7 +13261,7 @@ function rafaleAddCode(code){
   if(!s.drinks)s.drinks=[];
   s.drinks.push(did);
   if(!s.confirmations)s.confirmations={};
-  s.confirmations[did]=(s.confirmations[did]||0)+1;if(!s.seenAt)s.seenAt={};s.seenAt[did]=Date.now();
+  s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
   if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(function(e){console.warn(e);});
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
   window._rafaleCount=(window._rafaleCount||0)+1;
@@ -13098,7 +13354,7 @@ function addDrinkToStoreHere(d){
   var did=d.id;
   if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
   if(!s.confirmations)s.confirmations={};
-  s.confirmations[did]=(s.confirmations[did]||0)+1;if(!s.seenAt)s.seenAt={};s.seenAt[did]=Date.now();
+  s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
   if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(function(e){console.warn(e);});
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
   var key="tag:"+did+":"+String(s.id);
