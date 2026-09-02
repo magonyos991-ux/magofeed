@@ -452,6 +452,11 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         </div>
         <span style="font-size:16px;color:var(--s3)">›</span>
       </div>
+      <!-- SOUTENIR MAGOFEED : une ligne, discrete, et fermable pour de bon.
+           Remplie par renderDonCard() ; reste vide (et invisible) tant qu'aucun
+           moyen de don n'est configure, ou si la personne l'a fermee, ou si
+           elle a deja donne. -->
+      <div id="don-card" style="display:none"></div>
       <div style="padding:8px 20px 10px" class="t-section" id="t-leaderboard">Classement</div>
       <div id="leaderboard-list" style="padding:0 20px 20px"></div>
       <div style="padding:8px 20px 10px" class="t-section">Boissons favorites</div>
@@ -619,6 +624,17 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <div class="set-row" onclick="window.open('mailto:magofeed@outlook.com','_blank')" role="button" tabindex="0" aria-label="Nous écrire" onkeydown="if(event.key==='Enter'){window.open('mailto:magofeed@outlook.com','_blank');}">
           <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></div>
           <div class="set-txt"><div class="set-title">Nous écrire</div><div class="set-sub">Une question, une idée, un partenariat ?</div></div>
+          <span class="set-chev">›</span>
+        </div>
+        <!-- Le don a sa place ICI, en permanence : c'est l'endroit qu'on va
+             chercher quand on veut soutenir, et celui qui ne derange personne
+             quand on ne le veut pas. La carte du profil, elle, se ferme pour
+             toujours — cette ligne-ci reste, sinon fermer la carte reviendrait
+             a supprimer la fonction. Masquee par renderDonRow() tant qu'aucun
+             moyen de don n'est configure. -->
+        <div id="don-set-row" class="set-row" style="display:none" onclick="openDon('reglages')" role="button" tabindex="0" aria-label="Soutenir le projet" onkeydown="if(event.key==='Enter'){openDon('reglages');}">
+          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M12 20.5C7 16.5 3.5 13.2 3.5 9.3 3.5 6.6 5.6 4.5 8.2 4.5c1.6 0 3 .8 3.8 2 .8-1.2 2.2-2 3.8-2 2.6 0 4.7 2.1 4.7 4.8 0 3.9-3.5 7.2-8.5 11.2z"/></svg></div>
+          <div class="set-txt"><div class="set-title">Soutenir le projet</div><div class="set-sub" id="don-set-sub">Derrière Magofeed, une seule personne. Tu peux l'aider à continuer.</div></div>
           <span class="set-chev">›</span>
         </div>
         <div class="set-row" onclick="reportBug()" role="button" tabindex="0" aria-label="Signaler un bug" onkeydown="if(event.key==='Enter'){reportBug();}">
@@ -2508,6 +2524,35 @@ window.fbOuvrirVerification = async function(storeId) {
     return { ok: false, reason: (e && (e.message || e.code)) || "erreur" };
   }
 };
+/* ── SOUTENIR LE PROJET ────────────────────────────────────────────────────
+   Meme principe que la verification : le navigateur ne decide de rien. Il
+   demande a la Cloud Function d'ouvrir une page Stripe et suit l'adresse
+   qu'on lui rend. C'est le webhook signe par Stripe qui enregistre le don.
+   Si la fonction n'est pas deployee, on le dit franchement — l'app continue
+   de marcher, il n'y a juste pas de bouton mort a l'ecran. */
+window.fbOuvrirDon = async function(montantCentimes) {
+  var fns = getFunctions(app, "europe-west1");
+  var call = httpsCallable(fns, "ouvrirDon", { timeout: 30000 });
+  try {
+    var r = await call({ montant: Number(montantCentimes) || 0 });
+    return (r && r.data) || { ok: false, reason: "no-response" };
+  } catch (e) {
+    var code = String((e && e.code) || "");
+    if (/not-found|unimplemented|internal/.test(code)) return { ok: false, reason: "not-deployed" };
+    return { ok: false, reason: (e && (e.message || e.code)) || "erreur" };
+  }
+};
+/* « Cette personne a-t-elle deja soutenu ? » Sert a une seule chose : ne plus
+   lui redemander. Repond false a la moindre difficulte (pas de compte, regles,
+   reseau) : dans le doute on prefere afficher une carte de trop, discrete et
+   fermable, plutot que de faire echouer l'affichage du profil. */
+window.fbEstSoutien = async function() {
+  try {
+    var u = auth.currentUser; if (!u) return false;
+    var snap = await getDoc(doc(db, "soutiens", u.uid));
+    return snap.exists();
+  } catch (e) { return false; }
+};
 window.fbMesMagasins = async function() {
   var u = auth.currentUser;
   if (!u || u.isAnonymous) return [];
@@ -4301,9 +4346,9 @@ function show(s){
   _showRaw(s);
 }
 function _showRaw(s){
-  if(s==="profile"){try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}}
+  if(s==="profile"){try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}try{renderDonCard();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
-  if(s==="settings"){try{renderGeoRow();}catch(e){}}
+  if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}}
   if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{renderHunts();}catch(e){}
     // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
     // le filtre boisson de la carte (sinon la carte rouvrait toujours sur la derniere
@@ -6096,6 +6141,10 @@ function confirmFamilyFormat(family,barcode,fmt){
   // (le prochain scan du meme code sera reconnu sans OFF)
   if(!family.barcodes)family.barcodes=[];
   if(family.barcodes.indexOf(String(barcode))===-1)family.barcodes.push(String(barcode));
+  /* ET SUR LE DISQUE. Le tableau ci-dessus vit en memoire : il repart a chaque
+     rechargement, et la personne se retrouvait devant la meme question apres
+     avoir deja repondu. */
+  linkBarcodeLocally(barcode,family.id);
   if(fmt&&fmt.type){
     if(!family.formats)family.formats=[];
     var exists=family.formats.some(function(f){return f.type===fmt.type&&Number(f.cl)===Number(fmt.cl);});
@@ -6253,7 +6302,52 @@ function barcodeDisavowed(code,drinkId){
   var l=badLinks()[String(code)];
   return !!l && l.indexOf(Number(drinkId))!==-1;
 }
+/* ── LES LIENS CODE-BARRE ↔ BOISSON POSES PAR LA PERSONNE ELLE-MEME ───────
+   Quand quelqu'un dit « ce code, c'est cette boisson-la », confirmFamilyFormat
+   pousse le code dans DRINKS[].barcodes — EN MEMOIRE seulement. Le catalogue
+   n'est jamais reserialise avec ce tableau (idbSet("catalog:last") range les
+   lignes recues de Firestore, pas DRINKS). Au rechargement suivant, le lien
+   avait disparu et l'app reposait la meme question. La suggestion partait bien
+   a l'administrateur, mais la personne, elle, revoyait son probleme intact.
+   On garde donc le lien ICI, en local, a cote de son exact miroir (magoBadLinks,
+   qui memorise les liens DESAVOUES). L'un dit « si », l'autre dit « non ».
+   Ce n'est pas le catalogue partage — celui-la reste decide par l'admin a
+   partir des suggestions — c'est la memoire de cet appareil. */
+function ownLinks(){
+  try{ return JSON.parse(localStorage.getItem("magoLiensCode")||"{}")||{}; }catch(e){ return {}; }
+}
+function linkBarcodeLocally(code,drinkId){
+  var all=ownLinks();
+  all[String(code)]=Number(drinkId);
+  try{ localStorage.setItem("magoLiensCode",JSON.stringify(all)); }catch(e){}
+}
+/* La recherche « quelle boisson porte ce code ? », en un seul endroit : le
+   catalogue charge, PUIS les liens poses par la personne. Le desaveu
+   (barcodeDisavowed) l'emporte toujours sur les deux — dire « non » doit rester
+   plus fort que dire « oui ». */
+function drinkForBarcode(code){
+  var c=String(code);
+  var d=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(c)!==-1&&!barcodeDisavowed(c,x.id);});
+  if(d)return d;
+  var id=ownLinks()[c];
+  if(id==null||barcodeDisavowed(c,id))return undefined;
+  var perso=DRINKS.find(function(x){return Number(x.id)===Number(id);});
+  /* Le lien remis dans le tableau en memoire : tout le reste de l'app
+     (« nouveau format detecte », renderWhereFound, l'historique) continue de
+     lire drink.barcodes sans rien savoir de ce stockage. */
+  if(perso){ if(!perso.barcodes)perso.barcodes=[]; if(perso.barcodes.indexOf(c)===-1)perso.barcodes.push(c); }
+  return perso;
+}
 function disavowBarcode(code,drinkId){
+  /* Desavouer efface le lien inverse : sans ca, drinkForBarcode le remettrait
+     aussitot dans barcodes et le desaveu ne tiendrait pas un rechargement. */
+  try{
+    var l=ownLinks();
+    if(l[String(code)]!=null&&Number(l[String(code)])===Number(drinkId)){
+      delete l[String(code)];
+      localStorage.setItem("magoLiensCode",JSON.stringify(l));
+    }
+  }catch(e){}
   var all=badLinks(), k=String(code);
   if(!all[k])all[k]=[];
   if(all[k].indexOf(Number(drinkId))===-1)all[k].push(Number(drinkId));
@@ -6295,7 +6389,7 @@ function openBarcodeDispute(drink,code){
     '<div id="dispute-hint" style="font-size:11px;color:var(--s3);text-align:center;margin-top:6px;min-height:14px">Recherche du vrai nom\u2026</div>'+
     '<div id="dispute-new" role="button" tabindex="0" style="margin-top:8px;text-align:center;font-size:12.5px;font-weight:800;color:#fff;background:#e67e22;border-radius:12px;padding:12px;cursor:pointer;-webkit-tap-highlight-color:transparent">Ce produit n\'est pas encore dans Magofeed</div>'+
     '<div id="dispute-other" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:12px;font-weight:700;color:var(--s1);background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:11px;cursor:pointer;-webkit-tap-highlight-color:transparent">C\'est une autre boisson d\u00E9j\u00E0 au catalogue</div>'+
-    '<div id="dispute-cancel" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:11.5px;font-weight:700;color:var(--s3);padding:8px;cursor:pointer;-webkit-tap-highlight-color:transparent">Annuler \u2014 c\'\u00E9tait bien \u00E7a</div>'+
+    '<div id="dispute-cancel" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:11.5px;font-weight:700;color:var(--s2);padding:8px;cursor:pointer;-webkit-tap-highlight-color:transparent">Annuler \u2014 c\'\u00E9tait bien \u00E7a</div>'+
     /* La barre d'onglets flotte au-dessus du contenu : sans cette reserve,
        elle recouvre le dernier choix — celui qui permet de faire marche
        arriere. On reserve sa hauteur, encoche du telephone comprise. */
@@ -6363,12 +6457,52 @@ function onBarcodeDetected(r){
   // sans stopper la caméra ni afficher la fiche produit. C'est ce qui permet de
   // remplir un frigo entier en 2 minutes.
   if(window._rafaleStore){ rafaleAddCode(rawCode); return; }
+  /* Scan lance depuis « relier ce code a la boisson reconnue par l'IA ». On
+     demande confirmation malgre tout : un code-barre vaut pour UNE boisson
+     precise, et une variante (Zero, Peche, Cherry) se lit mal a l'ecran. Le
+     lien pose ici part aussi en suggestion a l'administrateur — il ne modifie
+     pas seul le catalogue partage. */
+  if(window._lienCodePour!=null){
+    var cible=DRINKS.find(function(x){return Number(x.id)===Number(window._lienCodePour);});
+    window._lienCodePour=null;
+    if(cible){
+      stopScan();playSound("beep");
+      var hint=document.getElementById("scan-hint");
+      if(hint)hint.textContent="\u2713 Code : "+rawCode;
+      var rl=document.getElementById("rescan-link");if(rl)rl.style.display="block";
+      var rs=document.getElementById("scan-result");if(rs)rs.style.display="block";
+      if(!confirm("Lier le code "+rawCode+" \u00E0 \u00AB "+cible.name+" \u00BB ?\n\nV\u00E9rifie bien la variante (Zero, P\u00EAche, Cherry...) \u2014 un code = UNE boisson pr\u00E9cise.")){
+        resetScanUI();rescan();return;
+      }
+      confirmFamilyFormat(cible,rawCode,{});
+      recordScan(rawCode,cible.name,cible.brand,cible.cat,"linked");
+      renderWhereFound({drinkId:cible.id});
+      if(rs){
+        rs.className="scan-result found";
+        rs.innerHTML='<div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#166534">\u2713 Code li\u00E9 \u00E0 '+sanitize(cible.name)+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">Ton prochain scan la reconna\u00EEtra direct \u2014 merci !</div></div>';
+      }
+      return;
+    }
+  }
   var code=rawCode;stopScan();playSound("beep");
   document.getElementById("scan-hint").textContent="✓ Code : "+code;
   var btn=document.getElementById("scan-btn"),res=document.getElementById("scan-result");
   var rescanLink=document.getElementById("rescan-link");if(rescanLink)rescanLink.style.display="block";
-  var found=DRINKS.find(function(d){return d.barcodes&&d.barcodes.indexOf(code)!==-1&&!barcodeDisavowed(code,d.id);});
-  var foundDiscovery=DISCOVERIES.find(function(d){return String(d.barcode)===String(code);});
+  var found=drinkForBarcode(code);
+  /* UNE DECOUVERTE REJETEE N'EST PLUS UNE DECOUVERTE.
+     Cette ligne cherchait dans TOUTES les decouvertes, rejetees comprises.
+     renderDiscoveries (« !d.promoted && !d.rejected »), l'ecran admin et le
+     compteur filtrent tous les deux drapeaux ; le scan etait le seul a ne pas
+     le faire. Resultat observe sur le code 4068261032907 : une decouverte que
+     l'administrateur avait rejetee le 11 juillet — et qui a donc disparu de
+     partout ailleurs — s'affichait encore en vert, avec une coche, comme une
+     trouvaille valide ; et comme elle gagnait cette branche, l'app n'allait
+     JAMAIS redemander son vrai nom a OpenFoodFacts. Rejeter ne voulait rien
+     dire ici. Une decouverte promue non plus : elle vit desormais au
+     catalogue, c'est la fiche catalogue qu'il faut montrer. */
+  var foundDiscovery=DISCOVERIES.find(function(d){
+    return String(d.barcode)===String(code)&&!d.rejected&&!d.promoted;
+  });
   res.style.display="block";
   // Nettoie les liens injectes par un scan precedent (« deja au catalogue ? »,
   // « produit different ») : sinon ils restent visibles, figes sur l'ancien
@@ -6412,6 +6546,21 @@ function onBarcodeDetected(r){
       btn.textContent="Voter pour cette découverte";btn.style.background="#e67e22";btn.style.display="block";
       btn.onclick=function(){voteDisc(foundDiscovery.id);};
     }
+    /* LA SORTIE DE SECOURS QUI MANQUAIT ICI.
+       La branche « deja au catalogue » juste au-dessus offre « Ce n'est pas ce
+       produit ? ». Celle-ci n'offrait rien — et quand la personne avait deja
+       vote, meme le bouton disparaissait : plus un seul geste possible devant
+       un nom faux. C'est exactement ce qui s'est passe avec une decouverte
+       nommee « Boisson Energisante » (le libelle generique d'OpenFoodFacts)
+       alors que la canette dit « Golden Power ». On rend donc la main. */
+    var lien=document.createElement("div");
+    lien.className="scan-injected";
+    lien.setAttribute("role","button");lien.setAttribute("tabindex","0");
+    lien.style.cssText="text-align:center;font-size:12px;font-weight:700;color:var(--s2);background:transparent;border:1.5px solid var(--border);border-radius:12px;padding:10px;cursor:pointer;margin-top:8px;-webkit-tap-highlight-color:transparent";
+    lien.textContent="Ce n'est pas le bon nom ?";
+    lien.onclick=function(){ openDiscoveryFix(foundDiscovery,code); };
+    lien.onkeydown=function(ev){if(ev.key==="Enter")lien.onclick();};
+    res.appendChild(lien);
     recordScan(code,foundDiscovery.name,foundDiscovery.brand||"",foundDiscovery.cat||"","discovery");
     renderWhereFound({discoveryId:foundDiscovery.id});
     playSound("win");toast("Déjà connu : "+foundDiscovery.name);
@@ -6425,8 +6574,8 @@ function onBarcodeDetected(r){
     btn.textContent="Ajouter aux découvertes";btn.style.background="#e67e22";btn.style.display="block";
     btn.onclick=function(){addDiscovery(cached.name,cached.brand,code,cached.cat);};
     recordScan(code,cached.name,cached.brand,cached.cat,cached.src);
-    var cachedDrink=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(String(code))!==-1&&!barcodeDisavowed(code,x.id);});
-    var cachedDisc=DISCOVERIES.find(function(x){return String(x.barcode||x.id)===String(code);});
+    var cachedDrink=drinkForBarcode(code);
+    var cachedDisc=DISCOVERIES.find(function(x){return String(x.barcode||x.id)===String(code)&&!x.rejected&&!x.promoted;});
     renderWhereFound(cachedDrink?{drinkId:cachedDrink.id}:(cachedDisc?{discoveryId:cachedDisc.id}:{pendingBarcode:code}));
     playSound("win");toast("Déjà scanné : "+cached.name);
   } else {
@@ -6595,6 +6744,55 @@ function confBornee(s,did){
    code) : l'utilisateur choisit la boisson du catalogue, le code lui est lie
    sur-le-champ en local + suggestion envoyee a l'admin (formatSuggestions,
    pipeline existant). Plus jamais de doublon Pepsi en decouverte. */
+/* « Ce n'est pas le bon nom ? » depuis une decouverte.
+   Deux issues, et aucune ne touche au document partage : renommer une
+   decouverte creee par quelqu'un d'autre est refuse par les regles (seuls son
+   auteur et l'administrateur le peuvent), et surtout la tentative ferait
+   echouer TOUT le lot d'ecriture — le vote compris, en silence. On ne propose
+   donc que ce qui marche vraiment :
+     - relier le code a une boisson du catalogue (le cas le plus frequent : le
+       produit EST deja dans Magofeed, sous son vrai nom, mais sans ce code) ;
+     - ou signaler le nom a l'administrateur, qui a le droit de le corriger. */
+function openDiscoveryFix(disc,code){
+  var res=document.getElementById("scan-result");
+  var btn=document.getElementById("scan-btn");
+  if(!res)return;
+  try{ renderWhereFound(null); }catch(e){}
+  if(btn)btn.style.display="none";
+  Array.prototype.forEach.call(document.querySelectorAll(".scan-injected"),function(n){n.remove();});
+  res.className="scan-result";
+  res.innerHTML=
+    '<div style="text-align:center;margin-bottom:9px">'+
+      '<div style="font-size:13.5px;font-weight:700;color:var(--s1)">Qu\'est-ce que tu as en main ?</div>'+
+      '<div style="font-size:11.5px;color:var(--s2);margin-top:3px;line-height:1.45">Le code '+sanitize(String(code))+' est actuellement annonc\u00E9 comme \u00AB '+sanitize(disc.name||"")+' \u00BB.</div>'+
+    '</div>'+
+    '<div id="dfix-link" role="button" tabindex="0" style="text-align:center;font-size:12.5px;font-weight:800;color:#fff;background:#166534;border-radius:12px;padding:12px;cursor:pointer;-webkit-tap-highlight-color:transparent">C\'est une boisson d\u00E9j\u00E0 au catalogue</div>'+
+    '<div id="dfix-report" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:12px;font-weight:700;color:var(--s1);background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:11px;cursor:pointer;-webkit-tap-highlight-color:transparent">Signaler ce nom \u00E0 l\'\u00E9quipe</div>'+
+    '<div id="dfix-cancel" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:11.5px;font-weight:700;color:var(--s2);padding:8px;cursor:pointer;-webkit-tap-highlight-color:transparent">Annuler \u2014 c\'\u00E9tait bien \u00E7a</div>'+
+    '<div style="height:calc(78px + env(safe-area-inset-bottom))" aria-hidden="true"></div>';
+  try{ res.scrollIntoView({block:"nearest"}); }catch(e){}
+  var bl=document.getElementById("dfix-link");
+  bl.onclick=function(){ openCatalogLinkPicker(code); };
+  bl.onkeydown=function(ev){if(ev.key==="Enter")bl.onclick();};
+  var br=document.getElementById("dfix-report");
+  br.onclick=function(){
+    var nm=prompt("Nom exact lu sur l\'\u00E9tiquette :",disc.name||"");
+    if(nm===null)return;
+    nm=nm.trim();
+    if(nm.length<2){toast("Indique le nom lu sur l\'\u00E9tiquette");playSound("err");return;}
+    /* Meme canal que « ce code pointe vers la mauvaise boisson » : un
+       signalement que l'administrateur voit, pas une ecriture sur le document
+       partage. */
+    if(window.fbReportBadBarcode)window.fbReportBadBarcode(String(code),0,String(disc.name||""),nm);
+    toast("Merci \u2014 l\'\u00E9quipe va corriger ce nom");
+    playSound("win");
+    resetScanUI();rescan();
+  };
+  br.onkeydown=function(ev){if(ev.key==="Enter")br.onclick();};
+  var bc=document.getElementById("dfix-cancel");
+  bc.onclick=function(){ resetScanUI();rescan(); };
+  bc.onkeydown=function(ev){if(ev.key==="Enter")bc.onclick();};
+}
 function openCatalogLinkPicker(code){
   var res=document.getElementById("scan-result");
   var btn=document.getElementById("scan-btn");
@@ -7737,6 +7935,231 @@ function majBlocParrainage(){
     el.style.display=bouts.length?"block":"none";
   }).catch(function(){});
 }
+/* ═════════════════════════════════════════════════════════════════════════
+   SOUTENIR MAGOFEED — le don.
+
+   TROIS REGLES, et elles expliquent tout le code qui suit.
+
+   1) Un don ne debloque RIEN. Pas de points, pas de badge, pas de fonction
+      reservee, pas de publicite retiree. Des qu'un paiement donne quelque
+      chose en echange, ce n'est plus un don mais un achat — et un achat dans
+      une app repond aux regles d'Apple et de Google, pas aux tiennes. Ici on
+      demande un coup de main, on ne vend rien.
+
+   2) Ca se ferme, et ca ne revient pas. La carte du profil porte une croix.
+      Une fois fermee, elle ne se reaffiche jamais : ni au bout de trois jours,
+      ni « juste une fois pour rappeler ». La ligne discrete des Reglages, elle,
+      reste — sinon fermer la carte reviendrait a supprimer la fonction, et la
+      personne qui change d'avis dans six mois ne saurait plus ou aller.
+
+   3) Rien ne s'affiche tant que rien n'est branche. Tant que DON_LIEN est vide
+      et DON_FONCTION a false, ni la carte ni la ligne n'existent a l'ecran.
+      Aucun bouton mort. C'est la meme regle que pour la verification des
+      commercants.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+/* ─── LES DEUX SEULES LIGNES A REMPLIR ─────────────────────────────────────
+   VOIE 1 (cinq minutes, aucun deploiement) : cree une page de don chez qui tu
+   veux — Stripe Payment Link, Ko-fi, Liberapay, Buy Me a Coffee — et colle son
+   adresse ici. C'est tout : la carte et la ligne apparaissent, et le bouton
+   ouvre ta page. Tu peux recevoir ton premier don aujourd'hui.
+       var DON_LIEN="https://ko-fi.com/tonpseudo";
+   VOIE 2 (plus tard) : le paiement DANS l'app, avec le choix du montant sur
+   place. Demande de deployer functions-a-deployer/dons.js et un compte Stripe
+   a ton nom (donc un numero d'entreprise). Le jour ou c'est fait, passe
+   DON_FONCTION a true — et laisse DON_LIEN rempli, il sert de secours si la
+   fonction ne repond pas.
+   ───────────────────────────────────────────────────────────────────────── */
+var DON_LIEN="";
+var DON_FONCTION=false;
+
+/* Les montants proposes. Aucun n'est mis en avant, et AUCUN N'EST ECRIT DANS
+   LE TEXTE de la feuille : « meme 0,50 € » ou « a partir de 1 € » transforme
+   une demande de coup de main en tarif, et un tarif, ca se compare et ca se
+   refuse. Le texte parle de la personne derriere l'app ; les chiffres restent
+   sur les boutons, ou ils ne font que repondre a « combien, alors ? ».
+   50 centimes reste propose parce que c'est le minimum que Stripe accepte en
+   euros, et parce que personne ne doit avoir honte de son montant — mais on ne
+   le brandit nulle part. Le serveur revalide cette liste de son cote
+   (MONTANTS_AUTORISES dans dons.js) : ce qui est ecrit ici n'est qu'un
+   affichage. */
+var DON_MONTANTS=[
+  {c:50,  t:"0,50 €"},
+  {c:100, t:"1 €"},
+  {c:200, t:"2 €"},
+  {c:500, t:"5 €"}
+];
+
+function donPossible(){ return !!DON_LIEN||DON_FONCTION; }
+function donMasque(){ try{return localStorage.getItem("magoDonMasque")==="1";}catch(e){return false;} }
+function donDejaFait(){ try{return localStorage.getItem("magoDonFait")==="1";}catch(e){return false;} }
+
+/* La ligne des Reglages : presente des qu'un moyen de don existe, et pour
+   toujours. Elle ne se ferme pas — c'est le point de repere. */
+function renderDonRow(){
+  var r=document.getElementById("don-set-row"); if(!r)return;
+  r.style.display=donPossible()?"":"none";
+  if(!donPossible())return;
+  var sub=document.getElementById("don-set-sub");
+  if(sub&&donDejaFait())sub.textContent="Merci — tu as déjà donné un coup de main. Tu peux recommencer, mais rien ne t'y oblige.";
+}
+
+/* La carte du profil : une ligne, une phrase, une croix. Elle disparait pour
+   de bon des qu'on la ferme, et aussi des qu'on a donne. */
+function renderDonCard(){
+  var el=document.getElementById("don-card"); if(!el)return;
+  if(!donPossible()||donMasque()||donDejaFait()){ el.style.display="none"; el.innerHTML=""; return; }
+  if(el.innerHTML){ el.style.display=""; return; }   // deja posee : on n'y retouche pas
+  el.style.display="";
+  el.innerHTML=
+    '<div style="display:flex;align-items:center;gap:11px;margin:2px 20px 8px;padding:11px 12px 11px 14px;background:var(--bg2);border:1.5px solid var(--border);border-radius:14px">'+
+      '<span style="line-height:0;color:var(--don-vert);flex-shrink:0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5C7 16.5 3.5 13.2 3.5 9.3 3.5 6.6 5.6 4.5 8.2 4.5c1.6 0 3 .8 3.8 2 .8-1.2 2.2-2 3.8-2 2.6 0 4.7 2.1 4.7 4.8 0 3.9-3.5 7.2-8.5 11.2z"/></svg></span>'+
+      '<div role="button" tabindex="0" aria-label="Soutenir le projet" onclick="openDon(\'profil\')" onkeydown="if(event.key===\'Enter\'){openDon(\'profil\');}" style="flex:1;min-width:0;cursor:pointer">'+
+        '<div style="font-size:12.5px;font-weight:800;color:var(--s1)">Soutenir le projet</div>'+
+        '<div style="font-size:11px;font-weight:600;color:var(--s2);margin-top:1px">Derrière Magofeed, une seule personne. Tu peux l’aider à continuer.</div>'+
+      '</div>'+
+      /* La croix : 34 px de cible tactile, un aria-label explicite, et elle
+         ferme pour toujours. Une croix qui ne ferme qu'a moitie est pire que
+         pas de croix du tout. */
+      '<span role="button" tabindex="0" aria-label="Masquer définitivement" onclick="fermerDonCard(event)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();fermerDonCard(event);}" style="flex-shrink:0;width:34px;height:34px;margin:-6px -4px -6px 0;display:flex;align-items:center;justify-content:center;color:var(--s2);cursor:pointer">'+
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>'+
+      '</span>'+
+    '</div>';
+}
+function fermerDonCard(e){
+  if(e){try{e.stopPropagation();}catch(err){}}
+  try{localStorage.setItem("magoDonMasque","1");}catch(err){}
+  var el=document.getElementById("don-card");
+  if(el){el.style.display="none";el.innerHTML="";}
+  try{playSound("pop");}catch(err){}
+  /* On dit ou ca reste. Sans cette phrase, fermer la carte donne l'impression
+     d'avoir supprime la possibilite de donner. */
+  toast("C’est fermé, ça ne reviendra pas · Réglages › Communauté si tu changes d’avis");
+}
+
+/* La feuille de don. Elle dit ce que l'argent paie et ce qu'il ne donne pas.
+   Rien n'est decide ici : soit on ouvre une page de don externe, soit on
+   demande a la Cloud Function d'ouvrir une page Stripe. Dans les deux cas
+   l'argent ne passe ni par l'app ni par un serveur de Magofeed. */
+function openDon(origine){
+  if(!donPossible()){toast("Le don n’est pas encore branché");try{playSound("err");}catch(e){}return;}
+  var old=document.getElementById("don-ov"); if(old)old.remove();
+  var boutons=DON_FONCTION
+    ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:14px 0 4px">'+
+        DON_MONTANTS.map(function(m,i){
+          /* AUCUN montant mis en avant. Les quatre boutons sont identiques :
+             en colorer un, c'est designer le « bon » choix, donc pousser. Ici
+             on propose, on ne suggere pas. */
+          return '<button class="don-montant" onclick="donChoisir('+m.c+')" style="min-height:52px;padding:13px 10px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:15px;font-weight:800;font-family:inherit;cursor:pointer">'+m.t+'</button>';
+        }).join("")+
+      '</div>'
+    : '<button class="don-montant" onclick="donChoisir(0)" style="width:100%;min-height:48px;margin:14px 0 4px;padding:14px;border-radius:15px;border:none;background:#0e7a4d;color:#fff;font-size:15px;font-weight:800;font-family:inherit;cursor:pointer">Donner un coup de main</button>';
+  var ov=document.createElement("div");
+  ov.id="don-ov";
+  ov.className="claim-ov";
+  ov.innerHTML=
+    '<div class="claim-card" role="dialog" aria-modal="true" aria-label="Soutenir le projet">'+
+      '<div class="claim-grip"></div>'+
+      '<div class="claim-badge" style="background:#0e7a4d">'+
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M12 20.5C7 16.5 3.5 13.2 3.5 9.3 3.5 6.6 5.6 4.5 8.2 4.5c1.6 0 3 .8 3.8 2 .8-1.2 2.2-2 3.8-2 2.6 0 4.7 2.1 4.7 4.8 0 3.9-3.5 7.2-8.5 11.2z"/></svg>'+
+        'Soutenir'+
+      '</div>'+
+      '<div class="claim-title">Derrière Magofeed, une seule personne</div>'+
+      '<div class="claim-lead">Pas d’entreprise, pas d’équipe, pas d’investisseur. Quelqu’un qui construit l’app sur son temps libre, et qui en paie l’hébergement de sa poche.</div>'+
+      '<ul class="claim-list">'+
+        '<li>Ton geste paie <b>les serveurs</b> : la carte, la recherche, les alertes.</li>'+
+        '<li>Il paie <b>le temps</b> passé à corriger et à ajouter ce que vous demandez.</li>'+
+        '<li>Et il dit quelque chose qu’aucun chiffre ne dit : <b>que ça sert à quelqu’un</b>.</li>'+
+      '</ul>'+
+      /* La ligne la plus importante de la feuille. On ne vend rien, et on le
+         dit avant de demander l'argent, pas apres. */
+      '<div class="claim-honest">Donne ce que tu veux, ou ne donne rien : l’app ne changera pas d’un pixel. Un don ne débloque ni points, ni badge, ni fonction réservée — tout reste accessible à tout le monde, gratuitement. C’est un coup de main, pas un achat.</div>'+
+      boutons+
+      '<div class="claim-lab" style="text-align:center;margin:12px 0 0;font-weight:600">Le paiement se fait sur une page sécurisée. Magofeed ne voit jamais ta carte.</div>'+
+      '<button class="claim-cancel" onclick="closeDon()">Une autre fois</button>'+
+    '</div>';
+  ov.addEventListener("click",function(e){ if(e.target===ov)closeDon(); });
+  document.body.appendChild(ov);
+  try{document.body.classList.add("sheet-open");}catch(e){}
+  requestAnimationFrame(function(){ov.classList.add("in");});
+  try{playSound("pop");}catch(e){}
+}
+function closeDon(){
+  var ov=document.getElementById("don-ov"); if(!ov)return;
+  ov.classList.remove("in");
+  try{document.body.classList.remove("sheet-open");}catch(e){}
+  setTimeout(function(){ if(ov.parentNode)ov.remove(); },240);
+}
+/* centimes = 0 : voie « page de don externe », il n'y a pas de montant a
+   choisir ici, la page s'en charge. */
+function donChoisir(centimes){
+  var btns=document.querySelectorAll("#don-ov .don-montant");
+  var ouvrirLien=function(){
+    if(!DON_LIEN)return false;
+    /* noopener : la page ouverte ne doit pas pouvoir manipuler la notre. */
+    try{window.open(DON_LIEN,"_blank","noopener");}catch(e){location.href=DON_LIEN;}
+    closeDon();
+    return true;
+  };
+  if(!centimes||!DON_FONCTION||!window.fbOuvrirDon){
+    if(ouvrirLien())return;
+    toast("Le don n’est pas encore branché");try{playSound("err");}catch(e){}
+    return;
+  }
+  btns.forEach(function(b){b.disabled=true;b.style.opacity=".6";});
+  var rendre=function(msg){
+    try{playSound("err");}catch(e){}
+    toast(msg);
+    btns.forEach(function(b){b.disabled=false;b.style.opacity="";});
+  };
+  window.fbOuvrirDon(centimes).then(function(r){
+    if(r&&r.ok&&r.url){ location.href=r.url; return; }
+    var why=(r&&r.reason)||"erreur";
+    /* La fonction n'est pas deployee : si une page de don externe existe, on
+       bascule dessus sans rien dire — la personne voulait donner, pas
+       apprendre l'etat de notre infrastructure. */
+    if(why==="not-deployed"){
+      if(ouvrirLien())return;
+      return rendre("Le don n’est pas encore actif — reviens bientôt");
+    }
+    rendre("Paiement impossible : "+String(why).slice(0,80));
+  }).catch(function(e){ rendre("Paiement impossible ("+((e&&e.message)||"erreur")+")"); });
+}
+
+/* Retour de la page de paiement. « ?don=merci » ne PROUVE rien — cette adresse
+   se tape a la main — et c'est pour ca qu'elle n'ecrit rien d'important : elle
+   ne fait que dire merci et ranger la carte. Le vrai enregistrement du don,
+   c'est le webhook signe par Stripe qui le fait, cote serveur. */
+function donRetour(){
+  var m=/[?&]don=(merci|annule)/.exec(location.search||"");
+  if(m){
+    if(m[1]==="merci"){
+      try{localStorage.setItem("magoDonFait","1");}catch(e){}
+      setTimeout(function(){toast("Merci. Sincèrement — ça compte plus que tu ne crois.");},900);
+      try{playSound("win");}catch(e){}
+    }
+    /* On nettoie l'adresse : sans ca, un rechargement redirait merci, et le
+       lien partage a un ami afficherait un remerciement qu'il n'a pas merite.
+       On retire UNIQUEMENT « don » : effacer toute la requete emporterait le
+       code de parrainage (« ?p=... ») de quelqu'un arrive par un lien. */
+    try{
+      var reste=(location.search||"").replace(/^\?/,"").split("&")
+        .filter(function(x){return x&&!/^don=/.test(x);}).join("&");
+      history.replaceState(null,"",location.pathname+(reste?"?"+reste:"")+location.hash);
+    }catch(e){}
+  }
+  /* Le serveur a le dernier mot : quelqu'un qui a donne depuis un autre
+     telephone ne doit pas revoir la carte ici. */
+  if(window.fbEstSoutien){
+    window.fbEstSoutien().then(function(oui){
+      if(!oui)return;
+      try{localStorage.setItem("magoDonFait","1");}catch(e){}
+      try{renderDonCard();renderDonRow();}catch(e){}
+    }).catch(function(){});
+  }
+  try{renderDonCard();renderDonRow();}catch(e){}
+}
+
 /* \u2500\u2500 Pastille MISSIONS flottante et deplacable \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
    Acces permanent aux missions/chasses depuis n'importe quel ecran. Badge =
    missions du jour a finir + chasses actives autour. Deplacable a la verticale
@@ -13586,6 +14009,42 @@ function _aiStatus(kind,html){
   el.innerHTML=html;
 }
 function _aiStatusHide(){var el=document.getElementById("propose-ai-status");if(el){el.style.display="none";el.innerHTML="";}}
+/* ── RELIER LE CODE-BARRE A LA BOISSON QUE L'IA VIENT DE RECONNAITRE ──────
+   La photo et le scan ne se parlaient pas. L'IA sait dire « c'est un Golden
+   Power, il est deja dans Magofeed » — elle tient meme l'identifiant exact de
+   la fiche — mais le code-barre n'entrait nulle part dans ce flux. Resultat :
+   on rescanne la canette juste apres et l'app ne fait aucun lien.
+   Pire, une fiche NEE d'une proposition par photo n'a jamais de code-barre :
+   promoteDiscovery n'inscrit le code que s'il est numerique, et une proposition
+   par photo porte un identifiant synthetique « m1783615360754 ». La fiche
+   arrive donc au catalogue avec barcodes:[] — introuvable au scan, a vie.
+   On propose donc le geste manquant, et seulement quand il sert : la fiche
+   n'a pas encore de code. */
+function offreLienCode(drink){
+  if(!drink||(drink.barcodes&&drink.barcodes.length))return "";
+  return '<span style="display:block;margin-top:9px">'+
+    '<span id="ai-lier-code" role="button" tabindex="0" style="display:block;text-align:center;padding:9px 10px;border-radius:10px;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer">'+
+    'Scanner son code-barre pour le relier</span>'+
+    '<span style="display:block;font-size:10.5px;color:var(--s2);margin-top:5px;line-height:1.4">'+
+    'Elle n\u2019a pas encore de code : sans lui, un scan ne la retrouvera jamais.</span></span>';
+}
+function cablerLienCode(drink){
+  var b=document.getElementById("ai-lier-code"); if(!b)return;
+  var go=function(){
+    /* On memorise la cible, on ferme la feuille et on ouvre le scanner. La
+       lecture suivante ira droit sur cette boisson (voir onBarcodeDetected). */
+    window._lienCodePour=drink.id;
+    closeProposeForm();
+    show("scan");
+    try{ resetScanUI(); }catch(e){}
+    var h=document.getElementById("scan-hint");
+    if(h)h.textContent="Vise le code-barre de "+drink.name;
+    try{ startScan(); }catch(e){}
+    playSound("pop");
+  };
+  b.onclick=go;
+  b.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();go();}};
+}
 function analyzeProposePhoto(data){
   window._aiPropose=null;window._aiBlockAlcohol=false;
   var btn0=document.getElementById("propose-send");
@@ -13621,7 +14080,8 @@ function analyzeProposePhoto(data){
     try{ proche=trouverBoissonProche(r.name,r.brand); }catch(e){}
     if(proche&&proche.distance<=0&&r.confidence>=70){
       window._aiPropose={existingId:proche.drink.id};
-      _aiStatus("ok","<span>"+icoOk(16)+"</span><span><b>"+sanitize(proche.drink.name)+"</b> est déjà dans Magofeed ! Appuie sur Envoyer pour ouvrir sa fiche.</span>");
+      _aiStatus("ok","<span>"+icoOk(16)+"</span><span><b>"+sanitize(proche.drink.name)+"</b> est déjà dans Magofeed ! Appuie sur Envoyer pour ouvrir sa fiche."+offreLienCode(proche.drink)+"</span>");
+      cablerLienCode(proche.drink);
       return;
     }
     if(proche&&r.confidence>=55){
@@ -13638,7 +14098,8 @@ function analyzeProposePhoto(data){
         window._aiPropose={existingId:proche.drink.id};
         var ne=document.getElementById("propose-name");if(ne)ne.value=proche.drink.name;
         var be=document.getElementById("propose-brand");if(be&&proche.drink.brand)be.value=proche.drink.brand;
-        _aiStatus("ok","<span>"+icoOk(16)+"</span><span><b>"+pn+"</b> \u2014 appuie sur Envoyer pour ouvrir sa fiche.</span>");
+        _aiStatus("ok","<span>"+icoOk(16)+"</span><span><b>"+pn+"</b> \u2014 appuie sur Envoyer pour ouvrir sa fiche."+offreLienCode(proche.drink)+"</span>");
+        cablerLienCode(proche.drink);
       };
       if(non)non.onclick=function(){
         /* On repart du nom lu par l'IA, comme si aucun rapprochement n'avait
@@ -14474,7 +14935,7 @@ function openExploreMap(opts){
         '<div id="explore-search-row" style="display:flex;margin-top:9px;gap:8px;align-items:center">'+
         '<div style="flex:1;position:relative;display:flex;align-items:center">'+
           '<svg style="position:absolute;left:12px;pointer-events:none;color:var(--s2);opacity:.75" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16.2 16.2 21 21"/></svg>'+
-          '<input id="explore-city-q" autocomplete="off" placeholder="Cherche une ville, un pays\u2026 New York, Japon" style="width:100%;padding:11px 34px 11px 34px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-family:inherit;outline:none">'+
+          '<input id="explore-city-q" autocomplete="off" placeholder="Cherche un magasin, une enseigne, une ville\u2026" style="width:100%;padding:11px 34px 11px 34px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-family:inherit;outline:none">'+
           '<span id="explore-city-clear" role="button" tabindex="0" aria-label="Effacer la recherche" style="display:none;position:absolute;right:6px;width:28px;height:28px;border-radius:50%;background:var(--bg3);color:var(--s2);font-size:12px;align-items:center;justify-content:center;cursor:pointer">\u2715</span>'+
         '</div>'+
         '<button id="explore-city-go" aria-label="Chercher" style="width:42px;height:42px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16.2 16.2 21 21"/></svg></button>'+
@@ -14491,10 +14952,22 @@ function openExploreMap(opts){
       '<div id="explore-status" style="position:absolute;bottom:calc(92px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--app-bg);border:1.5px solid var(--border);border-radius:999px;padding:8px 16px;font-size:12px;font-weight:700;color:var(--s1);box-shadow:0 4px 14px rgba(0,0,0,.18);white-space:nowrap;z-index:1100">Chargement\u2026</div>'+
       '<div id="explore-sheet"><div id="explore-sheet-head" role="button" tabindex="0" aria-label="Glisser pour ouvrir ou fermer la liste des magasins" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();exploreToggleSheet();}"><div id="explore-sheet-grip"></div><div style="display:flex;align-items:center;justify-content:space-between"><div id="explore-sheet-title" style="font-size:13.5px;font-weight:800;color:var(--s1)">Magasins autour de toi</div><div id="explore-sheet-chev" style="font-size:12px;font-weight:700;color:var(--s2);white-space:nowrap">Voir la liste \u25b2</div></div></div><div id="explore-sheet-list"></div></div>';
     document.body.appendChild(host);
-    host.querySelector("#explore-city-go").onclick=function(){exploreGoCity();};
+    /* Le bouton loupe et la touche Entree cherchent d'abord un MAGASIN — c'est
+       ce que la personne tape le plus souvent, et c'est gratuit (local). On ne
+       part interroger le service de lieux que si aucun magasin ne repond. */
+    host.querySelector("#explore-city-go").onclick=function(){
+      var q=(document.getElementById("explore-city-q")||{}).value||"";
+      if(exploreCadrerMagasins(q))return;
+      exploreGoCity();
+    };
     var _cq=host.querySelector("#explore-city-q");
     var _cclr=host.querySelector("#explore-city-clear");
-    _cq.addEventListener("keydown",function(ev){if(ev.key==="Enter"){ev.preventDefault();exploreGoCity();_cq.blur();}});
+    _cq.addEventListener("keydown",function(ev){
+      if(ev.key!=="Enter")return;
+      ev.preventDefault();
+      if(exploreCadrerMagasins(_cq.value))return;   // un magasin repond : on y va
+      exploreGoCity();_cq.blur();
+    });
     // Suggestions en direct : on interroge apres une pause de frappe (le service
     // de geocodage OpenStreetMap demande de ne pas le marteler).
     _cq.addEventListener("input",function(){
@@ -15305,10 +15778,13 @@ function exploreCloseCityPanel(){
    magasins deja charges AVANT d'interroger le service de geocodage : c'est
    instantane, ca ne coute aucune requete, et c'est ce qu'on cherche neuf fois
    sur dix. Les villes restent proposees en dessous. */
-function exploreSuggereMagasins(q){
-  var box=document.getElementById("explore-city-results");if(!box)return 0;
+/* Les magasins qui repondent au texte tape, les plus proches d'abord. Extrait
+   de exploreSuggereMagasins pour que la liste de suggestions ET le cadrage de
+   la carte travaillent sur exactement le meme ensemble : deux definitions du
+   mot « correspondre » finissent toujours par diverger. */
+function magasinsCorrespondants(q){
   var nq=normTxt((q||"").trim());
-  if(nq.length<2)return 0;
+  if(nq.length<2)return [];
   var debut=[],dedans=[];
   (STORES||[]).forEach(function(st){
     if(typeof st.lat!=="number")return;
@@ -15318,7 +15794,39 @@ function exploreSuggereMagasins(q){
   });
   var parDist=function(a,b){return (a.dist==null?9e9:a.dist)-(b.dist==null?9e9:b.dist);};
   debut.sort(parDist);dedans.sort(parDist);
-  var hits=debut.concat(dedans).slice(0,6);
+  return debut.concat(dedans);
+}
+/* VALIDER UNE RECHERCHE DE MAGASIN : la carte VA voir, elle ne masque rien.
+   La tentation etait de filtrer les pins sur le texte tape. C'est un piege :
+   le filtre ne montre que ce qui est deja dans le cadre, donc chercher « Aldi »
+   quand le premier Aldi est a trois rues d'ici VIDE la carte et affiche
+   « Aucun magasin dans cette zone » au-dessus d'une zone qui en contient 22.
+   Un mensonge pire que le bug. Et taper « Bruxelles » filtrerait aussi, parce
+   que les noms viennent d'OpenStreetMap et disent « Carrefour Express
+   Bruxelles-Midi ».
+   Ce que la personne veut en tapant « Aldi », ce n'est pas cacher les autres :
+   c'est trouver les Aldi et y aller. On cadre donc la carte sur eux. */
+function exploreCadrerMagasins(q){
+  var hits=magasinsCorrespondants(q);
+  if(!hits.length||!window.exploreMap)return 0;
+  var proches=hits.slice(0,8);
+  try{
+    if(proches.length===1){
+      exploreMap.setView([proches[0].lat,proches[0].lng],16);
+    }else{
+      var b=L.latLngBounds(proches.map(function(s){return [s.lat,s.lng];}));
+      exploreMap.fitBounds(b,{padding:[60,60],maxZoom:15});
+    }
+  }catch(e){ return 0; }
+  var box=document.getElementById("explore-city-results");if(box)box.innerHTML="";
+  var inp=document.getElementById("explore-city-q");if(inp)inp.blur();
+  toast(hits.length===1?("1 magasin trouv\u00E9 \u00B7 "+(proches[0].name||"")):(hits.length+" magasins trouv\u00E9s \u00B7 la carte s\u2019y d\u00E9place"));
+  playSound("pop");
+  return hits.length;
+}
+function exploreSuggereMagasins(q){
+  var box=document.getElementById("explore-city-results");if(!box)return 0;
+  var hits=magasinsCorrespondants(q).slice(0,6);
   if(!hits.length)return 0;
   var wrap=document.createElement("div");
   wrap.style.cssText="background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);margin-bottom:8px";
@@ -19070,6 +19578,12 @@ try{
     toast("Magofeed installé !");
   });
   registerServiceWorker();
+  /* Retour d'une page de don, et etat du soutien cote serveur. HORS de
+     registerServiceWorker : celle-ci abandonne des la premiere ligne quand
+     le navigateur n'a pas de service worker, et le merci ne serait jamais
+     dit. Le delai laisse le temps a l'authentification de s'etablir, sinon
+     fbEstSoutien n'a personne a regarder. */
+  setTimeout(function(){try{donRetour();}catch(e){}},3000);
   enhanceA11y();
   // Le reset dev de l'onboarding (removeItem magoob/magotuto a chaque ouverture) a ete retire :
   // en production il relançait l'onboarding a chaque visite. Pour le revoir en dev,
