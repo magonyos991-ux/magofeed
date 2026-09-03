@@ -601,16 +601,34 @@ service cloud.firestore {
        - l'identifiant etant libre, la boucle etait illimitee.
        Desormais : le document porte le numero de la boisson, chacun ne touche
        que SA propre entree, et _lastPush est hors de portee du client. */
+    /* La date d'inscription d'un chercheur (seekers.{uid}.at) est FIGEE une
+       fois posee : c'est elle qui prouve qu'il chassait AVANT qu'un aidant
+       reponde (voir crediterEntraide dans points-et-parrainage.js). Le client
+       ne rebouge que lat/lng quand il se repositionne. Un chercheur qui
+       apparait doit avoir un `at` numerique ; en quittant (null) puis en
+       revenant, il repart avec une nouvelle date : c'est voulu. */
+    function chercheurStable() {
+      let uid = request.auth.uid;
+      let avant = resource.data.seekers;
+      let apres = request.resource.data.seekers;
+      let existait = (uid in avant) && avant[uid] != null;
+      return !(uid in apres) || apres[uid] == null
+        || (existait
+            ? (('at' in apres[uid]) && apres[uid].at == avant[uid].at)
+            : (('at' in apres[uid]) && apres[uid].at is number));
+    }
     match /hunts/{drinkId} {
       allow read: if true;
       allow create: if isSignedIn()
         && drinkId == string(request.resource.data.drinkId)
         && request.resource.data.seekers.keys().hasOnly([request.auth.uid])
+        && request.resource.data.seekers[request.auth.uid].at is number
         && !('_lastPush' in request.resource.data);
       allow update: if isSignedIn()
         && request.resource.data.seekers.diff(resource.data.seekers)
              .affectedKeys().hasOnly([request.auth.uid])
-        && !changed().hasAny(['_lastPush']);
+        && !changed().hasAny(['_lastPush'])
+        && chercheurStable();
       allow delete: if isAdmin();
     }
 

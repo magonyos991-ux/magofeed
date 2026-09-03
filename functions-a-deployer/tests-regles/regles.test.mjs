@@ -166,6 +166,23 @@ await doit('bloque : eteindre les alertes d une boisson (_lastPush)',
   ()=>assertFails(updateDoc(doc(m,'hunts','7'),{_lastPush:Date.now()+1e12})));
 await doit('bloque : retirer le chercheur d un autre',
   ()=>assertFails(updateDoc(doc(m,'hunts','7'),{['seekers.'+ALICE]:null})));
+/* La date d'inscription (at) est figee : elle prouve qu'on chassait AVANT
+   qu'un aidant reponde. Se repositionner ne touche que lat/lng. */
+await doit('legitime : se repositionner sans toucher a sa date d inscription',
+  ()=>assertSucceeds(updateDoc(doc(a,'hunts','7'),
+      {['seekers.'+ALICE+'.lat']:50.9,['seekers.'+ALICE+'.lng']:4.4})));
+await doit('bloque : reecrire sa date d inscription (antidatage / rajeunissement)',
+  ()=>assertFails(updateDoc(doc(a,'hunts','7'),{['seekers.'+ALICE]:{lat:50.8,lng:4.3,at:999}})));
+await doit('bloque : apparaitre comme chercheur sans date d inscription',
+  ()=>assertFails(updateDoc(doc(m,'hunts','99'),{['seekers.'+ALICE+'.lat']:50.8})));
+await doit('bloque : creer une chasse en s inscrivant sans date',
+  ()=>assertFails(setDoc(doc(m,'hunts','101'),
+      {drinkId:101,drinkName:'x',seekers:{[MALLORY]:{lat:50.8,lng:4.3}}})));
+/* La provenance d'un rapport voyage dans note ("source|distance") : le
+   serveur ne credite rien a un rapport fait de loin. */
+await doit('legitime : rapport stock avec provenance dans note',
+  ()=>assertSucceeds(addDoc(collection(a,'reports'),
+      {by:ALICE,byPseudo:'Alice',type:'stock',storeId:'s1',drinkId:1,note:'chasse-vue|42',createdAt:serverTimestamp()})));
 
 await doit('legitime : Alice cree sa veille',
   ()=>assertSucceeds(setDoc(doc(a,'watches',ALICE+'_424'),

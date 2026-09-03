@@ -64,7 +64,8 @@ const BAREME_REPORT = {
   contrefacon: 3,
   codebarre: 2,    // un code-barres conteste
   badstore: 2,     // un faux magasin signale
-  nouveau: 2
+  nouveau: 2,
+  prix: 2          // un prix releve en rayon (note = le prix)
 };
 const POINTS_DECOUVERTE = 20;   // proposer une decouverte
 const POINTS_PROMOTION = 50;    // elle entre au catalogue
@@ -147,6 +148,11 @@ exports.crediterContribution = onDocumentCreated(
     if (rep.counted === true) return;              // deja passe
     const montant = BAREME_REPORT[rep.type] || 0;
     if (!montant || !rep.by) { await snap.ref.set({ counted: true, credited: 0 }, { merge: true }); return; }
+    // Un stock ou une rupture declares de loin (ou sans position) ne rapportent rien.
+    if ((rep.type === "stock" || rep.type === "rupture") && !surPlace(rep)) {
+      await snap.ref.set({ counted: true, credited: 0, raison: "trop loin" }, { merge: true });
+      return;
+    }
     if (await dejaCompteAujourdhui(rep, snap.id)) {
       await snap.ref.set({ counted: true, credited: 0, raison: "rejeu" }, { merge: true });
       return;
@@ -155,6 +161,95 @@ exports.crediterContribution = onDocumentCreated(
     await snap.ref.set({ counted: true, credited: verse }, { merge: true });
     await recalculerScore(rep.by);
     await evaluerParrainage(rep.by);
+  }
+);
+
+/* ── ENTRAIDE : « je l'ai vue » pour une chasse, confirmee par un chercheur ──
+   L'aidant rattache une boisson chassee a un magasin : son rapport `stock`
+   est marque hunt:true si, a ce moment, quelqu'un d'AUTRE chassait cette
+   boisson depuis avant (hunts.seekers.{uid}.at < createdAt — `at` est fige
+   par les regles). Quand un de ces chercheurs confirme a son tour le meme
+   (magasin, boisson) — un rapport `stock` a lui, posterieur — l'aidant
+   touche +15, une seule fois par rapport aide (huntCredited), avec un
+   plafond par paire (aidant, chercheur) sur 30 jours. Un « pas la » ne paie
+   rien de plus a personne : la rupture est deja un rapport ordinaire, et
+   deux ruptures distinctes sanctionnent l'aidant (anti-farm.js).
+   Index composites a creer (la console les propose au premier appel) :
+   reports(storeId, createdAt) et reports(by, huntCreditedBy). */
+const POINTS_ENTRAIDE = 15;
+const POINTS_ENTRAIDE_LOIN = 5;   // le chercheur a confirme sans etre sur place
+const ENTRAIDE_FENETRE_J = 14;
+const ENTRAIDE_MAX_PAIRE_30J = 3;
+const CHERCHEUR_AGE_MIN_J = 2;    // un compte cree hier ne valide rien
+
+/* Provenance d'un rapport : note = "source|distance en m" (voir _provenance
+   dans index.html). Un rapport fait de loin, ou sans position, reste une trace
+   utile mais ne vaut aucun point : personne ne voit un rayon depuis son canape. */
+const DIST_MAX_M = 500;
+function distanceRapport(rep) {
+  const m = /\|(\d+)$/.exec(String(rep.note || ""));
+  return m ? Number(m[1]) : null;                 // null = inconnue
+}
+function surPlace(rep) { const d = distanceRapport(rep); return d != null && d <= DIST_MAX_M; }
+
+exports.crediterEntraide = onDocumentCreated(
+  { document: "reports/{id}", region: REGION },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const rep = snap.data() || {};
+    if (rep.type !== "stock" || !rep.by || !rep.storeId || rep.drinkId == null) return;
+    const creeA = rep.createdAt ? rep.createdAt.toMillis() : Date.now();
+    const hunt = await db.doc(`hunts/${String(rep.drinkId)}`).get();
+    const seekers = hunt.exists ? ((hunt.data() || {}).seekers || {}) : {};
+
+    // 1) Ce rapport repond-il a une chasse ouverte par quelqu'un d'autre ?
+    const autres = Object.keys(seekers).filter((u) =>
+      seekers[u] && u !== rep.by && typeof seekers[u].at === "number" && seekers[u].at < creeA);
+    if (autres.length) await snap.ref.set({ hunt: true }, { merge: true });
+
+    // 2) Ce rapport confirme-t-il l'aide de quelqu'un d'autre ? Il faut que
+    //    son auteur soit lui-meme chercheur de cette boisson, inscrit avant
+    //    le rapport de l'aidant.
+    const moi = seekers[rep.by];
+    if (!moi || typeof moi.at !== "number") return;
+    // Un chercheur trop neuf ne valide rien : c'est le compte jetable du duo.
+    const u = await db.doc(`users/${rep.by}`).get();
+    const cree = (u.exists && u.data().createdAt && u.data().createdAt.toMillis) ? u.data().createdAt.toMillis() : 0;
+    if (cree && Date.now() - cree < CHERCHEUR_AGE_MIN_J * 86400000) return;
+    const depuis = Timestamp.fromMillis(creeA - ENTRAIDE_FENETRE_J * 86400000);
+    const q = await db.collection("reports")
+      .where("storeId", "==", rep.storeId)
+      .where("createdAt", ">=", depuis)
+      .limit(60).get();
+    const aides = q.docs
+      .map((d) => Object.assign({ id: d.id }, d.data()))
+      .filter((o) => o.type === "stock" && o.hunt === true && o.by !== rep.by
+        && String(o.drinkId) === String(rep.drinkId) && !o.huntCredited
+        && o.createdAt && o.createdAt.toMillis() < creeA
+        && moi.at < o.createdAt.toMillis())
+      .sort((x, y) => x.createdAt.toMillis() - y.createdAt.toMillis());
+    if (!aides.length) return;
+    const aide = aides[0];
+
+    // Plafond par paire : au plus 3 aides credites de A confirmees par B en 30 j.
+    const paire = await db.collection("reports")
+      .where("by", "==", aide.by)
+      .where("huntCreditedBy", "==", rep.by)
+      .limit(ENTRAIDE_MAX_PAIRE_30J + 2).get();
+    const recents = paire.docs.filter((d) => {
+      const t = (d.data() || {}).huntCreditedAt;
+      return t && t.toMillis() > Date.now() - 30 * 86400000;
+    }).length;
+    const marque = { huntCredited: true, huntCreditedBy: rep.by, huntCreditedAt: FieldValue.serverTimestamp() };
+    if (recents >= ENTRAIDE_MAX_PAIRE_30J) {
+      await db.doc(`reports/${aide.id}`).set(Object.assign(marque, { huntCreditedPts: 0, raison: "paire" }), { merge: true });
+      return;
+    }
+    const montant = surPlace(rep) ? POINTS_ENTRAIDE : POINTS_ENTRAIDE_LOIN;
+    const verse = await crediter(aide.by, montant, "entraide");
+    await db.doc(`reports/${aide.id}`).set(Object.assign(marque, { huntCreditedPts: verse }), { merge: true });
+    await recalculerScore(aide.by);
   }
 );
 
