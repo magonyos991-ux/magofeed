@@ -674,6 +674,37 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    /* Cases de 5 km deja interrogees chez Overture Maps (commerces du monde).
+       Ecrites par la Cloud Function chercherCommerces uniquement : si le client
+       pouvait marquer une zone « faite », il pourrait empecher tout le monde
+       d'y decouvrir des commerces pendant un mois. */
+    match /zonesOverture/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    /* Traces des dons. Meme principe que les verifications : ecrites
+       UNIQUEMENT par la Cloud Function, qui recoit la confirmation signee de
+       Stripe. Si le client pouvait ecrire ici, il lui suffirait de se declarer
+       donateur. Aucune donnee de carte : Stripe ne nous en transmet aucune. */
+    match /dons/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    /* « Cette personne a soutenu le projet. » Son SEUL usage dans l'app : ne
+       plus lui remettre la carte de don sous le nez, et lui dire merci. Ce
+       document ne pose aucun droit et ne debloque rien — un don qui debloque
+       quelque chose n'est plus un don, c'est un achat. Chacun lit le sien ;
+       personne ne peut l'ecrire, sinon il suffirait de se declarer soutien
+       pour faire taire la demande (ce qui, au fond, serait sans gravite —
+       mais une regle qui laisse ecrire n'importe quoi finit toujours par
+       servir a autre chose). */
+    match /soutiens/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow write: if false;
+    }
+
     match /stores/{storeId}/stats/{jour} {
       /* On accepte les deux : la fiche privee (nouveau), et l'ancien champ
          public pour les magasins certifies avant le changement, qui ne doivent

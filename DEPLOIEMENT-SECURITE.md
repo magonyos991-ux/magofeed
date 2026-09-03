@@ -73,6 +73,51 @@ Une restauration qu'on découvre le jour de l'incident n'est pas une sauvegarde.
   le prochain chantier de sécurité, et il se fait à deux — toi dans la console,
   moi dans le code.
 
+## 4 bis. Les commerces du monde entier (10 min, à faire maintenant)
+
+Ton collègue a tapé Filiates : zéro magasin. OpenStreetMap, la source de
+l'app, n'y connaît qu'un commerce — un salon funéraire — là où Google en montre
+sept. Des régions entières sont vides dans OSM : Grèce rurale, Balkans, Afrique,
+Amérique latine, Asie.
+
+La fonction `chercherCommerces` interroge **Overture Maps** (74 millions de
+lieux, données ouvertes, licence qui autorise à les stocker et à les afficher
+sur n'importe quelle carte) quand OSM connaît moins de cinq commerces dans une
+zone. Vérifié sur Filiates : elle trouve les deux supérettes de ta capture
+Google. Dakar : 44 commerces. Chaque zone n'est interrogée qu'une fois par mois,
+pour tout le monde. Aucun compte, aucune clé, aucun coût de lecture.
+
+```
+cd functions
+npm install @duckdb/node-api geofire-common
+```
+
+Ajoute au bout de `functions/index.js` :
+
+```js
+Object.assign(exports, require("./commerces-monde"));
+```
+
+Puis :
+
+```
+firebase deploy --only functions:chercherCommerces
+```
+
+Le premier appel après un déploiement est plus lent (quinze secondes environ :
+la fonction télécharge son lecteur de fichiers distants). Les suivants prennent
+deux à sept secondes.
+
+**Pour tester :** ouvre l'app, cherche « Filiates », et attends. Le message en
+bas de la carte doit passer par « Recherche des commerces dans le monde… » puis
+afficher les magasins. Sans la fonction déployée, il dira honnêtement « Aucun
+commerce connu ici (OpenStreetMap, Overture) » — et non plus « Aucun magasin »
+comme si on avait cherché partout.
+
+Ce que la fonction n'écrit **jamais** : un rayon, une confirmation, un
+« vérifié ». Un commerce importé est un endroit où chercher, rien de plus. Et
+elle refuse tout ce qui vend de l'alcool à titre principal.
+
 ## 5. Le jour où tu auras ton numéro d'entreprise
 
 Tant que tu n'es pas enregistré, **saute cette section** : l'app marche, la

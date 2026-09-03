@@ -285,6 +285,26 @@ await doit('bloque : se declarer paye (traces de verification)',
 await doit('bloque : lire les traces de paiement',
   ()=>assertFails(getDoc(doc(m,'verifications','cs_test_1'))));
 
+await doit('bloque : marquer une zone Overture comme faite (client)',
+  ()=>assertFails(setDoc(doc(m,'zonesOverture','z_792_406'),{etat:'faite',quand:1})));
+await doit('bloque : lire les zones Overture (client)',
+  ()=>assertFails(getDoc(doc(m,'zonesOverture','z_792_406'))));
+/* LE DON. Personne ne doit pouvoir se declarer donateur ni lire les traces :
+   ce serait le moyen le plus simple de faire taire la demande de soutien, et
+   surtout de se fabriquer une qualite qu'on n'a pas payee. Seule la Cloud
+   Function ecrit ici (Admin SDK, qui contourne ces regles). */
+await doit('bloque : se declarer donateur (traces de dons)',
+  ()=>assertFails(setDoc(doc(m,'dons','cs_don_1'),
+      {uid:MALLORY,etat:'payee',montant:50})));
+await doit('bloque : lire les traces de dons',
+  ()=>assertFails(getDoc(doc(m,'dons','cs_don_1'))));
+await doit('bloque : s inscrire soi-meme comme soutien',
+  ()=>assertFails(setDoc(doc(m,'soutiens',MALLORY),{total:50,fois:1})));
+await doit('bloque : lire le soutien de quelqu un d autre',
+  ()=>assertFails(getDoc(doc(m,'soutiens',ALICE))));
+await doit('legitime : Alice lit son propre soutien',
+  ()=>assertSucceeds(getDoc(doc(a,'soutiens',ALICE))));
+
 await doit('bloque : se declarer administrateur',
   ()=>assertFails(setDoc(doc(m,'admins',MALLORY),{ok:true})));
 
