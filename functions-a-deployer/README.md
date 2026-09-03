@@ -19,6 +19,7 @@ Tout est **testable/déployable par toi**, jamais mis en prod sans essai.
 | `partage.js` | **Aperçu des liens partagés** : une vraie vignette (titre + photo) pour les boissons de la communauté et les magasins, qui n'ont pas de page pré-générée | Faible (ne lit que des données publiques) | Quand tu veux |
 | `sauvegarde.js` | **Sauvegarde automatique** de toute la base, chaque nuit à 3 h, plus un bouton « Sauvegarder maintenant » dans l'administration | Faible (ne fait que lire et copier) | **Maintenant** |
 | `dons.js` | **Le don** : ouvre une page de paiement Stripe pour qui veut soutenir le projet. Un don ne débloque rien — pas de points, pas de badge, pas de fonction réservée | Faible (n'accorde aucun droit) | Seulement si tu veux le paiement **dans** l'app. Une page Ko-fi / Stripe Payment Link suffit sinon : voir `DON_LIEN` |
+| `don-notification.js` | **Notification push à chaque don** : Ko-fi prévient, l'app te le dit sur ton téléphone — montant, nom, message | Faible (ne touche à aucun paiement) | Seulement si tu veux la notif **dans Magofeed**. **L'app Ko-fi le fait déjà gratuitement** |
 | `tests-regles/` | **Banc d'essai des règles** : 34 épreuves qui attaquent la base pour vérifier qu'elle tient, et que les usages normaux passent toujours | Aucun (tourne chez toi, sur une base jetable) | Avant chaque déploiement de règles |
 
 ---
