@@ -250,7 +250,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <div id="theme-ico" style="font-size:20px;cursor:pointer;color:var(--s1)" onclick="cycleTheme()" role="button" tabindex="0" aria-label="Changer de thème" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();cycleTheme();}"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg></div>
-          <div id="bell-btn" onclick="openActivity()" style="position:relative;font-size:20px;cursor:pointer;color:var(--s1)" role="button" tabindex="0" aria-label="Mes activités" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openActivity();}"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span id="bell-badge" style="display:none;position:absolute;top:-6px;right:-6px;min-width:16px;height:16px;padding:0 3px;box-sizing:border-box;border-radius:8px;background:#e6462e;color:#fff;font-size:10px;font-weight:800;align-items:center;justify-content:center;line-height:1;border:2px solid var(--app-bg)"></span></div>
+          <div id="bell-btn" onclick="openActivity()" style="position:relative;font-size:20px;cursor:pointer;color:var(--s1)" role="button" tabindex="0" aria-label="Mes activités" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openActivity();}"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span id="bell-badge" style="display:none;position:absolute;top:-6px;right:-6px;min-width:16px;height:16px;padding:0 3px;box-sizing:border-box;border-radius:8px;background:#c8321a;color:#fff;font-size:10px;font-weight:800;align-items:center;justify-content:center;line-height:1;border:2px solid var(--app-bg)"></span></div>
           <div class="avatar" onclick="show('profile')" role="button" tabindex="0" aria-label="Voir mon profil" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();show('profile');}"></div>
         </div>
       </div>
@@ -463,7 +463,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       </div>
       <div id="chasse-tendances" style="display:none">
         <div id="chasse-recent" style="padding:0 20px 18px"></div>
-        <div style="padding:0 20px 8px;display:flex;align-items:center;gap:7px"><span class="t-section" data-i18n="mostSearched" style="padding:0;font-size:15px">Les plus consultées</span></div>
+        <div style="padding:0 20px 8px;display:flex;align-items:center;gap:7px"><span class="t-section" data-i18n="mostViewedSince" style="padding:0;font-size:15px">Les plus consultées · depuis le lancement</span></div>
         <div id="top-scanned" style="padding:0 20px 20px"></div>
       </div>
     </div>
@@ -518,7 +518,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div style="font-size:13.5px;font-weight:800;color:var(--s1)">Donne ton avis</div>
           <div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:1px">Aide à améliorer Magofeed — ce qui va, ce qui manque</div>
         </div>
-        <span style="font-size:16px;color:var(--s3)">›</span>
+        <span style="font-size:16px;color:var(--txt2)">›</span>
       </div>
       <div style="padding:8px 20px 10px" class="t-section" id="t-leaderboard">Classement</div>
       <div id="leaderboard-list" style="padding:0 20px 20px"></div>
@@ -3011,6 +3011,7 @@ window.fbWipeAllHunts = async function() {
    d'essai des regles, pas a la lecture. */
 window.fbJoinHunt = async function(drinkId, drinkName, emoji, lat, lng) {
   try {
+    window._huntsCache = null;
     var user = await ensureAuthed();
     var pos = { lat: lat != null ? _coarse(lat) : null, lng: lng != null ? _coarse(lng) : null };
     var moi = { lat: pos.lat, lng: pos.lng, at: Date.now() };
@@ -3044,6 +3045,7 @@ window.fbJoinHunt = async function(drinkId, drinkName, emoji, lat, lng) {
 };
 window.fbLeaveHunt = async function(drinkId) {
   try {
+    window._huntsCache = null;
     var user = auth.currentUser; if (!user) return;
     // updateDoc, pas setDoc : voir la note sur les cles pointees ci-dessus.
     var patch = {}; patch["seekers." + user.uid] = null; // marqué parti, filtré à la lecture
@@ -3064,7 +3066,12 @@ window.fbHuntSeekers = async function(drinkId) {
 };
 window.fbLoadNearbyHunts = async function(lat, lng, radiusKm) {
   try {
-    var snap = await getDocs(query(collection(db, "hunts"), limit(200)));
+    /* Lue a l'accueil ET dans La chasse : on garde la collection deux minutes
+       en memoire plutot que de la relire a chaque onglet. */
+    var cache = window._huntsCache;
+    var snap;
+    if (cache && (Date.now() - cache.at) < 120000) snap = cache.snap;
+    else { snap = await getDocs(query(collection(db, "hunts"), limit(200))); window._huntsCache = { at: Date.now(), snap: snap }; }
     var out = [], myUid = auth.currentUser ? auth.currentUser.uid : null;
     // PETITE BASE : on montre TOUTES les chasses actives. On n'exclut qu'un
     // chercheur VRAIMENT trop loin (>100 km, positions connues) ou parti (null).
@@ -4005,6 +4012,7 @@ function setLang(l){
   // remplissaient la file d'images avec l'ecran recherche et diluaient
   // le prechargement de l'accueil.
   if(!window._langBooted){window._langBooted=true;return;}
+  try{var _dvL=document.getElementById("s-discover");if(_dvL&&_dvL.classList.contains("on"))renderChasse();}catch(e){}
   try{renderStreak();}catch(e){}
   try{renderBadges();}catch(e){}
   try{renderDiscoveries();}catch(e){}
@@ -4518,7 +4526,12 @@ function report(type){
   var pts={stock:10,rupture:5,contrefacon:15,nouveau:20};
   var msgs={stock:"✓ +10 pts",rupture:"✕ +5 pts",contrefacon:"+15 pts",nouveau:"+20 pts"};
   var now=new Date(),time=now.getHours()+":"+String(now.getMinutes()).padStart(2,"0");
-  if(type==="stock"){if(!s.confirmations[d.id])s.confirmations[d.id]=0;s.confirmations[d.id]++;_noterObservation(s,d.id,true);userStats.confirms++;}
+  if(type==="stock"){
+    if(!s.confirmations[d.id])s.confirmations[d.id]=0;s.confirmations[d.id]++;_noterObservation(s,d.id,true);userStats.confirms++;
+    // Seul chemin qui n'ecrivait pas le stock en base : la fiche disait « en stock » et la carte des autres non.
+    if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||s.id,d.id,1);
+    if(window.fbTouchCache)window.fbTouchCache();
+  }
   else{
     userStats.signals++;
     if(type==="rupture"){
@@ -4535,7 +4548,7 @@ function report(type){
   userStats.activity.unshift({type:type,drink:d,store:s,time:time,pts:pts[type]});
   trackStoreContribution(s.fbId||s.id);
   // Firebase sync
-  if(window.fbAddReport) window.fbAddReport(s.fbId||s.id, d.id, type);
+  if(window.fbAddReport) window.fbAddReport(s.fbId||s.id, d.id, type, {note:_provenance("fiche",s)});
   if(type==="stock"){try{maybeRewardHuntHelp(d.id,s);}catch(e){}}
   closeModal();playSound("win");toast(msgs[type]);
   updateProfileStats();renderStoreList();
@@ -4549,12 +4562,10 @@ function freshnessInfo(s,did){
   if(!ts||!isFinite(ts))return null;
   var days=Math.floor((Date.now()-ts)/86400000);
   if(days<0)days=0;
-  if(days===0)return{label:"vu aujourd'hui",col:"#15803d",bg:"#f0fdf4",f:1};
-  if(days===1)return{label:"vu hier",col:"#15803d",bg:"#f0fdf4",f:1};
-  if(days<7)return{label:"vu il y a "+days+" j",col:"#15803d",bg:"#f0fdf4",f:1};
-  if(days<30)return{label:"vu il y a "+days+" j",col:"#b45309",bg:"#fffbeb",f:.7};
-  var lbl=days<60?"vu il y a "+days+" j · à reconfirmer":"à reconfirmer";
-  return{label:lbl,col:"var(--s2)",bg:"var(--bg3)",f:.4};
+  var lbl="vu "+jourGrossier(ts);
+  if(days<7)return{label:lbl,col:"var(--ok-txt)",bg:"var(--ok-bg)",f:1};
+  if(days<30)return{label:lbl,col:"var(--warn-txt)",bg:"var(--warn-bg)",f:.7};
+  return{label:lbl+" · à reconfirmer",col:"var(--txt2)",bg:"var(--bg3)",f:.4};
 }
 /* ── « VU PAR QUI, QUAND » ───────────────────────────────────────────────
    Un stock anonyme et sans date ne rassure personne. On garde, par boisson
@@ -4590,8 +4601,11 @@ function vuParInfo(s,did){
   if(!s)return null;
   var cAt=Number(s.confirmedAt&&s.confirmedAt[did])||Number(s.seenAt&&s.seenAt[did])||0;
   var aAt=Number(s.absentAt&&s.absentAt[did])||0;
+  var futur=Date.now()+3600000;
+  if(cAt>futur)cAt=0;if(aAt>futur)aAt=0;          // une date future n'est pas une observation
   if(!cAt&&!aAt)return null;
-  var positif=cAt>=aAt;
+  // Arrondi a l'heure : un « absente » 30 min apres un « vu » tombe a egalite ; le solde tranche.
+  var positif=cAt>aAt||(cAt===aAt&&((s.confirmations||{})[did]||0)>=0);
   var qui=positif?(s.confirmedBy&&s.confirmedBy[did]):(s.absentBy&&s.absentBy[did]);
   if(qui==="Explorateur")qui=null; // pseudo par defaut : pas une personne nommee
   var quand=positif?cAt:aAt;
@@ -4600,11 +4614,10 @@ function vuParInfo(s,did){
 /* Pastille complete (fiche boisson) : « Vu par Zdoudex · hier ». */
 function vuParHTML(s,did){
   var v=vuParInfo(s,did);if(!v)return "";
-  var dark=document.body.classList.contains("dark");
   var col,bg;
-  if(v.positif&&!v.vieux){col=dark?"#4ade80":"#15803d";bg=dark?"rgba(22,163,74,.18)":"#dcfce7";}
+  if(v.positif&&!v.vieux){col="var(--ok-txt)";bg="var(--ok-bg)";}
   else if(v.positif){col="var(--txt2)";bg="var(--bg3)";}
-  else{col=dark?"#fca5a5":"#b91c1c";bg=dark?"rgba(220,38,38,.18)":"#fee2e2";}
+  else{col="var(--danger-txt)";bg="var(--danger-bg)";}
   var txt=(v.positif?"Vu":"Absente")+(v.qui?" par "+sanitize(v.qui):"")+" · "+v.jour;
   return '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;background:'+bg+';color:'+col+';white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis">'+txt+'</span>';
 }
@@ -4632,7 +4645,7 @@ function doConfirm(btn,sid,did,val){
     if(!s.confirmations[did])s.confirmations[did]=0;
     s.confirmations[did]--; // negatif autorise : signal communautaire "pas en stock ici"
     _noterObservation(s,did,false);
-    if(window.fbAddReport)try{window.fbAddReport(s.fbId||sid,did,"rupture");}catch(e){} // la preuve pour le serveur
+    if(window.fbAddReport)try{window.fbAddReport(s.fbId||sid,did,"rupture",{note:_provenance("fiche",s)});}catch(e){} // la preuve pour le serveur
     awardOnce("conf:"+sid+":"+did,24);
     userStats.confirms++;userStats.pts+=3;flyPts(3);bumpDaily("confirms");
     trackStoreContribution(sid);
@@ -4667,7 +4680,7 @@ function confirmWithPrice(sid,did){
     if(window.fbSavePrice)window.fbSavePrice(s.fbId||sid,did,price);
   }
   if(!awardOnce("conf:"+sid+":"+did,24)){toast("D\u00e9j\u00e0 confirm\u00e9 aujourd'hui");renderStoreList();return;}
-  if(window.fbAddReport)try{window.fbAddReport(s.fbId||sid,did,"stock");}catch(e){} // la preuve pour le serveur
+  if(window.fbAddReport)try{window.fbAddReport(s.fbId||sid,did,"stock",{note:_provenance("fiche",s)});}catch(e){} // la preuve pour le serveur
   userStats.confirms++;userStats.pts+=3;flyPts(3);bumpDaily("confirms");
   trackStoreContribution(sid);
   // Firebase
@@ -4812,7 +4825,7 @@ function renderBadges(){
     cell.setAttribute("aria-label",def.name+(tier?" "+(def.special?"":TIER_NAMES[tier-1]):" verrouill\u00E9"));
     cell.innerHTML='<div style="display:flex;justify-content:center;margin-bottom:5px;color:'+(tier?ring:"var(--s3)")+'">'+badgeIcon(def.key,26,(tier?ring:"var(--s3)"))+'</div>'+
       '<div style="font-size:11px;font-weight:800;color:var(--s1)">'+def.name+'</div>'+
-      '<div style="font-size:9.5px;font-weight:700;color:'+(tier?ring:"var(--s3)")+';margin-top:2px;text-transform:uppercase;letter-spacing:.5px">'+
+      '<div style="font-size:9.5px;font-weight:700;color:'+(tier?ring:"var(--txt2)")+';margin-top:2px;text-transform:uppercase;letter-spacing:.5px">'+
         (def.special?(tier?"OBTENU":""):(maxed?TIER_NAMES[tier-1]+" MAX":(tier?TIER_NAMES[tier-1]:"")+(maxed?"":" "+Math.min(def.value,next)+"/"+next)))+
       '</div>';
     cell.style.cursor="pointer";
@@ -4836,7 +4849,7 @@ var BADGE_INFO={
 function showBadgeInfo(def,tier,qui){
   if(document.getElementById("badge-info"))return;
   var info=BADGE_INFO[def.key]||{};
-  var col=tier?TIER_COLORS[tier-1]:"var(--s3)";
+  var col=tier?TIER_COLORS[tier-1]:"var(--txt2)";
   var cap=function(s){return s.charAt(0).toUpperCase()+s.slice(1);};
   var tierLabel=def.special?(tier?"Obtenu":"Verrouillé"):(tier?("Palier "+TIER_NAMES[tier-1]):"À débloquer");
   var progressHtml="";
@@ -5381,7 +5394,12 @@ function startScan(){
   setScanState("live");
   var video=document.getElementById("scan-video"),hint=document.getElementById("scan-hint"),btn=document.getElementById("scan-btn");
   if(scanActive)return;
-  if(!navigator.mediaDevices){hint.textContent="✕ Caméra non disponible";return;}
+  if(!navigator.mediaDevices){
+    hint.textContent="✕ Caméra non disponible";
+    setScanState("idle");toast(_tr("camUnavailable"));
+    try{var _row=document.getElementById("scan-manual-row");if(_row&&_row.style.display!=="flex")toggleManualCode();}catch(e){}
+    return;
+  }
   navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
     .then(function(stream){
       video.srcObject=stream;scanActive=true;
@@ -6247,7 +6265,10 @@ function tagScanToStore(s){
     /* La PREUVE que le serveur saura crediter (reports type "stock", +3) :
        ce chemin etait le seul a n'en laisser aucune. La carte l'ecrit deja
        elle-meme (mapStockReport), on ne double pas. */
-    if(ctx.from!=="map"&&window.fbAddReport)try{window.fbAddReport(s.fbId||sid,did,"stock");}catch(e){}
+    if(ctx.from!=="map"&&window.fbAddReport){
+      var _srcRep=ctx.from==="chasse"?("chasse-"+(((ctx.mode||"vue")==="vue"&&typeof s.dist==="number"&&s.dist>1500)?"sais":(ctx.mode||"vue"))):(ctx.from||"scan");
+      try{window.fbAddReport(s.fbId||sid,did,"stock",{note:_provenance(_srcRep,s)});}catch(e){}
+    }
     if(window.fbTouchCache)window.fbTouchCache();
   }else if(ctx.pendingBarcode!=null){
     // Produit pas encore ajoute en decouverte : on retient le magasin,
@@ -6265,7 +6286,12 @@ function tagScanToStore(s){
   }
   // Le journal retient OU la trouvaille a ete faite (nom, position pour la
   // distance meme hors zone chargee) : c'est ce que la carte « Mes trouvailles » affiche.
-  try{patchScanEntry(_findsCodeFor(ctx),{storeId:sid,storeFbId:s.fbId||null,storeName:String(s.name||"").slice(0,60),storeLat:(typeof s.lat==="number"?s.lat:null),storeLng:(typeof s.lng==="number"?s.lng:null),taggedAt:Date.now()});}catch(e){}
+  try{
+    var _codeJ=_findsCodeFor(ctx),_patch={storeId:sid,storeFbId:s.fbId||null,storeName:String(s.name||"").slice(0,60),storeLat:(typeof s.lat==="number"?s.lat:null),storeLng:(typeof s.lng==="number"?s.lng:null),taggedAt:Date.now()};
+    var _anc=(scanHist||[]).find(function(x){return String(x.code)===String(_codeJ);});
+    if(_anc&&_anc.storeId!=null&&String(_anc.storeId)!==sid){_patch.price=null;_patch.priceAt=null;} // un prix vu ailleurs ne vaut pas ici
+    patchScanEntry(_codeJ,_patch);
+  }catch(e){}
   var tagKey="tag:"+(ctx.drinkId!=null?ctx.drinkId:(ctx.discoveryId!=null?"d"+ctx.discoveryId:"b"+ctx.pendingBarcode))+":"+sid;
   if(awardOnce(tagKey,FOREVER)){
     userStats.pts+=3;flyPts(3);
@@ -6551,7 +6577,7 @@ function _findWhere(e,st,s){
     (STORES||[]).forEach(function(x){
       if(!(x.drinks||[]).some(function(y){return Number(y)===Number(did);}))return;
       if(((x.confirmations||{})[did]||0)<0)return;
-      if(typeof x.dist==="number"&&x.dist>10000)return;
+      if(typeof x.dist!=="number"||x.dist>10000)return; // sans position, on ne compte pas toute la base
       n++;
     });
     if(n)return _tr("nearStores").replace("{n}",n).replace("{s}",n>1?"s":"");
@@ -6588,7 +6614,7 @@ function _findAction(e,st){
   if(st.k==="catalog"||st.k==="promoted")return{label:_tr("onMap"),go:function(){_findOpen(e,st);}};
   if(st.k==="pending"){
     var me=null;try{me=(window.fbAuth&&window.fbAuth.currentUser)?window.fbAuth.currentUser.uid:null;}catch(err){}
-    var auteur=!st.disc||!st.disc.by||(me&&st.disc.by===me);
+    var auteur=!!(st.disc&&me&&st.disc.by===me); // la regle foundIn n'accepte que l'auteur
     if(auteur&&!(e.storeId||e.storeName))return{label:_tr("sayWhere"),go:function(){lastScanContext={discoveryId:String(e.code),code:String(e.code),from:"finds"};try{playSound("pop");}catch(err){}openStorePicker();}};
     return{label:_tr("seeVotes"),go:function(){_findOpen(e,st);}};
   }
@@ -6605,7 +6631,7 @@ function renderScanHistory(){
   if(!scanHist.length){el.className="";el.innerHTML=emptyStateHTML("spark",_tr("noFinds"),_tr("noFindsSub"));return;}
   var rows=scanHist.map(function(e){return{e:e,st:findStatus(e)};}).filter(function(r){
     if(_findsFilter==="catalog")return r.st.k==="catalog";
-    if(_findsFilter==="pending")return r.st.k==="pending"||r.st.k==="unknown";
+    if(_findsFilter==="pending")return r.st.k==="pending";
     if(_findsFilter==="promoted")return r.st.k==="promoted";
     return true;
   });
@@ -6627,7 +6653,7 @@ function renderScanHistory(){
     var act=price?null:_findAction(e,st);
     var where=_findWhere(e,st,s);
     var div=document.createElement("div");div.className="find-card";div.dataset.code=code;
-    var huntBadge=e.hunt?'<span class="find-badge right '+(e.helpStatus==="ok"?"ok":(e.helpStatus==="ko"?"ko":""))+'">'+(e.helpStatus==="ok"?_tr("helpOk"):(e.helpStatus==="ko"?_tr("helpKo"):_tr("helpWait")))+'</span>':'';
+    var huntBadge=e.hunt?'<span class="find-badge right '+(e.helpStatus==="ok"?"ok":(e.helpStatus==="ko"?"ko":""))+'">'+(e.helpStatus==="ok"?_tr("helpOk"):(e.helpStatus==="ko"?_tr("helpKo"):(e.helpStatus==="none"?_tr("helpNoReply"):_tr("helpWait"))))+'</span>':'';
     div.innerHTML='<div class="find-thumb sh-thumb">'+thumb+'<span class="find-badge '+st.cls+'">'+sanitize(st.label)+'</span>'+huntBadge+'</div>'+
       '<div class="find-body"><div class="find-name">'+sanitize(e.name||"")+'</div>'+
       '<div class="find-where">'+where+'</div>'+
@@ -8588,7 +8614,7 @@ function renderDeals(){
     '<div onclick="pick(DRINKS.find(function(x){return x.id==='+d.id+';}))" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){pick(DRINKS.find(function(x){return x.id==='+d.id+';}));}" style="display:flex;align-items:center;gap:13px;background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:13px;cursor:pointer;margin-bottom:14px">'+
     '<div style="width:52px;height:52px;border-radius:13px;background:'+(d.light||"var(--bg2)")+';display:flex;align-items:center;justify-content:center;font-size:26px;overflow:hidden;flex-shrink:0">'+drinkIconHTML(d)+'</div>'+
     '<div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:800;color:var(--s1)">'+sanitize(d.name)+'</div><div style="font-size:12px;color:var(--s2);margin-top:2px">'+sanitize(d.brand)+starSuffix(d)+' — trouve-la près de toi</div></div>'+
-    '<span style="font-size:18px;color:var(--s3)">›</span>'+
+    '<span style="font-size:18px;color:var(--txt2)">›</span>'+
   '</div>';
 }
 function onSearchInput(){clearTimeout(searchDebounce);searchDebounce=setTimeout(renderList,150);}
@@ -11105,6 +11131,10 @@ function magasinProcheAvec(did){
    presence de quelqu'un dans un magasin n'est jamais publiee a la minute
    (les dates de stock sont arrondies a l'heure et affichees au jour). */
 function _moiPseudo(){return (localStorage.getItem("magopseudo")||"Explorateur").slice(0,24);}
+/* Provenance d'un rapport, dans son champ note : "source|distance en m" (ou
+   "?" sans position). Le serveur s'en sert pour ne rien crediter a un rapport
+   fait de loin : personne ne voit un rayon depuis son canape. */
+function _provenance(src,s){var d=(s&&typeof s.dist==="number"&&isFinite(s.dist))?Math.round(s.dist):null;return String(src||"?")+"|"+(d==null?"?":d);}
 
 /* Registre LOCAL des points en attente d'une validation (par une autre
    personne, ou par le serveur). Separe de userStats.pts : ce compteur-la est
@@ -11120,6 +11150,7 @@ function pendingResolve(key){
   var o=_pendingAll();if(!o[key])return null;
   var e=o[key];delete o[key];_pendingSave(o);try{majLignePending();}catch(err){}return e;
 }
+function pendingSetStatus(key,status,by){var o=_pendingAll();if(!o[key])return;o[key].status=status;if(by)o[key].by=String(by).slice(0,24);_pendingSave(o);try{majLignePending();}catch(e){}}
 function pendingTotal(){var o=_pendingAll(),t=0;Object.keys(o).forEach(function(k){t+=Number(o[k].pts)||0;});return t;}
 function majLignePending(){
   var el=document.getElementById("pending-line");if(!el)return;
@@ -11141,7 +11172,7 @@ function openPendingSheet(){
   card.innerHTML='<div style="width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 16px"></div>'+
     '<div style="font-size:17px;font-weight:800;color:var(--s1)">'+_tr("pendingTitle")+'</div>'+
     '<div style="font-size:12.5px;color:var(--txt2);line-height:1.5;margin:6px 0 14px">'+_tr("pendingSub")+'</div>'+
-    (keys.length?keys.map(function(k){var e=o[k];return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)"><span style="min-width:0;font-size:13px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(e.label)+'</span><span style="flex-shrink:0;font-size:12px;font-weight:800;color:var(--s1)">+'+e.pts+' · <span style="font-weight:600;color:var(--txt2)">'+jourGrossier(e.ts)+'</span></span></div>';}).join(""):'<div class="mt-empty-s">'+_tr("pendingNone")+'</div>')+
+    (keys.length?keys.map(function(k){var e=o[k];return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)"><span style="min-width:0;font-size:13px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(e.label)+'</span><span style="flex-shrink:0;font-size:12px;font-weight:800;color:var(--s1)">+'+e.pts+' · <span style="font-weight:600;color:var(--txt2)">'+jourGrossier(e.ts)+'</span></span></div>'+(e.status==="confirmee"?'<div style="font-size:11.5px;font-weight:700;color:var(--ok-txt);margin:-6px 0 6px">'+_tr("pendingConfirmed").replace("{p}",sanitize(e.by||""))+'</div>':'');}).join(""):'<div class="mt-empty-s">'+_tr("pendingNone")+'</div>')+
     '<div style="text-align:center;margin-top:14px"><button class="ghost-btn quiet" id="pending-close">OK</button></div>';
   ov.appendChild(card);document.body.appendChild(ov);
   var close=function(){try{ov.remove();}catch(e){}};
@@ -11185,12 +11216,12 @@ function repondreIndication(did,sid,ok){
     if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
     s.confirmations[did]=Math.max(1,(s.confirmations[did]||0)+1);_noterObservation(s,did,true);
     if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||storeId,did,1);
-    if(window.fbAddReport)try{window.fbAddReport(s.fbId||storeId,did,"stock");}catch(e){}
+    if(window.fbAddReport)try{window.fbAddReport(s.fbId||storeId,did,"stock",{note:_provenance("reponse",s)});}catch(e){}
     if(w){w.verdict="ok";w.verdictAt=Date.now();}
   }else{
     s.confirmations[did]=Math.min(-1,(s.confirmations[did]||0)-1);_noterObservation(s,did,false);
     if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||storeId,did,-1);
-    if(window.fbAddReport)try{window.fbAddReport(s.fbId||storeId,did,"rupture");}catch(e){}
+    if(window.fbAddReport)try{window.fbAddReport(s.fbId||storeId,did,"rupture",{note:_provenance("reponse",s)});}catch(e){}
     if(w){w.verdict="ko";w.verdictAt=Date.now();}
   }
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
@@ -11285,15 +11316,21 @@ function _verifierAides(){
     var nom=d?d.name:(e.name||"");
     if(cAt>=heure&&cBy&&cBy!==me&&cAt>=aAt){
       e.helpStatus="ok";e.helpBy=String(cBy).slice(0,24);changed=true;
-      pendingResolve(key);
+      /* Pas de +15 local : confirmedBy est un pseudo, un texte libre — un
+         pseudo change dans localStorage suffirait a se l'attribuer. Les 15
+         restent « en attente » jusqu'au serveur, qui lit les rapports. */
+      pendingSetStatus(key,"confirmee",e.helpBy);
       var txt=_tr("helpOkToast").replace("{p}",e.helpBy).replace("{d}",nom).replace("{s}",s.name);
-      if(awardOnce("huntok:"+did+":"+sid,FOREVER)){userStats.pts+=15;try{flyPts(15);}catch(err){}try{playSound("win");}catch(err){}toast(txt);}
+      try{playSound("win");}catch(err){}toast(txt);
       pushActivity({type:"tipOk",title:_tr("helpOkTitle").replace("{d}",nom),body:txt,action:{kind:"store",storeId:sid,drinkId:did},drinkId:did,key:"tipok:"+did+":"+sid});
     }else if(aAt>=heure&&aBy&&aBy!==me){
       e.helpStatus="ko";e.helpBy=String(aBy).slice(0,24);changed=true;
       pendingResolve(key);
       var txt2=_tr("helpKoToast").replace("{p}",e.helpBy).replace("{d}",nom).replace("{s}",s.name);
       pushActivity({type:"tipKo",title:_tr("helpKoTitle").replace("{d}",nom),body:txt2,action:{kind:"store",storeId:sid,drinkId:did},drinkId:did,key:"tipko:"+did+":"+sid});
+    }else if(Date.now()-e.taggedAt>14*86400000){
+      // Deux semaines sans que personne ne passe : on cesse d'attendre.
+      e.helpStatus="none";changed=true;pendingResolve(key);
     }
   });
   if(changed){
@@ -11369,8 +11406,31 @@ function alertOpenOnMap(did){
      collee qui recouvrait ensuite la fiche sans issue. */
   pick(d);
 }
-function removeWatch(id){
-  drinkWatches=drinkWatches.filter(function(w){return Number(w.id)!==Number(id);});
+function removeWatch(id,force){
+  var w=drinkWatches.find(function(x){return Number(x.id)===Number(id);});
+  // Une question est en attente sur cette veille : on la pose avant de retirer,
+  // sinon la personne qui a aide ne saura jamais.
+  if(!force&&w&&w.triggered&&w.verdict==null&&w.storeId!=null&&w.triggeredAt&&(Date.now()-w.triggeredAt)<7*86400000){
+    if(document.getElementById("rmwatch-ov"))return;
+    var ov=document.createElement("div");ov.id="rmwatch-ov";
+    ov.style.cssText="position:fixed;inset:0;z-index:10001;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px)";
+    var card=document.createElement("div");
+    card.style.cssText="width:100%;max-width:440px;background:var(--app-bg);border-radius:24px 24px 0 0;padding:18px 22px calc(26px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.28)";
+    card.innerHTML='<div style="width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 16px"></div>'+
+      '<div style="font-size:15px;font-weight:800;color:var(--s1);line-height:1.4">'+_tr("tipBeforeRemove").replace("{d}",sanitize(w.name)).replace("{s}",sanitize(w.storeName||""))+'</div>'+
+      '<div class="ch-actions" style="margin-top:14px"><button class="ch-btn main" id="rmw-yes">'+_tr("tipYes")+'</button><button class="ch-btn" id="rmw-no">'+_tr("tipNo")+'</button></div>'+
+      '<div style="text-align:center;margin-top:10px"><button class="ghost-btn quiet" id="rmw-skip">'+_tr("tipRemoveAnyway")+'</button></div>';
+    ov.appendChild(card);document.body.appendChild(ov);
+    var close=function(){try{ov.remove();}catch(e){}};
+    ov.onclick=function(e){if(e.target===ov)close();};
+    var sid=String(w.storeId),did=Number(w.id);
+    document.getElementById("rmw-yes").onclick=function(){close();try{repondreIndication(did,sid,true);}catch(e){}removeWatch(id,true);};
+    document.getElementById("rmw-no").onclick=function(){close();try{repondreIndication(did,sid,false);}catch(e){}removeWatch(id,true);};
+    document.getElementById("rmw-skip").onclick=function(){close();removeWatch(id,true);};
+    try{playSound("pop");}catch(e){}
+    return;
+  }
+  drinkWatches=drinkWatches.filter(function(x){return Number(x.id)!==Number(id);});
   saveWatches();renderAlertsCard();
 }
 /* ================================
@@ -11525,10 +11585,10 @@ function mapStockReport(storeId,inStock){
   if(inStock){
     lastScanContext={drinkId:did,from:"map"};
     tagScanToStore(s); // ajoute la boisson + confirmations++ + points + son "win"
-    if(window.fbAddReport)window.fbAddReport(s.fbId||sid,did,"stock"); // trace admin (pseudo)
+    if(window.fbAddReport)window.fbAddReport(s.fbId||sid,did,"stock",{note:_provenance("carte",s)}); // trace admin (pseudo)
   }else{
     if(!awardFree("mapstk:"+sid+":"+did,24)){toast("Déjà signalé aujourd'hui");playSound("err");return;}
-    if(window.fbAddReport)window.fbAddReport(s.fbId||sid,did,"rupture"); // trace admin (pseudo)
+    if(window.fbAddReport)window.fbAddReport(s.fbId||sid,did,"rupture",{note:_provenance("carte",s)}); // trace admin (pseudo)
     if(!s.confirmations)s.confirmations={};
     s.confirmations[did]=(s.confirmations[did]||0)-1;_noterObservation(s,did,false);
     userStats.signals=(userStats.signals||0)+1;userStats.pts+=5;flyPts(5);
@@ -12777,12 +12837,12 @@ function sdSetStock(did,wantStock){
     if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
     s.confirmations[did]=Math.max(1,cur+1);_noterObservation(s,did,true);
     if(window.fbConfirmStock)window.fbConfirmStock(sid,did,1);
-    if(window.fbAddReport)try{window.fbAddReport(sid,did,"stock");}catch(e){}
+    if(window.fbAddReport)try{window.fbAddReport(sid,did,"stock",{note:_provenance("magasin",s)});}catch(e){}
     playSound("win");toast("Marqué en stock");
   }else{
     s.confirmations[did]=Math.min(-1,cur-1);_noterObservation(s,did,false);
     if(window.fbConfirmStock)window.fbConfirmStock(sid,did,-1);
-    if(window.fbAddReport)try{window.fbAddReport(sid,did,"rupture");}catch(e){}
+    if(window.fbAddReport)try{window.fbAddReport(sid,did,"rupture",{note:_provenance("magasin",s)});}catch(e){}
     if(typeof resetWatchTrigger==="function")try{resetWatchTrigger(did,sid);}catch(e){}
     playSound("err");toast("Marqué en rupture");
   }
@@ -16892,6 +16952,31 @@ function _peindreChasse(demande){
    positives (stores.seenAt / confirmedBy), a moins de 10 km, sur 7 jours. La
    seule tendance qu'on peut afficher honnetement : des faits dates, pas un
    compteur global pollue par les tests. */
+/* « Trouvees cette semaine » : ce qui s'est conclu autour de moi, sans
+   aucune lecture — mes alertes declenchees et mes aides confirmees. */
+function renderTrouveesSemaine(){
+  var host=document.getElementById("chasse-found");if(!host)return;
+  var depuis=Date.now()-7*86400000,rows=[];
+  (drinkWatches||[]).forEach(function(w){
+    if(!w.triggered||!w.triggeredAt||w.triggeredAt<depuis)return;
+    var d=(DRINKS||[]).find(function(x){return Number(x.id)===Number(w.id);});
+    var sub=w.verdict==="ok"?_tr("confirmedByYou"):(w.by?_tr("saidBy").replace("{p}",sanitize(w.by)):_tr("seenWord"));
+    rows.push({ts:w.triggeredAt,d:d,name:w.name,store:w.storeName||"",sub:sub+" · "+jourGrossier(w.triggeredAt),go:"openWatchStore('"+_idAttr(w.storeId)+"',"+nbSur(w.id)+")"});
+  });
+  (scanHist||[]).forEach(function(e){
+    if(!e.hunt||e.helpStatus!=="ok"||!e.taggedAt||e.taggedAt<depuis)return;
+    var st=findStatus(e);
+    rows.push({ts:e.taggedAt,d:st.drink,name:e.name,store:e.storeName||"",sub:_tr("helpOkShort").replace("{p}",sanitize(e.helpBy||""))+" · +15 "+_tr("pendingPts"),go:"openStoreDetail('"+_idAttr(e.storeId)+"')"});
+  });
+  rows.sort(function(a,b){return b.ts-a.ts;});rows=rows.slice(0,5);
+  if(!rows.length){host.innerHTML="";return;}
+  host.innerHTML='<div class="ch-head">'+_tr("foundWeek")+'</div>'+rows.map(function(r){
+    return '<div class="ch-line" role="button" tabindex="0" onclick="'+r.go+'" onkeydown="if(event.key===\'Enter\')this.click()">'+
+      '<span class="ch-thumb small">'+(r.d?drinkIconHTML(r.d):"")+'</span>'+
+      '<span class="ch-txt"><span class="ch-name">'+sanitize(r.name)+(r.store?' · '+sanitize(r.store):'')+'</span><span class="ch-sub muted">'+r.sub+'</span></span>'+
+      '<span class="ch-chev">\u203A</span></div>';
+  }).join("");
+}
 function renderVuesRecentes(){
   var host=document.getElementById("chasse-recent");if(!host)return;
   var depuis=Date.now()-7*86400000,rows=[];
@@ -16918,7 +17003,7 @@ function renderVuesRecentes(){
 }
 function renderDiscoveries(){
   var el=document.getElementById("disc-list");if(!el)return;el.innerHTML="";
-  var T=LANGS[curLang];var _discDark=document.body.classList.contains("dark");
+  var T=LANGS[curLang]||LANGS.fr;var _discDark=document.body.classList.contains("dark");
   var pending=DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected;});
   try{_majCompteurValider();}catch(e){}
   if(!pending.length){
@@ -17281,7 +17366,7 @@ function showRouteToStore(lat,lng,store){
 /* ================================
    SCAN COUNTS & RATINGS
 ================================ */
-function incrementScan(id){scanCounts[id]=(scanCounts[id]||0)+1;localStorage.setItem("magoscans",JSON.stringify(scanCounts));if(window.fbIncrementScanCount)window.fbIncrementScanCount(id);}
+function incrementScan(id){scanCounts[id]=(scanCounts[id]||0)+1;localStorage.setItem("magoscans",JSON.stringify(scanCounts));if(!isAdmin&&window.fbIncrementScanCount)window.fbIncrementScanCount(id);}
 function renderTopScanned(){
   var el=document.getElementById("top-scanned");if(!el)return;
   var sorted=DRINKS.slice().sort(function(a,b){return(scanCounts[b.id]||0)-(scanCounts[a.id]||0);}).slice(0,5);
@@ -17292,8 +17377,7 @@ function renderTopScanned(){
     var div=document.createElement("div");div.style.cssText="display:flex;align-items:center;gap:12px;margin-bottom:12px;cursor:pointer";
     div.innerHTML='<div style="width:24px;text-align:center;font-size:12px;font-weight:800;color:var(--s'+(i===0?"1":"2")+')">'+(i+1)+'</div>'+
       '<div style="width:34px;height:34px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">'+drinkIconHTML(d)+'</div>'+
-      '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--s1);margin-bottom:4px">'+d.name+'</div>'+
-      '<div style="height:4px;border-radius:2px;background:var(--bg3)"><div style="height:100%;width:'+pct+'%;border-radius:2px;background:var(--s1);transition:width .5s"></div></div></div>'+
+      '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(d.name)+'</div></div>'+
       '<div style="font-size:11px;font-weight:700;color:var(--s2);flex-shrink:0">'+count+'x</div>';
     div.onclick=function(){pick(d);};el.appendChild(div);
   });

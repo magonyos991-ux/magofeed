@@ -148,6 +148,11 @@ exports.crediterContribution = onDocumentCreated(
     if (rep.counted === true) return;              // deja passe
     const montant = BAREME_REPORT[rep.type] || 0;
     if (!montant || !rep.by) { await snap.ref.set({ counted: true, credited: 0 }, { merge: true }); return; }
+    // Un stock ou une rupture declares de loin (ou sans position) ne rapportent rien.
+    if ((rep.type === "stock" || rep.type === "rupture") && !surPlace(rep)) {
+      await snap.ref.set({ counted: true, credited: 0, raison: "trop loin" }, { merge: true });
+      return;
+    }
     if (await dejaCompteAujourdhui(rep, snap.id)) {
       await snap.ref.set({ counted: true, credited: 0, raison: "rejeu" }, { merge: true });
       return;
@@ -172,8 +177,20 @@ exports.crediterContribution = onDocumentCreated(
    Index composites a creer (la console les propose au premier appel) :
    reports(storeId, createdAt) et reports(by, huntCreditedBy). */
 const POINTS_ENTRAIDE = 15;
+const POINTS_ENTRAIDE_LOIN = 5;   // le chercheur a confirme sans etre sur place
 const ENTRAIDE_FENETRE_J = 14;
 const ENTRAIDE_MAX_PAIRE_30J = 3;
+const CHERCHEUR_AGE_MIN_J = 2;    // un compte cree hier ne valide rien
+
+/* Provenance d'un rapport : note = "source|distance en m" (voir _provenance
+   dans index.html). Un rapport fait de loin, ou sans position, reste une trace
+   utile mais ne vaut aucun point : personne ne voit un rayon depuis son canape. */
+const DIST_MAX_M = 500;
+function distanceRapport(rep) {
+  const m = /\|(\d+)$/.exec(String(rep.note || ""));
+  return m ? Number(m[1]) : null;                 // null = inconnue
+}
+function surPlace(rep) { const d = distanceRapport(rep); return d != null && d <= DIST_MAX_M; }
 
 exports.crediterEntraide = onDocumentCreated(
   { document: "reports/{id}", region: REGION },
@@ -196,6 +213,10 @@ exports.crediterEntraide = onDocumentCreated(
     //    le rapport de l'aidant.
     const moi = seekers[rep.by];
     if (!moi || typeof moi.at !== "number") return;
+    // Un chercheur trop neuf ne valide rien : c'est le compte jetable du duo.
+    const u = await db.doc(`users/${rep.by}`).get();
+    const cree = (u.exists && u.data().createdAt && u.data().createdAt.toMillis) ? u.data().createdAt.toMillis() : 0;
+    if (cree && Date.now() - cree < CHERCHEUR_AGE_MIN_J * 86400000) return;
     const depuis = Timestamp.fromMillis(creeA - ENTRAIDE_FENETRE_J * 86400000);
     const q = await db.collection("reports")
       .where("storeId", "==", rep.storeId)
@@ -225,7 +246,8 @@ exports.crediterEntraide = onDocumentCreated(
       await db.doc(`reports/${aide.id}`).set(Object.assign(marque, { huntCreditedPts: 0, raison: "paire" }), { merge: true });
       return;
     }
-    const verse = await crediter(aide.by, POINTS_ENTRAIDE, "entraide");
+    const montant = surPlace(rep) ? POINTS_ENTRAIDE : POINTS_ENTRAIDE_LOIN;
+    const verse = await crediter(aide.by, montant, "entraide");
     await db.doc(`reports/${aide.id}`).set(Object.assign(marque, { huntCreditedPts: verse }), { merge: true });
     await recalculerScore(aide.by);
   }

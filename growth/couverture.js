@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* global clearTimeout, setTimeout, AbortController */
 /* ===========================================================================
  * Magofeed — couverture.js
  * « Combien de magasins existent VRAIMENT, et combien en ai-je deja ? »

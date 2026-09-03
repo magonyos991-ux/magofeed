@@ -1,3 +1,4 @@
+/* global db, collection, query, orderBy, limit, documentId, getDocs, writeBatch, deleteField, startAfter, packDrinkIds, brandIds, M4_CATS, buildChainSets, normTxt, guessStoreCat */
 /* ============================================================================
  * ⚠ AVERTISSEMENT AJOUTÉ APRÈS RELECTURE — LIS CECI AVANT DE LANCER QUOI QUE CE SOIT
  *
