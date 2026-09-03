@@ -8,12 +8,17 @@
  * fonction transforme ce moment en notification sur ton telephone, app fermee,
  * avec le montant, le nom et le message.
  *
- * ⚠️ AVANT DE DEPLOYER : L'APP KO-FI FAIT DEJA CA.
- * Installe-la, connecte-toi, tu as le push. Ce fichier ne sert que si tu veux
- * la notification DANS Magofeed — meme icone, meme boite de notifications que
- * le reste de l'app. C'est du confort, pas une necessite. Ne deploie pas une
- * Cloud Function pour quelque chose qu'une app gratuite fait deja, sauf si tu
- * y tiens vraiment.
+ * CE QU'IL Y A SANS CETTE FONCTION
+ * Ko-fi n'a PAS d'application iPhone (une note precedente disait le contraire :
+ * elle etait fausse). Il reste donc deux voies, et aucune ne donne les trois
+ * informations d'un coup :
+ *   - l'e-mail de Ko-fi : il porte le nom, le montant ET le message, mais il
+ *     arrive comme un e-mail parmi d'autres. Sur iPhone, le classer en VIP le
+ *     transforme en vraie notification.
+ *   - l'app PayPal : elle sonne vite et bien, mais ne dit que le montant. Ni le
+ *     nom du donateur, ni son message.
+ * Cette fonction-ci est la seule facon d'avoir les trois, dans Magofeed, avec
+ * ton icone et ta boite de notifications.
  *
  * CE QUE CA NE FAIT PAS
  * Ca n'encaisse rien et ne touche a aucun paiement : Ko-fi previent, on relaie.
