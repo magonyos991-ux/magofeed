@@ -144,10 +144,17 @@ exports.chercherCommerces = onCall(
     const zoneRef = db.collection("zonesOverture").doc(cell);
     const zone = await zoneRef.get();
     if (zone.exists) {
-      const q = zone.data().quand;
+      const zd = zone.data() || {};
+      const q = zd.quand;
       const ms = q && q.toMillis ? q.toMillis() : 0;
-      if (Date.now() - ms < JOURS_CACHE_ZONE * 86400000) {
-        return { ok: true, deja: true, ajoutes: 0, trouves: zone.data().trouves || 0 };
+      const age = Date.now() - ms;
+      /* Une marque « en-cours » de plus de trois minutes est un cadavre : la
+         fonction a depasse son delai avant d'ecrire « faite » ou de retirer la
+         marque. Sans ce test, la zone resterait consideree comme traitee
+         pendant trente jours alors que rien n'a ete ecrit. */
+      const cadavre = zd.etat === "en-cours" && age > 3 * 60000;
+      if (!cadavre && age < JOURS_CACHE_ZONE * 86400000) {
+        return { ok: true, deja: true, ajoutes: 0, trouves: zd.trouves || 0 };
       }
     }
 

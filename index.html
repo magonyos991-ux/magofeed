@@ -13640,28 +13640,38 @@ function autoImportZone(cLat,cLng){
   /* Quand OpenStreetMap en connait moins de cinq, on demande au serveur
      d'interroger Overture Maps. Une fois par mois par zone, quel que soit le
      nombre de personnes qui l'ouvrent. */
+  /* LA ZONE N'EST « FAITE » QUE QUAND LE MONDE A REPONDU. Le premier essai
+     marquait la zone des qu'OpenStreetMap avait repondu, meme si le relais
+     Overture n'avait pas pu etre appele (fonction pas encore deployee, reseau
+     coupe). Ilias a teste Filiates pendant que le deploiement finissait : la
+     fonction n'existait pas encore, la zone a ete marquee « faite » pour une
+     semaine, et une fois la fonction en ligne son telephone ne la rappelait
+     plus. Desormais : OSM suffit (5 commerces ou plus) -> faite ; Overture a
+     repondu -> faite ; tout le reste -> echec note, nouvel essai dans dix
+     minutes. */
   var _relaisMonde=function(nOsm){
-    if(!window.fbChercherCommercesMonde||nOsm>=5){ _autoImportBusy=false; return; }
+    if(nOsm>=5){ _marquerFaite(); _autoImportBusy=false; return; }
+    if(!window.fbChercherCommercesMonde){ _marquerEchec(); _autoImportBusy=false; return; }
     window._exploreDerniereRecherche={etat:"monde",quand:Date.now()};
     try{if(typeof exploreStatutHonnete==="function")exploreStatutHonnete();}catch(e){}
     window.fbChercherCommercesMonde(cLat,cLng).then(function(r){
       _autoImportBusy=false;
       if(r&&r.ok){
+        _marquerFaite();
         window._exploreDerniereRecherche={etat:"faite",quand:Date.now(),monde:true,ajoutes:r.ajoutes||0};
         if(r.ajoutes>0){
           try{if(typeof exploreLoadStores==="function")exploreLoadStores();}catch(e){}
           try{if(window.fbLoadNearbyStores)window.fbLoadNearbyStores(cLat,cLng,10);}catch(e){}
         }
-      }else if(r&&r.reason==="not-deployed"){
-        window._exploreDerniereRecherche={etat:"faite",quand:Date.now(),monde:false};
       }else{
-        window._exploreDerniereRecherche={etat:"echec",quand:Date.now()};
+        /* Pas deployee, quota, panne : on ne sait pas ce qu'il y a ici. On le
+           dit, et on laissera reessayer. */
+        _marquerEchec();
       }
       try{if(typeof exploreStatutHonnete==="function")exploreStatutHonnete();}catch(e){}
     }).catch(function(){
       _autoImportBusy=false;
-      window._exploreDerniereRecherche={etat:"echec",quand:Date.now()};
-      try{if(typeof exploreStatutHonnete==="function")exploreStatutHonnete();}catch(e){}
+      _marquerEchec();
     });
   };
   var km=2.5;
@@ -13688,7 +13698,6 @@ function autoImportZone(cLat,cLng){
         return {id:"o"+el.id,osm:el.id,name:name,emoji:osmShopEmoji(el.tags.shop),lat:lat,lng:lng,hours:(el.tags.opening_hours||null),
           brand:(el.tags.brand||null),type:gcat?("\u00e9picerie "+gcat):null,drinks:[],drinksVerified:null,verifiedSource:null};
       }).filter(Boolean).filter(function(s){var k=s.id;if(seen[k])return false;seen[k]=1;return true;});
-      _marquerFaite();   // la requete a REPONDU : c'est maintenant qu'on note la zone
       window._exploreDerniereRecherche={etat:"faite",quand:Date.now(),osm:found.length};
       if(!found.length){_relaisMonde(0);return;}
       var zone=window.fbQueryZone?window.fbQueryZone(cLat,cLng,km+0.5):Promise.resolve(STORES||[]);
