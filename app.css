@@ -15,6 +15,13 @@ input,button{font-family:'Space Grotesk',sans-serif;outline:none;border:none;bac
   --bg3:#e8e5df;
   --border:#dedad3;
   --card-bg:#ffffff;
+  /* Accents semantiques, lisibles (>= 4,5:1) sur leurs fonds. L'or #e5a93a est
+     un FOND (bouton) en clair, jamais un texte : 1,9:1 sur blanc. */
+  --gold-txt:#8a5408; --gold-bg:#e5a93a; --gold-on:#1a1714; --gold-chip-bg:#fdf3dc;
+  --ok-txt:#166534; --ok-bg:#dcfce7; --ok-solid:#15803d;
+  --warn-txt:#92400e; --warn-bg:#fef3c7;
+  --danger-txt:#b91c1c; --danger-bg:#fee2e2;
+  --cta-bg:#e67e22; --cta-on:#1a1714;
   --nav-bg:rgba(244,242,238,.9);
   --card-shadow:0 1px 3px rgba(0,0,0,.04),0 6px 20px rgba(0,0,0,.06);
   --accent:#1a1714;
@@ -41,6 +48,11 @@ body.dark{
   --bg3:#29221b;
   --border:#312a21;
   --card-bg:#211c17;
+  --gold-txt:#e5a93a; --gold-bg:#e5a93a; --gold-on:#1a1714; --gold-chip-bg:#2a2118;
+  --ok-txt:#4ade80; --ok-bg:#14532d; --ok-solid:#15803d;
+  --warn-txt:#fbbf24; --warn-bg:#3b2a0a;
+  --danger-txt:#fca5a5; --danger-bg:#450a0a;
+  --cta-bg:#e67e22; --cta-on:#1a1714;
   --nav-bg:rgba(20,16,13,.86);
   --card-shadow:0 1px 3px rgba(0,0,0,.35),0 10px 28px rgba(0,0,0,.32);
   --nav-border:#312a21;
@@ -200,7 +212,7 @@ body.dark #nav-pill{background:rgba(226,181,113,.12);border-color:rgba(226,181,1
 .t-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--s2)}
 .c1{color:var(--s1)}
 .c2{color:var(--s2)}
-.c3{color:var(--s3)}
+.c3{color:var(--txt2)}
 
 /* ── Search mode toggle ── */
 .search-mode-btn{flex:1;text-align:center;padding:10px 6px;border-radius:999px;font-size:12.5px;font-weight:700;cursor:pointer;color:var(--s2);transition:all .22s cubic-bezier(.2,.8,.3,1);-webkit-tap-highlight-color:transparent}
@@ -300,7 +312,7 @@ body.dark .dcard{background:#2a2a2a}
 }
 .dcard-tag{
   font-size:8px;letter-spacing:1.2px;
-  color:rgba(40,36,30,.4);font-weight:700;
+  color:rgba(40,36,30,.7);font-weight:700;
   position:relative;z-index:1;
 }
 .dcard-info{padding:8px 11px 10px}
@@ -470,9 +482,8 @@ body.dark .gobtn.closed{background:var(--bg2);color:var(--s2)}
 .sd-txt{flex:1;min-width:0}
 .sd-txt .store-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .store-meta .sd-stat{font-weight:800;margin-left:5px;white-space:nowrap}
-.sd-stat.ok{color:#16a34a}
-body.dark .sd-stat.ok{color:#4ade80}
-.sd-stat.todo{color:var(--s3)}
+.sd-stat.ok{color:var(--ok-txt)}
+.sd-stat.todo{color:var(--txt2)} /* --s3 tombait a 4,2:1 en clair et 3,5:1 en sombre */
 .sd-chev{color:var(--s3);font-size:20px;flex-shrink:0;margin-left:2px}
 /* ── Carte "mission" (rétention : incite à scanner/contribuer sur place) ── */
 .sd-mission{margin:14px 20px 2px;border-radius:18px;padding:14px 16px;position:relative;overflow:hidden;
@@ -710,6 +721,71 @@ body.dark .disc-card{background:#2a2a2a}
 .ghost-btn:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
 .ghost-btn.quiet{border-color:transparent;background:transparent;color:var(--txt2)}
 .ghost-btn.quiet:active{background:var(--bg3)}
+
+/* ── Scanner : trois etats (idle / live / result), voir setScanState ── */
+#s-scan[data-state="idle"] .scan-area,#s-scan[data-state="idle"] #scan-hint,#s-scan[data-state="idle"] #scan-tips,
+#s-scan[data-state="idle"] #scan-manual-toggle,#s-scan[data-state="idle"] #scan-cancel,#s-scan[data-state="idle"] #scan-btn{display:none!important}
+#s-scan[data-state="result"] .scan-area,#s-scan[data-state="result"] #scan-tips,#s-scan[data-state="result"] #scan-cancel,#s-scan[data-state="result"] #scan-manual-toggle{display:none!important}
+#s-scan:not([data-state="idle"]) #scan-cta{display:none}
+/* ── Mes trouvailles : grille du journal ── */
+.find-chip{min-height:44px;padding:0 14px;font-size:11.5px}
+.finds-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.find-card{background:var(--card-bg);border:1.5px solid var(--border);border-radius:20px;overflow:hidden;display:flex;flex-direction:column;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .12s}
+.find-card:active{transform:scale(.98)}
+.find-card:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.find-thumb{height:100px;background:var(--bg3);position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--s2)}
+.find-thumb>img{width:100%;height:100%;object-fit:cover;display:block}
+.find-thumb .drink-fill{width:100%;height:100%}
+.find-badge{position:absolute;top:8px;left:8px;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:800;background:var(--bg2);border:1px solid var(--border);color:var(--txt2);white-space:nowrap;max-width:calc(100% - 16px);overflow:hidden;text-overflow:ellipsis}
+.find-badge.ok{background:var(--ok-solid);border-color:var(--ok-solid);color:#fff}
+.find-badge.warn{background:var(--cta-bg);border-color:var(--cta-bg);color:var(--cta-on)}
+.find-body{padding:10px 11px 12px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.find-name{font-size:13px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.find-where{font-size:11px;font-weight:600;color:var(--txt2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.find-foot{display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0}
+.find-price{font-size:12px;font-weight:800;color:var(--gold-txt);white-space:nowrap}
+.find-act{font-size:11.5px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.find-date{font-size:10.5px;font-weight:600;color:var(--txt2);white-space:nowrap;flex-shrink:0}
+/* ── La chasse ── */
+.chasse-seg{display:flex;gap:4px;padding:4px;border-radius:999px;background:var(--bg2);border:1.5px solid var(--border)}
+.chasse-seg button{flex:1;min-height:44px;border:none;border-radius:999px;background:transparent;color:var(--txt2);font-size:12px;font-weight:700;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 6px;transition:background .18s,color .18s}
+.chasse-seg button.on{background:var(--s1);color:var(--app-bg);font-weight:800}
+.ch-head{font-size:15px;font-weight:800;letter-spacing:-.2px;color:var(--s1)}
+.ch-lead{font-size:11.5px;font-weight:500;line-height:1.5;color:var(--txt2);margin:3px 0 10px}
+.ch-card{background:var(--card-bg);border:1.5px solid var(--border);border-radius:20px;padding:12px 14px;margin-bottom:10px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.ch-card.first{border-color:#c69a57;box-shadow:0 1px 3px rgba(0,0,0,.08),0 10px 28px rgba(0,0,0,.10);padding:14px}
+body.dark .ch-card.first{border-color:#4a3a1f}
+.ch-card:focus-visible,.ch-line:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.ch-row{display:flex;align-items:center;gap:12px}
+.ch-thumb{width:46px;height:46px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ch-card.first .ch-thumb{width:54px;height:54px;border-radius:14px}
+.ch-thumb.small{width:40px;height:40px;border-radius:11px}
+.ch-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.ch-name{font-size:13.5px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ch-card.first .ch-name{font-size:14.5px}
+.ch-sub{font-size:11.5px;font-weight:600;color:var(--gold-txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ch-sub.muted{color:var(--txt2)}
+.ch-card:not(.first) .ch-sub{white-space:normal;line-height:1.3}
+.ch-card:not(.first) .ch-thumb{width:42px;height:42px}
+.ch-when{font-size:11px;font-weight:500;color:var(--txt2)}
+.ch-reward{flex-shrink:0;padding:6px 9px;border-radius:999px;background:var(--gold-chip-bg);border:1px solid var(--border);color:var(--gold-txt);font-size:11px;font-weight:800;white-space:nowrap}
+.ch-actions{display:flex;gap:8px;margin-top:12px}
+.ch-btn{min-height:44px;padding:0 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:12.5px;font-weight:700;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;white-space:nowrap}
+.ch-btn.main{flex:1;border-color:var(--gold-bg);background:var(--gold-bg);color:var(--gold-on);font-weight:800;font-size:13px}
+.ch-btn:active{transform:scale(.97)}
+.ch-pill{flex-shrink:0;min-height:44px;padding:0 12px;border-radius:999px;border:1px solid var(--border);background:var(--gold-chip-bg);display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:var(--gold-txt);font-family:inherit;cursor:pointer;white-space:nowrap;-webkit-tap-highlight-color:transparent}
+.ch-pill b{font-weight:800}
+.ch-dot{opacity:.5}
+.ch-mine{font-size:11px;font-weight:600;color:var(--txt2);margin-top:8px}
+.ch-line{display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer}
+.ch-line:last-child{border-bottom:none}
+.ch-line .ch-sub{white-space:normal;line-height:1.35}
+.ch-chev{color:var(--s3);font-size:18px;flex-shrink:0}
+/* ── Entraide : « on t'a dit où » ── */
+.tip-card{background:var(--card-bg);border:1.5px solid var(--gold-txt);border-radius:20px;padding:14px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.08),0 10px 28px rgba(0,0,0,.10)}
+.tip-q{font-size:12.5px;font-weight:600;line-height:1.45;color:var(--txt2);margin-top:10px}
+.find-badge.right{top:auto;bottom:8px} /* sous la pastille de statut, jamais dessus */
+.find-badge.ko{background:var(--danger-bg);border-color:var(--danger-bg);color:var(--danger-txt)}
 /* Note affichee par-dessus la photo du produit : une pastille translucide
    plutot qu'un mot souligne facon lien web. Vide = rien du tout. */
 .res-rate-chip{display:inline-flex;align-items:center;gap:5px;margin-top:5px;min-height:30px;padding:5px 11px;border-radius:999px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.24);color:#fff;font-size:11px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .15s}
@@ -798,6 +874,11 @@ body.homefab .toast{bottom:calc(150px + env(safe-area-inset-bottom))}
 .mago-pin.sure .mago-pin-head{border-color:#16a34a;border-width:3px;box-shadow:0 0 0 3px rgba(22,163,74,.25)}
 .mago-pin.sure{filter:drop-shadow(0 5px 10px rgba(22,163,74,.35))}
 .mago-pin .pin-check{position:absolute;top:-5px;right:-5px;width:16px;height:16px;border-radius:50%;background:#16a34a;border:2px solid #fff;color:#fff;font-size:9px;font-weight:900;display:flex;align-items:center;justify-content:center;z-index:3}
+/* Anti-crash iOS au dezoom : c'est l'ANIMATION (transform+opacity) qui force
+   Safari a promouvoir chaque pin en couche composee dediee, avec son propre
+   tampon offscreen. Sur la carte Explorer, des centaines de pins peuvent
+   apparaitre d'un coup : on coupe le pop-in la, et la seulement. */
+#explore-map .mago-pin{animation:none}
 /* ── BLEU = magasin certifie ──────────────────────────────────────────────
    Le vert parle d'une BOISSON (« elle est en stock ici »), le bleu parle de
    l'ETABLISSEMENT (rayon verifie sur place). Les deux se cumulent.
@@ -1151,7 +1232,8 @@ body.sheet-open{overflow:hidden;overscroll-behavior:none}
 .lvl-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:7px}
 .lvl-name{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:800;color:var(--s1);min-width:0}
 .lvl-num{width:22px;height:22px;border-radius:7px;background:rgba(240,184,64,.16);border:1px solid #f0b840;
-  color:#c69a57;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;flex-shrink:0}
+  color:#8a5408;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;flex-shrink:0}
+body.dark .lvl-num{color:#e5a93a}
 .lvl-count{font-size:10.5px;font-weight:700;color:var(--s2);flex-shrink:0}
 .lvl-track{height:7px;border-radius:99px;background:var(--bg3);overflow:hidden}
 .lvl-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#c69a57,#e0b878);
@@ -1159,7 +1241,8 @@ body.sheet-open{overflow:hidden;overscroll-behavior:none}
 .lvl-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:8px;
   font-size:11px;font-weight:600;color:var(--txt2,var(--s2))}
 .lvl-foot b{font-weight:800;color:var(--s1)}
-.lvl-go{display:inline-flex;align-items:center;font-weight:800;color:#c69a57;flex-shrink:0}
+.lvl-go{display:inline-flex;align-items:center;font-weight:800;color:#8a5408;flex-shrink:0}
+body.dark .lvl-go{color:#e5a93a}
 /* ── Liste des paliers : le PROCHAIN se voit tout de suite ── */
 .perk-row{display:flex;align-items:center;gap:11px;padding:12px 14px;border-top:1px solid var(--border)}
 .perk-row:first-child{border-top:0}
