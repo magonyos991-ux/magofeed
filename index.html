@@ -4722,7 +4722,14 @@ function jourGrossier(ts){
    deja : fbSavePrice horodate chaque releve dans priceHistory. On la lit,
    sans rien ajouter a la base ni aux regles. */
 function prixVuLe(s,did){
-  var h=s&&s.priceHistory&&(s.priceHistory[String(did)]||s.priceHistory[did]);
+  /* On lit l'historique COMPLET, pas seulement celui de Firestore.
+     quickPrice, la saisie de prix depuis la carte, n'ecrit que l'historique
+     LOCAL : un prix saisi par la ne portait donc aucune date connue de cette
+     fonction, donc aucun suffixe, donc jamais perime. Il passait pour
+     eternellement frais. La date existait, elle n'etait simplement pas lue. */
+  var h=null;
+  try{ h=getPriceHistory(s,did); }catch(e){ h=null; }
+  if(!h||!h.length)h=s&&s.priceHistory&&(s.priceHistory[String(did)]||s.priceHistory[did]);
   if(!h||!h.length)return null;
   var t=0;
   h.forEach(function(e){var v=Number(e&&e.t);if(isFinite(v)&&v>t)t=v;});
@@ -12318,7 +12325,7 @@ function renderAlertsCard(){
     var last=(i===drinkWatches.length-1);
     var found=!!w.triggered;
     var pill=found
-      ?'<span style="display:inline-flex;align-items:center;gap:5px;max-width:100%;font-size:11px;font-weight:800;color:#15803d;background:rgba(21,128,61,.11);padding:3px 9px;border-radius:999px;overflow:hidden"><span style="width:6px;height:6px;border-radius:50%;background:#16a34a;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(w.verdict==="ok"?_tr("confirmedByYou"):"Trouvée")+(w.storeName?" · "+sanitize(w.storeName):"")+(w.dist!=null?" · "+fmtDist(w.dist):"")+(w.by&&w.verdict!=="ok"?" · "+_tr("saidBy").replace("{p}",sanitize(w.by)):"")+'</span></span>'
+      ?'<span style="display:inline-flex;align-items:center;gap:5px;max-width:100%;font-size:11px;font-weight:800;color:#15803d;background:rgba(21,128,61,.11);padding:3px 9px;border-radius:999px;overflow:hidden"><span style="width:6px;height:6px;border-radius:50%;background:#16a34a;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(w.verdict==="ok"?_tr("confirmedByYou"):"Trouvée")+(w.storeName?" · "+sanitize(w.storeName):"")+(w.dist!=null?" · "+fmtDist(w.dist):"")+(w.triggeredAt?" · "+jourGrossier(w.triggeredAt):"")+(w.by&&w.verdict!=="ok"?" · "+_tr("saidBy").replace("{p}",sanitize(w.by)):"")+'</span></span>'
       :'<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#b45309;background:rgba(217,119,6,.12);padding:3px 9px;border-radius:999px"><span class="mago-live-dot" style="width:6px;height:6px;border-radius:50%;background:#f59e0b;flex-shrink:0"></span>En recherche</span>';
     var lineAction=w.triggered?"openWatchStore('"+String(w.storeId).replace(/'/g,"\\'")+"',"+w.id+")":"var d=DRINKS.find(function(x){return x.id==="+w.id+"});if(d)pick(d)";
     var wd=DRINKS.find(function(x){return Number(x.id)===Number(w.id);});
@@ -12945,7 +12952,13 @@ function renderStoreList(){
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;gap:8px">'+
         '<span style="font-size:10px;font-weight:600;color:var(--txt2)">Fiabilité</span>'+
         '<span style="display:inline-flex;align-items:center;gap:6px">'+
-          (vuParHTML(s,sid)||(fr?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;background:'+fr.bg+';color:'+fr.col+';white-space:nowrap">'+fr.label+'</span>':''))+
+          /* Quand ni vuParHTML ni freshnessInfo n'ont de date — magasins
+             importes avant l'horodatage — on le DIT, au lieu de laisser un
+             vert franc sans age. L'absence de date etait elle-meme invisible :
+             c'est le seul cas de cette liste qui demandait un libelle neuf. */
+          (vuParHTML(s,sid)
+            ||(fr?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;background:'+fr.bg+';color:'+fr.col+';white-space:nowrap">'+fr.label+'</span>':'')
+            ||(confN>0?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--bg3);color:var(--s3);white-space:nowrap">date inconnue</span>':''))+
           '<span style="font-size:10px;font-weight:600;color:var(--s2)">'+confs+' confirmation'+(confs>1?"s":"")+'</span>'+
         '</span>'+
       '</div>'+
@@ -13643,11 +13656,20 @@ function renderStoreDetail(){
   var storeIdStr=String(s.id);
   drinks.forEach(function(d,_i){
     var confs=s.confirmations[d.id]||0;
-    var stat=confs>0
+    /* MEME REGLE QUE LA LISTE DES MAGASINS, sinon les deux ecrans se
+       contredisent sur le meme magasin : une confirmation de mars s'affichait
+       ici en vert franc en septembre, alors que la liste disait deja
+       « A reconfirmer ». On ne le decouvrait qu'en passant de l'un a l'autre.
+       Aucune donnee nouvelle : la date est deja lue deux lignes plus bas. */
+    var _fr=null; try{ _fr=freshnessInfo(s,d.id); }catch(e){}
+    var _vieux=!!(_fr&&_fr.f<=0.4)&&!storeVerifiedFor(s,d.id);
+    var stat=(confs>0&&!_vieux)
       ? '<span class="sd-stat ok">● En stock</span>'
       : (confs<0
         ? '<span class="sd-stat" style="color:#dc2626">● Rupture</span>'
-        : '<span class="sd-stat todo">● À confirmer</span>');
+        : (confs>0
+          ? '<span class="sd-stat" style="color:var(--txt2)">● À reconfirmer</span>'
+          : '<span class="sd-stat todo">● À confirmer</span>'));
     var div=document.createElement("div");div.className="store-card";
     div.style.animation="sdRowIn .34s ease both";div.style.animationDelay=(Math.min(_i,9)*0.035)+"s";
     // Maintien du stock en 1 tap (surtout pour le commerçant) : ✓ en stock / ✕ rupture.
@@ -15476,10 +15498,24 @@ function exploreShowCard(s){
     dist=Math.sqrt(dLa*dLa+dLo*dLo);
   }
   var nDrinks=(s.drinks||[]).length;
+  var _vuCarte="";
+  try{
+    var _didC=(exploreFilter&&exploreFilter.drinkId!=null)?exploreFilter.drinkId:null;
+    if(_didC!=null){
+      var _tx=vuParTexte(s,_didC);
+      if(_tx)_vuCarte=' \u00B7 '+_tx;
+    }
+  }catch(e){}
   card.innerHTML='<div style="width:44px;height:44px;border-radius:13px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">'+(s.emoji||"")+'</div>'+
     '<div style="flex:1;min-width:0">'+
       '<div style="font-size:14px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(s.name)+'</div>'+
-      '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:2px">'+(dist!=null?""+fmtDist(dist)+" \u00B7 ":"")+nDrinks+" boisson"+(nDrinks>1?"s":"")+" r\u00E9f\u00E9renc\u00E9e"+(nDrinks>1?"s":"")+(openLabel(s)?' \u00B7 <span style="color:'+(storeOpenState(s)?"#15803d":"#b91c1c")+';font-weight:800">'+openLabel(s)+"</span>":"")+'</div>'+
+      /* QUAND, et pas seulement OU. Cette bandelette est ce qu'on lit juste
+         avant de designer un magasin : elle donnait le nom, la distance et le
+         nombre de boissons, jamais la date de la derniere observation. La
+         donnee existe (seenAt / confirmedAt) et vuParTexte sait deja la dire.
+         La couleur d'ouverture suit la meme regle qu'ailleurs : ambre quand
+         l'horaire est une deduction et non un fait. */
+      '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:2px">'+(dist!=null?""+fmtDist(dist)+" \u00B7 ":"")+nDrinks+" boisson"+(nDrinks>1?"s":"")+" r\u00E9f\u00E9renc\u00E9e"+(nDrinks>1?"s":"")+(openLabel(s)?' \u00B7 <span style="color:'+(openSur(s)?(storeOpenState(s)?"#15803d":"#b91c1c"):"#b45309")+';font-weight:800">'+openLabel(s)+"</span>":"")+_vuCarte+'</div>'+
     '</div>'+
     '<span style="font-size:15px;color:var(--s3)">\u203A</span>';
   card.style.display="flex";
@@ -18346,8 +18382,19 @@ function showRouteToStore(lat,lng,store){
       animateRouteDraw(coords,group);
       var km=rt.distance/1000;
       var mins=Math.max(1,Math.round(rt.duration/60));
+      /* LE PRIX SUR LA BANNIERE D'ITINERAIRE. C'est litteralement l'ecran
+         qu'on regarde en marchant vers la caisse, et il vantait un chiffre
+         sans age : un releve de l'an dernier s'affichait en vert franc a cote
+         de « 850 m, 11 min a pied ». Meme regle que partout ailleurs — au-dela
+         de deux mois le prix perd son vert et porte sa date, en dessous d'une
+         semaine il n'a besoin d'aucune excuse. */
       var _bp=(exploreFilter&&window._navDest)?getStorePrice(window._navDest,exploreFilter.drinkId):null;
-      var _bpTxt=(_bp!=null&&_bp>0)?' · <span style="color:#16a34a;font-weight:800">'+_bp.toFixed(2).replace(/\.?0+$/,"")+'€</span>':'';
+      var _bpT=(exploreFilter&&window._navDest)?prixVuLe(window._navDest,exploreFilter.drinkId):null;
+      var _bpMort=prixPerime(_bpT);
+      var _bpTxt=(_bp!=null&&_bp>0)
+        ? ' · <span style="color:'+(_bpMort?"var(--s2)":"#16a34a")+';font-weight:800">'+_bp.toFixed(2).replace(/\.?0+$/,"")+'€</span>'
+          +'<span style="color:var(--s2);font-weight:600">'+sanitize(prixSuffixe(_bpT))+'</span>'
+        : '';
       var _sid=String((window._navDest&&window._navDest.id)||"").replace(/'/g,"\\'");
       var host=document.getElementById("explore-map-host");
       if(host){
