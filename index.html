@@ -12278,24 +12278,58 @@ window._leafletState = window._leafletState || null;   // null | "loading" | "re
    ============================================================================ */
 var FOND_ATTRIB='Esri, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, commerces <a href="https://overturemaps.org">Overture Maps</a>';
 function fondMago(sombre){
-  /* UN SEUL FOND, SOBRE, A TOUS LES ZOOMS.
-     On basculait sur OpenStreetMap une fois proche, pour gagner en detail.
-     Mais ce detail-la ne sert a rien ici : Magofeed dit dans QUEL MAGASIN se
-     trouve une boisson, il ne livre personne a domicile. Numeros de maison,
-     numeros de police, commerces sans rapport : tout cela encombre ce qui doit
-     rester lisible d'un coup d'oeil, c'est-a-dire les pins.
+  /* DEUX FONDS, CHACUN LA OU IL EST BON.
 
-     La donnee de ce fond s'arrete au zoom 16 — mesure : au-dela le serveur
-     renvoie une tuile « pas de donnee » de 2,5 Ko. maxNativeZoom dit a Leaflet
-     de REUTILISER la tuile 16 en l'agrandissant, plutot que d'afficher un carre
-     vide. C'est adouci si on zoome au maximum ; c'est assume, et de toute facon
-     les regroupements se defont maintenant des le zoom 15, donc on a rarement
-     besoin d'aller plus loin. */
-  var jeu=sombre?"World_Dark_Gray_Base":"World_Light_Gray_Base";
-  return L.tileLayer(
-    "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/"+jeu+"/MapServer/tile/{z}/{y}/{x}",
-    { maxZoom:19,            // on peut zoomer jusqu'au bout...
-      maxNativeZoom:16,      // ...mais la donnee s'arrete la, on agrandit
+     Le fond sobre d'Esri (Light Gray Canvas) est parfait de loin : presque
+     rien a l'ecran, donc les pins ressortent. C'est pour ca qu'il a ete
+     choisi. Mais SA DONNEE S'ARRETE AU ZOOM 16 — mesure : au-dela, le serveur
+     renvoie une tuile « pas de donnee » de 2 521 octets, a l'octet pres, du
+     zoom 17 au zoom 19. Leaflet reutilisait donc la tuile 16 en l'agrandissant
+     jusqu'a huit fois, d'ou des noms de rue enormes et flous des qu'on
+     s'approche. Le commentaire d'origine appelait ca « adouci » et « assume ».
+     Ca ne l'etait pas : au niveau de la rue, c'est-a-dire exactement quand on
+     cherche a reconnaitre un magasin, la carte devenait illisible.
+
+     Au-dela du zoom 16, on passe donc a World_Street_Map, du MEME fournisseur,
+     qui a de vraies tuiles jusqu'au zoom 19 (mesure aussi). Il est en couleurs,
+     ce qui encombrerait ; un filtre CSS le desature et l'eclaircit, et il
+     redevient le canevas gris qu'on veut. Verifie en image sur Bruxelles avant
+     d'etre ecrit ici.
+
+     UNE SEULE COUCHE : c'est getTileUrl qui choisit la source, tuile par
+     tuile. Donc un seul cache, aucun clignotement de bascule, et le filtre
+     n'est pose que sur les tuiles qui en ont besoin.
+
+     Meme fournisseur des deux cotes, donc aucune licence nouvelle, aucune cle
+     a demander, et l'attribution existante couvre deja les deux. */
+  var ESRI="https://server.arcgisonline.com/ArcGIS/rest/services/";
+  var CANEVAS=ESRI+"Canvas/"+(sombre?"World_Dark_Gray_Base":"World_Light_Gray_Base")+"/MapServer/tile/{z}/{y}/{x}";
+  var RUE=ESRI+"World_Street_Map/MapServer/tile/{z}/{y}/{x}";
+  var BASCULE=17;   // le canevas n'a plus de donnee a partir d'ici
+  /* Desature et eclaircit la carte routiere pour qu'elle ressemble au canevas.
+     En sombre : on inverse d'abord, puis on assombrit — les rues restent
+     claires sur un fond noir, comme le Dark Gray Canvas. */
+  var FILTRE=sombre
+    ? "grayscale(1) invert(1) contrast(.85) brightness(.62)"
+    : "grayscale(1) contrast(.82) brightness(1.09)";
+
+  var FondMago=L.TileLayer.extend({
+    getTileUrl:function(coords){
+      /* _url est propre a cette couche : on l'oriente juste avant que Leaflet
+         ne compose l'adresse. Toutes les tuiles d'une meme grille partagent le
+         zoom, donc pas de melange possible. */
+      this._url=(this._getZoomForUrl()>=BASCULE)?RUE:CANEVAS;
+      return L.TileLayer.prototype.getTileUrl.call(this,coords);
+    },
+    createTile:function(coords,done){
+      var t=L.TileLayer.prototype.createTile.call(this,coords,done);
+      if(coords.z>=BASCULE)t.style.filter=FILTRE;
+      return t;
+    }
+  });
+
+  return new FondMago(CANEVAS,
+    { maxZoom:19,            // et cette fois la donnee suit jusqu'au bout
       keepBuffer:1,          // moitie moins de tuiles gardees hors ecran
       updateWhenZooming:false, // une seule reconstruction de grille, a la fin du zoom
       attribution:FOND_ATTRIB });
