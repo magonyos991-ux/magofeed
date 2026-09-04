@@ -129,6 +129,11 @@ export default [
       globals: { require: "readonly", module: "writable", exports: "writable", process: "readonly",
                  Buffer: "readonly", __dirname: "readonly", console: "readonly", URL: "readonly",
                  fetch: "readonly", setTimeout: "readonly", TextEncoder: "readonly",
+                 /* Globales de Node 18+, au meme titre que fetch : sans elles,
+                    le garde-fou signalait comme « variable inexistante » un
+                    delai d'attente parfaitement valide. */
+                 AbortSignal: "readonly", AbortController: "readonly",
+                 URLSearchParams: "readonly", crypto: "readonly",
                  window: "readonly", document: "readonly" }
     },
     rules: BUG_RULES

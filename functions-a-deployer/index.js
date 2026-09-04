@@ -73,6 +73,15 @@ Object.assign(exports, require("./sauvegarde"));
 /* ── La notification a chaque don Ko-fi. Secret KOFI_JETON : deja en place. */
 Object.assign(exports, require("./don-notification"));
 
+/* ── RECUPEREES LE 4 SEPTEMBRE 2026 ───────────────────────────────────────
+   Ces deux fonctions tournaient en production depuis le 26 juillet sans
+   qu'aucune copie n'existe dans le depot : elles avaient ete deployees a la
+   main, avant l'existence de ce dossier. C'est pour elles que Firebase
+   proposait une suppression, et un « oui » les aurait effacees pour de bon.
+   Elles ont maintenant un foyer et repartent avec toutes les autres. ──────*/
+Object.assign(exports, require("./notif-admin"));
+Object.assign(exports, require("./catalogue-ia"));
+
 /* ══════════════════════════════════════════════════════════════════════════
    PAS ENCORE BRANCHE — et pourquoi
    ══════════════════════════════════════════════════════════════════════════
@@ -108,4 +117,20 @@ Object.assign(exports, require("./don-notification"));
    migration-geohash.js n'est pas une Cloud Function : c'est un script qu'on
    lance une fois a la main, depuis un terminal. Le brancher ici le ferait
    tourner comme une fonction, ce qui n'a aucun sens.
+
+   outils-admin.js n'exporte qu'une fonction utilitaire, sendToAdmins, dont
+   se servent notif-admin.js et catalogue-ia.js. Le brancher ferait croire a
+   Firebase qu'il y a une fonction a deployer dedans.
+
+   ══════════════════════════════════════════════════════════════════════════
+   ET UNE QUI A ETE SUPPRIMEE POUR DE BON
+   ══════════════════════════════════════════════════════════════════════════
+
+   notifyWatchers ecoutait stores/{storeId} en « written », exactement comme
+   notifyStockToWatchers en « updated ». Les deux partaient a chaque mise a
+   jour d'un magasin : les gens recevaient DEUX notifications au lieu d'une,
+   depuis le 26 juillet. Celle qu'on garde porte en plus le garde-fou contre
+   la tempete (silence au-dela de trois boissons ajoutees d'un coup) et le
+   recoupement d'identite du destinataire. L'ancienne n'avait ni l'un ni
+   l'autre. Son code a ete lu, compris, et volontairement pas conserve.
 */

@@ -41,28 +41,34 @@ dossier se remet à diverger. Elle sauvegarde ton `firebase.json` et ton
 `index.js` sous `.avant` avant de les remplacer.
 
 ```powershell
-cd C:\Users\ilias\magofeed-functions; $b="https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"; if (Test-Path firebase.json) { Copy-Item firebase.json firebase.json.avant -Force }; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firebase.json.modele") -OutFile "firebase.json"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.rules") -OutFile "firestore.rules"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.indexes.json") -OutFile "firestore.indexes.json"; cd functions; if (Test-Path index.js) { Copy-Item index.js index.js.avant -Force }; foreach ($f in @("index.js","points-et-parrainage.js","anti-farm.js","notifications-push.js","emails-brevo.js","reconnaissance-ia.js","scan-frigo.js","commerces-monde.js","remplir-enseignes.js","importer-horaires.js","partage.js","sauvegarde.js","don-notification.js","dons.js","verification-commercant.js","recap-fondateur.js","migration-geohash.js")) { Invoke-WebRequest -UseBasicParsing -Uri ($b+$f) -OutFile $f; Write-Host "ok $f" }; npm install @duckdb/node-api geofire-common @google-cloud/firestore @anthropic-ai/sdk; cd ..; firebase deploy --only firestore:indexes; firebase deploy --only firestore:rules; firebase deploy --only functions
+cd C:\Users\ilias\magofeed-functions; $b="https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"; if (Test-Path firebase.json) { Copy-Item firebase.json firebase.json.avant -Force }; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firebase.json.modele") -OutFile "firebase.json"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.rules") -OutFile "firestore.rules"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.indexes.json") -OutFile "firestore.indexes.json"; cd functions; if (Test-Path index.js) { Copy-Item index.js index.js.avant -Force }; foreach ($f in @("index.js","points-et-parrainage.js","anti-farm.js","notifications-push.js","emails-brevo.js","reconnaissance-ia.js","scan-frigo.js","commerces-monde.js","remplir-enseignes.js","importer-horaires.js","partage.js","sauvegarde.js","don-notification.js","outils-admin.js","notif-admin.js","catalogue-ia.js","dons.js","verification-commercant.js","recap-fondateur.js","migration-geohash.js")) { Invoke-WebRequest -UseBasicParsing -Uri ($b+$f) -OutFile $f; Write-Host "ok $f" }; npm install @duckdb/node-api geofire-common @google-cloud/firestore @anthropic-ai/sdk; cd ..; firebase deploy --only firestore:indexes; firebase deploy --only firestore:rules; firebase deploy --only functions
 ```
 
 Le détail de ce que contient ce dossier, fichier par fichier, est dans
 `functions-a-deployer/README.md`.
 
-**Trois fonctions resteront proposées à la suppression** : `aiCatalogDiscovery`,
-`notifyAdminNewUser` et `notifyWatchers`. Leur code n'est dans aucun dossier
-connu, elles ont été déployées à la main avant l'existence du dépôt. Réponds
-**N** tant qu'on n'a pas tranché.
+**Le code perdu a été retrouvé.** Les trois fonctions dont la source
+n'existait nulle part — `aiCatalogDiscovery`, `notifyAdminNewUser`,
+`notifyWatchers` — tenaient dans un seul fichier, lisible dans la console
+Cloud Run, onglet Source. Les deux premières sont maintenant rangées dans le
+dépôt et repartent avec les autres. La troisième était le doublon qui faisait
+sonner la cloche deux fois : elle est à supprimer, une fois pour toutes.
 
-`notifyWatchers` mérite un coup d'œil. Le dépôt contient déjà
-`notifyStockToWatchers`, qui prévient les gens qui guettent une boisson quand
-elle réapparaît. Les deux tournent. Si elles font la même chose, chaque
-réapparition envoie **deux** notifications, ce qui expliquerait le problème de
-cloche qui revient depuis des mois. Pour vérifier : console Firebase, onglet
-Functions, colonne Déclencheur de `notifyWatchers`. Si c'est `stores/{id}`,
-c'est un doublon, et on le supprimera pour de bon.
+Après ce déploiement, Firebase ne proposera plus aucune suppression. Si la
+question revient malgré tout, la réponse reste **N** et tu me le dis.
 
-N'efface aucun autre dossier Firebase de ton PC avant qu'on ait récupéré le
-code de ces trois-là. Il se télécharge en deux clics : console Google Cloud,
-Cloud Functions, la fonction, onglet Source, Télécharger le fichier ZIP.
+Le détail de ce qui a été corrigé en rangeant ces fonctions est dans
+`functions-a-deployer/README.md`.
+
+### Une chose à faire dans l'app après
+
+**Administration → Sécurité → « Nettoyer le catalogue »**
+
+La fonction qui écrit une fiche à partir d'un code-barres inconnu demandait un
+emoji à l'IA et l'inscrivait. Magofeed n'en affiche aucun, mais 39 des 65
+fiches du catalogue partagé en portaient un, et l'app les affichait vraiment.
+La fonction est corrigée ; ce bouton vide ce qu'elle a déjà écrit. Rejouable
+sans risque.
 
 ## 1. Les règles Firestore — dans la commande de la section 0 bis
 

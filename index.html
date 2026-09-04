@@ -3499,6 +3499,34 @@ window.fbLireSauvegardes = async function() {
     return snap.exists() ? (snap.data() || null) : null;
   } catch (e) { return null; }
 };
+/* NETTOYAGE DES EMOJIS DU CATALOGUE PARTAGE.
+   Magofeed n'affiche aucun emoji : les 696 boissons natives portent toutes
+   emoji:"". Mais la fonction serveur qui fabrique une fiche a partir d'un
+   code-barres inconnu en demandait un a l'IA et l'ecrivait — 39 des 65 fiches
+   du catalogue partage en portaient un, et l'app les affichait vraiment.
+   La fonction est corrigee ; ceci nettoie ce qu'elle a deja ecrit.
+   Reservee aux administrateurs par les regles Firestore. Rejouable sans
+   risque : elle ne touche que les fiches dont le champ n'est pas deja vide. */
+window.fbNettoyerEmojis = async function() {
+  var snap = await getDocs(collection(db, "catalog"));
+  var aVider = [];
+  snap.forEach(function(d) {
+    var e = (d.data() || {}).emoji;
+    if (typeof e === "string" && e.trim() !== "") aVider.push(d.id);
+  });
+  if (!aVider.length) return { trouves: 0, vides: 0 };
+  var faits = 0;
+  for (var i = 0; i < aVider.length; i += 400) {
+    var lot = writeBatch(db);
+    aVider.slice(i, i + 400).forEach(function(id) {
+      lot.update(doc(db, "catalog", id), { emoji: "" });
+    });
+    await lot.commit();
+    faits += Math.min(400, aVider.length - i);
+  }
+  return { trouves: aVider.length, vides: faits };
+};
+
 /* Sante du credit des points. Les Cloud Functions ecrivent ici des qu'une de
    leurs requetes anti-triche echoue faute d'index composite : la contribution
    est bien enregistree, mais elle ne rapporte rien. Sans cette lecture, la
@@ -19529,6 +19557,13 @@ function renderSecurite(){
         'Rejouable sans risque.</div>'+
       '<button id="sec-figer-go" type="button" style="width:100%;padding:11px;border-radius:12px;border:1.5px solid var(--border);background:var(--app-bg);color:var(--s1);font-weight:800;font-size:12.5px;cursor:pointer;touch-action:manipulation">Figer les soldes maintenant</button>'+
     '</div>'+
+    '<div id="sec-emoji" style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px;margin-bottom:10px">'+
+      '<div style="font-size:13px;font-weight:700;color:var(--s1)">Retirer les emojis du catalogue</div>'+
+      '<div style="font-size:11.5px;color:var(--s2);margin:2px 0 10px;line-height:1.5">'+
+        'L\'app n\'affiche aucun emoji, mais la fonction qui cr\u00E9e une fiche \u00E0 partir d\'un code-barres inconnu en \u00E9crivait un. '+
+        'Elle est corrig\u00E9e ; ceci vide ce qu\'elle a d\u00E9j\u00E0 \u00E9crit. Rejouable sans risque.</div>'+
+      '<button id="sec-emoji-go" type="button" style="width:100%;padding:11px;border-radius:12px;border:1.5px solid var(--border);background:var(--app-bg);color:var(--s1);font-weight:800;font-size:13px;cursor:pointer">Nettoyer le catalogue</button>'+
+    '</div>'+
     '<div id="sec-sauv" style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px;margin-bottom:10px">'+
       '<div style="font-size:12.5px;color:var(--s2)">Lecture de l\'\u00E9tat des sauvegardes\u2026</div></div>'+
     '<div id="sec-sante" style="display:none;background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px;margin-bottom:10px"></div>'+
@@ -19548,6 +19583,22 @@ function renderSecurite(){
       var c=String((e&&(e.code||e.message))||e);
       toast(/not-found|unimplemented/.test(c)?"D\u00E9ploie d'abord points-et-parrainage.js":"\u00C9chec : "+c.slice(0,70));
       bf.disabled=false; bf.textContent="Figer les soldes maintenant";
+    });
+  };
+  var be=document.getElementById("sec-emoji-go");
+  if(be)be.onclick=function(){
+    if(!window.fbNettoyerEmojis){toast("Recharge la page");playSound("err");return;}
+    be.disabled=true; be.textContent="Nettoyage en cours\u2026";
+    window.fbNettoyerEmojis().then(function(r){
+      var n=(r&&r.vides)||0;
+      journaliserAction("Retirer les emojis du catalogue",{etat:"terminee",compte:n});
+      playSound(n?"win":"pop");
+      toast(n?(n+" fiche"+(n>1?"s":"")+" nettoy\u00E9e"+(n>1?"s":"")):"Aucun emoji \u00E0 retirer");
+      be.disabled=false; be.textContent="Nettoyer le catalogue";
+    }).catch(function(e){
+      playSound("err");
+      toast("\u00C9chec : "+String((e&&(e.code||e.message))||e).slice(0,70));
+      be.disabled=false; be.textContent="Nettoyer le catalogue";
     });
   };
   var boite=document.getElementById("sec-sauv");
