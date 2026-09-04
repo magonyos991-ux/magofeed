@@ -3499,6 +3499,17 @@ window.fbLireSauvegardes = async function() {
     return snap.exists() ? (snap.data() || null) : null;
   } catch (e) { return null; }
 };
+/* Sante du credit des points. Les Cloud Functions ecrivent ici des qu'une de
+   leurs requetes anti-triche echoue faute d'index composite : la contribution
+   est bien enregistree, mais elle ne rapporte rien. Sans cette lecture, la
+   panne reste invisible — c'est celle qui a deja bloque tous les points de
+   l'application sans que rien ne l'annonce. */
+window.fbLireSantePoints = async function() {
+  try {
+    var snap = await getDoc(doc(db, "_meta", "santePoints"));
+    return snap.exists() ? (snap.data() || null) : null;
+  } catch (e) { return null; }
+};
 window.fbLireJournalAdmin = async function(combien) {
   try {
     var q = query(collection(db, "adminLog"), orderBy("quand", "desc"), limit(combien || 25));
@@ -19520,6 +19531,7 @@ function renderSecurite(){
     '</div>'+
     '<div id="sec-sauv" style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px;margin-bottom:10px">'+
       '<div style="font-size:12.5px;color:var(--s2)">Lecture de l\'\u00E9tat des sauvegardes\u2026</div></div>'+
+    '<div id="sec-sante" style="display:none;background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px;margin-bottom:10px"></div>'+
     '<div id="sec-journal"></div>';
 
   var bf=document.getElementById("sec-figer-go");
@@ -19586,6 +19598,38 @@ function renderSecurite(){
     window.fbLireSauvegardes().then(function(info){ peindreSauvegarde(info,true); })
       .catch(function(){ peindreSauvegarde(null,false); });
   } else peindreSauvegarde(null,false);
+
+  /* PASTILLE « CREDIT DES POINTS ». Elle ne s'affiche que quand il y a quelque
+     chose a dire : tout va bien = rien a l'ecran. Quand une requete anti-triche
+     tombe faute d'index, elle donne l'etape en cause et le lien qui cree
+     l'index manquant en un clic. */
+  var santeBoite=document.getElementById("sec-sante");
+  if(santeBoite&&window.fbLireSantePoints){
+    window.fbLireSantePoints().then(function(d){
+      if(!d||String(d.etat||"")!=="index-manquant")return;
+      santeBoite.style.display="block";
+      var quand=_dateCourte(d.quand);
+      var lien=String(d.lien||"");
+      var ok=/^https:\/\/console\.(firebase|cloud)\.google\.com\//.test(lien);
+      santeBoite.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'+
+        '<div style="width:9px;height:9px;border-radius:50%;flex-shrink:0;background:#dc2626"></div>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:13px;font-weight:700;color:var(--s1)">Le cr\u00E9dit des points est bloqu\u00E9</div>'+
+          '<div style="font-size:11.5px;color:var(--s2);margin-top:2px">'+
+            'Il manque un index Firestore. Les contributions sont bien enregistr\u00E9es, '+
+            'mais elles ne rapportent rien tant que ce n\'est pas r\u00E9par\u00E9.</div>'+
+        '</div></div>'+
+        '<div style="font-size:11.5px;color:var(--s2);line-height:1.6">'+
+          '\u00C9tape en cause : <b>'+sanitize(String(d.ou||"inconnue"))+'</b><br>'+
+          'Rep\u00E9r\u00E9 le '+sanitize(quand||"?")+'</div>'+
+        (ok?'<a href="'+attr(lien)+'" target="_blank" rel="noopener noreferrer" '+
+            'style="display:block;text-align:center;margin-top:10px;padding:11px;border-radius:12px;'+
+            'border:1.5px solid var(--border);background:var(--app-bg);color:var(--s1);font-weight:800;'+
+            'font-size:13px;text-decoration:none">Cr\u00E9er l\'index manquant</a>'
+           :'<div style="font-size:11px;color:var(--s3);margin-top:8px">Aucun lien fourni : ouvre les journaux '+
+            'des Cloud Functions, le message y contient l\'adresse \u00E0 cliquer.</div>');
+    }).catch(function(){});
+  }
 
   var jHost=document.getElementById("sec-journal");
   if(!window.fbLireJournalAdmin){ jHost.innerHTML=""; return; }

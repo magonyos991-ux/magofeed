@@ -1,98 +1,90 @@
-# Ce qu'il te reste à faire — 20 minutes, une seule fois
+# Ce qu'il te reste à faire — 10 minutes
 
 Tout ce qui est dans l'app est **déjà en ligne**. Ce fichier ne concerne que le
 serveur, qui ne se déploie pas tout seul.
 
-## 0. URGENT — trois choses sont mortes en production (20 min)
+## 0. URGENT — le crédit des points (10 min)
 
-**Mesuré aujourd'hui, pas supposé.** J'ai interrogé ton projet Firebase depuis
-ici. Voici ce que répondent tes fonctions :
+**Mesuré, pas supposé.** Voici ce que répondent tes fonctions maintenant.
 
-| Fonction | Réponse | Ce que ça veut dire |
+| Fonction | Réponse | Traduction |
 |---|---|---|
-| `chercherCommerces` | 401 | déployée, elle marche |
+| `sauvegarderMaintenant` | 401 | déployée, elle marche |
+| `sauvegardeQuotidienne` | 403 | déployée, elle marche |
+| `chercherCommerces` | 401 | déployée |
 | `identifyFridge` | 401 | déployée |
-| `remplirEnseignes` | 401 | déployée, mais **avec l'ancien code** |
+| `remplirEnseignes` | 401 | déployée, mais ancien code |
 | `figerPointsExistants` | 404 | **absente** |
 | `monCodeParrain` | 404 | **absente** |
-| `sauvegarderMaintenant` | 404 | **absente** |
-| `sauvegardeQuotidienne` | 404 | **absente** |
-| `ouvrirVerificationCommercant` | 404 | absente — c'est normal, voir section 5 |
+| `utiliserCodeParrain` | 404 | **absente** |
 
-Et dans la base : **115 profils, aucun ne porte `pointsHerites`**. La bascule
-n'a jamais eu lieu.
+Les sauvegardes sont réglées. Il reste le plus important.
 
-Traduction en clair, trois problèmes :
+**Plus personne ne gagne un seul point.** La règle qui interdit à un téléphone
+de s'écrire 999 999 points est publiée, mais la fonction serveur qui devait
+prendre le relais n'existe pas. Le score monte pendant la session, puis revient
+en arrière au rechargement. Sur 115 profils, aucun ne porte `pointsHerites` :
+la bascule n'a jamais eu lieu.
 
-1. **Plus personne ne gagne un seul point.** La règle qui interdit au téléphone
-   d'écrire le score est publiée — c'est bien, sans elle n'importe qui
-   s'écrivait 999 999 points. Mais la fonction serveur qui devait prendre le
-   relais n'est pas là. Résultat : le score monte pendant la session, puis
-   revient en arrière au rechargement. 115 comptes concernés.
-2. **Tu n'as aucune sauvegarde.** Zéro. Si la base est effacée demain, les
-   31 000 magasins et les 115 comptes sont perdus définitivement.
-3. **`remplirEnseignes` ment encore.** La version en ligne marque des milliers
-   de rayons « vérifiés » alors que personne n'est entré dans ces magasins. Le
-   correctif est écrit, il n'est pas déployé.
+Il faut aussi redéployer deux fonctions dont la version en ligne est
+périmée. `remplirEnseignes` marque encore des rayons « vérifiés » sans que
+personne y soit entré, et `chercherCommerces` en est restée à la version qui
+trouvait quatre commerces à Filiates au lieu de quarante-neuf.
 
-### La commande unique
+### La commande
 
-Elle télécharge tous les fichiers concernés, les branche s'ils ne le sont pas
-déjà, et déploie tout d'un coup. Copie-la en entier, colle-la dans PowerShell,
-appuie une fois sur Entrée.
+Même format que celle que tu viens de lancer. Copie tout, colle, Entrée.
 
 ```powershell
-cd C:\Users\ilias\magofeed-functions\functions
-$base = "https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"
-foreach ($f in @("points-et-parrainage.js","sauvegarde.js","remplir-enseignes.js","commerces-monde.js")) {
-  Invoke-WebRequest -UseBasicParsing -Uri ($base + $f) -OutFile $f
-  Write-Host "telecharge : $f"
-}
-$idx = Get-Content index.js -Raw
-foreach ($m in @("points-et-parrainage","sauvegarde")) {
-  if ($idx -notmatch [regex]::Escape($m)) {
-    Add-Content index.js ("`nObject.assign(exports, require('./" + $m + "'));")
-    Write-Host "branche : $m"
-  }
-}
-npm install @google-cloud/firestore
-cd ..
-firebase deploy --only firestore:indexes
-firebase deploy --only functions
+cd C:\Users\ilias\magofeed-functions\functions; Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/points-et-parrainage.js" -OutFile "points-et-parrainage.js"; Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/remplir-enseignes.js" -OutFile "remplir-enseignes.js"; Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/commerces-monde.js" -OutFile "commerces-monde.js"; if ((Get-Content index.js -Raw) -notmatch "points-et-parrainage") { Add-Content index.js "`nObject.assign(exports, require(`"./points-et-parrainage`"));" }; cd ..; firebase deploy --only functions
 ```
-
-Le `firestore:indexes` passe **avant** les fonctions, et ce n'est pas un
-détail. Sept requêtes des fonctions de points filtrent sur deux champs à la
-fois. Firestore fabrique un index par champ tout seul, jamais les
-combinaisons. Sans elles, ces requêtes ne renvoient pas une liste vide : elles
-**plantent**. Le crédit des points aurait échoué à la première contribution,
-dans les journaux, et tu aurais conclu que la bascule ne marche pas.
-
-Si `firebase deploy --only firestore:indexes` répond qu'il ne trouve rien :
-copie `firestore.indexes.json` du dépôt à côté de ton `firestore.rules`.
-
-**Ce que cette commande ne déploie volontairement PAS :**
-`verification-commercant.js`, le paiement commerçant. Il réclame deux secrets
-Stripe (`STRIPE_CLE`, `STRIPE_WEBHOOK`) et le paquet `stripe`. Sans eux, le
-déploiement **échouerait pour tout le lot** — y compris les points, qui sont
-l'urgence. Il se déploie séparément, le jour où tu as un compte Stripe :
-section 5.
 
 ### Puis, dans l'app
 
 **Administration → Sécurité → « Figer les soldes maintenant »**. C'est cette
 étape, et elle seule, qui fait que personne ne perd ses points : elle recopie
-le solde actuel de chacun dans `pointsHerites`, et le serveur repart de là. Le
-mode d'emploi d'origine demandait d'ouvrir la console du navigateur ; il y a
-maintenant un bouton.
+le solde actuel de chacun dans `pointsHerites`, et le serveur repart de là.
 
-Ensuite **« Sauvegarder maintenant »**, juste en dessous. La pastille passera à
-l'**orange** : c'est normal, lis la section 3.
+### Les index composites, et pourquoi tu n'as plus à t'en occuper
+
+Cinq requêtes anti-triche de ces fonctions filtrent sur deux champs à la fois.
+Firestore fabrique un index par champ tout seul, jamais les combinaisons. Sans
+elles, la requête ne rend pas une liste vide : elle **plante**. Le crédit des
+points s'arrêterait net, la contribution serait quand même enregistrée, et
+rien ne le dirait à personne.
+
+C'était le dernier moyen que cette étape avait de rater en silence. Il est
+fermé : chaque requête concernée rattrape maintenant ce cas précis, écrit ce
+qui s'est passé, et **le panneau Administration → Sécurité affiche une pastille
+rouge « Le crédit des points est bloqué » avec un bouton qui crée l'index
+manquant en un clic.** Rien ne s'affiche tant que tout va bien.
+
+Le repli est toujours choisi du côté prudent : aucun point n'est distribué sur
+une vérification anti-triche qui n'a pas pu s'exécuter. Mieux vaut un point non
+crédité qu'un point volé, et dans les deux cas tu le sais.
+
+Tu peux donc aussi déployer les index d'avance, si tu retrouves le dossier qui
+contient ton `firestore.rules` :
+
+```
+firebase deploy --only firestore:indexes
+```
+
+S'il répond qu'il ne trouve rien, copie `firestore.indexes.json` du dépôt à
+côté de ton `firestore.rules`. Et si tu ne le fais pas, ce n'est plus grave :
+la pastille te préviendra.
 
 ### Vérifier que ça a marché
 
 Confirme un stock quelque part, recharge la page : le score doit avoir monté
-**et rester**. S'il redescend, la bascule n'a pas pris — dis-le-moi.
+**et rester**. Va ensuite voir Administration → Sécurité. Pas de pastille
+rouge, tout va bien.
+
+**Ce que cette commande ne déploie volontairement PAS :**
+`verification-commercant.js`, le paiement commerçant. Il réclame deux secrets
+Stripe et le paquet `stripe`. Sans eux, le déploiement **échouerait pour tout
+le lot** — y compris les points. Il se déploie séparément, le jour où tu as un
+compte Stripe : section 5.
 
 Ce que je ne peux pas réparer : les contributions faites depuis la publication
 des règles ne seront pas rattrapées. Les fonctions se déclenchent sur les
@@ -124,10 +116,10 @@ gardée seulement au cas où il faudrait les réinstaller un jour :
 firebase deploy --only functions:notifyHuntNearby,functions:notifyStockToWatchers,functions:notifyDiscoveryPromoted,functions:notifyPhotoRejected,functions:emailHuntStarted,functions:emailHuntFound,functions:sendTestEmail,functions:identifyDrink,functions:confirmAiDrink,functions:identifyFridge,functions:antiFarmRupture
 ```
 
-## 3. La sauvegarde quotidienne — comprendre la pastille
+## 3. La sauvegarde quotidienne — DÉPLOYÉE, comprendre la pastille
 
-Le déploiement est **déjà dans la commande unique de la section 0**, tu n'as
-rien à relancer ici. Ce qui suit sert à lire la pastille sans se tromper.
+`sauvegardeQuotidienne` et `sauvegarderMaintenant` répondent : c'est fait. Ce
+qui suit sert à lire la pastille sans se tromper.
 
 Après « Sauvegarder maintenant », elle passe à l'**orange** : « Lancée —
 résultat pas encore confirmé ». Ce n'est pas une panne. Un export Firestore

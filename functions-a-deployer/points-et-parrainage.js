@@ -53,6 +53,60 @@ if (!getApps().length) initializeApp();
 const db = getFirestore();
 const REGION = "europe-west1";
 
+/* ═══ NE JAMAIS ECHOUER EN SILENCE ═══════════════════════════════════════
+   Quatre requetes de ce fichier melangent une egalite et une comparaison de
+   date. Firestore fabrique un index par champ tout seul, jamais ces
+   combinaisons : sans elles, la requete ne rend pas une liste vide, elle
+   LEVE. Le credit des points s'arreterait net, la contribution serait quand
+   meme enregistree, et rien ne le dirait a personne — c'est exactement la
+   panne qui a deja fait perdre des semaines a ce projet.
+
+   requeteSure() rattrape ce cas precis, ecrit ce qui s'est passe dans
+   _meta/santePoints (que le panneau Administration affiche en rouge) avec le
+   lien de creation d'index que Firestore fournit toujours dans son message,
+   et rend une reponse vide. Le repli est TOUJOURS choisi du cote prudent :
+   aucun point n'est distribue sur une verification anti-triche qui n'a pas
+   pu s'executer. Mieux vaut un point non credite qu'un point vole, et dans
+   les deux cas on le SAIT.
+   ════════════════════════════════════════════════════════════════════════ */
+function estIndexManquant(e) {
+  if (!e) return false;
+  if (e.code === 9 || e.code === "failed-precondition") return true;
+  return /requires an index|besoin d.un index|FAILED_PRECONDITION/i.test(String(e.message || ""));
+}
+async function signalerPanne(ou, e) {
+  const msg = String((e && e.message) || e || "");
+  const lien = (msg.match(/https:\/\/console\.(?:firebase|cloud)\.google\.com\S+/) || [null])[0];
+  console.error("POINTS BLOQUES a l'etape " + ou + " :", msg);
+  if (lien) console.error("Index a creer en un clic :", lien);
+  try {
+    await db.collection("_meta").doc("santePoints").set({
+      etat: "index-manquant", ou: ou, quand: new Date().toISOString(),
+      message: msg.slice(0, 500), lien: lien || null
+    }, { merge: true });
+  } catch (err) { console.warn("santePoints inecrivable:", err && err.message); }
+}
+/* Marque le systeme comme sain. Appele quand une requete surveillee passe :
+   la panne precedente est donc reparee, la pastille peut repasser au vert. */
+async function signalerSante() {
+  try {
+    const d = await db.collection("_meta").doc("santePoints").get();
+    if (d.exists && (d.data() || {}).etat !== "ok") {
+      await d.ref.set({ etat: "ok", quand: new Date().toISOString(), ou: null, lien: null }, { merge: true });
+    }
+  } catch (err) { /* jamais bloquant */ }
+}
+async function requeteSure(ou, q) {
+  try {
+    const r = await q.get();
+    await signalerSante();
+    return { ok: true, docs: r.docs, size: r.size };
+  } catch (e) {
+    if (estIndexManquant(e)) { await signalerPanne(ou, e); return { ok: false, docs: [], size: 0 }; }
+    throw e;
+  }
+}
+
 /* ---------------------------------------------------------------------------
    LE BAREME. Volontairement plus bas que les montants affiches par l'app :
    ceux-ci recompensent l'usage, celui-ci mesure l'apport verifiable. Les deux
@@ -145,10 +199,13 @@ async function recalculerScore(uid) {
 async function dejaCompteAujourdhui(rep, idCourant) {
   if (!rep.by) return true;
   const debut = Timestamp.fromDate(new Date(jourUTC() + "T00:00:00Z"));
-  const q = await db.collection("reports")
+  const q = await requeteSure("anti-rejeu du jour", db.collection("reports")
     .where("by", "==", rep.by)
     .where("createdAt", ">=", debut)
-    .limit(80).get();
+    .limit(80));
+  /* Requete impossible : on refuse de crediter. Un « deja compte » par defaut
+     est le cote prudent — sinon la panne devient une faille a repetition. */
+  if (!q.ok) return true;
   return q.docs.some((s) => {
     if (s.id === idCourant) return false;
     const o = s.data() || {};
@@ -239,10 +296,11 @@ exports.crediterEntraide = onDocumentCreated(
     const cree = (u.exists && u.data().createdAt && u.data().createdAt.toMillis) ? u.data().createdAt.toMillis() : 0;
     if (cree && Date.now() - cree < CHERCHEUR_AGE_MIN_J * 86400000) return;
     const depuis = Timestamp.fromMillis(creeA - ENTRAIDE_FENETRE_J * 86400000);
-    const q = await db.collection("reports")
+    const q = await requeteSure("entraide de chasse", db.collection("reports")
       .where("storeId", "==", rep.storeId)
       .where("createdAt", ">=", depuis)
-      .limit(60).get();
+      .limit(60));
+    if (!q.ok) return;
     const aides = q.docs
       .map((d) => Object.assign({ id: d.id }, d.data()))
       .filter((o) => o.type === "stock" && o.hunt === true && o.by !== rep.by
@@ -254,10 +312,12 @@ exports.crediterEntraide = onDocumentCreated(
     const aide = aides[0];
 
     // Plafond par paire : au plus 3 aides credites de A confirmees par B en 30 j.
-    const paire = await db.collection("reports")
+    const paire = await requeteSure("plafond par paire", db.collection("reports")
       .where("by", "==", aide.by)
       .where("huntCreditedBy", "==", rep.by)
-      .limit(ENTRAIDE_MAX_PAIRE_30J + 2).get();
+      .limit(ENTRAIDE_MAX_PAIRE_30J + 2));
+    /* Le plafond anti-collusion n'a pas pu etre verifie : on ne credite pas. */
+    if (!paire.ok) return;
     const recents = paire.docs.filter((d) => {
       const t = (d.data() || {}).huntCreditedAt;
       return t && t.toMillis() > Date.now() - 30 * 86400000;
@@ -339,9 +399,10 @@ const MAX_FILLEULS_TOTAL = 10;
 /* Le filleul est-il devenu actif ? On ne regarde que des documents ecrits par
    le serveur ou horodates par lui : rien de declaratif. */
 async function filleulActif(uid, depuis) {
-  const q = await db.collection("reports")
+  const q = await requeteSure("activite du filleul", db.collection("reports")
     .where("by", "==", uid).where("counted", "==", true)
-    .limit(60).get();
+    .limit(60));
+  if (!q.ok) return false;   // pas verifiable = pas actif = pas de prime
   const magasins = new Set(), jours = new Set();
   let n = 0;
   q.docs.forEach((s) => {
@@ -381,8 +442,9 @@ async function evaluerParrainage(uidFilleul) {
 
     // Plafonds du parrain, comptes sur des documents que lui ne peut pas ecrire
     const semaine = Timestamp.fromMillis(Date.now() - 7 * 86400000);
-    const payes = await db.collection("referrals")
-      .where("parrain", "==", parrain).where("status", "==", "paid").limit(40).get();
+    const payes = await requeteSure("plafonds du parrain", db.collection("referrals")
+      .where("parrain", "==", parrain).where("status", "==", "paid").limit(40));
+    if (!payes.ok) return;   // plafond non verifiable : aucune prime versee
     if (payes.size >= MAX_FILLEULS_TOTAL) {
       await ref.set({ status: "expired", raison: "plafond total" }, { merge: true }); return;
     }
