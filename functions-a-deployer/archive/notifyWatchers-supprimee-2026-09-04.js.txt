@@ -1,0 +1,89 @@
+ARCHIVE — NE PAS DEPLOYER, NE PAS RECOPIER TEL QUEL
+====================================================================
+Code de la Cloud Function notifyWatchers, deployee le 26 juillet 2026 et
+supprimee le 4 septembre 2026. Recupere depuis la console Cloud Run, onglet
+Source, avant la suppression : aucune autre copie n'existait.
+
+L'extension est .txt volontairement, pour qu'aucun outil ne la charge et
+qu'aucun deploiement ne la reprenne par accident.
+
+POURQUOI ELLE A ETE SUPPRIMEE
+
+Elle ecoutait stores/{storeId} en « written ». notifyStockToWatchers, dans
+notifications-push.js, ecoute le MEME chemin en « updated ». Les deux
+partaient a chaque mise a jour d'un magasin : les gens recevaient deux
+notifications au lieu d'une, depuis six semaines. Compteur au moment de la
+suppression : 2 431 executions.
+
+Celle qui reste est aussi la meilleure des deux :
+
+  - Garde-fou contre la tempete. Au-dela de trois boissons ajoutees d'un
+    coup, elle se tait. Un remplissage d'enseigne en ajoute jusqu'a mille
+    deux cents sur des milliers de magasins ; celle-ci, ci-dessous, partait
+    une fois par boisson et par magasin.
+  - Rayon choisi par la personne, de 1 a 20 km. Celle-ci imposait 10 km a
+    tout le monde (voir « if (d > 10) continue » plus bas).
+  - Recoupement d'identite du destinataire avant l'envoi. Celle-ci fait
+    confiance au champ uid de la veille sans le verifier.
+
+Ce qu'elle faisait de mieux, et qui merite d'etre repris un jour : elle
+groupait les envois par jeton, donc une personne qui guette trois boissons
+arrivees ensemble recevait UNE notification et non trois.
+
+====================================================================
+
+/* ── 1. Veilles ── */
+exports.notifyWatchers = onDocumentWritten("stores/{storeId}", async (event) => {
+  const before = event.data.before.exists ? event.data.before.data() : {};
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  if (!after || typeof after.lat !== "number") return;
+  const beforeIds = new Set((before.drinks || []).map(Number));
+  const added = (after.drinks || []).map(Number).filter((id) => !beforeIds.has(id));
+  if (!added.length) return;
+  const watches = [];
+  for (let i = 0; i < added.length; i += 10) {
+    const snap = await db.collection("watches").where("drinkId", "in", added.slice(i, i + 10)).get();
+    snap.forEach((d) => watches.push(d.data()));
+  }
+  if (!watches.length) return;
+  const perToken = new Map();
+  for (const w of watches) {
+    if (typeof w.lat !== "number") continue;
+    const d = distKm(w.lat, w.lng, after.lat, after.lng);
+    if (d > 10) continue;
+    const tokDoc = await db.collection("pushTokens").doc(w.uid).get();
+    const token = tokDoc.exists ? tokDoc.data().token : null;
+    if (!token) continue;
+    if (!perToken.has(token)) perToken.set(token, []);
+    perToken.get(token).push({ name: w.drinkName || "Ta boisson", drinkId: w.drinkId, dist: d });
+  }
+  const sends = [];
+  for (const [token, hits] of perToken) {
+    const first = hits[0];
+    sends.push(admin.messaging().send({
+      token,
+      webpush: {
+        notification: {
+          title: first.name + " est arrivee pres de toi !",
+          body: "Signalee chez " + (after.name || "un magasin") + " (" +
+            (first.dist < 1 ? Math.round(first.dist * 1000) + " m" : first.dist.toFixed(1) + " km") + ")",
+          icon: "icons/icon-192.png"
+        },
+        fcmOptions: { link: "./#drink=" + first.drinkId }
+      }
+    }).catch(async (e) => {
+      if (e.code === "messaging/registration-token-not-registered") {
+        const q = await db.collection("pushTokens").where("token", "==", token).get();
+        q.forEach((doc) => doc.ref.delete());
+      }
+    }));
+  }
+  await Promise.all(sends);
+});
+
+/* Dependances qu'elle utilisait, definies en haut de son fichier d'origine :
+     const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+     const admin = require("firebase-admin");
+     const db = admin.firestore();
+     function distKm(lat1, lng1, lat2, lng2) { ... }   // formule de haversine
+   distKm est conservee a l'identique dans catalogue-ia.js. */
