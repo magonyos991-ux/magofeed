@@ -2382,9 +2382,13 @@ window.fbLoadLeaderboard = async function() {
       var data = d.data() || {};
       var pseudo = String(data.pseudo || "Anonyme").trim();
       var cle = pseudo.toLowerCase();
-      // Points NETS : ce que le serveur a retire (anti-farm) est deduit ici
-      // aussi, sinon un compte sanctionne resterait en tete du classement.
-      var pts = Math.max(0, (data.points || 0) - (data.penalty || 0));
+      /* Points NETS. ATTENTION au double comptage : depuis la bascule serveur,
+         recalculerScore ecrit points = herites + preuves + parrainage - penalty,
+         donc la sanction est DEJA dedans. Un profil bascule se reconnait a son
+         champ pointsHerites. Pour les profils pas encore bascules, points est le
+         compte brut du client et il faut bien retirer penalty ici. */
+      var dejaDeduite = (data.pointsHerites !== undefined);
+      var pts = Math.max(0, (data.points || 0) - (dejaDeduite ? 0 : (data.penalty || 0)));
       /* CLASSEMENT DES CONTRIBUTEURS, pas des comptes. Les points restent
          ecrits par le client (limite assumee), et le classement lit les 30
          premiers : trente comptes anonymes fabriques en une minute, chacun
@@ -5231,7 +5235,11 @@ function maybeAskFeedback(){
    userStats.penalty est ce que le serveur a retire. Le client ne peut pas
    effacer la seconde valeur (regle Firestore), donc pas effacer sa sanction. */
 function ptsNets(){
-  var p=(userStats.pts||0)-(userStats.penalty||0);
+  /* Meme piege que dans le classement : apres la bascule serveur, points
+     contient deja la sanction deduite. La retirer une seconde fois ici
+     punissait deux fois pour la meme faute. */
+  var p=(userStats.pts||0);
+  if(!userStats.penaliteDejaDeduite)p-=(userStats.penalty||0);
   return p>0?p:0;
 }
 function _chev(){
@@ -19454,21 +19462,35 @@ function renderSecurite(){
   var peindreSauvegarde=function(info,dispo){
     /* sauvegarde.js ecrit _meta/sauvegardes = { derniere: {quand, dossier,
        etat, motif}, ... } ou « quand » est une date au format ISO. */
+    /* CETTE PASTILLE NE REGARDAIT QUE LA DATE. Une sauvegarde ECHOUEE ecrit
+       pourtant une date fraiche avec etat:"echec" — elle s'affichait donc en
+       VERT, et le mode d'emploi donnait justement « la pastille passe au vert »
+       comme preuve de reussite. Un feu vert au-dessus de zero sauvegarde est
+       pire que pas de sauvegarde du tout : on cesse de se mefier.
+       Quatre etats, et le vert ne s'allume QUE sur une reussite confirmee —
+       c'est-a-dire quand un passage suivant a relu l'operation et l'a vue
+       aboutir. « Lancee » reste orange : demarrer un export n'est pas l'avoir
+       fini, et personne ne peut l'affirmer avant. */
     var d=info&&info.derniere?info.derniere:null;
     var quand=d?_dateCourte(d.quand):null;
     var ms=null;
     try{ ms=d&&d.quand?Date.parse(d.quand):null; if(isNaN(ms))ms=null; }catch(e){}
     var vieille=ms?(Date.now()-ms>36*3600*1000):true;
+    var etat=d&&d.etat?String(d.etat):"";
+    var rate=(etat==="echec"||etat==="echec-confirme");
+    var sure=(etat==="reussie");
+    var couleur=!dispo?"var(--s3)":(rate||vieille)?"#dc2626":(sure?"#22c55e":"#c69a57");
+    var ligne;
+    if(!dispo)ligne="Fonction pas encore d\u00E9ploy\u00E9e sur Firebase";
+    else if(!quand)ligne="Aucune sauvegarde enregistr\u00E9e pour l\'instant";
+    else if(rate)ligne="\u00C9CHEC le "+sanitize(quand)+(d.erreur?" \u2014 "+sanitize(String(d.erreur).slice(0,90)):"");
+    else if(sure)ligne="R\u00E9ussie le "+sanitize(quand)+(vieille?" \u2014 plus de 36 h":"");
+    else ligne="Lanc\u00E9e le "+sanitize(quand)+" \u2014 r\u00E9sultat pas encore confirm\u00E9"+(vieille?", et plus de 36 h":"");
     boite.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'+
-      '<div style="width:9px;height:9px;border-radius:50%;flex-shrink:0;background:'+
-        (!dispo?"var(--s3)":(vieille?"#dc2626":"#22c55e"))+'"></div>'+
+      '<div style="width:9px;height:9px;border-radius:50%;flex-shrink:0;background:'+couleur+'"></div>'+
       '<div style="flex:1;min-width:0">'+
         '<div style="font-size:13px;font-weight:700;color:var(--s1)">Sauvegarde de la base</div>'+
-        '<div style="font-size:11.5px;color:var(--s2);margin-top:2px">'+
-          (!dispo?"Fonction pas encore d\u00E9ploy\u00E9e sur Firebase"
-                 :(quand?("Derni\u00E8re : "+sanitize(quand)+(vieille?" \u2014 plus de 36 h":""))
-                        :"Aucune sauvegarde enregistr\u00E9e pour l\'instant"))+
-        '</div></div></div>'+
+        '<div style="font-size:11.5px;color:var(--s2);margin-top:2px">'+ligne+'</div></div></div>'+
       '<button id="sec-go" type="button" style="width:100%;padding:11px;border-radius:12px;border:1.5px solid var(--border);background:var(--app-bg);color:var(--s1);font-weight:800;font-size:12.5px;cursor:pointer;touch-action:manipulation">Sauvegarder maintenant</button>';
     var b=document.getElementById("sec-go");
     if(b)b.onclick=function(){
@@ -20409,6 +20431,9 @@ try{
        interdisent au client de l'ecrire. On l'adopte tel quel (pas de max :
        une sanction peut etre levee par un admin, elle doit pouvoir baisser). */
     userStats.penalty=Number(d.penalty)||0;
+    /* Le serveur a-t-il deja deduit la sanction du champ points ? Il l'a fait
+       si le profil porte pointsHerites (ecrit une seule fois, a la bascule). */
+    userStats.penaliteDejaDeduite=(d.pointsHerites!==undefined);
     try{annoncerSanction(userStats.penalty);}catch(err){}
     // Le pseudo du compte Firestore fait foi : on l'adopte localement pour que
     // le pseudo genere sur ce nouvel appareil n'ecrase pas celui du compte

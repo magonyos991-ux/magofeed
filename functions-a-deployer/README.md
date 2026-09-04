@@ -85,17 +85,30 @@ dans un dossier daté.
    firebase deploy --only functions:sauvegardeQuotidienne,functions:sauvegarderMaintenant
    ```
 5. Ouvre l'app, va dans **Administration**. Une carte « Sécurité » apparaît en
-   bas. Appuie sur **Sauvegarder maintenant** : la pastille doit passer au vert
-   avec la date du jour.
+   bas. Appuie sur **Sauvegarder maintenant**.
 
-La pastille devient **rouge** si la dernière sauvegarde date de plus de 36 h, et
-reste **grise** tant que la fonction n'est pas déployée. Une sauvegarde dont on
-ignore l'état est pire que pas de sauvegarde : on cesse de s'en méfier.
+Les quatre couleurs de la pastille, et ce qu'elles disent vraiment :
+
+- **grise** : la fonction n'est pas déployée. Tu n'as aucune sauvegarde.
+- **orange « Lancée — résultat pas encore confirmé »** : c'est normal juste
+  après avoir appuyé. Une export Firestore est une opération longue : elle est
+  partie, on ne sait pas encore si elle a abouti.
+- **verte « Réussie »** : la sauvegarde suivante a relu l'opération précédente
+  auprès de Google et confirmé qu'elle s'est terminée sans erreur. C'est la
+  seule couleur qui prouve qu'un fichier existe.
+- **rouge** : échec, ou dernière sauvegarde vieille de plus de 36 h.
+
+Autrement dit, le vert n'apparaît qu'au second passage. C'est voulu : une
+pastille verte au-dessus de zéro fichier est pire que pas de pastille du tout.
 
 **Restaurer**, le jour où il le faut :
 ```
-gcloud firestore import gs://TON-PROJET.appspot.com/sauvegardes/AAAA-MM-JJ
+gcloud firestore import gs://magofeed-7f621.firebasestorage.app/sauvegardes/AAAA-MM-JJ
 ```
+L'adresse du seau se lit dans la console Firebase, onglet **Storage**, en haut.
+Les projets créés avant 2024 finissent en `.appspot.com`, les récents en
+`.firebasestorage.app` — celui de Magofeed est du second type.
+
 Fais-le une fois pour de faux, sur un projet de test, pendant que tout va bien.
 Une restauration qu'on découvre le jour de l'incident n'est pas une sauvegarde.
 

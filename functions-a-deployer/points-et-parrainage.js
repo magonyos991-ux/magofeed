@@ -111,10 +111,31 @@ async function recalculerScore(uid) {
     const snap = await tx.get(ref);
     if (!snap.exists) return;
     const d = snap.data() || {};
+    /* GARDE — L'ORDRE DES ETAPES N'A PLUS D'IMPORTANCE.
+       pointsHerites vaut le solde d'avant la bascule, pose par
+       figerPointsExistants. Tant qu'il est absent, « d.pointsHerites || 0 »
+       valait zero : la premiere contribution arrivee entre le deploiement des
+       fonctions et le passage du gel ramenait le score a ce que les seules
+       preuves rapportent — 175 points devenaient 3. Et c'etait DEFINITIF :
+       recalculerScore n'ecrit que `points`, donc le gel passant apres figeait
+       la valeur deja ecrasee.
+       On fige donc ici, dans la meme transaction, pour la personne concernee.
+       figerPointsExistants garde tout son interet — il traite tout le monde
+       d'un coup, y compris ceux qui ne contribuent jamais — mais l'oublier ou
+       l'inverser ne detruit plus rien. */
+    const premierPassage = (d.pointsHerites === undefined);
+    const herite = premierPassage
+      ? Math.max(0, Number(d.points) || 0)
+      : (Number(d.pointsHerites) || 0);
     const total = Math.max(0,
-      (d.pointsHerites || 0) + (d.pointsPreuves || 0) + (d.refPoints || 0) - (d.penalty || 0));
-    if (d.points === total) return;
-    tx.set(ref, { points: total }, { merge: true });
+      herite + (d.pointsPreuves || 0) + (d.refPoints || 0) - (d.penalty || 0));
+    if (!premierPassage && d.points === total) return;
+    const patch = { points: total };
+    if (premierPassage) {
+      patch.pointsHerites = herite;
+      patch.pointsPreuves = d.pointsPreuves || 0;
+    }
+    tx.set(ref, patch, { merge: true });
   });
 }
 

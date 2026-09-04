@@ -96,13 +96,39 @@ async function noter(champs) {
   } catch (e) { console.warn("journal sauvegarde:", e && e.message); }
 }
 
+/* « LANCEE » N'EST PAS « REUSSIE ». exportDocuments ne fait que DEMARRER une
+   operation longue : elle rend un identifiant, pas un resultat. Personne ne
+   relisait jamais si l'export avait abouti, et le journal ne connaissait donc
+   que « lancee » — un mot que l'ecran d'administration affichait en vert.
+   Chaque passage verifie donc le precedent : c'est le seul moment ou l'on sait
+   vraiment. Si l'operation a fini, l'etat devient « reussie » ou
+   « echec-confirme » ; si on ne peut pas la relire, on ne touche a rien et on
+   le dit plutot que d'inventer. */
+async function verifierPrecedente() {
+  try {
+    const snap = await db.collection("_meta").doc("sauvegardes").get();
+    const prec = snap.exists ? ((snap.data() || {}).derniere || null) : null;
+    if (!prec || prec.etat !== "lancee" || !prec.operation) return;
+    const [op] = await client.operationsClient.getOperation({ name: prec.operation });
+    if (!op || !op.done) return;                    // encore en cours : on attend
+    await db.collection("_meta").doc("sauvegardes").set({
+      derniere: Object.assign({}, prec, op.error
+        ? { etat: "echec-confirme", erreur: String(op.error.message || "").slice(0, 300) }
+        : { etat: "reussie", finiLe: new Date().toISOString() })
+    }, { merge: true });
+    console.log("sauvegarde precedente :", op.error ? "ECHOUEE" : "reussie");
+  } catch (e) { console.warn("verification precedente impossible:", e && e.message); }
+}
+
 exports.sauvegardeQuotidienne = onSchedule(
   { schedule: "0 3 * * *", timeZone: "Europe/Brussels", region: "europe-west1",
     timeoutSeconds: 540, retryCount: 2 },
   async () => {
+    await verifierPrecedente();
     try {
       const r = await exporter("automatique");
-      await noter({ quand: new Date().toISOString(), dossier: r.dossier, etat: "lancee", motif: "automatique" });
+      await noter({ quand: new Date().toISOString(), dossier: r.dossier, operation: r.operation,
+                    etat: "lancee", motif: "automatique" });
     } catch (e) {
       console.error("SAUVEGARDE ECHOUEE:", e && e.message);
       await noter({ quand: new Date().toISOString(), etat: "echec", erreur: String(e && e.message).slice(0, 300), motif: "automatique" });
@@ -120,8 +146,10 @@ exports.sauvegarderMaintenant = onCall(
     if (!uid) throw new HttpsError("unauthenticated", "Connexion requise.");
     const adm = await db.collection("admins").doc(uid).get();
     if (!adm.exists) throw new HttpsError("permission-denied", "Réservé à l'administrateur.");
+    await verifierPrecedente();
     const r = await exporter("manuelle");
-    await noter({ quand: new Date().toISOString(), dossier: r.dossier, etat: "lancee", motif: "manuelle", par: uid });
+    await noter({ quand: new Date().toISOString(), dossier: r.dossier, operation: r.operation,
+                  etat: "lancee", motif: "manuelle", par: uid });
     return { dossier: r.dossier };
   }
 );

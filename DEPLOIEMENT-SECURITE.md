@@ -83,17 +83,31 @@ firebase deploy --only functions:sauvegardeQuotidienne,functions:sauvegarderMain
 ```
 
 Ouvre ensuite l'app → **Administration** → carte **Sécurité**, et appuie sur
-« Sauvegarder maintenant ». La pastille doit passer au vert avec la date du
-jour. Tant que la fonction n'est pas déployée, elle reste grise — c'est voulu :
-une sauvegarde dont on ignore l'état est pire que pas de sauvegarde, parce
-qu'on cesse de s'en méfier.
+« Sauvegarder maintenant ».
+
+La pastille passe alors à l'**orange** : « Lancée — résultat pas encore
+confirmé ». C'est normal, ce n'est pas une panne. Un export Firestore est une
+opération longue ; au moment où tu appuies, personne ne sait encore si elle
+aboutira. La sauvegarde du lendemain relit cette opération auprès de Google et
+c'est seulement là que la pastille passe au **vert « Réussie »**. Elle devient
+**rouge** en cas d'échec ou au-delà de 36 h, et reste **grise** tant que la
+fonction n'est pas déployée.
+
+Le vert n'arrive donc qu'au second passage. C'est voulu : une pastille verte
+au-dessus de zéro fichier serait pire que pas de pastille, parce qu'on cesse de
+s'en méfier.
 
 **Essaie la restauration une fois, pendant que tout va bien**, sur un projet de
 test :
 
 ```
-gcloud firestore import gs://TON-PROJET.appspot.com/sauvegardes/AAAA-MM-JJ
+gcloud firestore import gs://magofeed-7f621.firebasestorage.app/sauvegardes/AAAA-MM-JJ
 ```
+
+L'adresse exacte du seau se lit dans la console Firebase, onglet **Storage**.
+Les vieux projets finissent en `.appspot.com`, les récents en
+`.firebasestorage.app` : Magofeed est du second type, et c'est pour ça que
+l'ancienne commande écrite ici n'aurait pas marché.
 
 Une restauration qu'on découvre le jour de l'incident n'est pas une sauvegarde.
 
