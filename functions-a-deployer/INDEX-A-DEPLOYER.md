@@ -41,4 +41,20 @@ une requête, le lien te la donnera.
 | `reports` | `by` + `counted` | le filleul est-il vraiment actif |
 | `reports` | `storeId` + `drinkId` + `type` + `createdAt` | l'anti-farm : les annonces contredites sur place |
 | `referrals` | `parrain` + `status` | les plafonds de parrainage |
-| `discoveries` | `votes` + nom du document | la liste des découvertes les plus votées, au démarrage de l'app |
+
+### Celui que j'avais mis de trop
+
+J'avais aussi déclaré `discoveries` sur `votes` + nom du document, pour la
+liste des découvertes les plus votées. Firestore l'a refusé, et il a raison :
+
+```
+HTTP Error: 400, this index is not necessary,
+configure using single field index controls
+```
+
+Un tri sur **un seul** champ n'a jamais besoin d'un index composite : Firestore
+indexe déjà chaque champ tout seul, dans les deux sens. Le déclarer faisait
+échouer le déploiement des index, **et donc les six autres avec lui** — ceux-là
+étant nécessaires, l'erreur n'était pas cosmétique.
+
+Il est retiré. Il en reste six, tous nécessaires.
