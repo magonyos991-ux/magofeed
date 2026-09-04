@@ -34,6 +34,7 @@ const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
+const { getStorage } = require("firebase-admin/storage");
 const { v1 } = require("@google-cloud/firestore");
 
 if (!getApps().length) initializeApp();
@@ -41,7 +42,24 @@ const db = getFirestore();
 const client = new v1.FirestoreAdminClient();
 
 const PROJET = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
-const BUCKET = "gs://" + PROJET + ".appspot.com";
+/* LE NOM DU SEAU NE SE DEVINE PLUS. Il etait ecrit en dur comme
+   « <projet>.appspot.com ». C'etait vrai pour les anciens projets Firebase ;
+   depuis fin 2024 le seau par defaut s'appelle « <projet>.firebasestorage.app »,
+   et c'est le cas de Magofeed — sa propre configuration dit
+   « magofeed-7f621.firebasestorage.app ». L'export serait donc parti vers un
+   seau inexistant : Ilias aurait cru avoir des sauvegardes sans en avoir
+   aucune, exactement le faux sentiment de securite que ce fichier dit vouloir
+   eviter. On demande donc au SDK le seau REEL du projet, et on ne retombe sur
+   un nom devine que s'il ne repond pas. Le nom retenu est journalise a chaque
+   sauvegarde : en cas de doute, il est ecrit noir sur blanc. */
+function seauDuProjet() {
+  try {
+    const b = getStorage().bucket();
+    if (b && b.name) return "gs://" + b.name;
+  } catch (e) { console.warn("seau par defaut introuvable:", e && e.message); }
+  return "gs://" + PROJET + ".firebasestorage.app";
+}
+const BUCKET = seauDuProjet();
 const JOURS_GARDES = 30;
 
 /* Deux chiffres, toujours : « 2026-03-07 » et non « 2026-3-7 ». */
@@ -58,7 +76,8 @@ async function exporter(motif) {
     outputUriPrefix: dossier,
     collectionIds: []      // vide = TOUTE la base
   });
-  console.log("sauvegarde (" + motif + ") lancee ->", dossier, "|", op.name);
+  console.log("sauvegarde (" + motif + ") lancee ->", dossier, "|", op.name,
+              "| seau resolu:", BUCKET);
   return { dossier, operation: op.name };
 }
 

@@ -3,6 +3,44 @@
 Tout ce qui est dans l'app est **déjà en ligne**. Ce fichier ne concerne que le
 serveur, qui ne se déploie pas tout seul.
 
+## 0. URGENT — remettre les points en marche (15 min)
+
+**Mesuré en production aujourd'hui :** la règle qui interdit au téléphone
+d'écrire les points est publiée, mais aucune des huit fonctions serveur qui
+doivent les créditer n'existe. Les étapes de la bascule ont été faites dans le
+mauvais ordre. **Plus personne ne gagne de points** — 115 comptes concernés.
+Symptôme : les points montent pendant la session, puis reviennent en arrière au
+rechargement.
+
+Dans cet ordre, sans en sauter :
+
+**a)** Les index composites d'abord. Sept requêtes des fonctions de points
+filtrent sur deux champs à la fois ; sans index elles **échouent**, et le
+crédit planterait en silence. Copie `firestore.indexes.json` à côté de
+`firestore.rules`, puis :
+
+```
+firebase deploy --only firestore:indexes
+```
+
+**b)** Les fonctions :
+
+```powershell
+cd C:\Users\ilias\magofeed-functions\functions; Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/points-et-parrainage.js" -OutFile "points-et-parrainage.js"; Add-Content index.js "`nObject.assign(exports, require(`"./points-et-parrainage`"));"; cd ..; firebase deploy --only functions
+```
+
+**c)** Figer les soldes — c'est **cette étape** qui fait que personne ne perd
+ses points. Ouvre l'app, **Administration → Sécurité → « Figer les soldes
+maintenant »**. Le mode d'emploi d'origine demandait la console du navigateur ;
+il y a maintenant un bouton.
+
+**d)** Vérifie : confirme un stock quelque part, recharge, le score doit avoir
+monté et rester.
+
+Ce que je ne peux pas réparer : les contributions faites depuis la publication
+des règles ne seront pas rattrapées. Les fonctions se déclenchent sur les
+nouveaux documents, pas sur les anciens.
+
 ## 1. Les règles Firestore (le plus important, 2 min)
 
 Tant que tu ne lances pas cette commande, la base reste ouverte : toutes les

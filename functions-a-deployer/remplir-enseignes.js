@@ -79,11 +79,16 @@ exports.remplirEnseignes = onCall(
         const hit = CHAINES.find(([key, test]) => propre[key] && test(b));
         if (!hit) continue;
         const ids = propre[hit[0]];
+        /* RAYON PROBABLE, PAS RAYON VERIFIE. Cette fonction ecrivait aussi
+           drinksVerified et verifiedSource : un seul clic marquait des
+           milliers de rayons comme « confirmes au catalogue de l'enseigne »,
+           avec la coche verte, alors que personne n'est entre dans ces
+           magasins. Le catalogue d'une enseigne dit ce qu'on y trouve
+           PROBABLEMENT ; il ne constate rien. Tous les chemins d'import cote
+           app avaient deja ete corriges — celui-ci, cote serveur, avait ete
+           oublie. */
         batch.update(d.ref, {
           drinks: FieldValue.arrayUnion(...ids),
-          drinksVerified: FieldValue.arrayUnion(...ids),
-          verifiedSource: "catalogue enseigne (serveur, " +
-            new Date().toISOString().slice(0, 7) + ")",
         });
         counts[hit[0]] = (counts[hit[0]] || 0) + 1;
         modifies++;
