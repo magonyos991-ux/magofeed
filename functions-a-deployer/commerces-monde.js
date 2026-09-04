@@ -60,6 +60,22 @@ const db = getFirestore();
 const REGION = "europe-west1";
 const OVERTURE = "s3://overturemaps-us-west-2/release/2026-08-19.0/theme=places/type=place/*";
 const RAYON_KM = 2.5;
+/* Second passage pour les zones presque vides : voir le commentaire en face
+   des deux appels a lire(), plus bas. */
+const RAYON_LARGE_KM = 12;
+const SEUIL_ZONE_VIDE = 8;
+/* VERSION DE L'IMPORT. A augmenter d'un a chaque fois qu'on elargit les
+   categories ou qu'on change la facon de chercher. Une zone deja marquee
+   « faite » avec une version plus ancienne est reinterrogee tout de suite, au
+   lieu d'attendre la fin de son mois de cache. Sans ce numero, une
+   amelioration du code ne changeait rien pendant trente jours pour toutes les
+   villes deja visitees — y compris celles ou la recherche avait justement mal
+   marche.
+     1  version d'origine : 19 categories, rayon fixe de 2,5 km
+     2  4 categories de plus (boulangerie, confiserie, alimentation, glacier)
+        et un second passage a 12 km quand la zone est presque vide. Mesure sur
+        Filiates : 4 commerces trouves en version 1, 49 en version 2. */
+const VERSION_IMPORT = 2;
 const JOURS_CACHE_ZONE = 30;
 const PLAFOND_PERSO_JOUR = 30;
 const PLAFOND_GLOBAL_JOUR = 400;
@@ -76,7 +92,18 @@ const CATEGORIES = {
   korean_grocery_store: "epicerie asiatique", asian_grocery_store: "epicerie asiatique",
   international_grocery_store: "epicerie du monde", farmers_market: "marche",
   night_market: "marche", public_market: "marche", gas_station: "station-service",
-  truck_gas_station: "station-service"
+  truck_gas_station: "station-service",
+  /* Ajoutees apres avoir compte les categories REELLES du fichier Overture sur
+     quatre zones de trois continents (Bruxelles, Athenes, Casablanca, Tokyo) :
+     ce ne sont pas des noms devines, ils existent et sont frequents. Toutes
+     vendent une bouteille a emporter quelque part dans le monde — en Grece
+     rurale, la boulangerie et le magasin de bonbons sont souvent les deux
+     seuls commerces du village. Volontairement PAS retenues : cafe,
+     coffee_shop, bar, restaurant (on y consomme sur place, on n'y achete pas
+     sa canette), shopping et shopping_center (un centre commercial n'est pas
+     un magasin), wholesale_store (grossiste, ferme au public). */
+  bakery: "boulangerie", candy_store: "confiserie", food: "alimentation",
+  ice_cream_shop: "glacier"
 };
 const ALCOOL = /liquor|wine|beer|spirit|winery|brewery|distill|cave|vinot|bar$/i;
 const NON_COMMERCE = /ferment|brew|brasserie|distiller|roaster|torref|winery|vineyard|cannery|wholesale|grossist|warehouse|entrepot|\busine\b|factory|manufacture|atelier|workshop|production|logistic/i;
@@ -127,7 +154,11 @@ function distanceM(aLat, aLng, bLat, bLng) {
 }
 
 exports.chercherCommerces = onCall(
-  { region: REGION, memory: "1GiB", timeoutSeconds: 120, maxInstances: 5 },
+  /* 300 s et non 120 : depuis la version 2, une zone presque vide est relue
+     une seconde fois sur un rayon plus large, ce qui double le temps de
+     lecture du fichier Overture. Un depassement de delai laisserait la zone
+     marquee « en-cours » et perdrait le travail. */
+  { region: REGION, memory: "1GiB", timeoutSeconds: 300, maxInstances: 5 },
   async (req) => {
     const uid = req.auth && req.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Connexion requise.");
@@ -153,7 +184,11 @@ exports.chercherCommerces = onCall(
          marque. Sans ce test, la zone resterait consideree comme traitee
          pendant trente jours alors que rien n'a ete ecrit. */
       const cadavre = zd.etat === "en-cours" && age > 3 * 60000;
-      if (!cadavre && age < JOURS_CACHE_ZONE * 86400000) {
+      /* Zone traitee par une version plus ancienne du code : on la refait,
+         meme si son mois n'est pas ecoule. C'est ce qui fait qu'une
+         amelioration profite tout de suite aux endroits deja visites. */
+      const perimee = (Number(zd.version) || 1) < VERSION_IMPORT;
+      if (!cadavre && !perimee && age < JOURS_CACHE_ZONE * 86400000) {
         return { ok: true, deja: true, ajoutes: 0, trouves: zd.trouves || 0 };
       }
     }
@@ -168,12 +203,11 @@ exports.chercherCommerces = onCall(
        l'app cote client avec OpenStreetMap). */
     await zoneRef.set({ quand: FieldValue.serverTimestamp(), etat: "en-cours", par: uid }, { merge: true });
 
-    const dLat = RAYON_KM / 111, dLng = RAYON_KM / (111 * Math.cos(lat * Math.PI / 180));
-    const xmin = lng - dLng, xmax = lng + dLng, ymin = lat - dLat, ymax = lat + dLat;
     const cats = Object.keys(CATEGORIES).map((c) => "'" + c + "'").join(",");
 
-    let lieux;
-    try {
+    async function lire(rayonKm) {
+      const dLat = rayonKm / 111, dLng = rayonKm / (111 * Math.cos(lat * Math.PI / 180));
+      const xmin = lng - dLng, xmax = lng + dLng, ymin = lat - dLat, ymax = lat + dLat;
       const con = await duck();
       const r = await con.runAndReadAll(`
         SELECT id, names.primary AS nom, categories.primary AS cat, confidence,
@@ -186,7 +220,23 @@ exports.chercherCommerces = onCall(
         ORDER BY confidence DESC
         LIMIT ${MAX_LIEUX}
       `);
-      lieux = r.getRowObjects();
+      return r.getRowObjects();
+    }
+
+    /* DEUX PASSAGES, et le second ne sert qu'aux endroits vides. Un rayon de
+       2,5 km convient a une ville ; dans un village, il ne contient parfois
+       que trois commerces alors que le bourg voisin est a 6 km. Mesure sur
+       Filiates : le fichier Overture n'y connait que quatre commerces dans
+       2,5 km. Plutot que de rendre une carte presque vide, on relit une fois
+       a 12 km. Dans une ville le premier passage depasse toujours le seuil,
+       donc ce second passage ne s'y declenche jamais et ne coute rien. */
+    let lieux, rayonUtilise = RAYON_KM;
+    try {
+      lieux = await lire(RAYON_KM);
+      if (lieux.length < SEUIL_ZONE_VIDE) {
+        const large = await lire(RAYON_LARGE_KM);
+        if (large.length > lieux.length) { lieux = large; rayonUtilise = RAYON_LARGE_KM; }
+      }
     } catch (e) {
       await zoneRef.delete().catch(() => {});
       console.error("overture:", e && e.message);
@@ -205,7 +255,7 @@ exports.chercherCommerces = onCall(
 
     /* Dedoublonnage contre ce qui existe deja dans la zone (import OSM, ajouts
        communautaires) : meme nom a moins de 60 m, ou meme identifiant. */
-    const bounds = geofire.geohashQueryBounds([lat, lng], (RAYON_KM + 0.5) * 1000);
+    const bounds = geofire.geohashQueryBounds([lat, lng], (rayonUtilise + 0.5) * 1000);
     const existants = [];
     for (const b of bounds) {
       const snap = await db.collection("stores").orderBy("geohash").startAt(b[0]).endAt(b[1]).limit(2000).get();
@@ -242,11 +292,12 @@ exports.chercherCommerces = onCall(
     if (n) await batch.commit();
 
     await zoneRef.set({
-      quand: FieldValue.serverTimestamp(), etat: "faite",
+      quand: FieldValue.serverTimestamp(), etat: "faite", version: VERSION_IMPORT,
+      rayonKm: rayonUtilise,
       trouves: candidats.length, ajoutes: ecrits, par: uid
     }, { merge: true });
 
-    console.log("overture", cell, "trouves", candidats.length, "ajoutes", ecrits);
-    return { ok: true, deja: false, trouves: candidats.length, ajoutes: ecrits };
+    console.log("overture", cell, "rayon", rayonUtilise + "km", "trouves", candidats.length, "ajoutes", ecrits);
+    return { ok: true, deja: false, trouves: candidats.length, ajoutes: ecrits, rayonKm: rayonUtilise };
   }
 );

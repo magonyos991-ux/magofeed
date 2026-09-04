@@ -1,45 +1,95 @@
-# Ce qu'il te reste à faire — 15 minutes, une seule fois
+# Ce qu'il te reste à faire — 20 minutes, une seule fois
 
 Tout ce qui est dans l'app est **déjà en ligne**. Ce fichier ne concerne que le
 serveur, qui ne se déploie pas tout seul.
 
-## 0. URGENT — remettre les points en marche (15 min)
+## 0. URGENT — trois choses sont mortes en production (20 min)
 
-**Mesuré en production aujourd'hui :** la règle qui interdit au téléphone
-d'écrire les points est publiée, mais aucune des huit fonctions serveur qui
-doivent les créditer n'existe. Les étapes de la bascule ont été faites dans le
-mauvais ordre. **Plus personne ne gagne de points** — 115 comptes concernés.
-Symptôme : les points montent pendant la session, puis reviennent en arrière au
-rechargement.
+**Mesuré aujourd'hui, pas supposé.** J'ai interrogé ton projet Firebase depuis
+ici. Voici ce que répondent tes fonctions :
 
-Dans cet ordre, sans en sauter :
+| Fonction | Réponse | Ce que ça veut dire |
+|---|---|---|
+| `chercherCommerces` | 401 | déployée, elle marche |
+| `identifyFridge` | 401 | déployée |
+| `remplirEnseignes` | 401 | déployée, mais **avec l'ancien code** |
+| `figerPointsExistants` | 404 | **absente** |
+| `monCodeParrain` | 404 | **absente** |
+| `sauvegarderMaintenant` | 404 | **absente** |
+| `sauvegardeQuotidienne` | 404 | **absente** |
+| `verifierCommercant` | 404 | **absente** |
 
-**a)** Les index composites d'abord. Sept requêtes des fonctions de points
-filtrent sur deux champs à la fois ; sans index elles **échouent**, et le
-crédit planterait en silence. Copie `firestore.indexes.json` à côté de
-`firestore.rules`, puis :
+Et dans la base : **115 profils, aucun ne porte `pointsHerites`**. La bascule
+n'a jamais eu lieu.
 
-```
-firebase deploy --only firestore:indexes
-```
+Traduction en clair, trois problèmes :
 
-**b)** Les fonctions :
+1. **Plus personne ne gagne un seul point.** La règle qui interdit au téléphone
+   d'écrire le score est publiée — c'est bien, sans elle n'importe qui
+   s'écrivait 999 999 points. Mais la fonction serveur qui devait prendre le
+   relais n'est pas là. Résultat : le score monte pendant la session, puis
+   revient en arrière au rechargement. 115 comptes concernés.
+2. **Tu n'as aucune sauvegarde.** Zéro. Si la base est effacée demain, les
+   31 000 magasins et les 115 comptes sont perdus définitivement.
+3. **`remplirEnseignes` ment encore.** La version en ligne marque des milliers
+   de rayons « vérifiés » alors que personne n'est entré dans ces magasins. Le
+   correctif est écrit, il n'est pas déployé.
+
+### La commande unique
+
+Elle télécharge tous les fichiers concernés, les branche s'ils ne le sont pas
+déjà, et déploie tout d'un coup. Copie-la en entier, colle-la dans PowerShell,
+appuie une fois sur Entrée.
 
 ```powershell
-cd C:\Users\ilias\magofeed-functions\functions; Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/points-et-parrainage.js" -OutFile "points-et-parrainage.js"; Add-Content index.js "`nObject.assign(exports, require(`"./points-et-parrainage`"));"; cd ..; firebase deploy --only functions
+cd C:\Users\ilias\magofeed-functions\functions
+$base = "https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"
+foreach ($f in @("points-et-parrainage.js","sauvegarde.js","remplir-enseignes.js","commerces-monde.js","verification-commercant.js")) {
+  Invoke-WebRequest -UseBasicParsing -Uri ($base + $f) -OutFile $f
+  Write-Host "telecharge : $f"
+}
+$idx = Get-Content index.js -Raw
+foreach ($m in @("points-et-parrainage","sauvegarde","verification-commercant")) {
+  if ($idx -notmatch [regex]::Escape($m)) {
+    Add-Content index.js ("`nObject.assign(exports, require('./" + $m + "'));")
+    Write-Host "branche : $m"
+  }
+}
+npm install @google-cloud/firestore
+cd ..
+firebase deploy --only firestore:indexes
+firebase deploy --only functions
 ```
 
-**c)** Figer les soldes — c'est **cette étape** qui fait que personne ne perd
-ses points. Ouvre l'app, **Administration → Sécurité → « Figer les soldes
-maintenant »**. Le mode d'emploi d'origine demandait la console du navigateur ;
-il y a maintenant un bouton.
+Le `firestore:indexes` passe **avant** les fonctions, et ce n'est pas un
+détail. Sept requêtes des fonctions de points filtrent sur deux champs à la
+fois. Firestore fabrique un index par champ tout seul, jamais les
+combinaisons. Sans elles, ces requêtes ne renvoient pas une liste vide : elles
+**plantent**. Le crédit des points aurait échoué à la première contribution,
+dans les journaux, et tu aurais conclu que la bascule ne marche pas.
 
-**d)** Vérifie : confirme un stock quelque part, recharge, le score doit avoir
-monté et rester.
+Si `firebase deploy --only firestore:indexes` répond qu'il ne trouve rien :
+copie `firestore.indexes.json` du dépôt à côté de ton `firestore.rules`.
+
+### Puis, dans l'app
+
+**Administration → Sécurité → « Figer les soldes maintenant »**. C'est cette
+étape, et elle seule, qui fait que personne ne perd ses points : elle recopie
+le solde actuel de chacun dans `pointsHerites`, et le serveur repart de là. Le
+mode d'emploi d'origine demandait d'ouvrir la console du navigateur ; il y a
+maintenant un bouton.
+
+Ensuite **« Sauvegarder maintenant »**, juste en dessous. La pastille passera à
+l'**orange** : c'est normal, lis la section 3.
+
+### Vérifier que ça a marché
+
+Confirme un stock quelque part, recharge la page : le score doit avoir monté
+**et rester**. S'il redescend, la bascule n'a pas pris — dis-le-moi.
 
 Ce que je ne peux pas réparer : les contributions faites depuis la publication
 des règles ne seront pas rattrapées. Les fonctions se déclenchent sur les
-nouveaux documents, pas sur les anciens.
+nouveaux documents, pas sur ceux déjà écrits.
 
 ## 1. Les règles Firestore (le plus important, 2 min)
 
@@ -49,56 +99,48 @@ corrections de règles décrites plus bas ne s'appliquent pas.
 ```
 cd functions-a-deployer/tests-regles
 npm install          # une seule fois
-npm test             # doit afficher : 68/68 conformes
+npm test             # doit afficher : 92/92 conformes
 cd ../..
 firebase deploy --only firestore:rules
 ```
 
 Le banc d'essai attaque une base jetable sur ta machine. Rien ne part en ligne.
-S'il n'affiche pas `68/68`, **ne déploie pas** : dis-le-moi.
+S'il n'affiche pas `92/92`, **ne déploie pas** : dis-le-moi.
 
-## 2. Les Cloud Functions (10 min)
+## 2. Les Cloud Functions de base — DÉJÀ FAIT
+
+Vérifié aujourd'hui : `identifyDrink`, `identifyFridge`, `remplirEnseignes` et
+les notifications répondent. Rien à faire ici. La commande d'origine est
+gardée seulement au cas où il faudrait les réinstaller un jour :
 
 ```
 firebase deploy --only functions:notifyHuntNearby,functions:notifyStockToWatchers,functions:notifyDiscoveryPromoted,functions:notifyPhotoRejected,functions:emailHuntStarted,functions:emailHuntFound,functions:sendTestEmail,functions:identifyDrink,functions:confirmAiDrink,functions:identifyFridge,functions:antiFarmRupture
 ```
 
-## 3. La sauvegarde quotidienne (5 min, à faire une fois)
+## 3. La sauvegarde quotidienne — comprendre la pastille
 
-```
-cd functions
-npm install @google-cloud/firestore
-```
+Le déploiement est **déjà dans la commande unique de la section 0**, tu n'as
+rien à relancer ici. Ce qui suit sert à lire la pastille sans se tromper.
 
-Ajoute au bout de `functions/index.js` :
+Après « Sauvegarder maintenant », elle passe à l'**orange** : « Lancée —
+résultat pas encore confirmé ». Ce n'est pas une panne. Un export Firestore
+est une opération longue ; au moment où tu appuies, personne ne sait encore si
+elle aboutira. La sauvegarde du lendemain relit cette opération auprès de
+Google, et c'est seulement là qu'elle passe au **vert « Réussie »**.
 
-```js
-Object.assign(exports, require("./sauvegarde"));
-```
-
-Puis :
-
-```
-firebase deploy --only functions:sauvegardeQuotidienne,functions:sauvegarderMaintenant
-```
-
-Ouvre ensuite l'app → **Administration** → carte **Sécurité**, et appuie sur
-« Sauvegarder maintenant ».
-
-La pastille passe alors à l'**orange** : « Lancée — résultat pas encore
-confirmé ». C'est normal, ce n'est pas une panne. Un export Firestore est une
-opération longue ; au moment où tu appuies, personne ne sait encore si elle
-aboutira. La sauvegarde du lendemain relit cette opération auprès de Google et
-c'est seulement là que la pastille passe au **vert « Réussie »**. Elle devient
-**rouge** en cas d'échec ou au-delà de 36 h, et reste **grise** tant que la
-fonction n'est pas déployée.
+| Couleur | Ce que ça dit |
+|---|---|
+| grise | fonction pas déployée — **tu n'as rien** |
+| orange | partie, résultat pas encore connu |
+| verte | opération confirmée terminée sans erreur |
+| rouge | échec, ou dernière sauvegarde de plus de 36 h |
 
 Le vert n'arrive donc qu'au second passage. C'est voulu : une pastille verte
-au-dessus de zéro fichier serait pire que pas de pastille, parce qu'on cesse de
-s'en méfier.
+au-dessus de zéro fichier serait pire que pas de pastille, parce qu'on cesse
+de s'en méfier.
 
-**Essaie la restauration une fois, pendant que tout va bien**, sur un projet de
-test :
+**Essaie la restauration une fois, pendant que tout va bien**, sur un projet
+de test :
 
 ```
 gcloud firestore import gs://magofeed-7f621.firebasestorage.app/sauvegardes/AAAA-MM-JJ
@@ -125,50 +167,63 @@ Une restauration qu'on découvre le jour de l'incident n'est pas une sauvegarde.
   le prochain chantier de sécurité, et il se fait à deux — toi dans la console,
   moi dans le code.
 
-## 4 bis. Les commerces du monde entier (10 min, à faire maintenant)
+## 4 bis. Les commerces du monde entier — DÉPLOYÉ, et amélioré depuis
 
-Ton collègue a tapé Filiates : zéro magasin. OpenStreetMap, la source de
-l'app, n'y connaît qu'un commerce — un salon funéraire — là où Google en montre
-sept. Des régions entières sont vides dans OSM : Grèce rurale, Balkans, Afrique,
-Amérique latine, Asie.
+Ton collègue a tapé Filiates : zéro magasin. OpenStreetMap, la source
+d'origine, n'y connaît qu'un commerce — un salon funéraire — là où Google en
+montre sept. Des régions entières sont vides dans OSM : Grèce rurale, Balkans,
+Afrique, Amérique latine, Asie.
 
 La fonction `chercherCommerces` interroge **Overture Maps** (74 millions de
-lieux, données ouvertes, licence qui autorise à les stocker et à les afficher
-sur n'importe quelle carte) quand OSM connaît moins de cinq commerces dans une
-zone. Vérifié sur Filiates : elle trouve les deux supérettes de ta capture
-Google. Dakar : 44 commerces. Chaque zone n'est interrogée qu'une fois par mois,
-pour tout le monde. Aucun compte, aucune clé, aucun coût de lecture.
+lieux, données ouvertes, licence qui autorise à les stocker et à les afficher)
+quand OSM connaît moins de cinq commerces dans une zone.
 
-```
-cd functions
-npm install @duckdb/node-api geofire-common
-```
+**Elle est déployée et elle marche.** Vérifié dans ta base aujourd'hui :
+Filiates contient maintenant quatre magasins réels, dont « Super Market
+Μποροδημος » et « Express Market » — ceux de ta capture Google.
 
-Ajoute au bout de `functions/index.js` :
+### Ce qui change avec la version 2 (à redéployer)
 
-```js
-Object.assign(exports, require("./commerces-monde"));
-```
+Quatre, c'est mieux que zéro, mais c'est encore peu. J'ai cherché pourquoi en
+interrogeant directement le fichier Overture depuis ici, sur quatre zones de
+trois continents. Deux causes, toutes les deux corrigées :
 
-Puis :
+1. **La liste des types de commerce venait de Belgique.** Elle ignorait la
+   boulangerie, la confiserie, le glacier et le magasin d'alimentation
+   générale. Dans un village grec, ce sont souvent les seuls commerces.
+2. **Le rayon de 2,5 km convient à une ville, pas à un village.** Le bourg
+   voisin est à 6 km et n'était jamais vu.
 
-```
-firebase deploy --only functions:chercherCommerces
-```
+Maintenant, quand une zone rend moins de huit commerces, la fonction relit une
+seconde fois à 12 km. Dans une ville le premier passage dépasse toujours ce
+seuil, donc ce second passage ne s'y déclenche jamais et ne coûte rien.
+
+**Mesuré sur Filiates, sur les vraies données :**
+
+| | Commerces trouvés |
+|---|---|
+| version 1 (en ligne aujourd'hui) | 4 |
+| version 2 | 49 |
+
+Les 49 incluent Lidl, Σκλαβενίτης, Μασούτης, sept boulangeries et les
+supérettes d'Igoumenitsa.
+
+Chaque zone porte désormais le numéro de version qui l'a traitée. Une zone
+déjà visitée par la version 1 est réinterrogée dès le premier passage de
+quelqu'un, sans attendre la fin de son mois de cache — sinon Filiates serait
+resté à quatre magasins pendant trente jours.
+
+Le redéploiement est **déjà dans la commande unique de la section 0**.
 
 Le premier appel après un déploiement est plus lent (quinze secondes environ :
 la fonction télécharge son lecteur de fichiers distants). Les suivants prennent
-deux à sept secondes.
-
-**Pour tester :** ouvre l'app, cherche « Filiates », et attends. Le message en
-bas de la carte doit passer par « Recherche des commerces dans le monde… » puis
-afficher les magasins. Sans la fonction déployée, il dira honnêtement « Aucun
-commerce connu ici (OpenStreetMap, Overture) » — et non plus « Aucun magasin »
-comme si on avait cherché partout.
+deux à sept secondes, et jusqu'à une quinzaine quand le second passage large se
+déclenche.
 
 Ce que la fonction n'écrit **jamais** : un rayon, une confirmation, un
 « vérifié ». Un commerce importé est un endroit où chercher, rien de plus. Et
-elle refuse tout ce qui vend de l'alcool à titre principal.
+elle refuse tout ce qui vend de l'alcool à titre principal — par catégorie et
+par nom, dans les deux sens.
 
 ## 5. Le jour où tu auras ton numéro d'entreprise
 
@@ -240,3 +295,46 @@ ne pose jamais « rayon vu sur place » (un fait constaté) ni « mis en avant �
   boutique-gérant vit maintenant dans `merchants/{uid}`, lisible par son seul
   propriétaire. Les magasins certifiés avant ce changement continuent de
   fonctionner grâce à l'ancien champ, qui n'est plus jamais écrit.
+
+## Trois décisions que je ne prends pas à ta place
+
+### a) Ouvrir le scan de frigo à tout le monde
+
+Aujourd'hui, « Scanner un frigo » n'apparaît que pour toi (administrateur) et
+pour un commerçant sur sa propre boutique. C'est de loin l'outil de
+contribution le plus puissant de l'app : une photo remplit un rayon entier en
+vingt secondes, là où il faut vingt scans un par un.
+
+Pourquoi je ne l'ouvre pas de moi-même : **chaque photo est un appel payant à
+l'IA**, sur ta carte bancaire. Le garde-fou existe déjà côté serveur (dix
+frigos par jour et par personne, l'alcool écarté), donc le pire cas est borné,
+mais c'est ta facture, pas la mienne. Avec quatre personnes actives sur
+quatorze jours, le coût serait aujourd'hui négligeable. Avec mille, non.
+
+Dis-moi oui et je l'ouvre en dix minutes, avec une condition d'accès (par
+exemple : compte connecté et au moins une contribution déjà faite) pour
+qu'un compte créé à la minute ne puisse pas s'en servir.
+
+### b) La migration geohash — 43 % de lectures Firestore en moins
+
+Le code est écrit et testé des deux côtés ; il attend derrière un interrupteur
+(`MAGO_GEOHASH_READY`, aujourd'hui à `false`). Mesuré sur 900 requêtes : aucun
+magasin manqué, 43 % de lectures en moins, soit 1,8 fois moins cher. L'écart
+grandit avec le nombre de villes partageant ta latitude — donc avec chaque
+pays que tu ajoutes.
+
+Il manque une seule chose : lancer une fois `migration-geohash.js` pour
+remplir le champ sur les 31 000 magasins existants, puis passer l'interrupteur
+à `true`. Tant qu'il est à `false`, **rien ne change** : c'est la bande de
+latitude qui répond, exactement comme aujourd'hui. L'interrupteur existe
+justement pour qu'un magasin sans geohash ne devienne jamais invisible.
+
+C'est une opération sur toute ta base. Je préfère te la proposer et la faire
+avec toi plutôt que de la déclencher pendant que tu regardes ailleurs.
+
+### c) Une ligne de test à effacer
+
+`searchLog/zFwHru6OeWBLEKtjyKHO` est une ligne d'essai laissée pendant les
+vérifications. Elle ne gêne rien, mais elle salit les statistiques de
+recherche. Seul un administrateur peut l'effacer : console Firebase →
+Firestore → `searchLog` → ce document → Supprimer.
