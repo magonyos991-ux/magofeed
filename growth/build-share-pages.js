@@ -101,6 +101,16 @@ function drinkPageHTML(d) {
 <meta name="twitter:image" content="${esc(ogImg)}">
 <meta name="theme-color" content="#1a1714">
 <link rel="icon" href="../icons/favicon-32.png">
+<!-- Ces 571 pages existent pour UNE raison : donner un apercu de lien correct
+     quand on partage une boisson (WhatsApp, Instagram, TikTok lisent les
+     balises og: sans executer le JavaScript). Elles ne contiennent rien
+     d'autre et renvoient toutes vers la meme app : aux yeux de Google c'est
+     la definition d'une « page satellite », et 571 d'un coup peuvent faire
+     sanctionner le domaine ENTIER. On demande donc explicitement de ne pas
+     les indexer, tout en laissant suivre le lien vers l'app. Les robots des
+     reseaux sociaux ignorent cette balise : les apercus continuent de
+     marcher exactement pareil. -->
+<meta name="robots" content="noindex,follow">
 <meta http-equiv="refresh" content="0;url=${esc(target)}">
 <style>
   html,body{height:100%;margin:0}
