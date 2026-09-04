@@ -5665,6 +5665,15 @@ function nameLooksAlcoholic(name,brand){
      .replace(/sans[- ]?alcool/g," ").replace(/alcohol[- ]?free/g," ").replace(/0[.,]0\s*%?/g," ");
   // Mots de TYPE (biere/pils/vin/spiritueux) : ecrits dans presque tous les libelles
   if(/\b(pils|pilsner|pilsener|biere|bieres|beer|beers|lager|lagers|ipa|stout|porter|trappist|trappiste|abbaye|kriek|gueuze|geuze|lambic|witbier|weizen|weissbier|tripel|dubbel|vin|vins|wine|wines|wein|vino|cava|prosecco|champagne|cremant|porto|sherry|xeres|sangria|cidre|cidres|cider|ciders|vodka|whisky|whiskey|whiskies|bourbon|rhum|rhums|tequila|mezcal|cognac|brandy|armagnac|calvados|grappa|schnaps|schnapps|liqueur|liqueurs|aperol|campari|martini|vermouth|pastis|ricard|jagermeister|bacardi|absinthe|eau[- ]de[- ]vie|gin|gins)\b/.test(t))return true;
+  /* Mots COMPOSES et vocabulaire du vin, sans frontiere de mot a gauche : un
+     « Rotwein Reserva » (vin rouge, en allemand) est passe parce que « wein »
+     n'etait cherche qu'en mot entier. Idem pour les cepages et appellations,
+     qui suffisent a nommer une bouteille sans jamais ecrire « vin ». */
+  if(/(rot|weiss|weis|rose|schaum|glueh|gluh|tafel|land|feder)wein\b|\bwein\b|(tafel|wit|pils|weizen|bock|land|malz)bier\b|\bbier\b|\b(wijn|wijnen|cerveza|cervezas|cerveja|birra|birre|sekt|likor|likoer|likeur|jenever|genever|genievre|aperitivo|sake|soju|mousseux|petillant[- ]?vin|vinho|tinto|reserva|riserva|crianza|rioja|merlot|cabernet|chardonnay|sauvignon|pinot|syrah|shiraz|malbec|tempranillo|grenache|chianti|bordeaux|bourgogne|beaujolais|lambrusco|moscato|riesling|primitivo|ale|ales)\b/.test(t))return true;
+  // (« spritz » et « brut » sont volontairement absents : Hell Lime Spritz est
+  // un energy drink, « brut de pomme » un jus.)
+  // « 5 % vol », « 12,5 % alc », « 40° » : le degre ecrit dans le libelle
+  if(/\d+([.,]\d+)?\s*%\s*(vol|alc)|\d{1,2}\s*°\s*(vol|alc)?/.test(t)&&!/\b0[.,]0\b/.test(t))return true;
   // MARQUES d'alcool connues (surtout bieres belges) : un nom de marque seul
   // ("Jupiler", "Duvel") ne contient aucun mot de type -> filet supplementaire
   // pour la saisie manuelle. Pour les scans, offIsAlcoholic (categories OFF)
@@ -6691,6 +6700,13 @@ function _findAction(e,st){
 }
 function renderScanHistory(){
   var el=document.getElementById("scan-history");if(!el)return;
+  // Un scan d'alcool passe entre les mailles un jour, le filtre se durcit le
+  // lendemain : le journal ne garde jamais ce que l'app refuse aujourd'hui.
+  try{
+    var avant=scanHist.length;
+    scanHist=(scanHist||[]).filter(function(e){return !nameLooksAlcoholic(e.name,e.brand);});
+    if(scanHist.length!==avant)localStorage.setItem("magoScanHist",JSON.stringify(scanHist));
+  }catch(e){}
   var cnt=document.getElementById("finds-count");if(cnt)cnt.textContent=scanHist.length?String(scanHist.length):"";
   var allBtn=document.getElementById("finds-all");
   if(allBtn){allBtn.style.display=scanHist.length>8?"":"none";allBtn.textContent=_findsAll?_tr("seeLess"):_tr("seeAll");}
