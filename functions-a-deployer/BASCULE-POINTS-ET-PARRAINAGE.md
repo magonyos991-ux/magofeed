@@ -29,14 +29,11 @@ cd magofeed-functions
 firebase deploy --only functions
 ```
 
-**⚠️ Un seul crédit pour la promotion d'une découverte.** Si
-`awardPromotionPoints` (fichier `points-serveur-PHASE2.js`) est déjà déployé,
-**supprime `crediterPromotion`** de `points-et-parrainage.js` avant de
-déployer — sinon l'auteur recevrait +50 deux fois. Pour savoir :
-
-```bash
-firebase functions:list | grep -i promotion
-```
+**Le double crédit de promotion n'est plus possible.** L'ancien
+`awardPromotionPoints` (`points-serveur-PHASE2.js`) versait lui aussi +50. Vérifié
+en production : il n'a jamais été déployé, et le fichier a été supprimé du dépôt
+pour qu'on ne puisse plus le déployer par mégarde. `crediterPromotion` est
+désormais le seul chemin.
 
 **Rien ne change encore pour personne** à cette étape : les fonctions
 créditent `pointsPreuves`, mais `points` reste écrit par le client. C'est

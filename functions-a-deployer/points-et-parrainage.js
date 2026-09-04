@@ -37,10 +37,12 @@
  * de chacun dans `pointsHerites`. Le score officiel vaut toujours
  * heritage + preuves - sanctions. On ne repart pas de zero.
  *
- * ⚠️ ORDRE DE DEPLOIEMENT — a respecter, voir README-DEPLOIEMENT-POINTS.md.
- * ⚠️ awardPromotionPoints (points-serveur-PHASE2.js) credite deja +50 a la
- *    promotion d'une decouverte. Si tu l'as deploye, NE deploie pas
- *    `crediterPromotion` ci-dessous : ce serait deux fois. Une seule des deux.
+ * DOUBLE CREDIT : plus de risque. L'ancien awardPromotionPoints
+ * (points-serveur-PHASE2.js) creditait lui aussi +50 a la promotion d'une
+ * decouverte, et deployer les deux versait donc deux fois. Verifie en
+ * production : awardPromotionPoints n'a jamais ete deployee, et le fichier a
+ * ete supprime du depot pour qu'on ne puisse plus le deployer par megarde.
+ * crediterPromotion ci-dessous est desormais le seul chemin.
  *
  * Firebase Functions v2 (Node 18+).
  */

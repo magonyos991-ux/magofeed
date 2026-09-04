@@ -1,120 +1,89 @@
-# Ce qu'il te reste à faire — 10 minutes
+# Où en est le serveur de Magofeed
 
 Tout ce qui est dans l'app est **déjà en ligne**. Ce fichier ne concerne que le
 serveur, qui ne se déploie pas tout seul.
 
-## 0. URGENT — le crédit des points (10 min)
+## 0. Où on en est vraiment (mesuré, pas supposé)
 
-**Mesuré, pas supposé.** Voici ce que répondent tes fonctions maintenant.
+J'ai sondé les 32 fonctions du projet et relu la base. Voici l'état réel.
 
-| Fonction | Réponse | Traduction |
-|---|---|---|
-| `sauvegarderMaintenant` | 401 | déployée, elle marche |
-| `sauvegardeQuotidienne` | 403 | déployée, elle marche |
-| `chercherCommerces` | 401 | déployée |
-| `identifyFridge` | 401 | déployée |
-| `remplirEnseignes` | 401 | déployée, mais ancien code |
-| `figerPointsExistants` | 404 | **absente** |
-| `monCodeParrain` | 404 | **absente** |
-| `utiliserCodeParrain` | 404 | **absente** |
+**Ce qui marche maintenant :** les points sont déployés (`crediterContribution`,
+`monCodeParrain`, `figerPointsExistants` répondent), les sauvegardes aussi, la
+recherche mondiale aussi, et les huit fonctions que Firebase proposait de
+supprimer sont toujours là parce que tu as répondu non.
 
-Les sauvegardes sont réglées. Il reste le plus important.
+**Il reste UNE action, et c'est un bouton :**
 
-**Plus personne ne gagne un seul point.** La règle qui interdit à un téléphone
-de s'écrire 999 999 points est publiée, mais la fonction serveur qui devait
-prendre le relais n'existe pas. Le score monte pendant la session, puis revient
-en arrière au rechargement. Sur 115 profils, aucun ne porte `pointsHerites` :
-la bascule n'a jamais eu lieu.
+> **Administration → Sécurité → « Figer les soldes maintenant »**
 
-Il faut aussi redéployer deux fonctions dont la version en ligne est
-périmée. `remplirEnseignes` marque encore des rayons « vérifiés » sans que
-personne y soit entré, et `chercherCommerces` en est restée à la version qui
-trouvait quatre commerces à Filiates au lieu de quarante-neuf.
+Sur 115 profils, aucun ne porte encore `pointsHerites`. Tant que ce bouton n'a
+pas été pressé, la bascule n'est pas faite. C'est cette étape, et elle seule,
+qui garantit que personne ne perd ses points quand le serveur reprend le calcul.
 
-### La commande
+Ensuite, confirme un stock quelque part et recharge : le score doit avoir monté
+**et rester**. Puis reviens dans Administration → Sécurité. Aucune pastille
+rouge, c'est gagné.
 
-Même format que celle que tu viens de lancer. Copie tout, colle, Entrée.
+## 0 bis. Remettre les dossiers en ordre (une commande)
+
+Le message « Would you like to proceed with deletion? » n'était pas un bug :
+tes fonctions avaient été déployées depuis **plusieurs dossiers différents**.
+Chacun ignorait l'existence des autres, donc chaque déploiement proposait
+d'effacer le travail du voisin.
+
+Cette commande met fin à ça. Un seul dossier, un seul `index.js` qui branche
+tout, les règles et les index au même endroit. Elle sauvegarde ton
+`firebase.json` et ton `index.js` actuels sous `.avant` avant de les remplacer.
 
 ```powershell
-cd C:\Users\ilias\magofeed-functions\functions; Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/points-et-parrainage.js" -OutFile "points-et-parrainage.js"; Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/remplir-enseignes.js" -OutFile "remplir-enseignes.js"; Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/commerces-monde.js" -OutFile "commerces-monde.js"; if ((Get-Content index.js -Raw) -notmatch "points-et-parrainage") { Add-Content index.js "`nObject.assign(exports, require(`"./points-et-parrainage`"));" }; cd ..; firebase deploy --only functions
+cd C:\Users\ilias\magofeed-functions; $b="https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"; if (Test-Path firebase.json) { Copy-Item firebase.json firebase.json.avant -Force }; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firebase.json.modele") -OutFile "firebase.json"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.rules") -OutFile "firestore.rules"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.indexes.json") -OutFile "firestore.indexes.json"; cd functions; if (Test-Path index.js) { Copy-Item index.js index.js.avant -Force }; foreach ($f in @("index.js","points-et-parrainage.js","anti-farm.js","notifications-push.js","emails-brevo.js","reconnaissance-ia.js","scan-frigo.js","commerces-monde.js","remplir-enseignes.js","importer-horaires.js","partage.js","sauvegarde.js","don-notification.js","dons.js","verification-commercant.js","recap-fondateur.js","migration-geohash.js")) { Invoke-WebRequest -UseBasicParsing -Uri ($b+$f) -OutFile $f; Write-Host "ok $f" }; npm install @duckdb/node-api geofire-common @google-cloud/firestore @anthropic-ai/sdk; cd ..; firebase deploy --only firestore:indexes; firebase deploy --only firestore:rules; firebase deploy --only functions
 ```
 
-### Puis, dans l'app
+Le détail de ce que contient ce dossier, fichier par fichier, est dans
+`functions-a-deployer/README.md`.
 
-**Administration → Sécurité → « Figer les soldes maintenant »**. C'est cette
-étape, et elle seule, qui fait que personne ne perd ses points : elle recopie
-le solde actuel de chacun dans `pointsHerites`, et le serveur repart de là.
+**Trois fonctions resteront proposées à la suppression** : `aiCatalogDiscovery`,
+`notifyAdminNewUser` et `notifyWatchers`. Leur code n'est dans aucun dossier
+connu, elles ont été déployées à la main avant l'existence du dépôt. Réponds
+**N** tant qu'on n'a pas tranché.
 
-### Les index composites, et pourquoi tu n'as plus à t'en occuper
+`notifyWatchers` mérite un coup d'œil. Le dépôt contient déjà
+`notifyStockToWatchers`, qui prévient les gens qui guettent une boisson quand
+elle réapparaît. Les deux tournent. Si elles font la même chose, chaque
+réapparition envoie **deux** notifications, ce qui expliquerait le problème de
+cloche qui revient depuis des mois. Pour vérifier : console Firebase, onglet
+Functions, colonne Déclencheur de `notifyWatchers`. Si c'est `stores/{id}`,
+c'est un doublon, et on le supprimera pour de bon.
 
-Cinq requêtes anti-triche de ces fonctions filtrent sur deux champs à la fois.
-Firestore fabrique un index par champ tout seul, jamais les combinaisons. Sans
-elles, la requête ne rend pas une liste vide : elle **plante**. Le crédit des
-points s'arrêterait net, la contribution serait quand même enregistrée, et
-rien ne le dirait à personne.
+N'efface aucun autre dossier Firebase de ton PC avant qu'on ait récupéré le
+code de ces trois-là. Il se télécharge en deux clics : console Google Cloud,
+Cloud Functions, la fonction, onglet Source, Télécharger le fichier ZIP.
 
-C'était le dernier moyen que cette étape avait de rater en silence. Il est
-fermé : chaque requête concernée rattrape maintenant ce cas précis, écrit ce
-qui s'est passé, et **le panneau Administration → Sécurité affiche une pastille
-rouge « Le crédit des points est bloqué » avec un bouton qui crée l'index
-manquant en un clic.** Rien ne s'affiche tant que tout va bien.
+## 1. Les règles Firestore — dans la commande de la section 0 bis
 
-Le repli est toujours choisi du côté prudent : aucun point n'est distribué sur
-une vérification anti-triche qui n'a pas pu s'exécuter. Mieux vaut un point non
-crédité qu'un point volé, et dans les deux cas tu le sais.
+Elles s'y déploient avec les index et les fonctions, depuis le dossier unique.
+Rien à lancer séparément.
 
-Tu peux donc aussi déployer les index d'avance, si tu retrouves le dossier qui
-contient ton `firestore.rules` :
-
-```
-firebase deploy --only firestore:indexes
-```
-
-S'il répond qu'il ne trouve rien, copie `firestore.indexes.json` du dépôt à
-côté de ton `firestore.rules`. Et si tu ne le fais pas, ce n'est plus grave :
-la pastille te préviendra.
-
-### Vérifier que ça a marché
-
-Confirme un stock quelque part, recharge la page : le score doit avoir monté
-**et rester**. Va ensuite voir Administration → Sécurité. Pas de pastille
-rouge, tout va bien.
-
-**Ce que cette commande ne déploie volontairement PAS :**
-`verification-commercant.js`, le paiement commerçant. Il réclame deux secrets
-Stripe et le paquet `stripe`. Sans eux, le déploiement **échouerait pour tout
-le lot** — y compris les points. Il se déploie séparément, le jour où tu as un
-compte Stripe : section 5.
-
-Ce que je ne peux pas réparer : les contributions faites depuis la publication
-des règles ne seront pas rattrapées. Les fonctions se déclenchent sur les
-nouveaux documents, pas sur ceux déjà écrits.
-
-## 1. Les règles Firestore (le plus important, 2 min)
-
-Tant que tu ne lances pas cette commande, la base reste ouverte : toutes les
-corrections de règles décrites plus bas ne s'appliquent pas.
+Avant tout changement de règles, le banc d'essai doit passer :
 
 ```
 cd functions-a-deployer/tests-regles
 npm install          # une seule fois
 npm test             # doit afficher : 92/92 conformes
-cd ../..
-firebase deploy --only firestore:rules
 ```
 
-Le banc d'essai attaque une base jetable sur ta machine. Rien ne part en ligne.
-S'il n'affiche pas `92/92`, **ne déploie pas** : dis-le-moi.
+Il attaque une base jetable sur ta machine. Rien ne part en ligne. S'il
+n'affiche pas `92/92`, **ne déploie pas** : dis-le-moi.
 
 ## 2. Les Cloud Functions de base — DÉJÀ FAIT
 
-Vérifié aujourd'hui : `identifyDrink`, `identifyFridge`, `remplirEnseignes` et
-les notifications répondent. Rien à faire ici. La commande d'origine est
-gardée seulement au cas où il faudrait les réinstaller un jour :
+Vérifié : `identifyDrink`, `confirmAiDrink`, `identifyFridge`, `remplirEnseignes`,
+`importerHoraires`, `antiFarmRupture`, `fiche`, `kofiWebhook`, `sendTestPush`,
+`sendTestEmail` et les quatre notifications répondent toutes. Rien à faire ici.
 
-```
-firebase deploy --only functions:notifyHuntNearby,functions:notifyStockToWatchers,functions:notifyDiscoveryPromoted,functions:notifyPhotoRejected,functions:emailHuntStarted,functions:emailHuntFound,functions:sendTestEmail,functions:identifyDrink,functions:confirmAiDrink,functions:identifyFridge,functions:antiFarmRupture
-```
+Depuis la réorganisation, elles sont branchées dans le `index.js` unique et
+repartent avec toutes les autres à chaque déploiement. Tu n'as plus de liste de
+noms à recopier.
 
 ## 3. La sauvegarde quotidienne — DÉPLOYÉE, comprendre la pastille
 

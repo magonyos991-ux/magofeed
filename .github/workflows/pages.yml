@@ -65,8 +65,10 @@ jobs:
       # plan anti-triche, les notes de strategie, le code d'automatisation n8n,
       # les guides internes. On assemble desormais une liste blanche : ce qui
       # est en ligne est ce que le site utilise, et rien d'autre.
-      # Les fichiers .js de functions-a-deployer restent publies : le mode
-      # d'emploi PowerShell les telecharge depuis cette adresse.
+      # functions-a-deployer/ n'est PLUS publie. Le mode d'emploi PowerShell
+      # telecharge ces fichiers depuis raw.githubusercontent.com, pas depuis le
+      # site : les servir ici n'apportait rien et exposait le code serveur a
+      # une adresse devinable.
       - name: Rassembler le site
         run: |
           set -e
@@ -91,14 +93,12 @@ jobs:
           find _site/promo -name '*.md' -delete 2>/dev/null || true
           mkdir -p _site/promo/cards-src
           cp -r promo/cards-src/bottles _site/promo/cards-src/ 2>/dev/null || true
-          mkdir -p _site/functions-a-deployer
-          cp functions-a-deployer/*.js _site/functions-a-deployer/ 2>/dev/null || true
           echo "--- contenu publie ---"
           find _site -maxdepth 2 | head -40
           echo "--- ce qui ne doit PAS y etre ---"
           ! find _site -name '*.md' | grep . || (echo "ECHEC : un .md est publie" && exit 1)
           ! test -d _site/promo/n8n || (echo "ECHEC : promo/n8n est publie" && exit 1)
-          ! test -d _site/functions-a-deployer/tests-regles || (echo "ECHEC : tests publies" && exit 1)
+          ! test -d _site/functions-a-deployer || (echo "ECHEC : code serveur publie" && exit 1)
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:

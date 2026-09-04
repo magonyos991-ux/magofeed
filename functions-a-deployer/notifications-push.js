@@ -10,10 +10,8 @@
  *  - Envoyer une vraie notification PUSH sur le téléphone de l'auteur, même
  *    quand l'app est fermée (FCM). C'est la pièce manquante.
  *
- * ⚠️ Ces fonctions n'ajoutent AUCUN point : les points restent gérés par
- *    l'app (Phase 1). Pour des points infalsifiables côté serveur, voir
- *    points-serveur-PHASE2.js. Déployer les deux ensemble = double crédit :
- *    ne bascule sur la Phase 2 qu'en suivant son README.
+ * Ces fonctions n'ajoutent AUCUN point. Le crédit des points vit entièrement
+ * dans points-et-parrainage.js, côté serveur, depuis la bascule.
  *
  * Firebase Functions v2 (Node 18+). Déploiement : voir README.md.
  */
