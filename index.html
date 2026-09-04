@@ -4676,6 +4676,35 @@ function jourGrossier(ts){
   if(days<60)return "il y a un mois";
   return "il y a plus d'un mois";
 }
+/* ── AGE DU PRIX AFFICHE ──────────────────────────────────────────────
+   Un prix sans date se lit comme le prix d'aujourd'hui. Celui d'il y a huit
+   mois n'est plus un prix, c'est un souvenir — et il fait deplacer des gens
+   pour rien, exactement ce que cette app promet d'eviter. La date existe
+   deja : fbSavePrice horodate chaque releve dans priceHistory. On la lit,
+   sans rien ajouter a la base ni aux regles. */
+function prixVuLe(s,did){
+  var h=s&&s.priceHistory&&(s.priceHistory[String(did)]||s.priceHistory[did]);
+  if(!h||!h.length)return null;
+  var t=0;
+  h.forEach(function(e){var v=Number(e&&e.t);if(isFinite(v)&&v>t)t=v;});
+  var futur=Date.now()+3600000;
+  if(!t||t>futur)return null;         // une date future n'est pas un releve
+  return t;
+}
+/* Suffixe court a coller au prix. Vide en dessous d'une semaine : un prix de
+   mardi n'a pas besoin d'excuse. */
+function prixSuffixe(t){
+  if(!t)return "";
+  var j=Math.floor((Date.now()-t)/86400000);
+  if(j<7)return "";
+  return " \u00b7 "+jourGrossier(t);
+}
+/* Au-dela de deux mois, on cesse de traiter ce chiffre comme un fait :
+   plus d'etiquette « le moins cher », plus de mise en avant. */
+function prixPerime(t){
+  if(!t)return false;
+  return (Date.now()-t)>60*86400000;
+}
 /* Renvoie la derniere observation connue de cette boisson dans ce magasin :
    {positif, qui, quand(ts), jour(label), vieux} — ou null s'il n'y en a pas. */
 function vuParInfo(s,did){
@@ -12532,22 +12561,34 @@ function renderStoreList(){
     var frF=fr?fr.f:(confs>0?0.6:1); // confirmations sans date (historique) : prudence
     var trust=Math.round(Math.min(confs*20,100)*frF);
     var storePriceVal=getStorePrice(s,sid);
-    var storePrice=storePriceVal?storePriceVal.toFixed(2)+"€":null;
+    var _prixT=prixVuLe(s,sid);
+    var _prixMort=prixPerime(_prixT);
+    var storePrice=storePriceVal?storePriceVal.toFixed(2)+"€"+prixSuffixe(_prixT):null;
     /* Pastille « le moins cher » sur la carte concernee — mais seulement s'il
        y a de quoi comparer ET un ecart reel. Coller l'etiquette sur le seul
        prix connu, ou sur deux prix identiques, serait mensonger. */
-    var estMoinsCher=!!(_stats&&_stats.n>1&&_stats.ecart>=0.05&&storePriceVal!=null&&
+    /* Et jamais sur un prix perime : « le moins cher » calcule sur un chiffre
+       de l'annee derniere est une promesse qu'on ne peut pas tenir en caisse. */
+    var estMoinsCher=!!(_stats&&_stats.n>1&&_stats.ecart>=0.05&&storePriceVal!=null&&!_prixMort&&
                         Math.abs(storePriceVal-_stats.min)<0.001);
     var storeIdStr=String(s.id);
     // Statut stock de CETTE boisson dans CE magasin, rendu tres visible :
     // barre d'accent coloree a gauche + pastille pres du nom.
     var confN=confBornee(s,sid);
-    var isSure=storeVerifiedFor(s,sid)||confN>0;
+    /* UNE CONFIRMATION N'EST PAS ETERNELLE. Un stock bouge chaque semaine.
+       Passe un mois sans que personne ne repasse, un vert franc « En stock »
+       n'est plus une information, c'est un souvenir presente comme un fait.
+       On garde le magasin dans la liste — il a des chances d'avoir la boisson
+       — mais l'etiquette perd son aplomb et dit depuis quand. Le catalogue
+       verifie a la main echappe a la peremption : ce n'est pas une observation
+       de passage, c'est un referencement. */
+    var perime=!!(fr&&fr.f<=0.4)&&!storeVerifiedFor(s,sid);
+    var isSure=(storeVerifiedFor(s,sid)||confN>0)&&!perime;
     var isNo=confN<0;
     var stCol=isSure?"#16a34a":(isNo?"#dc2626":"#f59e0b");
     var stBg=isSure?"#f0fdf4":(isNo?"#fef2f2":"#fffbeb");
     var stTxt=isSure?"#15803d":(isNo?"#b91c1c":"#b45309");
-    var stLbl=isSure?"En stock":(isNo?"Absente":"À vérifier");
+    var stLbl=isSure?"En stock":(isNo?"Absente":(perime?"\u00c0 reconfirmer":"\u00c0 v\u00e9rifier"));
     var stIco=isSure?"✓":(isNo?"✕":"?");
     var div=document.createElement("div");div.className="store-card";
     div.style.borderLeft="4px solid "+stCol;
@@ -12561,10 +12602,15 @@ function renderStoreList(){
             (storePrice?'<span class="pchip'+(estMoinsCher?' best':'')+'">'+storePrice+(estMoinsCher?' \u00b7 le moins cher':'')+'</span>':'<span style="font-size:11px;color:var(--txt2);font-weight:500">Prix inconnu</span>')+
           '</div>'+
           '<div class="store-meta"><span>'+dist+'</span><span>·</span>'+
-          (storeOpenState(s)!==null?'<span class="status" style="background:'+(storeOpenState(s)?"#f0fdf4":"#fef2f2")+';color:'+(storeOpenState(s)?"#15803d":"#b91c1c")+'">'+openLabel(s)+(s.hours?" · "+s.hours:"")+'</span>':'<span class="status" style="background:var(--bg3);color:var(--s2)">Horaires inconnus</span>')+'</div>'+
+          (storeOpenState(s)!==null?'<span class="status" style="background:'+(openSur(s)?(storeOpenState(s)?"#f0fdf4":"#fef2f2"):"#fffbeb")+';color:'+(openSur(s)?(storeOpenState(s)?"#15803d":"#b91c1c"):"#92400e")+'">'+openLabel(s)+(s.hours?" · "+s.hours:"")+'</span>':'<span class="status" style="background:var(--bg3);color:var(--s2)">Horaires inconnus</span>')+'</div>'+
         '</div>'+
       '</div>'+
-      (storeOpenState(s)===false?'<button class="gobtn closed">Fermé</button>':'<button class="gobtn" onclick="goToStore('+s.lat+','+s.lng+')">Y aller</button>')+
+      /* « Y aller » reste TOUJOURS cliquable. Avant, un magasin juge ferme
+         perdait son bouton : impossible d'y aller, meme pour demain matin, et
+         surtout meme quand l'horaire n'etait qu'une supposition d'apres
+         l'enseigne. La pastille juste a cote dit deja s'il est ferme ; a
+         l'utilisateur de decider. */
+      '<button class="gobtn'+(storeOpenState(s)===false?" closed":"")+'" onclick="goToStore('+s.lat+','+s.lng+')">Y aller</button>'+
     '</div>'+
     '<div class="trust-wrap">'+
       (storeVerifiedFor(s,sid)?
@@ -13215,7 +13261,7 @@ function renderStoreDetail(){
   if(!addr)resolveStoreAddress(s);
   var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):null;
   document.getElementById("sd-badges").innerHTML=
-    (openLabel(s)?'<span class="rbadge" style="background:'+(storeOpenState(s)?"rgba(34,197,94,.3)":"rgba(239,68,68,.3)")+'">'+openLabel(s)+(s.hours?" · "+s.hours:"")+'</span>':"")+
+    (openLabel(s)?'<span class="rbadge" style="background:'+(openSur(s)?(storeOpenState(s)?"rgba(34,197,94,.3)":"rgba(239,68,68,.3)"):"rgba(245,158,11,.3)")+'">'+openLabel(s)+(s.hours?" · "+s.hours:"")+'</span>':"")+
     (dist?'<span class="rbadge">'+dist+'</span>':"");
   var mmap=document.getElementById("sd-mago-map");if(mmap)mmap.onclick=function(){
     var la=Number(s.lat),ln=Number(s.lng);
@@ -15692,7 +15738,11 @@ function renderExploreSheet(list){
   if(title)title.textContent=arr.length?(arr.length+" magasin"+(arr.length>1?"s":"")+(exploreFilter?" · "+exploreFilter.name:" autour de toi")):"Aucun magasin ici";
   // Prix communautaire : le moins cher connu ressort en vert avec un badge.
   var _did=exploreFilter?exploreFilter.drinkId:null;
-  var _prices=_did?arr.map(function(s){return getStorePrice(s,_did);}).filter(function(p){return typeof p==="number"&&p>0;}):[];
+  /* Le minimum ne se calcule QUE sur des prix encore vivants. Un releve de
+     l'annee derniere gagnerait la comparaison sans jamais avoir ete verifie,
+     et enverrait quelqu'un a l'autre bout de la ville pour un prix qui
+     n'existe plus. */
+  var _prices=_did?arr.map(function(s){return prixPerime(prixVuLe(s,_did))?null:getStorePrice(s,_did);}).filter(function(p){return typeof p==="number"&&p>0;}):[];
   var _minP=_prices.length?Math.min.apply(null,_prices):null;
   // Tri "moins cher d'abord" (prix connus en tete, inconnus a la fin), sinon distance.
   if(window._exploreSortPrice&&_did){
@@ -15706,12 +15756,19 @@ function renderExploreSheet(list){
   el.innerHTML=arr.slice(0,80).map(function(s){
     var dist=s.dist?(s.dist<1000?Math.round(s.dist)+" m":(s.dist/1000).toFixed(1)+" km"):"";
     var open=storeOpenState(s);
-    var openTxt=open===false?'<span style="color:#dc6b6b;font-weight:700">fermé</span>':(open===true?'<span style="color:#16a34a;font-weight:700">ouvert</span>':"");
+    /* Un « fermé » rouge tire d'une simple deduction sur l'enseigne est un
+       mensonge : le magasin est peut-etre grand ouvert. Quand l'horaire n'est
+       pas un fait, on le dit, et la couleur passe en ambre. */
+    var _openSur=openSur(s);
+    var _openCol=open===false?(_openSur?"#dc6b6b":"#b45309"):(_openSur?"#16a34a":"#b45309");
+    var openTxt=(open===null)?"":'<span style="color:'+_openCol+';font-weight:700">'+(_openSur?(open?"ouvert":"fermé"):(open?"sans doute ouvert":"sans doute fermé"))+'</span>';
     var nb=(s.drinks||[]).length;
     var sub=[s.brand||"",openTxt,nb?nb+" boissons":""].filter(Boolean).join(" · ");
     var idEsc=String(s.id).replace(/'/g,"\\'");
     var pr=_did?getStorePrice(s,_did):null;
-    var isCheap=(pr!=null&&pr===_minP&&_prices.length>1);
+    var _prT=_did?prixVuLe(s,_did):null;
+    var _prMort=prixPerime(_prT);
+    var isCheap=(pr!=null&&!_prMort&&pr===_minP&&_prices.length>1);
     var prTxt=(pr!=null)?(pr.toFixed(2).replace(/\.?0+$/,"")+"€"):"";
     var cheapBadge=isCheap?'<span style="flex-shrink:0;font-size:9px;font-weight:800;color:#16a34a;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:999px;padding:1px 6px">MOINS CHER</span>':'';
     return '<div class="exsheet-row" onclick="exploreSheetPick(\''+idEsc+'\')" role="button" tabindex="0">'+
@@ -15719,7 +15776,7 @@ function renderExploreSheet(list){
       '<div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px"><div style="font-size:13.5px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(s.name)+'</div>'+cheapBadge+'</div><div style="font-size:11px;color:var(--s2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sub+'</div></div>'+
       '<div style="flex-shrink:0;text-align:right;min-width:46px">'+
         (_did?'<div onclick="event.stopPropagation();quickPrice(\''+idEsc+'\','+_did+')" role="button" tabindex="0" aria-label="Ajouter ou modifier le prix" style="cursor:pointer">'+
-          (prTxt?'<div style="font-size:13.5px;font-weight:800;color:'+(isCheap?"#16a34a":"var(--s1)")+'">'+prTxt+'</div>':'<div style="font-size:10.5px;font-weight:800;color:#c69a57">+ prix</div>')+
+          (prTxt?'<div style="font-size:13.5px;font-weight:800;color:'+(isCheap?"#16a34a":(_prMort?"var(--s2)":"var(--s1)"))+'" title="'+attr(_prT?("Prix relev\u00e9 "+jourGrossier(_prT)):"Prix relev\u00e9 par la communaut\u00e9")+'">'+prTxt+'</div>':'<div style="font-size:10.5px;font-weight:800;color:#c69a57">+ prix</div>')+
         '</div>':'')+
         (dist?'<div style="font-size:11px;font-weight:700;color:var(--s2);margin-top:1px">'+dist+'</div>':'')+
       '</div>'+
@@ -16515,7 +16572,10 @@ function exploreLoadStores(useCache){
       var hasDrink=exploreFilter?!!s._hasDrink:true;
       var conf=did?((s.confirmations||{})[did]||0):0;
       var sure=did?(hasDrink&&(storeVerifiedFor(s,did)||conf>0)):false;
-      var closed=storeOpenState(s)===false;
+      /* On n'attenue le point que si la fermeture est un FAIT. Une fermeture
+         devinee d'apres l'enseigne faisait disparaitre a moitie un magasin
+         peut-etre grand ouvert : la carte mentait a l'oeil. */
+      var closed=(storeOpenState(s)===false&&openSur(s));
       // vend & confirme = vert coche ; vend = point de marque ; ne vend pas = gris (contexte alentour)
       // + BLEU : magasin certifie. Independant du vert, donc cumulable.
       var certif=storeCertifie(s);
@@ -17706,7 +17766,10 @@ function openGmaps(){
   var did=curSel.id;
   var cands=STORES.filter(function(x){
     return (x.drinks||[]).some(function(d){return Number(d)===Number(did);})
-      &&storeOpenState(x)!==false
+      /* On n'ecarte que les magasins CERTAINEMENT fermes. Ecarter aussi ceux
+         devines fermes d'apres l'enseigne pouvait repondre « aucun magasin
+         ouvert par ici » alors qu'il y en avait un, ouvert, a 200 m. */
+      &&!(storeOpenState(x)===false&&openSur(x))
       &&((x.confirmations||{})[did]||0)>=0; // jamais vers un magasin signale absent
   });
   if(!cands.length){toast("Aucun magasin ouvert avec cette boisson par ici");playSound("err");return;}
@@ -18291,12 +18354,25 @@ function horairesReels(s){
   var k=osmIdDe(s);
   return k?(HORAIRES_OSM[k]||null):null;
 }
-function storeOpenState(s,at){
+/* On ne renvoie plus seulement OUVERT ou FERME : on renvoie aussi D'OU on le
+   tient. Trois sources, et elles ne se valent pas du tout.
+
+     "saisi"       le commercant a ecrit ses horaires lui-meme
+     "osm"         horaires publies dans OpenStreetMap pour CE magasin
+     "devine"      personne n'a jamais dit les horaires de ce magasin. On a
+                   deduit d'apres l'enseigne qu'un Lidl ouvre 8h-20h.
+
+   Les deux premieres sont des faits. La troisieme est une supposition, et une
+   supposition qui s'affiche « Fermé » en rouge est un mensonge : le magasin
+   est peut-etre grand ouvert. D'ou openSur() plus bas, que l'affichage utilise
+   pour ne jamais donner a une devinette l'apparence d'une certitude. */
+function openInfo(s,at){
   var now=at||(window.__forceNow?new Date(window.__forceNow):new Date());
-  /* Ordre de confiance : ce que le commercant a saisi lui-meme, puis les
-     horaires reels d'OpenStreetMap, puis seulement l'heuristique. */
-  var rules=parseOSMHours(s.hours)||parseOSMHours(horairesReels(s))||heuristicHours(s.name,s.type);
-  if(!rules)return null; // horaires inconnus : pas de mensonge
+  var src=null,rules=null;
+  rules=parseOSMHours(s.hours);            if(rules)src="saisi";
+  if(!rules){rules=parseOSMHours(horairesReels(s)); if(rules)src="osm";}
+  if(!rules){rules=heuristicHours(s.name,s.type);   if(rules)src="devine";}
+  if(!rules)return{open:null,src:null};    // horaires inconnus : pas de mensonge
   var day=now.getDay(),t=now.getHours()*60+now.getMinutes();
   var open=false;
   rules.forEach(function(r){
@@ -18309,14 +18385,18 @@ function storeOpenState(s,at){
       }
     });
   });
-  return open;
+  return{open:open,src:src};
 }
+function storeOpenState(s,at){return openInfo(s,at).open;}
+/* Vrai seulement si l'horaire vient d'un fait, pas d'une deduction. */
+function openSur(s){var i=openInfo(s);return i.src==="saisi"||i.src==="osm";}
 function openScore(s){var o=storeOpenState(s);return o===true?2:(o===null?1:0);}
 function openLabel(s){
-  var o=storeOpenState(s);
-  if(o===true)return"Ouvert";
-  if(o===false)return"Ferm\u00E9";
-  return"";
+  var i=openInfo(s);
+  if(i.open===null)return"";
+  var sur=(i.src==="saisi"||i.src==="osm");
+  if(i.open===true)return sur?"Ouvert":"Sans doute ouvert";
+  return sur?"Ferm\u00E9":"Sans doute ferm\u00E9";
 }
 function storeVerifiedFor(s,did){return !!(s&&s.drinksVerified&&s.drinksVerified.some(function(v){return Number(v)===Number(did);}));}
 function sortedStores(stores){var arr=stores.slice();if(curSort==="distance")arr.sort(function(a,b){return(a.dist||999)-(b.dist||999);});else if(curSort==="open")arr.sort(function(a,b){return openScore(b)-openScore(a);});else if(curSort==="trust")arr.sort(function(a,b){var id=curSel?curSel.id:0;return confBornee(b,id)-confBornee(a,id);});
