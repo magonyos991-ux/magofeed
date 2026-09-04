@@ -1,39 +1,44 @@
-# Où en est le serveur de Magofeed
+# Le serveur de Magofeed — état et mode d'emploi
 
 Tout ce qui est dans l'app est **déjà en ligne**. Ce fichier ne concerne que le
 serveur, qui ne se déploie pas tout seul.
 
-## 0. Où on en est vraiment (mesuré, pas supposé)
+## 0. Où on en est — tout est en place
 
-J'ai sondé les 32 fonctions du projet et relu la base. Voici l'état réel.
+Mesuré directement dans le projet, pas déclaré.
 
-**Ce qui marche maintenant :** les points sont déployés (`crediterContribution`,
-`monCodeParrain`, `figerPointsExistants` répondent), les sauvegardes aussi, la
-recherche mondiale aussi, et les huit fonctions que Firebase proposait de
-supprimer sont toujours là parce que tu as répondu non.
+| Vérification | Résultat |
+|---|---|
+| Fonctions déployées | 30 sur 30, aucune absente |
+| Soldes figés (`pointsHerites`) | 115 sur 115 |
+| Profils ayant perdu des points à la bascule | 0 |
+| Profils remis à zéro | 0 |
+| Règles de sécurité actives | oui (`_meta` et `zonesOverture` fermés au public) |
+| Sauvegardes | déployées, quotidiennes plus bouton |
 
-**Il reste UNE action, et c'est un bouton :**
+Le crédit des points, le parrainage, la sanction anti-triche, les
+notifications, la reconnaissance par photo, le scan de frigo, la recherche
+mondiale, les horaires, les e-mails, l'aperçu des liens et les sauvegardes
+tournent tous depuis le même dossier.
 
-> **Administration → Sécurité → « Figer les soldes maintenant »**
+**Le seul essai qui reste** : confirme un stock quelque part, recharge la page.
+Le score doit avoir monté et rester. Puis Administration → Sécurité : aucune
+pastille rouge.
 
-Sur 115 profils, aucun ne porte encore `pointsHerites`. Tant que ce bouton n'a
-pas été pressé, la bascule n'est pas faite. C'est cette étape, et elle seule,
-qui garantit que personne ne perd ses points quand le serveur reprend le calcul.
-
-Ensuite, confirme un stock quelque part et recharge : le score doit avoir monté
-**et rester**. Puis reviens dans Administration → Sécurité. Aucune pastille
-rouge, c'est gagné.
-
-## 0 bis. Remettre les dossiers en ordre (une commande)
+## 0 bis. Les dossiers — FAIT, gardé pour la prochaine machine
 
 Le message « Would you like to proceed with deletion? » n'était pas un bug :
 tes fonctions avaient été déployées depuis **plusieurs dossiers différents**.
 Chacun ignorait l'existence des autres, donc chaque déploiement proposait
 d'effacer le travail du voisin.
 
-Cette commande met fin à ça. Un seul dossier, un seul `index.js` qui branche
-tout, les règles et les index au même endroit. Elle sauvegarde ton
-`firebase.json` et ton `index.js` actuels sous `.avant` avant de les remplacer.
+C'est réglé. Un seul dossier, un seul `index.js` qui branche tout, les règles
+et les index au même endroit. Preuve que ça a marché : le déploiement suivant
+ne proposait plus de supprimer que trois fonctions au lieu de huit.
+
+La commande est gardée ici pour le jour où tu changes de machine, ou si un
+dossier se remet à diverger. Elle sauvegarde ton `firebase.json` et ton
+`index.js` sous `.avant` avant de les remplacer.
 
 ```powershell
 cd C:\Users\ilias\magofeed-functions; $b="https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"; if (Test-Path firebase.json) { Copy-Item firebase.json firebase.json.avant -Force }; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firebase.json.modele") -OutFile "firebase.json"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.rules") -OutFile "firestore.rules"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.indexes.json") -OutFile "firestore.indexes.json"; cd functions; if (Test-Path index.js) { Copy-Item index.js index.js.avant -Force }; foreach ($f in @("index.js","points-et-parrainage.js","anti-farm.js","notifications-push.js","emails-brevo.js","reconnaissance-ia.js","scan-frigo.js","commerces-monde.js","remplir-enseignes.js","importer-horaires.js","partage.js","sauvegarde.js","don-notification.js","dons.js","verification-commercant.js","recap-fondateur.js","migration-geohash.js")) { Invoke-WebRequest -UseBasicParsing -Uri ($b+$f) -OutFile $f; Write-Host "ok $f" }; npm install @duckdb/node-api geofire-common @google-cloud/firestore @anthropic-ai/sdk; cd ..; firebase deploy --only firestore:indexes; firebase deploy --only firestore:rules; firebase deploy --only functions
