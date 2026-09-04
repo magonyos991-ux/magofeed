@@ -80,28 +80,57 @@ il n'y a qu'à enlever les deux slashs.
 `migration-geohash.js` n'est pas une fonction : c'est un script à lancer une
 fois, à la main. Il ne doit jamais être branché dans `index.js`.
 
-## Trois fonctions sans code source
+## Trois fonctions sans code source, et ce qu'on en sait
 
 Trois fonctions tournent en production et leur code n'est **dans aucun dossier
-connu** : `aiCatalogDiscovery`, `notifyAdminNewUser` et `notifyWatchers`.
-Elles ont été déployées à la main, avant l'existence de ce dépôt.
+connu** : elles ont été déployées à la main, avant l'existence de ce dépôt.
+C'est pour elles que Firebase continuera de proposer une suppression.
 
-C'est pour elles que Firebase continuera de proposer une suppression. Réponds
-**N**, tant qu'on n'a pas tranché.
+Relevé dans la console Eventarc, déclencheurs et chemins réels :
 
-`notifyWatchers` mérite un examen particulier. Le dépôt contient
-`notifyStockToWatchers`, qui envoie une notification aux gens qui guettent une
-boisson quand elle réapparaît en rayon. Les deux sont déployées. Si elles font
-la même chose, **chaque réapparition de stock déclenche deux notifications** —
-ce qui expliquerait le problème de cloche qui revient depuis des mois.
+| Fonction | Événement | Statut |
+|---|---|---|
+| `notifyWatchers` | `written` sur `stores/{storeId}` | **doublon confirmé, à supprimer** |
+| `aiCatalogDiscovery` | `created` | chemin à relever |
+| `notifyAdminNewUser` | `written` | chemin à relever |
 
-Pour le vérifier en trente secondes : console Firebase, onglet **Functions**,
-regarde la colonne **Déclencheur** de `notifyWatchers`. Si elle indique un
-déclencheur sur `stores/{id}`, c'est un doublon.
+### notifyWatchers : le doublon qui faisait sonner deux fois
 
-Pour récupérer le code d'une de ces trois avant d'en faire quoi que ce soit :
-console Google Cloud, **Cloud Functions**, la fonction, onglet **Source**,
-bouton **Télécharger le fichier ZIP**.
+Déployée le 26 juillet 2026. Elle écoute `stores/{storeId}` en `written`.
+`notifyStockToWatchers`, celle du dépôt, écoute le **même chemin** en
+`updated`. Les deux partent donc à chaque mise à jour d'un magasin : les gens
+recevaient deux notifications au lieu d'une.
+
+Ce n'est pas le seul écart. `notifyStockToWatchers` porte deux protections que
+l'ancienne n'a pas :
+
+- **Le garde-fou contre la tempête.** Au-delà de trois boissons ajoutées d'un
+  coup, elle se tait. Un remplissage d'enseigne ajoute jusqu'à mille deux cents
+  boissons sur des milliers de magasins ; sans ce garde-fou, le déclencheur
+  part une fois par boisson et par magasin. C'est l'explication la plus
+  probable des vagues de notifications pendant les grands imports.
+- **Le recoupement d'identité.** Elle vérifie que l'identifiant du document de
+  veille commence bien par l'identifiant de la personne avant d'envoyer, pour
+  qu'une veille repointée sur quelqu'un d'autre ne passe pas.
+
+**À faire :** télécharger sa source (console Google Cloud, Cloud Functions, la
+fonction, onglet Source, Télécharger le ZIP), puis la supprimer depuis la
+console Firebase — pas depuis Eventarc, où le bouton n'efface que le
+déclencheur et laisse la fonction derrière.
+
+### Les deux autres
+
+`aiCatalogDiscovery` se déclenche à la **création** d'un document,
+`notifyAdminNewUser` à **toute écriture**. Leurs chemins restent à relever :
+console Eventarc, cliquer sur le déclencheur, ligne `Filtre(s)`.
+
+`notifyAdminNewUser` en `written` mérite un coup d'œil. Si elle écoute
+`users/{uid}`, elle se déclenche à chaque écriture de profil et pas seulement à
+l'inscription — le gel des soldes, par exemple, a écrit dans 115 profils d'un
+coup.
+
+Pour récupérer le code d'une de ces fonctions : console Google Cloud,
+**Cloud Functions**, la fonction, onglet **Source**, **Télécharger le ZIP**.
 
 ## Les règles de sécurité
 
