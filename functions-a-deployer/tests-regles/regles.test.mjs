@@ -308,6 +308,18 @@ await doit('legitime : Alice lit son propre soutien',
 await doit('bloque : se declarer administrateur',
   ()=>assertFails(setDoc(doc(m,'admins',MALLORY),{ok:true})));
 
+/* « Stores » AVEC UNE MAJUSCULE. Vestige d'une ancienne version : un seul
+   document y dormait et aucun code ne la lisait, mais elle avait un jeu de
+   regles complet qui laissait tout compte connecte y ecrire. Un entrepot
+   invisible et inscriptible. Le bloc a ete retire ; ces deux epreuves
+   verifient qu'elle est bien tombee dans le refus par defaut, et qu'elle n'y
+   revient pas si quelqu'un recopie un jour l'ancien bloc par megarde. */
+await doit('bloque : ecrire dans Stores (majuscule, collection morte)',
+  ()=>assertFails(setDoc(doc(m,'Stores','faux1'),
+      {name:'Faux magasin',lat:50.8,lng:4.3})));
+await doit('bloque : lire Stores (majuscule, collection morte)',
+  ()=>assertFails(getDoc(doc(m,'Stores','ss7GMAGpBfvLmkgwMw9B'))));
+
 R.forEach(r=>console.log(r[0],'|',r[1]));
 console.log('\n'+(R.length-ko)+'/'+R.length+' conformes');
 await env.cleanup();

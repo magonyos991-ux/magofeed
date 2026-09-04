@@ -147,6 +147,31 @@ lecture.
 milliseconde recevaient le même numéro. La place est désormais vérifiée avant
 l'écriture.
 
+## Une collection morte, supprimée
+
+La base contenait une collection **`Stores`** avec un S majuscule, à côté de la
+vraie `stores` et ses 31 563 magasins. Elle ne contenait qu'un document, un
+Carrefour d'Ixelles, et **aucun code ne la lisait ni ne l'écrivait**, ni dans
+l'app ni sur le serveur.
+
+Elle avait pourtant un jeu de règles complet de trente lignes, copié sur celui
+de `stores`, qui autorisait **tout compte connecté à y créer des documents**.
+Un entrepôt invisible et inscriptible. Rien de grave puisque personne ne
+l'affiche, mais du code mort dans un fichier de sécurité est exactement ce qui
+empêche d'y voir clair le jour où il faut relire vite.
+
+Le bloc est retiré : la collection tombe maintenant dans le refus par défaut.
+Deux épreuves du banc d'essai le vérifient, et vérifient surtout qu'elle n'y
+revient pas si quelqu'un recopie l'ancien bloc un jour de fatigue.
+
+Le document qui reste se supprime à la main dans la console Firestore. Il ne
+gêne rien, il salit juste la liste des collections.
+
+Vérifié au passage : `crawler`, `demand`, `aiQuota`, `aiVerified`, `emailSent`
+et `emailStarted` ne sont pas des vestiges. Les quatre dernières n'ont
+volontairement aucune règle parce que seul le serveur y touche, et `crawler`
+est déjà verrouillé en écriture.
+
 ## Les règles de sécurité
 
 Elles se déploient avec la commande ci-dessus. Avant tout changement, le banc
@@ -155,8 +180,8 @@ d'essai doit passer :
 ```
 cd functions-a-deployer/tests-regles
 npm install          # une seule fois
-npm test             # doit afficher : 92/92 conformes
+npm test             # doit afficher : 94/94 conformes
 ```
 
 Il attaque une base jetable sur ta machine. Rien ne part en ligne. S'il
-n'affiche pas `92/92`, ne déploie pas.
+n'affiche pas `94/94`, ne déploie pas.

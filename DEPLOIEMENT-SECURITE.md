@@ -80,11 +80,11 @@ Avant tout changement de règles, le banc d'essai doit passer :
 ```
 cd functions-a-deployer/tests-regles
 npm install          # une seule fois
-npm test             # doit afficher : 92/92 conformes
+npm test             # doit afficher : 94/94 conformes
 ```
 
 Il attaque une base jetable sur ta machine. Rien ne part en ligne. S'il
-n'affiche pas `92/92`, **ne déploie pas** : dis-le-moi.
+n'affiche pas `94/94`, **ne déploie pas** : dis-le-moi.
 
 ## 2. Les Cloud Functions de base — DÉJÀ FAIT
 

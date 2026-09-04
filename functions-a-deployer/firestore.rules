@@ -387,36 +387,15 @@ service cloud.firestore {
                 || !changed().hasAny(['name','brand','lat','lng','emoji','geohash'])));
       allow delete: if isAdmin();
     }
-    match /Stores/{id} {
-      allow read: if true;
-      /* drinksVerified rejoint la liste des champs serveur A LA CREATION aussi :
-         plus aucun chemin client ne l'ecrit depuis que l'import automatique a
-         cesse de marquer « verifie » un rayon devine d'apres le nom du magasin. */
-      /* Aucune contrainte de type ni de taille n'existait : le decoupage a 60
-         caracteres du nom vit cote client, donc rien n'empechait de creer un
-         magasin invente, place n'importe ou, avec un nom de dix mille
-         caracteres. Un magasin s'affiche sur la carte de tout le monde. */
-      allow create: if isAdmin()
-        || (isSignedIn()
-            && !request.resource.data.keys().hasAny(champsServeurStore())
-            && (!('addedBy' in request.resource.data)
-                || request.resource.data.addedBy == request.auth.uid)
-            && request.resource.data.name is string
-            && request.resource.data.name.size() > 0
-            && request.resource.data.name.size() <= 60
-            && request.resource.data.lat is number
-            && request.resource.data.lat >= -90 && request.resource.data.lat <= 90
-            && request.resource.data.lng is number
-            && request.resource.data.lng >= -180 && request.resource.data.lng <= 180);
-      allow update: if isAdmin()
-        || (isSignedIn()
-            && !changed().hasAny(champsServeurStore())
-            && !changed().hasAny(['addedBy','createdAt','community'])
-            && sourceHonnete()
-            && (resource.data.addedBy == request.auth.uid
-                || !changed().hasAny(['name','brand','lat','lng','emoji','geohash'])));
-      allow delete: if isAdmin();
-    }
+    /* « Stores » AVEC UNE MAJUSCULE : vestige supprime le 4 septembre 2026.
+       Un seul document y dormait — un Carrefour d'Ixelles — et aucun code, ni
+       dans l'app ni sur le serveur, ne lisait ni n'ecrivait cette collection.
+       Elle avait pourtant un jeu de regles complet, copie de celui de
+       « stores », qui autorisait tout compte connecte a y creer des documents.
+       Un entrepot invisible et inscriptible : rien de grave puisque personne
+       ne l'affiche, mais du code mort dans un fichier de securite est
+       exactement ce qui empeche d'y voir clair.
+       Elle tombe desormais dans le refus par defaut, tout en bas. */
 
     /* ── Journal des recherches (taux de réponse) ─────────────────────────
      * Anonyme par construction : boisson, zone arrondie, trouvé ou pas.
