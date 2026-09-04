@@ -5891,6 +5891,10 @@ function renderWhereFound(ctx){
   // bouge). Le flag _fresh evite toute boucle infinie.
   if(ctx._fresh!==true&&(Date.now()-_lastGpsRefresh>60000)){
     refreshLocation(function(ok){
+      /* Pas pendant qu'une fiche de relecture est ouverte : la liste serait
+         redessinee et RETRIEE par distance sous le doigt, donc les trois
+         lignes changeraient d'ordre pendant qu'on lit la fiche. */
+      if(window._rattachEnCours)return;
       if(ok&&lastScanContext===ctx){renderWhereFound(Object.assign({},ctx,{_fresh:true}));}
     });
   }
@@ -5992,10 +5996,42 @@ function pickerFetchZone(force){
    a maintenir en parallele, donc plus de derive possible entre les deux.
    ============================================================================ */
 function choisirCeMagasin(s){
-  window._choixMagasin=false;
-  _majBandeauChoix();
-  try{ closeExploreMap(); }catch(e){}
-  try{ tagScanToStore(s); }catch(e){}
+  /* LA CARTE NE SE FERME PLUS AVANT D'AVOIR DEMANDE.
+     Elle se fermait ici, AVANT l'ecriture : le nom du magasin avait donc
+     quitte l'ecran au moment ou le message « Rattache a X » s'affichait. On
+     laisse tout en place, on entoure le magasin touche, et on demande.
+     Sur un NON on ne touche a rien : le mode choix et le bandeau sont
+     toujours la, la personne vise un autre pin. « En choisir un autre » est
+     donc offert sans une ligne de plus. */
+  _haloChoix(s);
+  try{
+    tagScanToStore(s).then(function(ok){
+      _haloChoix(null);
+      if(!ok)return;
+      window._choixMagasin=false;
+      _majBandeauChoix();
+      try{ closeExploreMap(); }catch(e){}
+    });
+  }catch(e){ _haloChoix(null); console.warn(e); }
+}
+/* Le cercle autour du magasin touche, pendant qu'on relit la fiche. C'est lui
+   qui tranche le cas des deux enseignes identiques a quatre-vingts metres,
+   qu'aucun texte ne tranchera.
+   IMPERATIF : la couche est posee sur exploreMap et PAS sur exploreLayer, que
+   exploreLoadStores vide a chaque deplacement de carte — le cercle
+   disparaitrait pendant que la fiche l'annonce. */
+function _haloChoix(s){
+  try{
+    if(!window.exploreMap)return;
+    if(!s){
+      if(window._haloLayer){window._haloLayer.clearLayers();}
+      return;
+    }
+    if(!window._haloLayer)window._haloLayer=L.layerGroup().addTo(window.exploreMap);
+    window._haloLayer.clearLayers();
+    L.circleMarker([s.lat,s.lng],
+      {radius:26,color:"#c69a57",weight:3,fill:false,interactive:false}).addTo(window._haloLayer);
+  }catch(e){ console.warn("halo:",e); }
 }
 function _majBandeauChoix(){
   var b=document.getElementById("choix-magasin-bandeau");
@@ -6265,7 +6301,10 @@ function saveNewStore(){
     playSound("win");
     toast("\u00AB "+name+" \u00BB enregistr\u00E9 pour tout le monde !");
     if(createBtn){createBtn.disabled=false;createBtn.textContent="Cr\u00E9er le magasin";}
-    if(lastScanContext){closeStorePicker();tagScanToStore(s);}
+    /* On laisse passer le message de creation avant d'ouvrir la fiche de
+       relecture : toast() ne reinitialise pas sa minuterie, donc le message
+       du rattachement serait masque en avance par celui de la creation. */
+    if(lastScanContext){closeStorePicker();setTimeout(function(){tagScanToStore(s);},600);}
     else{renderStorePicker();}
   };
   var finishFail=function(e){
@@ -6390,9 +6429,13 @@ function renderStorePicker(){
 }
 /* Prix facultatif juste apres le rattachement (boissons du catalogue uniquement :
    une decouverte n'a pas encore d'identite catalogue pour porter un prix) */
-function renderPriceAfterTag(s,did){
+function renderPriceAfterTag(s,did,ctx){
   var host=document.getElementById("scan-where");if(!host)return;
-  var codeJournal=_findsCodeFor(lastScanContext); // capture AVANT que le contexte soit remis a zero
+  /* Le contexte est passe en argument depuis la fiche de relecture : entre le
+     tap et le OUI il peut s'ecouler dix secondes, et lastScanContext a pu
+     bouger. Sans ca le prix serait rattache a la mauvaise entree de journal.
+     Repli sur la globale pour les appels qui ne le passent pas. */
+  var codeJournal=_findsCodeFor(ctx||lastScanContext);
   host.innerHTML='<div style="display:flex;align-items:center;gap:8px;background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;padding:10px 12px">'+
     '<span style="font-size:12px;font-weight:600;color:var(--s2);flex-shrink:0">Prix vu ? (facultatif)</span>'+
     '<input id="scan-price-input" type="number" step="0.10" min="0" max="20" placeholder="1.30" style="flex:1;min-width:0;padding:8px 10px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:13px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none">'+
@@ -6425,10 +6468,180 @@ function renderPriceAfterTag(s,did){
     playSound("win");
   };
 }
-function tagScanToStore(s){
-  var ctx=lastScanContext;
-  if(!ctx)return;
+/* ============================================================================
+   RATTACHER UNE BOISSON A UN MAGASIN — AVEC RELECTURE
+   ----------------------------------------------------------------------------
+   Avant : toucher un pin sur la carte fermait la carte ET ecrivait, d'un seul
+   geste. La boisson etait rattachee, le rapport partait vers Firestore, les
+   trois points tombaient. Le nom du magasin avait quitte l'ecran au moment ou
+   le message « Rattache a X » s'affichait, donc il etait litteralement
+   impossible de relire ce qu'on venait de designer.
+
+   Dans les mots d'Ilias : « imagine je me trompe de magasin, je ne sais meme
+   pas si j'ai bien appuye au bon endroit ».
+
+   Et se tromper ne se rattrape pas : aucun chemin de l'application ne retire
+   une boisson d'un magasin (verifie — arrayRemove n'existe que sur les
+   favoris et les codes-barres). Une erreur est donc definitive et visible par
+   tout le monde.
+
+   Desormais : la carte NE SE FERME PLUS, le magasin touche reste entoure
+   dessous, et une fiche monte par-dessus en disant en gros LE MAGASIN et LA
+   BOISSON. Rien ne part tant qu'on n'a pas dit oui. Se tromper est gratuit et
+   silencieux : on vise un autre pin.
+
+   La protection est posee sur la SEULE fonction qui ecrit, donc les sept
+   endroits qui appellent tagScanToStore en heritent sans etre modifies.
+   ============================================================================ */
+
+/* LA FICHE DE RELECTURE. Rend une promesse : true si la personne confirme.
+   Elle n'ecrit rien elle-meme, elle ne fait que demander.
+
+   Couche creee a la volee, et non #map-sheet-modal : ce dernier est en
+   z-index 120, il passerait DERRIERE la carte plein ecran qui est en 4100.
+   On se place a 10500 : au-dessus de la carte, des feuilles d'ajout et de
+   #add-drink-ov, sous le garde-fou administrateur.
+
+   Voile volontairement LEGER : on doit continuer de voir la carte et le
+   cercle qui entoure le magasin touche. C'est ce cercle qui tranche le cas
+   des deux enseignes identiques a quatre-vingts metres, qu'aucun texte ne
+   tranchera jamais. */
+function confirmerRattachement(ctx,s){
+  return new Promise(function(resolve){
+    var fini=false;
+    var ov=document.createElement("div");
+    ov.id="relecture-sheet";
+    ov.setAttribute("role","dialog");
+    ov.setAttribute("aria-modal","true");
+    ov.style.cssText="position:fixed;inset:0;z-index:10500;display:flex;align-items:flex-end;"+
+      "background:rgba(12,10,8,.35);-webkit-tap-highlight-color:transparent";
+
+    /* CE QU'ON RATTACHE. Trois cas, et les deux derniers n'ont ni vignette ni
+       nom de catalogue : sans ce repli, drinkIconHTML plante sur undefined et
+       la promesse ne se resout jamais. */
+    var d=null,titreBoisson="",sousBoisson="",vignette="";
+    try{
+      if(ctx.drinkId!=null){
+        d=DRINKS.find(function(x){return Number(x.id)===Number(ctx.drinkId);})||null;
+        if(d){ titreBoisson=d.name; sousBoisson=d.brand||d.cat||""; vignette=drinkIconHTML(d); }
+      }
+      if(!titreBoisson&&ctx.discoveryId!=null){
+        var dec=(typeof DISCOVERIES!=="undefined"&&DISCOVERIES)
+          ? DISCOVERIES.find(function(x){return String(x.id)===String(ctx.discoveryId);}) : null;
+        titreBoisson=(dec&&dec.name)?dec.name:"Ta découverte";
+        sousBoisson="proposée par la communauté";
+      }
+      if(!titreBoisson&&ctx.pendingBarcode!=null){
+        titreBoisson="Nouveau produit";
+        sousBoisson="code-barres "+String(ctx.pendingBarcode).slice(0,20);
+      }
+    }catch(e){ console.warn("relecture, boisson:",e); }
+    if(!titreBoisson)titreBoisson="Cette boisson";
+
+    /* L'IDENTITE DU MAGASIN, dans l'ordre ou on la lit pour le reconnaitre. */
+    try{ resolveStoreAddress(s); }catch(e){}
+    var bits=[];
+    if(s.brand&&String(s.brand)!==String(s.name))bits.push(sanitize(String(s.brand).slice(0,30)));
+    else if(s.type)bits.push(sanitize(String(s.type).slice(0,30)));
+    if(typeof s.dist==="number")bits.push(sanitize(fmtDist(s.dist)));
+    var ligneIdent=bits.join(" · ");
+    var adresse=s.address?sanitize(String(s.address).slice(0,80)):"";
+    var ouvert="",coulOuvert="";
+    try{
+      var lbl=openLabel(s);
+      if(lbl){ ouvert=sanitize(lbl); coulOuvert=openSur(s)?"var(--s2)":"#b45309"; }
+    }catch(e){}
+
+    /* Deja rattache ? awardFree TESTE sans consommer, contrairement a
+       awardOnce qui brule la cle : la fiche peut donc poser la question sans
+       detruire les points. */
+    var deja=false;
+    try{
+      var k="tag:"+(ctx.drinkId!=null?ctx.drinkId:(ctx.discoveryId!=null?"d"+ctx.discoveryId:"b"+ctx.pendingBarcode))+":"+String(s.id);
+      deja=!awardFree(k,FOREVER);
+    }catch(e){}
+
+    ov.innerHTML='<div id="relecture-carte" style="background:var(--app-bg);border-radius:22px 22px 0 0;'+
+        'padding:18px 20px calc(16px + env(safe-area-inset-bottom));width:100%;max-width:402px;margin:0 auto;'+
+        'box-shadow:0 -8px 30px rgba(0,0,0,.28);animation:sheetUp .5s cubic-bezier(.3,1.38,.44,1) both">'+
+        '<div style="font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--s2)">'+
+          'À vérifier avant d\'envoyer</div>'+
+        '<div style="font-size:18px;font-weight:800;color:var(--s1);margin-top:8px;line-height:1.25">'+sanitize(String(s.name||"Ce magasin"))+'</div>'+
+        (ligneIdent?'<div style="font-size:12px;color:var(--s2);margin-top:3px">'+ligneIdent+
+          (ouvert?' · <span style="color:'+coulOuvert+';font-weight:700">'+ouvert+'</span>':'')+'</div>':'')+
+        (adresse?'<div style="font-size:12px;color:var(--s2);margin-top:2px">'+adresse+'</div>':'')+
+        '<div style="display:flex;align-items:center;gap:11px;margin:14px 0 10px;padding:10px 12px;'+
+          'background:var(--bg2);border:1.5px solid var(--border);border-radius:14px">'+
+          (vignette?'<div style="width:38px;height:38px;border-radius:11px;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center">'+vignette+'</div>':'')+
+          '<div style="min-width:0"><div style="font-size:13.5px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(titreBoisson)+'</div>'+
+          (sousBoisson?'<div style="font-size:11.5px;color:var(--s2);margin-top:1px">'+sanitize(sousBoisson)+'</div>':'')+'</div>'+
+        '</div>'+
+        '<div style="font-size:12px;color:var(--s2);line-height:1.5">Tu vas dire que cette boisson se vend ici. Tout le monde le verra, et ça ne peut pas être retiré.</div>'+
+        (deja?'<div style="font-size:12px;font-weight:700;color:#b45309;margin-top:8px">Tu l\'as déjà signalée ici.</div>':'')+
+        '<button id="relecture-oui" type="button" style="width:100%;margin-top:14px;padding:14px;border-radius:14px;border:none;'+
+          'background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer">Oui, c\'est bien ce magasin</button>'+
+        '<button id="relecture-autre" type="button" style="width:100%;margin-top:8px;padding:12px;border-radius:14px;'+
+          'border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer">'+
+          'Ce n\'est pas le bon — en choisir un autre</button>'+
+        '<div id="relecture-annuler" role="button" tabindex="0" style="text-align:center;margin-top:12px;font-size:11.5px;'+
+          'font-weight:700;color:var(--s3);cursor:pointer;padding:6px">Annuler</div>'+
+      '</div>';
+    document.body.appendChild(ov);
+
+    var sortir=function(ok){
+      if(fini)return; fini=true;
+      try{document.removeEventListener("keydown",clavier,true);}catch(e){}
+      try{ov.remove();}catch(e){}
+      resolve(!!ok);
+    };
+    /* Le verrou de 450 ms est recopie de la porte de securite : sur telephone
+       un appui emet touchend PUIS click, et sans lui le second geste tombe sur
+       ce qui se trouve dessous une fois la feuille retiree. */
+    var brancher=function(el,fn){
+      if(!el)return;
+      var fait=false;
+      var go=function(ev){
+        if(fait)return; fait=true;
+        try{ev.preventDefault();ev.stopPropagation();}catch(e){}
+        fn();
+      };
+      el.addEventListener("click",go);
+      el.addEventListener("touchend",go,{passive:false});
+      el.addEventListener("keydown",function(ev){
+        if(ev.key==="Enter"||ev.key===" "){try{ev.preventDefault();}catch(e){}go(ev);}
+      });
+    };
+    var clavier=function(ev){ if(ev.key==="Escape"){try{ev.preventDefault();}catch(e){}sortir(false);} };
+    document.addEventListener("keydown",clavier,true);
+
+    brancher(ov.querySelector("#relecture-oui"),function(){sortir(true);});
+    brancher(ov.querySelector("#relecture-autre"),function(){sortir(false);});
+    brancher(ov.querySelector("#relecture-annuler"),function(){sortir(false);});
+    /* Toucher a cote ferme sans rien envoyer : c'est le sens le plus sur. */
+    ov.addEventListener("click",function(ev){ if(ev.target===ov)sortir(false); });
+
+    try{ var b=ov.querySelector("#relecture-oui"); if(b)b.focus(); }catch(e){}
+    try{ playSound("pop"); }catch(e){}
+  });
+}
+
+/* PRIVEE. N'appeler QUE depuis tagScanToStore, apres la fiche de relecture.
+   Tout appel direct contourne la relecture. */
+function _ecrireRattachement(s,ctx){
   var sid=String(s.id);
+  /* LE VERROU PASSE AVANT LES ECRITURES, ET NON APRES.
+     Il etait teste tout en bas, alors que fbAddDrinkToStore et fbAddReport
+     etaient deja partis. Un second passage affichait donc « Deja rattache »
+     tout en regonflant confirmations — increment(1) n'est pas idempotent,
+     contrairement a arrayUnion — et en creant un deuxieme document reports,
+     donc de vrais points serveur en double. Avec une fiche de relecture, la
+     personne qui doute va logiquement revalider : ce defaut serait devenu
+     visible tous les jours. */
+  var tagKey="tag:"+(ctx.drinkId!=null?ctx.drinkId:(ctx.discoveryId!=null?"d"+ctx.discoveryId:"b"+ctx.pendingBarcode))+":"+sid;
+  if(!awardFree(tagKey,FOREVER)){
+    toast("D\u00e9j\u00e0 rattach\u00e9 \u00e0 "+sanitize(s.name));
+    return;
+  }
   if(ctx.drinkId!=null){
     // Boisson du catalogue : disponibilite confirmee dans ce magasin
     if(!s.drinks)s.drinks=[];
@@ -6467,12 +6680,9 @@ function tagScanToStore(s){
     if(_anc&&_anc.storeId!=null&&String(_anc.storeId)!==sid){_patch.price=null;_patch.priceAt=null;} // un prix vu ailleurs ne vaut pas ici
     patchScanEntry(_codeJ,_patch);
   }catch(e){}
-  var tagKey="tag:"+(ctx.drinkId!=null?ctx.drinkId:(ctx.discoveryId!=null?"d"+ctx.discoveryId:"b"+ctx.pendingBarcode))+":"+sid;
   if(awardOnce(tagKey,FOREVER)){
     userStats.pts+=3;flyPts(3);
     toast("Rattach\u00E9 \u00E0 "+sanitize(s.name)+" \u00B7 +3 pts");
-  }else{
-    toast("D\u00e9j\u00e0 rattach\u00e9 \u00e0 "+sanitize(s.name));
   }
   trackStoreContribution(sid);
   // Rattacher une boisson que des gens attendent rend le meme service qu'un
@@ -6495,8 +6705,32 @@ function tagScanToStore(s){
   }else if(ctx.from==="map"){
     // Confirmation depuis la carte : le retour visuel est gere par la banniere
     // d'itineraire (bouton -> "Confirme"), pas par l'ecran de scan.
-  }else if(ctx.drinkId!=null){renderPriceAfterTag(s,ctx.drinkId);}
+  }else if(ctx.drinkId!=null){renderPriceAfterTag(s,ctx.drinkId,ctx);}
   else{renderWhereFound(null);}
+}
+
+function tagScanToStore(s){
+  var ctx=lastScanContext;
+  if(!ctx)return Promise.resolve(false);
+  if(window._rattachEnCours)return Promise.resolve(false);
+  /* On COPIE le contexte : renderWhereFound(null) remet lastScanContext a zero,
+     et la personne peut passer dix secondes sur la fiche. Le fichier a deja
+     paye ce piege une fois (voir la capture dans renderPriceAfterTag). */
+  var ctxCopie=Object.assign({},ctx);
+  window._rattachEnCours=true;
+  return confirmerRattachement(ctxCopie,s).then(function(ok){
+    window._rattachEnCours=false;
+    if(ok)_ecrireRattachement(s,ctxCopie);
+    return ok;
+  }).catch(function(e){
+    /* SANS CE CATCH, une seule exception dans la construction de la fiche
+       laisserait le drapeau leve et rendrait tout rattachement impossible EN
+       SILENCE pour le reste de la session. C'est le pire mode de panne
+       possible pour ce chemin. */
+    window._rattachEnCours=false;
+    console.warn("relecture:",e);
+    return false;
+  });
 }
 /* ================================
    RECONNAISSANCE DE FAMILLE
@@ -12141,9 +12375,27 @@ function mapStockReport(storeId,inStock){
   if(!s)return;
   var did=exploreFilter.drinkId,sid=String(s.id);
   if(inStock){
+    /* CE CHEMIN EST LE PLUS DANGEREUX DU LOT, et il l'est devenu le jour ou
+       tagScanToStore a demande confirmation. Le fbAddReport ci-dessous est
+       ecrit ICI, et pas dans tagScanToStore, parce que celle-ci le saute
+       quand ctx.from vaut "map". Laisse a sa place, il partait meme sur un
+       REFUS : un document reports « stock » permanent pour un rattachement
+       qui n'a jamais eu lieu, invisible depuis l'app, non supprimable par son
+       auteur, et qui credite de vrais points serveur. Tout ce qui suit un
+       accord descend donc dans le .then. */
     lastScanContext={drinkId:did,from:"map"};
-    tagScanToStore(s); // ajoute la boisson + confirmations++ + points + son "win"
-    if(window.fbAddReport)window.fbAddReport(s.fbId||sid,did,"stock",{note:_provenance("carte",s)}); // trace admin (pseudo)
+    tagScanToStore(s).then(function(ok){
+      if(!ok)return;
+      if(window.fbAddReport)window.fbAddReport(s.fbId||sid,did,"stock",{note:_provenance("carte",s)}); // trace admin (pseudo)
+      // Retour visuel : les deux boutons laissent place à une confirmation calme.
+      var row=document.getElementById("route-stock-row");
+      if(row){
+        var col=inStock?"#16a34a":"#dc2626";
+        row.innerHTML='<div style="flex:1;text-align:center;padding:11px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:13px;font-weight:800;color:'+col+'">'+(inStock?"En stock — merci !":"Rupture notée — merci !")+'</div>';
+      }
+      try{if(exploreMap)exploreLoadStores(true);}catch(e){}
+    });
+    return;
   }else{
     if(!awardFree("mapstk:"+sid+":"+did,24)){toast("Déjà signalé aujourd'hui");playSound("err");return;}
     if(window.fbAddReport)window.fbAddReport(s.fbId||sid,did,"rupture",{note:_provenance("carte",s)}); // trace admin (pseudo)
@@ -15391,6 +15643,13 @@ function exploreSheetPick(id){
   var sheet=document.getElementById("explore-sheet");
   if(sheet&&sheet.classList.contains("open"))exploreToggleSheet();
   try{if(exploreMap&&exploreMap.setView)exploreMap.setView([s.lat,s.lng],Math.max(exploreMap.getZoom?exploreMap.getZoom():15,16));}catch(e){}
+  /* CETTE LISTE IGNORAIT LE MODE « CHOISIR ». Le bandeau disait « Touche le
+     magasin ou tu as vu X », et toucher une ligne de la liste tracait un
+     itineraire au lieu de choisir. Or c'est la surface la PLUS lisible de la
+     carte — nom, enseigne, distance, ouverture — et la seule qui ne
+     selectionnait pas. Elle poussait donc les gens vers les pastilles de neuf
+     pixels, c'est-a-dire vers l'erreur. */
+  if(window._choixMagasin){ choisirCeMagasin(s); playSound("pop"); return; }
   // Clic sur un magasin = tracer l'itineraire (le "traçage partout").
   showRouteToStore(s.lat,s.lng,s);
   playSound("pop");
