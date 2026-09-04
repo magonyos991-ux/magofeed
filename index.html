@@ -4042,6 +4042,7 @@ window.fbLoadCommunityData();
 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js" integrity="sha512-bCsBoYoW6zE0aja5xcIyoCDPfT27+cGr7AOCqelttLVRGay6EKGQbR6wm6SUcUGOMGXJpj+jrIpMS6i80+kZPw==" crossorigin="anonymous" async></script>
 
 <script src="data/drinks.js"></script>
+<script src="data/alcool.js"></script>
 <script src="data/drinkart.js"></script>
 <script src="data/state.js"></script>
 <script src="data/ui.js"></script>
@@ -5635,16 +5636,24 @@ function offGuessCategory(p){
   return"";
 }
 function offIsAlcoholic(p){
-  var abv=parseFloat(p.alcohol_by_volume||((p.nutriments||{}).alcohol)||0);
+  var nut=p.nutriments||{};
+  var abv=parseFloat(p.alcohol_by_volume||nut.alcohol||nut.alcohol_100g||nut.alcohol_value||0);
   if(abv>0)return true;
-  var tags=(p.categories_tags||[]).join(" ").toLowerCase();
+  var tags=(p.categories_tags||[]).concat(p.categories_hierarchy||[]).join(" ").toLowerCase();
   // Faux positifs connus : sodas au nom historique, gingembre (contient "gin"),
-  // vinaigres/marinades ("vin"), racines ("root"), origines ("origin" finit par "gin")
-  tags=tags.replace(/ginger[- ]?beers?|root[- ]?beers?|gingembre|ginger|vinaigres?|vinegars?|origins?/g,"");
-  // Frontieres de mots STRICTES des deux cotes : "gin" ne matche plus "gingembre",
-  // "vin" ne matche plus "vinaigre", "beer" ne matche plus "beeren" (baies en allemand)
-  // Inclut volontairement les bieres/vins 0.0% : choix produit du fondateur
-  return /\b(alcohols?|alcools?|beers?|bieres?|wines?|vins?|ciders?|cidres?|spirits?|liqueurs?|vodkas?|whisky|whiskey|whiskies|rhums?|rums?|gins?|sake|tequila|cocktails?[- ]alcoolises?)\b/.test(tags);
+  // vinaigres/marinades ("vin"), racines ("root"), origines ("origin" finit par "gin").
+  tags=tags.replace(/ginger[- ]?beers?|root[- ]?beers?|gingembre|ginger|vinaigres?|vinegars?|origins?|non-alcoholic|alcohol-free|sans-alcool|alkoholfrei/g,"");
+  // Inclut volontairement les bieres/vins 0.0% : choix produit du fondateur.
+  if(/\b(alcohols?|alcools?|alcoholic|beers?|bieres?|biers?|wines?|vins?|wein|vino|vinho|ciders?|cidres?|spirits?|liqueurs?|liquors?|vodkas?|whisky|whiskey|whiskies|rhums?|rums?|gins?|sake|tequila|mezcal|cocktails?|aperitifs?|sherry|porto|champagnes?|sparkling-wines?|hard-seltzers?|alcopops?|meads?|brandies|brandy|cognacs?|liqueur)\b/.test(tags))return true;
+  // Tous les noms de la fiche, dans TOUTES les langues (product_name_de, _es...),
+  // plus les categories en clair et la marque : c'est la que « Rotwein » se cache.
+  var noms=[];
+  Object.keys(p).forEach(function(k){if(/^(product_name|generic_name|abbreviated_product_name)/.test(k)&&typeof p[k]==="string")noms.push(p[k]);});
+  if(p.categories)noms.push(String(p.categories));
+  if(p.brands)noms.push(String(p.brands));
+  if(p.labels)noms.push(String(p.labels));
+  for(var i=0;i<noms.length;i++)if(nameLooksAlcoholic(noms[i],""))return true;
+  return false;
 }
 /* Filet de securite anti-alcool base sur le NOM (et la marque).
    OpenFoodFacts est souvent vide de categories pour les marques distributeur
@@ -5659,29 +5668,34 @@ function offIsAlcoholic(p){
    les 0.0%, mais on evite qu'un "cola sans alcool" soit qualifie d'alcool par le
    mot "alcool" lui-meme). */
 function nameLooksAlcoholic(name,brand){
-  var t=" "+normTxt((name||"")+" "+(brand||""))+" ";
-  t=t.replace(/ginger[- ]?ale/g," ").replace(/gingembre/g," ").replace(/ginger/g," ")
-     .replace(/vinaigres?/g," ").replace(/virgin/g," ").replace(/vitamine?s?/g," ")
-     .replace(/sans[- ]?alcool/g," ").replace(/alcohol[- ]?free/g," ").replace(/0[.,]0\s*%?/g," ");
-  // Mots de TYPE (biere/pils/vin/spiritueux) : ecrits dans presque tous les libelles
-  if(/\b(pils|pilsner|pilsener|biere|bieres|beer|beers|lager|lagers|ipa|stout|porter|trappist|trappiste|abbaye|kriek|gueuze|geuze|lambic|witbier|weizen|weissbier|tripel|dubbel|vin|vins|wine|wines|wein|vino|cava|prosecco|champagne|cremant|porto|sherry|xeres|sangria|cidre|cidres|cider|ciders|vodka|whisky|whiskey|whiskies|bourbon|rhum|rhums|tequila|mezcal|cognac|brandy|armagnac|calvados|grappa|schnaps|schnapps|liqueur|liqueurs|aperol|campari|martini|vermouth|pastis|ricard|jagermeister|bacardi|absinthe|eau[- ]de[- ]vie|gin|gins)\b/.test(t))return true;
-  /* Mots COMPOSES et vocabulaire du vin, sans frontiere de mot a gauche : un
-     « Rotwein Reserva » (vin rouge, en allemand) est passe parce que « wein »
-     n'etait cherche qu'en mot entier. Idem pour les cepages et appellations,
-     qui suffisent a nommer une bouteille sans jamais ecrire « vin ». */
-  if(/(rot|weiss|weis|rose|schaum|glueh|gluh|tafel|land|feder)wein\b|\bwein\b|(tafel|wit|pils|weizen|bock|land|malz)bier\b|\bbier\b|\b(wijn|wijnen|cerveza|cervezas|cerveja|birra|birre|sekt|likor|likoer|likeur|jenever|genever|genievre|aperitivo|sake|soju|mousseux|petillant[- ]?vin|vinho|tinto|reserva|riserva|crianza|rioja|merlot|cabernet|chardonnay|sauvignon|pinot|syrah|shiraz|malbec|tempranillo|grenache|chianti|bordeaux|bourgogne|beaujolais|lambrusco|moscato|riesling|primitivo|ale|ales)\b/.test(t))return true;
-  // (« spritz » et « brut » sont volontairement absents : Hell Lime Spritz est
-  // un energy drink, « brut de pomme » un jus.)
-  // « 5 % vol », « 12,5 % alc », « 40° » : le degre ecrit dans le libelle
-  if(/\d+([.,]\d+)?\s*%\s*(vol|alc)|\d{1,2}\s*°\s*(vol|alc)?/.test(t)&&!/\b0[.,]0\b/.test(t))return true;
-  // MARQUES d'alcool connues (surtout bieres belges) : un nom de marque seul
-  // ("Jupiler", "Duvel") ne contient aucun mot de type -> filet supplementaire
-  // pour la saisie manuelle. Pour les scans, offIsAlcoholic (categories OFF)
-  // couvre deja ces marques ; ici on double la securite.
-  // "ironbeer" : soda cubain sans alcool, mais le mot "beer" y est soude a "iron"
-  // (un seul mot) donc la frontiere de mot \bbeer\b ne l'attrape pas. Choix
-  // produit : aucun "beer" visible -> on le bloque explicitement ici.
-  return /\b(jupiler|stella\s?artois|maes|carapils|cara\s?pils|duvel|chimay|leffe|hoegaarden|desperados|heineken|primus|karmeliet|kwak|orval|westmalle|rochefort|chouffe|kasteel|vedett|cornet|grimbergen|affligem|ciney|tongerlo|omer|jupiler|ironbeer|corona\s?extra|budweiser|carlsberg|beck\s?s|becks|guinness|kronenbourg|smirnoff|absolut|jack\s?daniel|johnnie\s?walker|ballantine|jameson|chivas|baileys|malibu|captain\s?morgan|hennessy|cointreau|bombay\s?sapphire|tanqueray|moet|veuve\s?clicquot|dom\s?perignon)\b/.test(t);
+  var brut=String(name||"")+" "+String(brand||"");
+  if(!brut.trim())return false;
+  // 1. Ecritures non latines (arabe, hebreu, cyrillique, grec, japonais,
+  //    chinois, coreen, thai, hindi...) : cherchees telles quelles.
+  var scripts=(typeof ALCOOL_SCRIPTS!=="undefined")?ALCOOL_SCRIPTS:[];
+  for(var i=0;i<scripts.length;i++)if(brut.indexOf(scripts[i])!==-1)return true;
+  // 2. Degre ecrit : « 5 % vol », « 12,5 % alc », « 40° », « 80 proof ».
+  var bas=brut.toLowerCase();
+  if(/\d+([.,]\d+)?\s*%\s*(vol|alc|abv)|\d{1,2}([.,]\d)?\s*°(\s*(vol|alc|gl))?(?![a-z])|\b\d+\s*proof\b/.test(bas)&&!/\b0[.,]0\s*%/.test(bas))return true;
+  // 3. Texte normalise (minuscules, sans accents), faux amis retires.
+  var t=" "+normTxt(brut).replace(/[\u2019']/g," ")+" ";
+  var faux=(typeof ALCOOL_FAUX!=="undefined")?ALCOOL_FAUX:[];
+  for(var j=0;j<faux.length;j++)t=t.replace(faux[j]," ");
+  t=t.replace(/\s+/g," ");
+  if(!window._alcoolRe){
+    var esc=function(m){return normTxt(m).replace(/[\u2019']/g," ").trim().replace(/[.*+?^${}()|[\]\\]/g,"\\$&").replace(/\s+/g,"[ -]");};
+    var mots=((typeof ALCOOL_MOTS!=="undefined")?ALCOOL_MOTS:[]).map(esc).filter(Boolean);
+    var marques=((typeof ALCOOL_MARQUES!=="undefined")?ALCOOL_MARQUES:[]).map(esc).filter(Boolean);
+    var racines=((typeof ALCOOL_RACINES!=="undefined")?ALCOOL_RACINES:[]).map(function(m){return normTxt(m);}).filter(Boolean);
+    window._alcoolRe={
+      mots:new RegExp("(^|[^a-z0-9])("+mots.join("|")+")(?=[^a-z0-9]|$)"),
+      marques:new RegExp("(^|[^a-z0-9])("+marques.join("|")+")(?=[^a-z0-9]|$)"),
+      racines:new RegExp("("+racines.join("|")+")(?=[^a-z0-9]|$)")
+    };
+  }
+  if(window._alcoolRe.mots.test(t))return true;
+  if(window._alcoolRe.racines.test(t))return true;
+  return window._alcoolRe.marques.test(t);
 }
 function offBestProduct(p){
   var brand=sanitize(((p.brands||"").split(",")[0]||"").trim());
@@ -17610,7 +17624,7 @@ function renderVuesRecentes(){
 function renderDiscoveries(){
   var el=document.getElementById("disc-list");if(!el)return;el.innerHTML="";
   var T=LANGS[curLang]||LANGS.fr;var _discDark=document.body.classList.contains("dark");
-  var pending=DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected;});
+  var pending=DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected&&!nameLooksAlcoholic(d.name,d.brand);});
   try{_majCompteurValider();}catch(e){}
   if(!pending.length){
     var TE=LANGS[curLang]||LANGS.fr;
@@ -18648,7 +18662,7 @@ function renderAdmin(){
   renderFormatSuggestions();
   renderAdminHistory();
   try{ renderSecurite(); }catch(e){ console.warn("securite:",e); }
-  var pending=DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected;});
+  var pending=DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected&&!nameLooksAlcoholic(d.name,d.brand);});
   if(!pending.length){
     el.innerHTML='<div style="text-align:center;padding:40px 20px;font-size:13px;color:var(--s3)">Aucune d\u00E9couverte en attente </div>';
     return;
@@ -19710,6 +19724,7 @@ function adminRenameDiscovery(d){
 }
 function promoteDiscovery(d){
   var key=String(d.barcode||d.id);
+  if(nameLooksAlcoholic(d.name,d.brand)){toast("Magofeed reste 100% sans alcool \u2014 cette proposition ne peut pas entrer au catalogue");playSound("err");return;}
   var cat=adminCatChoice[key]||d.cat||classifyDrink(d.name,d.brand);
   if(VALID_CATS.indexOf(cat)===-1){toast("Choisis d'abord une cat\u00E9gorie");playSound("err");return;}
   var def=CAT_DEFAULTS[cat];
