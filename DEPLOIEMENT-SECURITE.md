@@ -17,7 +17,7 @@ ici. Voici ce que répondent tes fonctions :
 | `monCodeParrain` | 404 | **absente** |
 | `sauvegarderMaintenant` | 404 | **absente** |
 | `sauvegardeQuotidienne` | 404 | **absente** |
-| `verifierCommercant` | 404 | **absente** |
+| `ouvrirVerificationCommercant` | 404 | absente — c'est normal, voir section 5 |
 
 Et dans la base : **115 profils, aucun ne porte `pointsHerites`**. La bascule
 n'a jamais eu lieu.
@@ -44,12 +44,12 @@ appuie une fois sur Entrée.
 ```powershell
 cd C:\Users\ilias\magofeed-functions\functions
 $base = "https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"
-foreach ($f in @("points-et-parrainage.js","sauvegarde.js","remplir-enseignes.js","commerces-monde.js","verification-commercant.js")) {
+foreach ($f in @("points-et-parrainage.js","sauvegarde.js","remplir-enseignes.js","commerces-monde.js")) {
   Invoke-WebRequest -UseBasicParsing -Uri ($base + $f) -OutFile $f
   Write-Host "telecharge : $f"
 }
 $idx = Get-Content index.js -Raw
-foreach ($m in @("points-et-parrainage","sauvegarde","verification-commercant")) {
+foreach ($m in @("points-et-parrainage","sauvegarde")) {
   if ($idx -notmatch [regex]::Escape($m)) {
     Add-Content index.js ("`nObject.assign(exports, require('./" + $m + "'));")
     Write-Host "branche : $m"
@@ -70,6 +70,13 @@ dans les journaux, et tu aurais conclu que la bascule ne marche pas.
 
 Si `firebase deploy --only firestore:indexes` répond qu'il ne trouve rien :
 copie `firestore.indexes.json` du dépôt à côté de ton `firestore.rules`.
+
+**Ce que cette commande ne déploie volontairement PAS :**
+`verification-commercant.js`, le paiement commerçant. Il réclame deux secrets
+Stripe (`STRIPE_CLE`, `STRIPE_WEBHOOK`) et le paquet `stripe`. Sans eux, le
+déploiement **échouerait pour tout le lot** — y compris les points, qui sont
+l'urgence. Il se déploie séparément, le jour où tu as un compte Stripe :
+section 5.
 
 ### Puis, dans l'app
 
@@ -152,6 +159,25 @@ Les vieux projets finissent en `.appspot.com`, les récents en
 l'ancienne commande écrite ici n'aurait pas marché.
 
 Une restauration qu'on découvre le jour de l'incident n'est pas une sauvegarde.
+
+### Si ça coince — les deux seules erreurs probables
+
+**« Cloud Scheduler API has not been used… »** La sauvegarde quotidienne est
+une tâche programmée : Google veut que le service soit activé une fois. Le
+message d'erreur contient un lien `console.developers.google.com/apis/…` —
+clique-le, appuie sur **Activer**, attends une minute, relance
+`firebase deploy --only functions`. Rien à réparer dans le code.
+
+**« The bucket must be in the same location as the database »** L'export écrit
+dans `gs://magofeed-7f621.firebasestorage.app`. Si ta base Firestore est dans
+une région et le seau dans une autre, Google refuse. Vérifie les deux :
+console Firebase → Firestore → l'emplacement est écrit en haut ; puis Storage
+→ même chose. S'ils diffèrent, dis-le-moi avec les deux noms, je change la
+destination — ce n'est qu'une ligne.
+
+Dans les deux cas la pastille restera grise ou rouge, jamais verte : elle ne
+te dira pas que tout va bien alors que rien n'est sauvegardé.
+
 
 ## 4. Deux réglages dans la console Firebase (5 min)
 
