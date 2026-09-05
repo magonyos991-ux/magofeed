@@ -484,18 +484,40 @@ async function evaluerParrainage(uidFilleul) {
    marcher le classement), donc un identifiant partage est une cle de lecture
    permanente vers le profil. Un code, lui, se revoque. */
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+/* LE CODE NE VA PAS DANS LE PROFIL PUBLIC.
+   Il y allait : users/{uid} est en « allow read: if true » — c'est ce qui fait
+   marcher le classement — donc le code de parrainage de chacun s'y lisait sans
+   compte. refCodes/{code} est pourtant bien protege en lecture admin, mais
+   c'etait la table INVERSE, uid vers code, qui etait ouverte : lister users
+   suffisait a reconstituer tous les codes de tout le monde. Le commentaire
+   ci-dessus disait « un code, lui, se revoque » — vrai, mais seulement si
+   personne ne peut le lire avant.
+   Verifie en production le jour de la correction : aucun code n'existait
+   encore, la fonction venant d'etre deployee. Rien n'a donc fuite, et il n'y a
+   rien a revoquer — c'etait la derniere minute pour le corriger gratuitement.
+   Le code vit desormais dans refMine/{uid}, lisible par son seul proprietaire
+   et ecrit par le serveur uniquement. */
 exports.monCodeParrain = onCall({ region: REGION }, async (req) => {
   const uid = req.auth && req.auth.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi d'abord.");
+  const mien = await db.doc(`refMine/${uid}`).get();
+  if (mien.exists && (mien.data() || {}).code) return { code: mien.data().code };
+  /* Repli pour les comptes qui auraient recu un code avant la correction : on
+     le recupere du profil public et on l'en RETIRE en le rangeant au bon
+     endroit. Rejouable, et ne perd le code de personne. */
   const u = await db.doc(`users/${uid}`).get();
-  const existant = u.exists ? (u.data() || {}).refCode : null;
-  if (existant) return { code: existant };
+  const ancien = u.exists ? (u.data() || {}).refCode : null;
+  if (ancien) {
+    await db.doc(`refMine/${uid}`).set({ code: ancien, createdAt: FieldValue.serverTimestamp() }, { merge: true });
+    await db.doc(`users/${uid}`).set({ refCode: FieldValue.delete() }, { merge: true });
+    return { code: ancien };
+  }
   for (let essai = 0; essai < 12; essai++) {
     let code = "";
     for (let i = 0; i < 5; i++) code += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
     try {
       await db.doc(`refCodes/${code}`).create({ uid: uid, createdAt: FieldValue.serverTimestamp() });
-      await db.doc(`users/${uid}`).set({ refCode: code }, { merge: true });
+      await db.doc(`refMine/${uid}`).set({ code: code, createdAt: FieldValue.serverTimestamp() }, { merge: true });
       return { code: code };
     } catch (e) { /* deja pris : on retire */ }
   }

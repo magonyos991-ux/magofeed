@@ -181,8 +181,8 @@ d'essai doit passer :
 ```
 cd functions-a-deployer/tests-regles
 npm install          # une seule fois
-npm test             # doit afficher : 94/94 conformes
+npm test             # doit afficher : 106/106 conformes
 ```
 
 Il attaque une base jetable sur ta machine. Rien ne part en ligne. S'il
-n'affiche pas `94/94`, ne déploie pas.
+n'affiche pas `106/106`, ne déploie pas.

@@ -341,6 +341,17 @@ await doit('legitime : tout le monde peut LIRE la chasse (sans compte)',
 await doit('bloque : se declarer administrateur',
   ()=>assertFails(setDoc(doc(m,'admins',MALLORY),{ok:true})));
 
+/* LE CODE DE PARRAINAGE. Il vivait dans users/{uid}, qui est en lecture
+   publique pour faire marcher le classement : lister les profils suffisait a
+   reconstituer les codes de tout le monde. La table refCodes (code vers uid)
+   etait bien protegee, la table INVERSE ne l'etait pas. */
+await doit('legitime : Alice lit son propre code de parrainage',
+  ()=>assertSucceeds(getDoc(doc(a,'refMine',ALICE))));
+await doit('bloque : lire le code de parrainage de quelqu un d autre',
+  ()=>assertFails(getDoc(doc(m,'refMine',ALICE))));
+await doit('bloque : s ecrire un code de parrainage',
+  ()=>assertFails(setDoc(doc(m,'refMine',MALLORY),{code:'ABCDE'})));
+
 /* « Stores » AVEC UNE MAJUSCULE. Vestige d'une ancienne version : un seul
    document y dormait et aucun code ne la lisait, mais elle avait un jeu de
    regles complet qui laissait tout compte connecte y ecrire. Un entrepot

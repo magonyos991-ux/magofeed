@@ -1269,6 +1269,11 @@ window.fbLoadMyScore = async function() {
     if (!snap.exists()) return null;
     var d = snap.data() || {};
     if (typeof d.points !== "number") return null;    // bascule pas encore faite
+    /* refCode n'est plus ici : il vivait dans le profil PUBLIC, donc lister
+       users suffisait a reconstituer les codes de tout le monde. Il est passe
+       dans refMine/{uid}, lisible par son seul proprietaire, et s'obtient par
+       fbMonCodeParrain(). On le laisse en repli le temps que les comptes
+       d'avant la correction soient migres au premier appel. */
     return { points: d.points, refCode: d.refCode || null, refCount: d.refCount || 0 };
   } catch (e) { console.warn("Lecture du score :", e); return null; }
 };
@@ -8839,10 +8844,18 @@ function majBlocParrainage(){
   window.fbLoadMyScore().then(function(d){
     if(!d)return;
     var bouts=[];
-    if(d.refCode)bouts.push("Ton code : <b>"+sanitize(d.refCode)+"</b>");
     if(d.refCount)bouts.push(d.refCount+" filleul"+(d.refCount>1?"s":"")+" r\u00e9compens\u00e9"+(d.refCount>1?"s":""));
-    el.innerHTML=bouts.length?bouts.join(" \u00b7 "):"";
-    el.style.display=bouts.length?"block":"none";
+    var poser=function(code){
+      var b=code?["Ton code : <b>"+sanitize(code)+"</b>"].concat(bouts):bouts;
+      el.innerHTML=b.length?b.join(" \u00b7 "):"";
+      el.style.display=b.length?"block":"none";
+    };
+    /* Le code se demande au serveur : il n'est plus dans le profil public.
+       On n'appelle la fonction que si le bloc est reellement visible, pour ne
+       pas reveiller une Cloud Function a chaque ouverture du profil. */
+    if(window.fbMonCodeParrain){
+      window.fbMonCodeParrain().then(function(r){ poser(r&&r.code); }).catch(function(){ poser(d.refCode||null); });
+    }else poser(d.refCode||null);
   }).catch(function(){});
 }
 /* ═════════════════════════════════════════════════════════════════════════
