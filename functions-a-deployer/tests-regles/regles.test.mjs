@@ -305,6 +305,39 @@ await doit('bloque : lire le soutien de quelqu un d autre',
 await doit('legitime : Alice lit son propre soutien',
   ()=>assertSucceeds(getDoc(doc(a,'soutiens',ALICE))));
 
+/* LA CHASSE AUX CODES-BARRES. Ces regles laissent la communaute ECRIRE : ce
+   sont donc celles qu'il faut le plus attaquer. Ce qu'on verifie ici, c'est
+   qu'on ne peut ni se compter deux fois, ni ajouter quelqu'un d'autre, ni
+   detourner un lien vers une autre boisson une fois les confirmations reunies. */
+await doit('legitime : Alice propose un code pour une boisson orpheline',
+  ()=>assertSucceeds(setDoc(doc(a,'chasseCodes','5000112637939'),
+      {drinkId:1783615414484,drinkName:'Golden Power',barcode:'5000112637939',
+       par:[ALICE],etat:'attente',createdAt:serverTimestamp()})));
+await doit('bloque : proposer en se declarant deja confirme par un autre',
+  ()=>assertFails(setDoc(doc(m,'chasseCodes','5449000000996'),
+      {drinkId:1,drinkName:'X',barcode:'5449000000996',
+       par:[ALICE,MALLORY],etat:'attente',createdAt:serverTimestamp()})));
+await doit('bloque : proposer un lien deja marque comme pose',
+  ()=>assertFails(setDoc(doc(m,'chasseCodes','5449000011527'),
+      {drinkId:1,drinkName:'X',barcode:'5449000011527',
+       par:[MALLORY],etat:'pose',createdAt:serverTimestamp()})));
+await doit('legitime : Mallory confirme la proposition d Alice',
+  ()=>assertSucceeds(updateDoc(doc(m,'chasseCodes','5000112637939'),
+      {par:[ALICE,MALLORY]})));
+await doit('bloque : se compter une deuxieme fois',
+  ()=>assertFails(updateDoc(doc(m,'chasseCodes','5000112637939'),
+      {par:[ALICE,MALLORY,MALLORY]})));
+await doit('bloque : detourner le lien vers une autre boisson en confirmant',
+  ()=>assertFails(updateDoc(doc(a,'chasseCodes','5000112637939'),
+      {par:[ALICE,MALLORY,ALICE],drinkId:99999})));
+await doit('bloque : se declarer soi-meme valide (etat pose)',
+  ()=>assertFails(updateDoc(doc(a,'chasseCodes','5000112637939'),{etat:'pose'})));
+await doit('bloque : un anonyme confirme un code',
+  ()=>assertFails(updateDoc(doc(anon,'chasseCodes','5000112637939'),
+      {par:[ALICE,MALLORY,'anon']})));
+await doit('legitime : tout le monde peut LIRE la chasse (sans compte)',
+  ()=>assertSucceeds(getDoc(doc(anon,'chasseCodes','5000112637939'))));
+
 await doit('bloque : se declarer administrateur',
   ()=>assertFails(setDoc(doc(m,'admins',MALLORY),{ok:true})));
 

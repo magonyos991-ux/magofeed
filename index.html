@@ -284,6 +284,9 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       </div>
       <div class="brands-rail" id="brands-rail"></div>
       <div id="missions-card" style="margin-bottom:14px"></div>
+      <!-- LA CHASSE AUX CODES-BARRES : rempli par renderChasseCodes(),
+           vide (et invisible) quand aucune fiche n'est orpheline. -->
+      <div id="chasse-card"></div>
       <div id="deals-wrap"></div>
       <div id="top-rail-wrap" style="display:none">
         <div class="sec-hd"><div class="t-section"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3 2.5.5 5 2.5 5 5.5a4.5 4.5 0 1 1-9 0c0-1.15.43-2.2 1-3 .28.6.5 1.5 1.5 3z"/><path d="M12 2c1 3 4 4.5 4 8.5"/><path d="M12 2C8 5 6 8 6 11.5"/></svg> <span id="t-toprail">Tes plus recherchées</span></div></div>
@@ -2231,6 +2234,49 @@ window.fbSetCatalogBarcodes = async function(drinkId, barcodes) {
   await setDoc(doc(db, "catalog", String(drinkId)),
     { barcodes: (barcodes || []).map(String), updatedAt: serverTimestamp() },
     { merge: true });
+};
+/* ── LA CHASSE AUX CODES-BARRES ────────────────────────────────────────────
+   Proposer un code pour une boisson orpheline. Le document ne porte QUE la
+   liste de ceux qui ont confirme : ni le point, ni la pose sur la fiche ne
+   sont decides ici. C'est la Cloud Function qui tranche, a deux confirmations
+   (voir functions-a-deployer/chasse-codes.js). Le client ne peut pas se
+   declarer valide : les regles le lui interdisent. */
+window.fbProposerCodeChasse = async function(drinkId, drinkName, barcode) {
+  var user = await ensureAuthed();
+  if (user.isAnonymous) throw new Error("compte requis");
+  var ref = doc(db, "chasseCodes", String(barcode));
+  var snap = await getDoc(ref);
+  if (!snap.exists()) {
+    await setDoc(ref, {
+      drinkId: Number(drinkId) || drinkId,
+      drinkName: String(drinkName).slice(0, 60),
+      barcode: String(barcode),
+      par: [user.uid],
+      etat: "attente",
+      createdAt: serverTimestamp()
+    });
+    return { nb: 1, deja: false };
+  }
+  var d = snap.data() || {};
+  var par = Array.isArray(d.par) ? d.par : [];
+  if (d.etat !== "attente") return { nb: par.length, deja: true, pose: true };
+  if (par.indexOf(user.uid) !== -1) return { nb: par.length, deja: true };
+  /* On envoie la liste complete plutot qu'un arrayUnion : les regles exigent
+     exactement « l'ancienne liste + moi », ce qui rend impossible d'ajouter
+     quelqu'un d'autre au passage. */
+  await updateDoc(ref, { par: par.concat([user.uid]) });
+  return { nb: par.length + 1, deja: false };
+};
+window.fbChargerChasseCodes = async function() {
+  try {
+    var snap = await getDocs(query(collection(db, "chasseCodes"), where("etat", "==", "attente")));
+    var out = {};
+    snap.forEach(function (d) {
+      var v = d.data() || {};
+      out[String(v.barcode || d.id)] = { drinkId: v.drinkId, nb: (v.par || []).length };
+    });
+    return out;
+  } catch (e) { console.warn("chasseCodes:", e && e.message); return {}; }
 };
 window.fbRemoveCatalogDrink = async function(drinkId) {
   await deleteDoc(doc(db, "catalog", String(drinkId)));
@@ -4575,7 +4621,7 @@ function _showRaw(s){
   if(s==="profile"){try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}try{renderDonCard();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
   if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}}
-  if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{_verifierAides();}catch(e){}try{renderHunts();}catch(e){}    // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
+  if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderChasseCodes();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{_verifierAides();}catch(e){}try{renderHunts();}catch(e){}    // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
     // le filtre boisson de la carte (sinon la carte rouvrait toujours sur la derniere
     // boisson cherchee, ex. "Red Bull", au lieu de montrer tous les magasins).
     try{var _q=document.getElementById("q");if(_q)_q.value="";var _sl=document.getElementById("search-list");if(_sl)_sl.innerHTML="";exploreFilter=null;window._exploreFromDrink=false;}catch(e){}
@@ -6910,6 +6956,9 @@ function renderBrandKinChoice(kin,best,code,p,tout){
   btn.textContent=(kin.length===1?"Non \u2014 c'est un nouveau produit":(kin.length===2?"Aucun des deux \u2014 nouveau produit":"Aucun de ceux-l\u00e0 \u2014 nouveau produit"));
   btn.style.background="#e67e22";btn.style.display="block";
   btn.onclick=function(){addDiscovery(best.name,best.brand,code,best.cat);};
+  /* Avant de proposer une nouvelle decouverte : est-ce l'une des boissons que
+     la chasse cherche ? Sinon on cree un doublon de ce qui existe deja. */
+  try{ proposerChasse(code,best,res); }catch(e){}
   recordScan(code,best.name,best.brand,best.cat,"off");
   renderWhereFound({pendingBarcode:code});
   playSound("win");
@@ -7505,6 +7554,7 @@ function onBarcodeDetected(r){
           }
           btn.textContent="Ajouter aux découvertes";btn.style.background="#e67e22";btn.style.display="block";
           btn.onclick=function(){addDiscovery(best.name,best.brand,code,best.cat);};
+          try{ proposerChasse(code,best,res); }catch(e){}
           recordScan(code,best.name,best.brand,best.cat,"off");
           var lnk2=document.createElement("div");
           lnk2.className="scan-injected";
@@ -19250,6 +19300,156 @@ function renderAdmin(){
    boissons du fichier de base qui n'ont pas de code-barre ne sont pas un
    probleme a reparer — elles n'ont jamais pretendu en avoir, et les noyer dans
    cette liste la rendrait inutilisable. */
+/* Les fiches orphelines, definies UNE fois. L'ecran d'administration et la
+   chasse doivent viser exactement le meme ensemble : deux definitions du mot
+   « orpheline » finiraient par diverger, et la chasse proposerait des boissons
+   que l'admin ne voit pas — ou l'inverse. */
+/* ═══ LA CHASSE AUX CODES-BARRES ═══════════════════════════════════════════
+   Ces fiches existent, s'affichent dans la recherche, ont parfois leur photo —
+   mais scanner le produit qu'elles decrivent ne les trouve pas. Plutot que de
+   laisser l'administrateur les rattraper une par une, on demande a ceux qui
+   font les courses : ils ont le produit en main, c'est le seul moment ou la
+   reponse est certaine.
+
+   POURQUOI ON NE COLLE PAS LE CODE AU PREMIER SCAN VENU.
+   Un code-barre faux est PIRE qu'un code absent : une fiche sans code ne
+   trouve rien, une fiche avec le mauvais code affirme une chose fausse, avec
+   assurance, a tout le monde. On ne pose donc jamais un lien sur la foi d'un
+   seul geste :
+     - le nom lu sur OpenFoodFacts doit ressembler a la boisson visee, et on
+       DEMANDE quand meme confirmation ;
+     - sans cette ressemblance (OFF ignore beaucoup de boissons exotiques —
+       precisement celles qui manquent ici), le lien attend une deuxieme
+       personne ;
+     - c'est la Cloud Function qui pose le code, jamais le telephone : les
+       regles interdisent au client d'ecrire dans le catalogue.
+   Les points suivent la meme logique : ils tombent quand le lien devient
+   officiel, pas quand il est propose. Payer le geste plutot que le resultat,
+   c'est installer une imprimante a points — la meme raison qui fait qu'on ne
+   paie pas l'arrivee d'un filleul. */
+function chasseVisible(){ return boissonsOrphelines().length>0; }
+function renderChasseCodes(){
+  var host=document.getElementById("chasse-card"); if(!host)return;
+  var liste=boissonsOrphelines();
+  if(!liste.length){ host.innerHTML=""; return; }
+  var apercu=liste.slice(0,3).map(function(d){return sanitize(d.name);}).join(" · ");
+  host.innerHTML=
+    '<div role="button" tabindex="0" aria-label="La chasse aux codes-barres" onclick="ouvrirChasseCodes()" onkeydown="if(event.key===\'Enter\'){ouvrirChasseCodes();}" '+
+      'style="display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:14px 16px;background:linear-gradient(135deg,#3b2a12,#1f1608);border:1.5px solid #6b4d1d;border-radius:16px;cursor:pointer">'+
+      '<span style="line-height:0;color:#f0b840;flex-shrink:0"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h4l1-2h8l1 2h4v12H3z"/><path d="M7 11v4M10 11v4M14 11v4M17 11v4"/></svg></span>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:13.5px;font-weight:800;color:#f7e3b8">'+liste.length+' boisson'+(liste.length>1?"s":"")+' cherche'+(liste.length>1?"nt leur":" son")+' code-barre</div>'+
+        '<div style="font-size:11.5px;font-weight:600;color:#c9ab74;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+apercu+(liste.length>3?" \u2026":"")+'</div>'+
+      '</div>'+
+      '<span style="font-size:16px;color:#c9ab74">\u203A</span>'+
+    '</div>';
+}
+function ouvrirChasseCodes(){
+  var liste=boissonsOrphelines();
+  if(!liste.length){toast("Aucune boisson en chasse \u2014 tout est \u00E0 jour !");return;}
+  var old=document.getElementById("chasse-ov"); if(old)old.remove();
+  var ov=document.createElement("div");
+  ov.id="chasse-ov"; ov.className="claim-ov";
+  ov.innerHTML=
+    '<div class="claim-card" role="dialog" aria-modal="true" aria-label="La chasse aux codes-barres">'+
+      '<div class="claim-grip"></div>'+
+      '<div class="claim-badge" style="background:#8a6414">Chasse</div>'+
+      '<div class="claim-title">Ces boissons sont introuvables au scan</div>'+
+      '<div class="claim-lead">Elles sont dans Magofeed, mais sans leur code-barre : scanner le produit ne les retrouve pas, et cr\u00E9e un doublon.</div>'+
+      '<div class="claim-honest">Si tu en croises une en rayon, <b>scanne-la</b> : l\u2019app reconna\u00EEtra qu\u2019il s\u2019agit d\u2019elle et te demandera de confirmer. Le code n\u2019est pos\u00E9 que quand c\u2019est s\u00FBr \u2014 un code faux serait pire que pas de code du tout.</div>'+
+      '<div id="chasse-liste" style="margin-top:12px"></div>'+
+      '<button class="claim-cancel" onclick="fermerChasseCodes()">Fermer</button>'+
+    '</div>';
+  ov.addEventListener("click",function(e){ if(e.target===ov)fermerChasseCodes(); });
+  document.body.appendChild(ov);
+  try{document.body.classList.add("sheet-open");}catch(e){}
+  requestAnimationFrame(function(){ov.classList.add("in");});
+  var el=document.getElementById("chasse-liste");
+  liste.forEach(function(d){
+    var row=document.createElement("div");
+    row.style.cssText="display:flex;align-items:center;gap:11px;padding:9px 0;border-top:1px solid var(--border)";
+    row.innerHTML='<div style="width:38px;height:38px;flex-shrink:0;border-radius:10px;overflow:hidden;font-size:24px">'+drinkIconHTML(d)+'</div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:13px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(d.name)+'</div>'+
+        '<div style="font-size:11px;font-weight:600;color:var(--s2)">'+sanitize(d.brand||"")+'</div></div>';
+    el.appendChild(row);
+  });
+  try{playSound("pop");}catch(e){}
+}
+function fermerChasseCodes(){
+  var ov=document.getElementById("chasse-ov"); if(!ov)return;
+  ov.classList.remove("in");
+  try{document.body.classList.remove("sheet-open");}catch(e){}
+  setTimeout(function(){ if(ov.parentNode)ov.remove(); },240);
+}
+/* Appele depuis le scan quand le code n'est rattache a rien. Renvoie true si
+   une boisson de la chasse a ete proposee — auquel cas le scan laisse la main
+   a cet ecran plutot que de proposer une nouvelle decouverte. */
+function proposerChasse(code,best,res){
+  var liste=boissonsOrphelines();
+  if(!liste.length||!res)return false;
+  var cible=null;
+  if(best&&best.name){
+    /* On reutilise le rapprochement de noms deja eprouve ailleurs dans l'app
+       plutot que d'en inventer un deuxieme. */
+    try{
+      var proche=trouverBoissonProche(best.name,best.brand);
+      if(proche&&proche.drink&&liste.indexOf(proche.drink)!==-1&&proche.distance<=1)cible=proche.drink;
+    }catch(e){}
+  }
+  if(!cible)return false;
+  var bloc=document.createElement("div");
+  bloc.className="scan-injected";
+  bloc.style.cssText="margin-top:10px;padding:11px 13px;border-radius:13px;background:rgba(240,184,64,.12);border:1.5px solid rgba(240,184,64,.45)";
+  bloc.innerHTML='<div style="font-size:12.5px;font-weight:800;color:var(--s1);margin-bottom:3px">Elle est dans la chasse !</div>'+
+    '<div style="font-size:11.5px;font-weight:600;color:var(--s2);line-height:1.45">\u00AB '+sanitize(cible.name)+' \u00BB est dans Magofeed mais sans code-barre. C\u2019est bien ce que tu as en main ?</div>';
+  var oui=document.createElement("div");
+  oui.setAttribute("role","button");oui.setAttribute("tabindex","0");
+  oui.style.cssText="margin-top:9px;text-align:center;padding:11px;border-radius:12px;background:#8a6414;color:#fff;font-size:12.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent";
+  oui.textContent="Oui, c\u2019est bien elle";
+  var envoyer=function(){
+    if(!window.fbProposerCodeChasse){toast("Indisponible hors ligne");playSound("err");return;}
+    oui.textContent="Envoi\u2026"; oui.onclick=null;
+    window.fbProposerCodeChasse(cible.id,cible.name,code).then(function(r){
+      /* Le lien vaut deja pour CET appareil : la personne qui vient de le
+         confirmer ne doit pas rescanner dans le vide en attendant la
+         deuxieme confirmation. */
+      try{linkBarcodeLocally(code,cible.id);}catch(e){}
+      if(!cible.barcodes)cible.barcodes=[];
+      if(cible.barcodes.indexOf(String(code))===-1)cible.barcodes.push(String(code));
+      bloc.innerHTML='<div style="font-size:12.5px;font-weight:800;color:#166534">Merci \u2014 c\u2019est not\u00E9</div>'+
+        '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:3px;line-height:1.45">'+
+        (r&&r.nb>=2
+          ? "Une deuxi\u00E8me personne l\u2019avait d\u00E9j\u00E0 vue : le code va \u00EAtre pos\u00E9 pour tout le monde."
+          : "Il manque encore une confirmation d\u2019une autre personne pour que le code compte pour tous. De ton c\u00F4t\u00E9, il marche d\u00E9j\u00E0.")+'</div>';
+      playSound("win");
+      try{renderChasseCodes();}catch(e){}
+    }).catch(function(e){
+      var msg=String((e&&e.message)||"");
+      if(/compte requis/.test(msg)){toast("Cr\u00E9e un compte pour participer \u00E0 la chasse");}
+      else toast("Envoi impossible");
+      playSound("err");
+      oui.textContent="Oui, c\u2019est bien elle"; oui.onclick=envoyer;
+    });
+  };
+  oui.onclick=envoyer;
+  oui.onkeydown=function(ev){if(ev.key==="Enter")envoyer();};
+  bloc.appendChild(oui);
+  var non=document.createElement("div");
+  non.setAttribute("role","button");non.setAttribute("tabindex","0");
+  non.style.cssText="margin-top:6px;text-align:center;padding:9px;font-size:11.5px;font-weight:700;color:var(--s2);cursor:pointer";
+  non.textContent="Non, c\u2019est autre chose";
+  non.onclick=function(){bloc.remove();};
+  non.onkeydown=function(ev){if(ev.key==="Enter")bloc.remove();};
+  bloc.appendChild(non);
+  res.appendChild(bloc);
+  return true;
+}
+function boissonsOrphelines(){
+  return (window.DRINKS||[]).filter(function(d){
+    return Number(d.id)>=1e12&&!(d.barcodes&&d.barcodes.length);
+  });
+}
 function renderFichesSansCode(){
   var host=document.getElementById("admin-sans-code");
   if(!host){
@@ -19259,9 +19459,7 @@ function renderFichesSansCode(){
     if(list&&list.parentNode)list.parentNode.insertBefore(host,list);
   }
   host.innerHTML="";
-  var orphelines=(window.DRINKS||[]).filter(function(d){
-    return Number(d.id)>=1e12&&!(d.barcodes&&d.barcodes.length);
-  });
+  var orphelines=boissonsOrphelines();
   if(!orphelines.length)return;
   var hd=document.createElement("div");
   hd.style.cssText="font-size:13px;font-weight:800;color:var(--s1);margin:4px 0 4px";
