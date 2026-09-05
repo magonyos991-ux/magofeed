@@ -268,14 +268,20 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       <!-- ACCUEIL ÉPURÉ : l'essentiel d'abord — autour de toi, ce que tu attends
            (alertes + chasses), puis à découvrir. Le reste est plus bas. -->
       <div id="nearby-card" style="margin-bottom:16px"></div>
-      <!-- Alertes et chasses ne sont plus ici : elles vivent dans la pastille
-           de chasse (mission-fab), qui porte deja leur compteur. L'accueil
-           s'ouvre sur l'accueil. -->
+      <!-- Alertes et chasses ne sont plus ici : elles vivent dans l'onglet
+           Chasse, qui porte leur compteur sur son badge de navigation.
+           L'accueil s'ouvre sur l'accueil. -->
       <div class="sec-hd">
         <div class="t-section" id="t-trends">À découvrir</div>
         <div class="sec-count" id="trends-count"></div>
       </div>
       <div class="grid" id="trends"></div>
+      <!-- LES MISSIONS SONT HORS DE #home-extras, et volontairement.
+           Ce bloc est masque des qu'une categorie est filtree ; la feuille de
+           la boule flottante etait alors le SEUL acces aux missions, et elle
+           va disparaitre. Sortie d'ici, la carte reste accessible dans tous
+           les cas. -->
+      <div id="missions-card" style="margin-bottom:14px"></div>
       <div id="home-extras">
       <div id="wanted-card" style="margin-bottom:14px"></div>
       <div class="sec-hd">
@@ -283,7 +289,6 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <div class="sec-count" id="brands-count"></div>
       </div>
       <div class="brands-rail" id="brands-rail"></div>
-      <div id="missions-card" style="margin-bottom:14px"></div>
       <!-- LA CHASSE AUX CODES-BARRES : rempli par renderChasseCodes(),
            vide (et invisible) quand aucune fiche n'est orpheline. -->
       <div id="chasse-card"></div>
@@ -456,6 +461,15 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       </div>
       <div id="chasse-trouver">
         <div id="chasse-tips" style="padding:0 20px"></div>
+        <!-- TES ALERTES. Cette carte n'avait qu'un seul hote : la feuille de la
+             boule flottante. Les douze appels a renderAlertsCard() disperses
+             dans l'app sortaient donc tous sur « if(!host)return » — sans une
+             erreur, sans un test rouge. Retirer la boule aurait fait
+             disparaitre en silence le seul ecran ou l'on voit ses veilles avec
+             leur statut, le magasin, la date et qui a signale. Elle a
+             desormais sa place ici, au-dessus de #chasse-mine qui n'en est que
+             la version degradee. -->
+        <div id="alerts-card" style="padding:0 20px;margin-bottom:14px"></div>
         <div id="chasse-mine" style="padding:0 20px 12px"></div>
         <div id="chasse-list" style="padding:0 20px 18px"></div>
         <div id="chasse-found" style="padding:0 20px 20px"></div>
@@ -609,11 +623,6 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 8a5 5 0 0 1 0 8"/></svg></div>
           <div class="set-txt"><div class="set-title" data-i18n="sounds">Effets sonores</div><div class="set-sub" data-i18n="soundsSub">Sons lors des interactions</div></div>
           <div id="sound-toggle" class="sw on" aria-hidden="true"><div id="sound-knob" class="sw-knob"></div></div>
-        </div>
-        <div id="hunt-fab-row" class="set-row static sw-row" role="switch" aria-checked="true" tabindex="0" aria-label="Bouton de chasse flottant" onclick="toggleHuntFab()" onkeydown="if(event.key==='Enter'){toggleHuntFab();}">
-          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg></div>
-          <div class="set-txt"><div class="set-title">Bouton de chasse flottant</div><div class="set-sub">La pastille sur l'écran d'accueil — appui long dessus pour la masquer</div></div>
-          <div id="huntfab-toggle" class="sw on" aria-hidden="true"><div class="sw-knob"></div></div>
         </div>
       </div>
       <div class="theme-row">
@@ -1057,6 +1066,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
     <div class="ntab" data-screen="discover" onclick="navTo('discover')" role="button" tabindex="0" aria-label="Découvrir" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();navTo('discover');}">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 20s-7-4.5-7-9.5A3.5 3.5 0 0112 7a3.5 3.5 0 017 3.5C19 15.5 12 20 12 20z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
       <span class="ntab-lbl" id="nt-disc">Découvrir</span>
+      <span class="ntab-badge" id="nt-disc-badge" hidden aria-hidden="true"></span>
     </div>
     <div class="ntab" data-screen="profile" onclick="navTo('profile')" role="button" tabindex="0" aria-label="Profil" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();navTo('profile');}">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 12a4 4 0 100-8 4 4 0 000 8zM5 20c0-3.5 3-6 7-6s7 2.5 7 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -4559,7 +4569,7 @@ function refreshLocation(cb,opts){
     if(window.fbLoadNearbyStores){try{window.fbLoadNearbyStores(userLat,userLng,10);}catch(e){}}
     // Maintenant qu'on a une vraie position, on redessine les chasses avec les
     // bonnes distances (sinon la liste chargée sans GPS restait figée).
-    try{var hp=document.getElementById("s-home");if(hp&&hp.classList.contains("on"))renderHunts();}catch(e){}
+    try{var hp=document.getElementById("s-discover");if(hp&&hp.classList.contains("on"))renderChasse();}catch(e){}
     try{renderNearby();}catch(e){}
     cb&&cb(true);
   },function(){_gpsRefreshing=false;cb&&cb(false);},
@@ -4654,7 +4664,6 @@ function emptyStateHTML(icon,title,sub,btnLabel,onclick){
 }
 /* Action d'un etat vide : ferme une eventuelle feuille missions puis navigue */
 function emptyGo(tab){
-  var ms=document.getElementById("mission-sheet");if(ms)ms.remove();
   navTo(tab);
 }
 function show(s){
@@ -4677,12 +4686,12 @@ function _showRaw(s){
   if(s==="profile"){try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}try{renderDonCard();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
   if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}}
-  if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderChasseCodes();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{_verifierAides();}catch(e){}try{renderHunts();}catch(e){}    // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
+  if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderChasseCodes();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{_verifierAides();}catch(e){}try{renderChasse();}catch(e){}    // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
     // le filtre boisson de la carte (sinon la carte rouvrait toujours sur la derniere
     // boisson cherchee, ex. "Red Bull", au lieu de montrer tous les magasins).
     try{var _q=document.getElementById("q");if(_q)_q.value="";var _sl=document.getElementById("search-list");if(_sl)_sl.innerHTML="";exploreFilter=null;window._exploreFromDrink=false;}catch(e){}
   }
-  try{updateMissionFab();}catch(e){}
+  try{renderChasse();}catch(e){}
   // Quitter l'écran scan met fin au remplissage rafale (nettoie HUD + état).
   if(s!=="scan"&&window._rafaleStore)try{endRafale(true);}catch(e){}
   if(s!=="scan"&&scanActive)stopScan();
@@ -8823,7 +8832,7 @@ function renderMissions(){
       '<div style="font-size:13px;font-weight:800;color:var(--s1)">Missions du jour</div>'+
       '<div style="font-size:11px;font-weight:800;color:'+(all?"#c69a57":"var(--s2)")+'">'+(all?"\u2713 +10 pts !":done+"/"+defs.length)+'</div>'+
     '</div>'+rows+'</div>';
-  try{updateMissionFab();}catch(e){}
+  try{renderChasse();}catch(e){}
 }
 /* \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
    "AUTOUR DE TOI" \u2014 le pouls local, tout en haut de l'accueil.
@@ -9267,199 +9276,23 @@ function donRetour(){
   try{renderDonCard();renderDonRow();}catch(e){}
 }
 
-/* \u2500\u2500 Pastille MISSIONS flottante et deplacable \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-   Acces permanent aux missions/chasses depuis n'importe quel ecran. Badge =
-   missions du jour a finir + chasses actives autour. Deplacable a la verticale
-   (position memorisee en local). Tap = ouvre l'accueil sur les missions. */
-var MISSION_FAB_W=58;
-/* Le bouton flottant peut deranger : un appui long le masque, et il se
-   reaffiche depuis les Reglages — ou tout seul quand on lance une nouvelle
-   chasse, puisqu'a ce moment-la il redevient utile (c'est lui qui porte le
-   compteur des chasses). Masquer pour toujours un bouton qu'on vient de
-   rendre necessaire serait un piege. */
-function huntFabWanted(){ try{ return localStorage.getItem("magoHuntFab")!=="0"; }catch(e){ return true; } }
-function applyHuntFabSwitch(){
-  var on=huntFabWanted();
-  var t=document.getElementById("huntfab-toggle"); if(t)t.classList.toggle("on",on);
-  var r=document.getElementById("hunt-fab-row"); if(r)r.setAttribute("aria-checked",on?"true":"false");
-}
-function hideMissionFab(){
-  if(!confirm("Masquer le bouton de chasse ?\n\nTu peux le r\u00e9afficher dans R\u00e9glages, et il reviendra de lui-m\u00eame si tu lances une nouvelle chasse."))return;
-  try{localStorage.setItem("magoHuntFab","0");}catch(e){}
-  var f=document.getElementById("mission-fab"); if(f)f.remove();
-  applyHuntFabSwitch();
-  toast("Bouton masqu\u00e9 \u00b7 r\u00e9affichable dans R\u00e9glages");
-  playSound("pop");
-}
-function toggleHuntFab(){
-  if(huntFabWanted()){
-    try{localStorage.setItem("magoHuntFab","0");}catch(e){}
-    var f=document.getElementById("mission-fab"); if(f)f.remove();
-  }else{
-    try{localStorage.setItem("magoHuntFab","1");}catch(e){}
-    try{ensureMissionFab();}catch(e){}
-  }
-  applyHuntFabSwitch();
-  playSound("pop");
-}
-function ensureMissionFab(){
-  applyHuntFabSwitch();
-  if(!huntFabWanted())return null;
-  var ex=document.getElementById("mission-fab");
-  if(ex)return ex;
-  var W=MISSION_FAB_W;
-  var fab=document.createElement("div");
-  fab.id="mission-fab";
-  fab.setAttribute("role","button");
-  fab.setAttribute("tabindex","0");
-  fab.setAttribute("aria-label","Voir mes missions et chasses");
-  fab.style.cssText="position:fixed;z-index:900;width:"+W+"px;height:"+W+"px;border-radius:50%;background:radial-gradient(130% 130% at 32% 24%,#2c2824,#191512 60%,#0e0c0a);box-shadow:0 10px 26px rgba(0,0,0,.42),0 2px 12px rgba(16,138,67,.30),inset 0 1.5px 0 rgba(255,255,255,.14),inset 0 -4px 10px rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none;opacity:1;transition:opacity .3s ease";
-  var vw=window.innerWidth||390,vh=window.innerHeight||700;
-  var savedTop=parseInt(localStorage.getItem("magoFabTop")||"",10);
-  var savedSide=localStorage.getItem("magoFabSide")||"right";
-  var top=(savedTop&&savedTop>60)?Math.min(savedTop,vh-140):Math.round(vh*0.6);
-  fab.style.top=top+"px";
-  fab.style.left=(savedSide==="left"?12:(vw-W-12))+"px";
-  fab.innerHTML='<svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 1.5px 1.5px rgba(0,0,0,.35))"><circle cx="12" cy="12" r="7.2" stroke="#fff" stroke-width="2"/><path d="M12 1.8v3.4M12 18.8v3.4M1.8 12h3.4M18.8 12h3.4" stroke="#fff" stroke-width="2"/><circle cx="12" cy="12" r="2.6" fill="#37d98c"/></svg>'+
-    '<span id="mission-fab-badge" style="position:absolute;top:-4px;right:-4px;min-width:21px;height:21px;padding:0 5px;border-radius:11px;background:#e67e22;color:#1a1714;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2.5px solid var(--app-bg);box-shadow:0 2px 6px rgba(0,0,0,.25)">0</span>';
-  document.body.appendChild(fab);
-  var sx=0,sy=0,ox=0,oy=0,moved=false,dragging=false,idleT=null,lpT=null;
-  function idle(){if(idleT)clearTimeout(idleT);fab.style.opacity="1";idleT=setTimeout(function(){fab.style.opacity="0.6";},2600);}
-  function P(e){return (e.touches&&e.touches[0])?e.touches[0]:e;}
-  function down(e){dragging=true;moved=false;
-    /* Appui long (650 ms sans bouger) = proposer de masquer le bouton. Le
-       glissement pour le deplacer et le tap pour ouvrir restent inchanges :
-       des que le doigt bouge, le minuteur est annule. */
-    if(lpT)clearTimeout(lpT);
-    lpT=setTimeout(function(){ if(dragging&&!moved){ dragging=false; fab.style.cursor="grab"; hideMissionFab(); } },650);
-    var p=P(e);sx=p.clientX;sy=p.clientY;ox=parseInt(fab.style.left,10)||0;oy=parseInt(fab.style.top,10)||0;fab.style.transition="opacity .2s ease";fab.style.cursor="grabbing";fab.style.opacity="1";if(idleT)clearTimeout(idleT);if(e.cancelable)e.preventDefault();}
-  function move(e){if(!dragging)return;var p=P(e);var dx=p.clientX-sx,dy=p.clientY-sy;if(Math.abs(dx)>4||Math.abs(dy)>4){moved=true;if(lpT){clearTimeout(lpT);lpT=null;}}var w=window.innerWidth,h=window.innerHeight;fab.style.left=Math.max(8,Math.min(ox+dx,w-W-8))+"px";fab.style.top=Math.max(60,Math.min(oy+dy,h-140))+"px";if(e.cancelable)e.preventDefault();}
-  function snap(){
-    var w=window.innerWidth,h=window.innerHeight;
-    var cx=(parseInt(fab.style.left,10)||0)+W/2;
-    var side=cx<w/2?"left":"right";
-    var t=Math.max(60,Math.min(parseInt(fab.style.top,10)||0,h-140));
-    fab.style.transition="left .34s cubic-bezier(.34,1.4,.4,1),top .34s cubic-bezier(.34,1.4,.4,1),opacity .3s ease";
-    fab.style.left=(side==="left"?12:(w-W-12))+"px";fab.style.top=t+"px";
-    try{localStorage.setItem("magoFabSide",side);localStorage.setItem("magoFabTop",String(t));}catch(_){}
-    idle();
-  }
-  function up(){if(lpT){clearTimeout(lpT);lpT=null;}if(!dragging)return;dragging=false;fab.style.cursor="grab";if(moved){snap();}else{openMissions();idle();}}
-  fab.addEventListener("touchstart",down,{passive:false});
-  fab.addEventListener("touchmove",move,{passive:false});
-  fab.addEventListener("touchend",up);
-  fab.addEventListener("mousedown",down);
-  window.addEventListener("mousemove",move);
-  window.addEventListener("mouseup",up);
-  fab.addEventListener("keydown",function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();openMissions();}});
-  window.addEventListener("resize",function(){var side=localStorage.getItem("magoFabSide")||"right";var w=window.innerWidth,h=window.innerHeight;fab.style.transition="none";fab.style.left=(side==="left"?12:(w-W-12))+"px";fab.style.top=Math.max(60,Math.min(parseInt(fab.style.top,10)||0,h-140))+"px";});
-  idle();
-  return fab;
-}
-/* Panneau missions & chasses (ouvert au tap sur la pastille) : missions du jour
-   + chasses autour, avec les VRAIES photos des boissons. */
-/* Effet "goutte d'eau" : un cercle qui jaillit de la pastille et s'elargit. */
-function fabRipple(){
-  try{
-    var f=document.getElementById("mission-fab");if(!f)return;
-    var r=f.getBoundingClientRect();var cx=r.left+r.width/2,cy=r.top+r.height/2;
-    var rip=document.createElement("div");
-    rip.style.cssText="position:fixed;left:"+cx+"px;top:"+cy+"px;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;background:radial-gradient(circle,rgba(34,192,127,.55),rgba(14,122,77,.12) 70%,transparent);z-index:999;pointer-events:none;transform:scale(0);opacity:.95;transition:transform .55s cubic-bezier(.2,.7,.3,1),opacity .55s ease";
-    document.body.appendChild(rip);
-    requestAnimationFrame(function(){rip.style.transform="scale(70)";rip.style.opacity="0";});
-    setTimeout(function(){if(rip.parentNode)rip.remove();},600);
-  }catch(e){}
-}
-function openMissions(){
-  if(document.getElementById("mission-sheet"))return;
-  fabRipple();
-  var defs=[];try{defs=missionDefs();}catch(e){}
-  var hunts=window._huntList||[];
-  var missDone=defs.filter(function(m){return m.have>=m.need;}).length;
-  var missRows=defs.map(function(m){
-    var ok=m.have>=m.need;
-    return '<div style="display:flex;align-items:center;gap:11px;padding:9px 0">'+
-      '<span style="width:22px;height:22px;border-radius:50%;border:2px solid '+(ok?"#16a34a":"var(--border)")+';display:flex;align-items:center;justify-content:center;font-size:12px;color:#16a34a;flex-shrink:0">'+(ok?"✓":"")+'</span>'+
-      '<span style="flex:1;font-size:13.5px;font-weight:700;color:var(--s1);'+(ok?"text-decoration:line-through;opacity:.55":"")+'">'+m.label+'</span>'+
-      '<span style="font-size:12px;font-weight:800;color:var(--s2)">'+Math.min(m.have,m.need)+'/'+m.need+'</span></div>';
-  }).join("");
-  var huntRows=hunts.length?hunts.slice(0,8).map(function(h){
-    var hd=DRINKS.find(function(x){return Number(x.id)===Number(h.drinkId);});
-    if(hd&&!getCachedDrinkImage(hd)){try{fetchVerifiedOFFImage(hd);}catch(e){}}
-    var who=h.seekers>1?(h.seekers+" cherchent"):(h.mine?"Tu cherches":"1 cherche");
-    var thumb=hd?drinkIconHTML(hd):magoCatIcon("Autre",20,"#7a4a10");
-    return '<div class="ms-hunt" data-did="'+nbSur(h.drinkId)+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 0;cursor:pointer;border-top:1px solid var(--border)">'+
-      '<span class="ms-thumb" data-did="'+nbSur(h.drinkId)+'" role="button" tabindex="0" aria-label="Voir cette boisson sur la carte" style="width:40px;height:40px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">'+thumb+'</span>'+
-      '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(h.drinkName||"Boisson")+'</div><div style="font-size:11.5px;font-weight:600;color:var(--s2)">'+who+' près d\'ici</div></div>'+
-      '<span style="font-size:12px;font-weight:800;color:#e67e22;flex-shrink:0">Je l\'ai vue →</span></div>';
-  }).join(""):emptyStateHTML("radar","Aucune chasse en cours","Cherche une boisson introuvable et lance la chasse : les explorateurs autour de toi seront prévenus dès qu\'elle est repérée.","Explorer les boissons","emptyGo(\'search\')");
-  // Bloc « Tes alertes » : il vivait sur l'accueil, il vit maintenant ici.
-  var alertsBlock="";
-  if((drinkWatches||[]).length){
-    alertsBlock='<div id="alerts-card" style="margin-bottom:14px"></div>';
-  }
-  var ov=document.createElement("div");
-  ov.id="mission-sheet";
-  ov.style.cssText="position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center";
-  ov.innerHTML='<div id="ms-card" style="background:var(--app-bg);border-radius:24px 24px 0 0;width:100%;max-width:520px;max-height:82vh;overflow-y:auto;padding:10px 20px calc(24px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.35);transform:translateY(100%);transition:transform .5s cubic-bezier(.3,1.38,.44,1)">'+
-    '<div style="width:40px;height:4px;border-radius:3px;background:var(--border);margin:0 auto 14px"></div>'+
-    '<div style="font-size:18px;font-weight:850;color:var(--s1);margin-bottom:2px">Tes missions &amp; chasses</div>'+
-    '<div style="font-size:12.5px;font-weight:600;color:var(--s2);margin-bottom:14px">Gagne des points en contribuant près de chez toi.</div>'+
-    '<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:12px 15px;margin-bottom:14px">'+
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px"><span style="font-size:13px;font-weight:800;color:var(--s1)">Missions du jour</span><span style="font-size:11.5px;font-weight:800;color:'+(defs.length&&missDone===defs.length?"#c69a57":"var(--s2)")+'">'+missDone+'/'+defs.length+'</span></div>'+
-      missRows+
-    '</div>'+
-    alertsBlock+
-    '<div style="font-size:13px;font-weight:800;color:var(--s1);margin:0 2px 2px">Chasses près de toi</div>'+
-    huntRows+
-    '<button id="ms-close" style="width:100%;margin-top:18px;padding:13px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">Fermer</button>'+
-  '</div>';
-  document.body.appendChild(ov);
-  try{ renderAlertsCard(); }catch(e){}
-  var card=document.getElementById("ms-card");
-  requestAnimationFrame(function(){if(card)card.style.transform="none";});
-  var close=function(){if(card)card.style.transform="translateY(100%)";setTimeout(function(){if(ov.parentNode)ov.remove();},300);};
-  var cb=document.getElementById("ms-close");if(cb)cb.onclick=close;
-  ov.addEventListener("click",function(e){if(e.target===ov)close();});
-  // Glisser la feuille vers le bas pour la fermer (comme une vraie bottom sheet).
-  var _sy=null,_dy=0;
-  if(card){
-    card.addEventListener("touchstart",function(e){if(card.scrollTop>0){_sy=null;return;}_sy=e.touches[0].clientY;_dy=0;card.style.transition="none";},{passive:true});
-    card.addEventListener("touchmove",function(e){if(_sy===null)return;var d=e.touches[0].clientY-_sy;if(d<0)return;_dy=d;card.style.transform="translateY("+d+"px)";},{passive:true});
-    card.addEventListener("touchend",function(){if(_sy===null)return;card.style.transition="transform .3s cubic-bezier(.2,.8,.2,1)";if(_dy>110){close();}else{card.style.transform="none";}_sy=null;_dy=0;},{passive:true});
-  }
-  ov.querySelectorAll(".ms-thumb").forEach(function(th){
-    th.onclick=function(ev){
-      ev.stopPropagation();
-      var did=Number(th.getAttribute("data-did"));
-      close();
-      setTimeout(function(){alertOpenOnMap(did);},260);
-    };
-    th.onkeydown=function(ev){if(ev.key==="Enter"){ev.preventDefault();th.onclick(ev);}};
-  });
-  ov.querySelectorAll(".ms-hunt").forEach(function(row){
-    row.onclick=function(){var did=Number(row.getAttribute("data-did"));var d=DRINKS.find(function(x){return Number(x.id)===did;});close();if(d)setTimeout(function(){pick(d);},260);else toast("Boisson introuvable");};
-    row.onkeydown=function(ev){if(ev.key==="Enter")row.click();};
-  });
-  try{playSound("pop");}catch(e){}
-}
-function updateMissionFab(){
-  try{
-    var fab=ensureMissionFab();
-    // Ne jamais montrer la pastille pendant le splash ou l'intro (onboarding).
-    var _ob=document.getElementById("onboarding"),_sp=document.getElementById("splash");
-    var _introUp=(_ob&&getComputedStyle(_ob).display!=="none"&&!_ob.classList.contains("hidden"))||(_sp&&getComputedStyle(_sp).display!=="none"&&!_sp.classList.contains("hidden"));
-    if(_introUp){fab.style.display="none";return;}
-    var newcomer=ptsNets()<1&&!Object.keys(scanCounts||{}).length&&!(userStats.signals||0)&&!(userStats.confirms||0);
-    var miss=0;
-    if(!newcomer){try{miss=missionDefs().filter(function(m){return m.have<m.need;}).length;}catch(e){}}
-    var hunts=window._huntCount||0;
-    var total=miss+hunts;
-    var badge=document.getElementById("mission-fab-badge");
-    if(total>0){ if(badge)badge.textContent=(total>99?"99+":total); fab.style.display="flex"; }
-    else{ fab.style.display="none"; }
-  }catch(e){}
-}
+/* ── LA PASTILLE FLOTTANTE A ETE SUPPRIMEE ───────────────────────────────
+   Elle donnait acces aux missions, aux chasses et aux alertes depuis
+   n'importe quel ecran. Les deux premieres faisaient doublon avec l'accueil
+   et l'onglet Chasse — l'onglet fait meme mieux : il ecarte les boissons
+   qu'on trouve dans un magasin d'a cote, et il porte les boutons qui
+   rapportent des points.
+
+   « Tes alertes » n'existait nulle part ailleurs : sa carte a d'abord ete
+   demenagee dans l'onglet Chasse, et le badge est passe sur l'onglet
+   Decouvrir, AVANT cette suppression. Dans l'autre ordre, on perdait en
+   silence le seul ecran ou l'on voit ses veilles.
+
+   Ce qui part avec elle : une pastille posee par-dessus la camera de scan,
+   deux ecouteurs mousemove/mouseup laisses sur window et jamais retires, un
+   reglage dont le libelle mentait (« la pastille sur l'ecran d'accueil »
+   alors qu'elle flottait partout), et un second compteur de chasses qui ne
+   disait pas la meme chose que celui de l'onglet. */
 /* Mission « boisson recherchée » : l'app met en avant une boisson du catalogue
    dont AUCUN magasin n'est connu (localement) et récompense l'utilisateur qui la
    repère en magasin (+30 pts). Double bénéfice : remplit les données manquantes
@@ -9554,10 +9387,22 @@ function applyHomeFilter(){
   var filtering=curCat&&curCat!=="Tous";
   var ex=document.getElementById("home-extras");if(ex)ex.style.display=filtering?"none":"";
   var rc=document.getElementById("home-recents");if(rc)rc.style.display=filtering?"none":"";
-  // Sélection d'une catégorie = accès direct aux résultats : on masque aussi les
-  // blocs perso du haut (autour de toi, alertes, chasses) pour ne montrer que la
-  // catégorie. Ils réapparaissent en revenant sur « Tous ».
-  ["nearby-card","alerts-card","hunts-card"].forEach(function(id){var e=document.getElementById(id);if(e)e.style.display=filtering?"none":"";});
+  /* Selection d'une categorie = acces direct aux resultats : on masque les
+     blocs perso du haut pour ne montrer que la categorie.
+
+     DEUX IDENTIFIANTS ONT ETE RETIRES DE CETTE LISTE. « alerts-card » vit
+     desormais dans l'onglet Chasse : le masquer d'ici revenait a effacer les
+     alertes d'un AUTRE ecran parce qu'on avait filtre une categorie sur
+     l'accueil — et a ne jamais les remontrer tant qu'on n'etait pas revenu
+     sur « Tous ». « hunts-card » n'existe plus nulle part dans le document.
+
+     Les MISSIONS, elles, restent visibles meme en filtrant : la feuille de la
+     boule flottante en etait le seul autre acces, et elle va disparaitre. */
+  ["nearby-card"].forEach(function(id){var e=document.getElementById(id);if(e)e.style.display=filtering?"none":"";});
+  /* Rien a faire pour les missions : leur carte a ete SORTIE de #home-extras
+     dans le document, elle n'est donc plus masquee par ce filtre. Lui rendre
+     un display en JavaScript ne servait a rien — un enfant d'un parent masque
+     reste masque. */
   var tt=document.getElementById("t-trends");
   if(tt)tt.textContent=filtering?curCat:"À découvrir";
 }
@@ -10470,8 +10315,6 @@ function _dragOverlayOpen(){
   if(ex&&ex.style.display!=="none"&&ex.classList.contains("in"))return ex;
   var ac=document.getElementById("activity-ov");
   if(ac)return ac;
-  var ms=document.getElementById("mission-sheet");
-  if(ms)return ms;
   var au=document.getElementById("auth-sheet");
   if(au&&au.style.display!=="none")return au;
   return null;
@@ -10480,7 +10323,7 @@ function _dragCloseOverlay(el){
   if(el.id==="img-zoom")closeDrinkZoom();
   else if(el.id==="store-picker")closeStorePicker();
   else if(el.id==="explore-map-host"){try{closeExploreMap();}catch(e){}}
-  else if(el.id==="activity-ov"||el.id==="mission-sheet"){try{el.remove();}catch(e){}}
+  else if(el.id==="activity-ov"){try{el.remove();}catch(e){}}
   else if(el.id==="auth-sheet"){try{closeAuthSheet();}catch(e){}}
   else closeProposeForm();
 }
@@ -11782,12 +11625,11 @@ function toggleWatch(d){
        lui qui porte le compteur des chasses actives, le laisser cache rendrait
        invisible la chasse qu'on vient de lancer. Ici et seulement ici — sur le
        GESTE de l'utilisateur, jamais sur une synchronisation automatique. */
-    try{
-      if(localStorage.getItem("magoHuntFab")==="0"){
-        localStorage.setItem("magoHuntFab","1");
-        ensureMissionFab();
-      }
-    }catch(e){}
+    /* Ici on remettait de force la pastille flottante quand elle avait ete
+       masquee, parce qu'une nouvelle chasse la rendait utile. Ce role de
+       protection passe au badge de l'onglet Decouvrir, qui lui ne peut pas
+       etre masque du tout : il n'y a plus rien a remettre. */
+    try{ renderChasse(); }catch(e){}
     pushActivity({
       type:"hunt",
       title:"Chasse lanc\u00e9e \u00b7 "+d.name,
@@ -11810,7 +11652,7 @@ function toggleWatch(d){
   saveWatches();
   try{renderStoreList();}catch(e){}
   try{renderAlertsCard();}catch(e){}
-  try{renderHunts();}catch(e){}
+  try{renderChasse();}catch(e){}
 }
 function resetWatchTrigger(drinkId,storeId){
   var changed=false;
@@ -11928,7 +11770,14 @@ function _runActivityAction(act){
   if(act.kind==="store"&&act.storeId!=null){try{openWatchStore(String(act.storeId),act.drinkId);}catch(e){}return;}
   if(act.kind==="storeMap"&&act.lat!=null){try{showStoreOnMap(Number(act.lat),Number(act.lng));}catch(e){}return;}
   if(act.kind==="drink"&&act.drinkId!=null){var d=DRINKS.find(function(x){return Number(x.id)===Number(act.drinkId);});if(d){try{pick(d);}catch(e){}}return;}
-  if(act.kind==="hunts"){try{show("home");}catch(e){}setTimeout(function(){var el=document.getElementById("hunts-card");if(el)el.scrollIntoView({behavior:"smooth",block:"center"});},280);return;}
+  if(act.kind==="hunts"){
+    /* Ce lien faisait defiler l'accueil vers #hunts-card, un conteneur qui
+       n'existe plus : il ne se passait donc rien du tout. Les chasses vivent
+       dans l'onglet Decouvrir. */
+    try{show("discover");}catch(e){}
+    setTimeout(function(){try{renderChasse();}catch(e){}},60);
+    return;
+  }
 }
 function _renderActivityList(){
   var host=document.getElementById("act-list");if(!host)return;
@@ -12512,84 +12361,20 @@ function removeWatch(id,force){
    tu aides la communauté ET tu gagnes des points. Rendu au chargement de
    l'accueil ; données réelles agrégées (aucun nom, position arrondie).
 ================================ */
-function _drawHunts(map,noReflow){
-  var list=Object.keys(map).map(function(k){return map[k];}).filter(function(h){return h.seekers>0;});
-  list.sort(function(a,b){return b.seekers-a.seekers;});
-  // IMPORTANT : on alimente la pastille AVANT de chercher un conteneur.
-  // L'accueil n'en a plus ; sortir trop tot laisserait la pastille vide.
-  window._huntCount=list.length;window._huntList=list;window._huntMap=map;try{updateMissionFab();}catch(e){}
-  var host=document.getElementById("hunts-card");if(!host)return;
-  if(!list.length){host.innerHTML="";return;}
-  var needPhoto=false;
-  var LIMIT=window._huntsExpanded?999:4;   // liste courte + "voir plus" (pas d'infini)
-  var rows=list.slice(0,LIMIT).map(function(h){
-    var who=h.seekers>1?(h.seekers+" personnes cherchent"):(h.mine?"Tu cherches":"1 personne cherche");
-    var hd=DRINKS.find(function(x){return Number(x.id)===Number(h.drinkId);});
-    // Vraie photo du produit (OpenFoodFacts verifie) si connue, sinon canette
-    // stylisee — plus jamais un simple glyphe. On declenche le chargement de la
-    // photo pour les boissons pas encore vues.
-    if(hd&&!getCachedDrinkImage(hd)){needPhoto=true;try{fetchVerifiedOFFImage(hd);}catch(e){}}
-    var thumb=hd?drinkIconHTML(hd):magoCatIcon("Autre",22,"#7a4a10");
-    return '<div class="hunt-row" data-did="'+nbSur(h.drinkId)+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 0;cursor:pointer">'+
-      '<span class="hunt-thumb" data-did="'+nbSur(h.drinkId)+'" role="button" tabindex="0" aria-label="Voir cette boisson sur la carte" style="width:42px;height:42px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid rgba(240,184,64,.55);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">'+thumb+'</span>'+
-      '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:800;color:#2a1e12;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(h.drinkName||"Boisson")+'</div>'+
-      '<div style="font-size:11px;font-weight:600;color:#8a6338">'+who+' près d\'ici</div></div>'+
-      '<span style="font-size:11px;font-weight:800;color:#e67e22;flex-shrink:0">Je l\'ai vue →</span>'+
-    '</div>';
-  }).join("");
-  var moreRow="";
-  if(list.length>4){
-    moreRow=window._huntsExpanded
-      ?'<div id="hunts-more" role="button" tabindex="0" style="text-align:center;padding:10px 0 4px;font-size:12px;font-weight:800;color:#b45309;cursor:pointer">Voir moins ▲</div>'
-      :'<div id="hunts-more" role="button" tabindex="0" style="text-align:center;padding:10px 0 4px;font-size:12px;font-weight:800;color:#b45309;cursor:pointer">Voir plus (+'+(list.length-4)+') ▼</div>';
-  }
-  host.innerHTML='<div style="background:linear-gradient(135deg,#fff3e0,#ffe8cc);border:1.5px solid #f0b840;border-radius:18px;padding:13px 16px 6px;margin-bottom:14px">'+
-    '<div style="font-size:13px;font-weight:800;color:#7a4a10;margin-bottom:1px">Chasses près de toi</div>'+
-    '<div style="font-size:11px;font-weight:600;color:#9a6a2a;margin-bottom:4px">Tu croises une de ces boissons en magasin ? Signale-la — tu gagnes des points en aidant.</div>'+rows+moreRow+'</div>';
-  var moreEl=document.getElementById("hunts-more");
-  if(moreEl)moreEl.onclick=function(){window._huntsExpanded=!window._huntsExpanded;try{playSound("pop");}catch(e){}_drawHunts(window._huntMap,true);};
-  host.querySelectorAll(".hunt-row").forEach(function(row){
-    row.onclick=function(){
-      var did=Number(row.getAttribute("data-did"));
-      var d=DRINKS.find(function(x){return Number(x.id)===did;});
-      if(d)pick(d);else toast("Boisson introuvable");
-    };
-    row.onkeydown=function(ev){if(ev.key==="Enter")row.click();};
-  });
-  host.querySelectorAll(".hunt-thumb").forEach(function(th){
-    th.onclick=function(ev){ev.stopPropagation();alertOpenOnMap(Number(th.getAttribute("data-did")));};
-    th.onkeydown=function(ev){if(ev.key==="Enter"){ev.preventDefault();th.onclick(ev);}};
-  });
-  // Les photos OpenFoodFacts arrivent en asynchrone : on redessine UNE fois (sans
-  // re-interroger le reseau) quand elles sont pretes, si on est encore sur l'accueil.
-  if(needPhoto&&!noReflow){
-    setTimeout(function(){try{var hp=document.getElementById("s-home");if(hp&&hp.classList.contains("on")&&window._huntMap)_drawHunts(window._huntMap,true);}catch(e){}},1800);
-  }
-}
-function renderHunts(){
-  // Plus de conteneur sur l'accueil : les chasses alimentent la pastille (et
-  // son panneau). On ne sort donc PAS ici, sinon le compteur resterait a zero.
-  // Base LOCALE : tes propres veilles = tes chasses, affichées TOUT DE SUITE
-  // (même si Firestore est lent ou que les règles ne sont pas encore prêtes).
-  var map={};
-  (drinkWatches||[]).forEach(function(w){
-    map[w.id]={drinkId:w.id,drinkName:w.name,emoji:w.emoji,seekers:1,mine:true};
-  });
-  _drawHunts(map);
-  // Puis on enrichit avec les chasses des AUTRES autour (Firestore).
-  if(window.fbLoadNearbyHunts){
-    window.fbLoadNearbyHunts(userLat,userLng,15).then(function(hunts){
-      var merged={};
-      (hunts||[]).forEach(function(h){merged[h.drinkId]={drinkId:h.drinkId,drinkName:h.drinkName,emoji:h.emoji,seekers:h.seekers||0,mine:!!h.mine};});
-      // On garde nos veilles locales même si le distant ne les renvoie pas encore
-      Object.keys(map).forEach(function(k){
-        if(merged[k]){merged[k].mine=true;merged[k].seekers=Math.max(merged[k].seekers,1);}
-        else merged[k]=map[k];
-      });
-      _drawHunts(merged);
-    }).catch(function(){/* on garde l'affichage local */});
-  }
-}
+/* ── renderHunts / _drawHunts ONT ETE SUPPRIMEES ─────────────────────────
+   Elles peignaient les chasses dans #hunts-card, un conteneur qui n'existe
+   plus dans le document depuis que l'accueil a ete epure. Elles sortaient
+   donc immediatement sur « if(!host)return » — mais APRES avoir appele
+   fbLoadNearbyHunts. A chaque affichage de l'accueil, l'app payait donc une
+   lecture Firestore complete des chasses du voisinage pour jeter le
+   resultat. La seule chose qu'elles alimentaient encore, window._huntCount,
+   n'etait plus lue par personne depuis la suppression de la pastille
+   flottante.
+
+   L'onglet Chasse fait le meme travail, en mieux, avec renderChasse et
+   _peindreChasse : meme source, meme requete, mais il ecarte les boissons
+   trouvables a cote et il porte les boutons qui rapportent des points. */
+
 function renderAlertsCard(){
   var host=document.getElementById("alerts-card");if(!host)return;
   if(!drinkWatches.length){host.innerHTML="";return;}
@@ -12622,7 +12407,10 @@ function renderAlertsCard(){
   // L'hote est recree a chaque ouverture de la feuille : on rebranche le
   // geste apres chaque reconstruction (la garde _swpInit evite les doublons).
   try{initSwipeToDelete(host);}catch(e){}
-  if(_alertNeedPhoto&&!window._alertReflow){window._alertReflow=true;setTimeout(function(){window._alertReflow=false;try{var hp=document.getElementById("s-home");if(hp&&hp.classList.contains("on"))renderAlertsCard();}catch(e){}},1800);}
+  /* La carte vit dans l'onglet Chasse, plus dans la feuille de la boule : on
+     teste l'ecran ou elle se trouve REELLEMENT, sinon les vignettes de
+     boissons ne se completeraient jamais apres leur chargement. */
+  if(_alertNeedPhoto&&!window._alertReflow){window._alertReflow=true;setTimeout(function(){window._alertReflow=false;try{var hp=document.getElementById("s-discover");if(hp&&hp.classList.contains("on"))renderAlertsCard();}catch(e){}},1800);}
 }
 /* Rayon vide pour cette boisson : on montre quand meme les magasins autour,
    clairement marques "pas encore confirmee ici", avec un bouton "Trouvee ici !"
@@ -16772,7 +16560,13 @@ function _pinRetirerMenu(){
 }
 function fermerMenuPin(){ _pinDetache(); _pinRetirerMenu(); }
 window.addEventListener("pagehide",fermerMenuPin);
-document.addEventListener("visibilitychange",function(){ if(document.hidden)fermerMenuPin(); });
+document.addEventListener("visibilitychange",function(){
+  if(document.hidden){ fermerMenuPin(); return; }
+  /* Au retour dans l'app : on recalcule le badge des chasses. Une chasse a pu
+     s'ouvrir ou se conclure pendant l'absence, et un badge qui ment sur la
+     barre de navigation est pire que pas de badge. */
+  try{ renderChasse(); }catch(e){}
+});
 /* GARDE PERMANENT. Les ecouteurs d'un geste peuvent etre arraches par un
    chemin qu'on n'avait pas prevu — et le menu reste alors colle a l'ecran, ce
    qui s'est deja produit deux fois. Celui-ci n'appartient a aucun geste : il
@@ -18064,7 +17858,7 @@ function wipeTestHunts(){
       playSound("win");
       toast("✓ "+r.deleted+" chasse(s) effacée(s). Base propre !");
       try{var p=document.getElementById("notif-diag");if(p)p.remove();}catch(e){}
-      try{if(typeof renderHunts==="function")renderHunts();}catch(e){}
+      try{if(typeof renderChasse==="function")renderChasse();}catch(e){}
     }else{
       var why=String(r&&r.reason||"?");
       if(why.indexOf("permission")>=0||why.indexOf("PERMISSION")>=0)toast("Bloqué par les règles Firestore — dis-le-moi, je te donne la règle à ajouter");
@@ -18196,9 +17990,28 @@ function _chasseDistLabel(distKm){
   if(distKm<=12)return _tr("huntNear");
   return _tr("huntAbout").replace("{km}",Math.round(distKm));
 }
+/* Le badge de l'onglet Decouvrir. Il remplace celui de la boule flottante,
+   avec une difference qui compte : il ne peut etre ni masque, ni deplace hors
+   de l'ecran, ni pose par-dessus la camera de scan. */
+function majBadgeChasse(n){
+  var b=document.getElementById("nt-disc-badge");
+  if(!b)return;
+  n=Math.max(0,Math.min(99,Math.floor(Number(n)||0)));
+  window._badgeChasse=n;
+  if(!n){ b.hidden=true; b.textContent=""; b.removeAttribute("aria-label"); return; }
+  if(b.textContent!==String(n)){
+    b.textContent=String(n);
+    /* On relance l'animation seulement quand le chiffre CHANGE : sinon elle
+       repart a chaque re-rendu et la barre clignote sans raison. */
+    b.style.animation="none"; void b.offsetWidth; b.style.animation="";
+  }
+  b.hidden=false;
+  b.setAttribute("aria-label",n+" chasse"+(n>1?"s":"")+" autour de toi");
+}
 function renderChasse(){
   _majCompteurValider();
   setChasseSeg(_chasseSegCourant());
+  try{ renderAlertsCard(); }catch(e){}
   renderMesChasses();
   /* Tant que les magasins ne sont pas charges, TOUT parait introuvable. On se
      tait plutot que d'annoncer un manque qui n'existe pas. */
@@ -18259,6 +18072,13 @@ function _peindreChasse(demande){
     .slice(0,8);
   var autres=lignes.filter(function(x){return !x.moi;}).length;
   if(cnt)cnt.textContent=lignes.length?_tr("huntCount").replace("{n}",lignes.length):"";
+  /* LE BADGE DE L'ONGLET vient du MEME calcul que la liste, et pas du compteur
+     brut que portait la boule. La difference n'est pas cosmetique : ce chiffre
+     a deja ecarte les boissons qu'on trouve dans un magasin d'a cote, donc il
+     ne promet que des chasses reellement actionnables. Deux compteurs
+     differents pour le meme sujet, c'est exactement le bug qui existait entre
+     la boule et #disc-count. */
+  try{ majBadgeChasse(lignes.length); }catch(e){}
   if(!lignes.length){
     host.innerHTML=emptyStateHTML("spark",_tr("noHunt"),_tr("noHuntSub"));
     return;
@@ -19175,7 +18995,7 @@ function obFinish(){
   window._obFait=true;
   var ob=document.getElementById("onboarding");ob.classList.add("hidden");
   setTimeout(function(){ob.style.display="none";},400);
-  try{updateMissionFab();}catch(e){}
+  try{renderChasse();}catch(e){}
   // Premier atterrissage sur l'accueil : la bulle d'accueil prend le relais.
   setTimeout(function(){try{showCoach("home");}catch(e){}},700);
 }
@@ -19341,7 +19161,7 @@ function initSplash(){
     // La pastille chasse etait calculee PENDANT le splash (donc masquee par la
     // garde anti-intro) et rien ne la recalculait apres : elle n'apparaissait
     // qu'au premier changement d'onglet. On la reevalue des que le splash part.
-    try{updateMissionFab();}catch(e){}
+    try{renderChasse();}catch(e){}
   },1400);
 }
 
@@ -21488,7 +21308,13 @@ try{
   try{updateGreeting();}catch(e){}
   try{renderMissions();}catch(e){}
   try{checkWatches();renderAlertsCard();}catch(e){}
-  try{renderHunts();}catch(e){}
+  try{renderChasse();}catch(e){}
+  /* Le badge de l'onglet Decouvrir se calcule dans _peindreChasse, qui n'est
+     appelee que par renderChasse. Sans cet appel au demarrage, le badge ne
+     s'allumerait qu'apres etre alle voir l'onglet — donc jamais pour ce qu'il
+     doit annoncer. Les conteneurs de l'onglet existent dans le document meme
+     quand il n'est pas affiche, la peinture est donc sans effet visible. */
+  try{renderChasse();}catch(e){}
   try{refreshBell();}catch(e){}
   renderLangGrid();renderDiscoveries();
   renderFavs();
