@@ -160,9 +160,37 @@ async function crediter(uid, montant, motif) {
 /* Le score officiel : heritage du solde d'avant la bascule, plus les preuves,
    plus le parrainage, moins les sanctions. On l'ecrit dans `points` pour que
    le classement n'ait rien a changer. */
+/* LA SANCTION NE VIT PAS DANS LE PROFIL — elle y est seulement recopiee.
+   `users/{uid}.penalty` est effacable : la regle Firestore autorise chacun a
+   supprimer son propre document, et un document neuf n'a pas de champ penalty.
+   Il suffisait donc d'effacer son profil pour effacer sa sanction.
+   La source de verite est la collection `penalties`, ecrite par l'anti-farm
+   (anti-farm.js), un document par incident, clef uid__magasin__boisson. Elle
+   n'est pas supprimable par le client (firestore.rules) et survit donc a la
+   suppression du profil. On la relit ici, et on recopie le total dans le
+   profil pour que l'affichage reste juste.
+   Requete a champ unique : Firestore l'indexe tout seul, aucun index composite
+   a creer. Les sanctions sont rares, la lecture est donc quasi toujours vide. */
+async function sanctionReelle(uid) {
+  try {
+    const snap = await db.collection("penalties").where("uid", "==", String(uid)).limit(500).get();
+    let total = 0;
+    snap.forEach((doc) => { total += Number((doc.data() || {}).points) || 0; });
+    return total;
+  } catch (e) {
+    /* Lecture impossible : on ne renvoie PAS zero, ce qui effacerait la
+       sanction de quelqu'un a cause d'une panne. On rend null, et l'appelant
+       garde la valeur deja inscrite au profil. */
+    console.warn("sanctionReelle :", e && e.message);
+    return null;
+  }
+}
 async function recalculerScore(uid) {
   if (!uid) return;
   const ref = db.doc(`users/${uid}`);
+  // Lue AVANT la transaction : une transaction Firestore n'accepte pas de
+  // requete, seulement des lectures de documents par leur chemin.
+  const sanction = await sanctionReelle(uid);
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) return;
@@ -183,10 +211,14 @@ async function recalculerScore(uid) {
     const herite = premierPassage
       ? Math.max(0, Number(d.points) || 0)
       : (Number(d.pointsHerites) || 0);
+    const penalite = (sanction === null) ? (Number(d.penalty) || 0) : sanction;
     const total = Math.max(0,
-      herite + (d.pointsPreuves || 0) + (d.refPoints || 0) - (d.penalty || 0));
-    if (!premierPassage && d.points === total) return;
+      herite + (d.pointsPreuves || 0) + (d.refPoints || 0) - penalite);
+    if (!premierPassage && d.points === total && (Number(d.penalty) || 0) === penalite) return;
     const patch = { points: total };
+    // On recopie la sanction dans le profil : l'app l'affiche depuis la, et
+    // apres une suppression-recreation le champ y manquerait.
+    if ((Number(d.penalty) || 0) !== penalite) patch.penalty = penalite;
     if (premierPassage) {
       patch.pointsHerites = herite;
       patch.pointsPreuves = d.pointsPreuves || 0;

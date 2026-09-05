@@ -235,11 +235,16 @@ réellement 3 contributions honnêtes pour débloquer le parrainage d'un ami. Ce
 n'est d'ailleurs pas de la triche : les contributions sont vraies, l'app y
 gagne. Le plafond de 10 filleuls borne le tout.
 
-**Effacer son profil efface sa sanction.** `allow delete` autorise chacun à
-supprimer son propre document, et `penalty` est absent d'un document neuf. Le
-score repart donc à zéro — on ne gagne rien, mais on efface une sanction.
-Corriger cela demande de déplacer la sanction dans une collection que
-l'utilisateur ne peut pas supprimer. **Ce n'est pas fait.**
+**Effacer son profil n'efface plus sa sanction.** `allow delete` autorise
+toujours chacun à supprimer son propre document — c'est voulu, on doit pouvoir
+partir. Mais `users/{uid}.penalty` n'est plus qu'une copie d'affichage : la
+source de vérité est la collection `penalties`, écrite par l'anti-farm, que le
+client ne peut pas supprimer. `recalculerScore` la relit et remet le champ à
+jour. Supprimer son profil fait donc perdre ses points sans effacer sa
+sanction.
+
+Si la lecture de `penalties` échoue (panne), la valeur déjà inscrite au profil
+est conservée : une panne ne doit blanchir personne.
 
 **Le barème et la sanction ne sont plus cohérents.** `anti-farm.js` retire 10
 points avec le commentaire « exactement ce que rapportait l'annonce stock », or
