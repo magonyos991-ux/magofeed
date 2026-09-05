@@ -5628,6 +5628,28 @@ function startScan(){
         if(_tb)_tb.style.display=(_caps&&_caps.torch)?"flex":"none";
       }catch(e){}
       hint.textContent="Approche le code-barre…";
+      /* CE QUI MANQUAIT QUAND CA NE PREND PAS.
+         L'ecran disait « approche le code-barre » et ne disait plus rien
+         ensuite : au bout de dix secondes on ne sait pas si l'app cherche, si
+         elle a plante, ou ce qu'on fait mal. On donne donc les conseils qui
+         marchent vraiment, dans l'ordre ou ils servent, et on finit par
+         rappeler que la saisie a la main existe. */
+      try{clearInterval(window._scanAide);}catch(e){}
+      window._scanAideT=0;
+      window._scanAide=setInterval(function(){
+        if(!scanActive){try{clearInterval(window._scanAide);}catch(e){}return;}
+        if(_scanVotes.count>0)return;              // ca lit : on se tait
+        window._scanAideT+=1;
+        var h=document.getElementById("scan-hint"); if(!h)return;
+        if(window._scanAideT===6)h.textContent="Le code doit remplir la largeur du cadre";
+        else if(window._scanAideT===12)h.textContent="Recule un peu, puis rapproche lentement";
+        else if(window._scanAideT===18)h.textContent="Plus de lumière, et bien à plat — pas sur l'arrondi";
+        else if(window._scanAideT===26){
+          h.textContent="Tu peux aussi taper le code à la main";
+          try{var _r=document.getElementById("scan-manual-row");if(_r&&_r.style.display!=="flex")toggleManualCode();}catch(e){}
+          try{clearInterval(window._scanAide);}catch(e){}
+        }
+      },1000);
       btn.style.display="none";
       document.getElementById("scan-result").style.display="none";
       if(quaggaRunning)return;
@@ -5640,7 +5662,22 @@ function startScan(){
         btn.style.display="";
         return;
       }
-      Quagga.init({inputStream:{type:"LiveStream",target:video,constraints:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}}},locator:{patchSize:"medium",halfSample:true},decoder:{readers:["ean_reader","ean_8_reader","code_128_reader","upc_reader"]}},
+      /* LES LECTEURS ACTIFS, ET SURTOUT CELUI QU'ON A RETIRE.
+         « code_128_reader » etait la. Le Code 128 est un format a LONGUEUR
+         LIBRE : il accepte a peu pres n'importe quelle suite de barres et en
+         sort un resultat plausible. Aucune boisson n'en porte — les produits
+         de grande distribution sont en EAN-13, EAN-8 ou UPC. Le garder, c'est
+         donner a la camera le droit d'inventer un code a chaque image floue.
+         C'est la cause la plus probable des « scans trop rapides avec le
+         mauvais chiffre ».
+         « upc_e_reader » entre a sa place : c'est l'UPC compresse des PETITES
+         canettes (souvent americaines), qui n'etait pas lu du tout — donc une
+         part des « il n'arrive pas a prendre le code ».
+         RESOLUTION : 1920 au lieu de 1280. halfSample divise l'image par deux
+         avant de chercher le code ; on passait donc 640x360 au localisateur, ce
+         qui est juste pour un code-barre dense photographie de biais. On lui en
+         donne 960x540 pour le meme travail. */
+      Quagga.init({inputStream:{type:"LiveStream",target:video,constraints:{facingMode:"environment",width:{ideal:1920},height:{ideal:1080}}},locator:{patchSize:"medium",halfSample:true},decoder:{readers:["ean_reader","ean_8_reader","upc_reader","upc_e_reader"]}},
         function(err){
           if(err){hint.textContent="✕ "+err;return;}
           _scanVotes={code:null,count:0};
@@ -5676,6 +5713,7 @@ function setScanState(st){var el=document.getElementById("s-scan");if(el)el.data
       on perdait la seule reference qui permettait de les couper.
    On coupe donc tout ce qui vit, dans l'ordre, avant d'oublier quoi que ce soit. */
 function stopScan(){
+  try{clearInterval(window._scanAide);window._scanAide=null;}catch(e){}
   var sa=document.querySelector("#s-scan .scan-area");if(sa)sa.classList.remove("live");
   var tb=document.getElementById("scan-torch");if(tb)tb.style.display="none";
   window._torchOn=false;
@@ -7168,7 +7206,16 @@ function renderScanHistory(){
    camera ne se reproduit jamais a l'identique.
 ================================ */
 function validGTIN(code){
-  if(!/^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/.test(code))return true; // formats non GS1 : pas de cle a verifier
+  /* TOUT CE QUI N'EST PAS UNE LONGUEUR GS1 EST REFUSE.
+     Cette ligne renvoyait « true » — donc « valide » — pour n'importe quelle
+     longueur inconnue, sous pretexte qu'il n'y a pas de cle a verifier. Un code
+     de 7 ou 11 chiffres sorti d'une lecture ratee passait ainsi SANS AUCUN
+     CONTROLE, et allait se coller sur une boisson. Un code produit fait 8, 12,
+     13 ou 14 chiffres : il n'y a pas de cinquieme cas a accepter.
+     La saisie manuelle passe aussi par ici : quelqu'un qui tape 12 chiffres au
+     lieu de 13 est desormais arrete tout de suite, au lieu de creer une
+     decouverte qu'aucun scan ne retrouvera jamais. */
+  if(!/^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/.test(code))return false;
   var digits=code.split("").map(Number);
   var check=digits.pop();
   var sum=0,w=3;
@@ -7330,16 +7377,45 @@ function openBarcodeDispute(drink,code){
   bCancel.onkeydown=function(ev){if(ev.key==="Enter")bCancel.onclick();};
   if(input)input.focus();
 }
+/* CE QUE QUAGGA SAIT ET QU'ON NE LUI DEMANDAIT PAS.
+   Chaque symbole decode porte sa propre marge d'erreur : c'est la distance
+   entre les barres mesurees et les barres theoriques. Une lecture nette a une
+   erreur quasi nulle ; une lecture de biais, floue, ou sur un code deforme par
+   la courbe d'une canette monte tres vite. On lui posait la question a aucun
+   moment — d'ou des lectures acceptees alors que la camera n'etait pas sure.
+   0,12 est deliberement severe : sur un code-barre, se tromper coute bien plus
+   cher que de demander une seconde de plus. */
+var SCAN_ERREUR_MAX=0.12;
+function qualiteLecture(r){
+  try{
+    var d=r&&r.codeResult&&r.codeResult.decodedCodes;
+    if(!d||!d.length)return 0;                 // le lecteur ne la fournit pas : on ne penalise pas
+    var somme=0,nb=0;
+    for(var i=0;i<d.length;i++){
+      if(typeof d[i].error==="number"){somme+=d[i].error;nb++;}
+    }
+    return nb?somme/nb:0;
+  }catch(e){ return 0; }
+}
 function onBarcodeDetected(r){
   var rawCode=r&&r.codeResult&&r.codeResult.code;
   if(!rawCode)return;
-  if(!validGTIN(rawCode))return;              // verrou 1 : cle invalide, lecture rejetee
+  if(!validGTIN(rawCode))return;              // verrou 1 : longueur ou cle invalide
+  if(qualiteLecture(r)>SCAN_ERREUR_MAX){      // verrou 2 : la camera n'est pas sure d'elle
+    _scanVotes={code:null,count:0};           // on repart de zero : une lecture douteuse
+    return;                                    // ne doit pas compter comme un vote
+  }
   if(_scanVotes.code===rawCode){_scanVotes.count++;}
   else{_scanVotes={code:rawCode,count:1};}
-  if(_scanVotes.count<2){
+  /* TROIS lectures identiques, plus deux. A une dizaine d'images par seconde,
+     la troisieme coute un dixieme de seconde — et deux lectures identiques
+     mais fausses, ca arrive: un code mal eclaire se lit souvent de travers
+     TOUJOURS DE LA MEME FACON. C'est la troisieme qui separe une vraie lecture
+     stable d'une erreur stable. */
+  if(_scanVotes.count<3){
     // Premiere lecture : retour visuel immediat, le scan "reflechit"
     var h=document.getElementById("scan-hint");
-    if(h)h.textContent="Lecture\u2026 garde le code stable";
+    if(h)h.textContent=_scanVotes.count>=2?"Presque\u2026 ne bouge plus":"Lecture\u2026 garde le code stable";
     var f=document.querySelector(".scan-frame");
     if(f)f.classList.add("reading");
     return;                                    // verrou 2 : on attend la confirmation
