@@ -341,6 +341,39 @@ await doit('legitime : tout le monde peut LIRE la chasse (sans compte)',
 await doit('bloque : se declarer administrateur',
   ()=>assertFails(setDoc(doc(m,'admins',MALLORY),{ok:true})));
 
+/* ── LES SIGNALEMENTS ────────────────────────────────────────────────────
+   Le motif vient d'une liste FERMEE : c'est ce qui empeche un formulaire de
+   signalement de devenir un canal pour insulter la personne visee. Et
+   personne ne relit ses propres signalements, meme leur auteur : les ouvrir
+   en lecture ferait de la collection un canal (« je vois que tu m'as
+   signale »). ── */
+await doit('legitime : signaler une decouverte avec un motif de la liste',
+  ()=>assertSucceeds(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'decouverte',cibleId:'d1',motif:'sexuel',
+       apercu:'Nom du produit',at:new Date(),etat:'nouveau'})));
+await doit('bloque : signaler au nom de quelqu un d autre',
+  ()=>assertFails(addDoc(collection(m,'abus'),
+      {par:ALICE,cibleType:'decouverte',cibleId:'d1',motif:'spam',at:new Date(),etat:'nouveau'})));
+await doit('bloque : un motif invente (texte libre deguise)',
+  ()=>assertFails(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'profil',cibleId:'u1',motif:'tu es un imbecile',at:new Date(),etat:'nouveau'})));
+await doit('bloque : un champ en plus pour glisser du texte',
+  ()=>assertFails(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'profil',cibleId:'u1',motif:'spam',
+       message:'insulte',at:new Date(),etat:'nouveau'})));
+await doit('bloque : se declarer deja traite',
+  ()=>assertFails(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'profil',cibleId:'u1',motif:'spam',at:new Date(),etat:'traite'})));
+await doit('bloque : un apercu de plus de 400 caracteres',
+  ()=>assertFails(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'profil',cibleId:'u1',motif:'spam',
+       apercu:'x'.repeat(401),at:new Date(),etat:'nouveau'})));
+await doit('bloque : lire les signalements, meme les siens',
+  ()=>assertFails(getDocs(collection(m,'abus'))));
+await doit('bloque : un type de cible invente',
+  ()=>assertFails(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'magasin',cibleId:'s1',motif:'spam',at:new Date(),etat:'nouveau'})));
+
 /* LE CODE DE PARRAINAGE. Il vivait dans users/{uid}, qui est en lecture
    publique pour faire marcher le classement : lister les profils suffisait a
    reconstituer les codes de tout le monde. La table refCodes (code vers uid)

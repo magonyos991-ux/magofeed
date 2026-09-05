@@ -78,6 +78,14 @@ const BUG_RULES = {
   "no-dupe-args": "error",
   "no-duplicate-case": "error",
   "no-unreachable": "error",      // code derrière un return : mort sans le dire
+  /* UNE EXPRESSION QUI NE FAIT RIEN. Ajouté après avoir écrit exactement ce
+     bug : une ligne « +'<div>…' » collée APRÈS le point-virgule d'une
+     affectation innerHTML. C'est du JavaScript valide — un plus unaire sur une
+     chaîne — donc node --check passe, la page se charge, et le bloc HTML
+     n'apparaît simplement jamais. Aucune erreur, aucun symptôme, un lien de
+     signalement invisible. Les court-circuits (a && f()) et les ternaires
+     restent autorisés : le fichier s'en sert partout, légitimement. */
+  "no-unused-expressions": ["error", { allowShortCircuit: true, allowTernary: true }],
   "no-func-assign": "error",
   "no-cond-assign": "error",      // if (a = b) au lieu de ==
   "no-self-assign": "error",

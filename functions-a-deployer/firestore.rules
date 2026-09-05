@@ -169,6 +169,53 @@ service cloud.firestore {
 
     // ── Notifications in-app : le destinataire lit les siennes et peut les
     //    marquer lues ; SEUL un admin en crée (à la promotion / au rejet photo).
+    /* ══ SIGNALEMENTS ════════════════════════════════════════════════════
+       Magofeed heberge deja du contenu depose par n'importe quel visiteur :
+       photos de decouvertes, suggestions de photos, pseudos et avatars
+       publics. Il n'existait aucun moyen de signaler quoi que ce soit — les
+       deux boutons « signaler » de l'app visent un magasin qui n'existe pas
+       ou une information fausse, jamais un contenu abusif.
+
+       Le mecanisme de notification et action de l'article 16 du reglement
+       europeen sur les services numeriques s'applique quelle que soit la
+       taille du service : l'exemption prevue pour les micro-entreprises ne
+       couvre que les articles 20 a 28. Apple et Google le demandent aussi a
+       la soumission d'une application.
+
+       ON N'EFFACE PAS AVANT D'AVOIR COPIE : le signalement porte lui-meme la
+       description de ce qui est vise, pour que la preuve survive a la
+       suppression du contenu d'origine. Sinon la personne qui signale perd ce
+       qu'elle signalait.
+
+       Personne ne relit ses propres signalements : les ouvrir en lecture,
+       meme a leur auteur, transformerait la collection en canal (« je vois
+       que tu m'as signale »). L'accuse de reception passe par userNotifs. */
+    function signalementValide() {
+      return request.resource.data.keys().hasOnly(
+               ['par','cibleType','cibleId','motif','apercu','at','etat'])
+        && request.resource.data.par == request.auth.uid
+        && request.resource.data.cibleType in ['decouverte','photo','profil','commentaire']
+        && request.resource.data.cibleId is string
+        && request.resource.data.cibleId.size() > 0
+        && request.resource.data.cibleId.size() <= 200
+        /* Liste FERMEE : aucun texte libre ne peut entrer ici, donc aucun
+           signalement ne peut servir a insulter la personne visee. */
+        && request.resource.data.motif in
+             ['alcool','sexuel','haine','harcelement','faux','spam','mineur','autre']
+        && (!('apercu' in request.resource.data)
+            || (request.resource.data.apercu is string
+                && request.resource.data.apercu.size() <= 400))
+        && request.resource.data.etat == 'nouveau';
+    }
+    match /abus/{id} {
+      allow read:   if isAdmin();
+      allow create: if isSignedIn() && signalementValide();
+      /* L'administrateur marque TRAITE, il n'efface pas : le signalement et sa
+         copie du contenu restent, c'est la trace de ce qui a ete decide et
+         quand. La suppression reste possible pour purger apres un an. */
+      allow update, delete: if isAdmin();
+    }
+
     match /userNotifs/{docId} {
       allow read:   if isSignedIn() && resource.data.to == request.auth.uid;
       allow create: if isAdmin();

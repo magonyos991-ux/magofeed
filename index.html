@@ -3592,11 +3592,62 @@ window.fbNettoyerEmojis = async function() {
    est bien enregistree, mais elle ne rapporte rien. Sans cette lecture, la
    panne reste invisible — c'est celle qui a deja bloque tous les points de
    l'application sans que rien ne l'annonce. */
+/* SIGNALER UN CONTENU. Ecrit dans « abus », que seul l'administrateur relit.
+   L'apercu est une COPIE de ce qui est vise, faite au moment du signalement :
+   sans elle, effacer le contenu ferait disparaitre la preuve avec lui, et la
+   personne qui signale se retrouverait a avoir denonce du vide.
+   Le motif vient d'une liste fermee cote regles : rien de ce qui part d'ici ne
+   peut servir a insulter la personne visee. */
+window.fbSignaler = async function(cibleType, cibleId, motif, apercu) {
+  await ensureAuthed();
+  var user = auth.currentUser;
+  if (!user) throw new Error("non connecte");
+  var doc0 = {
+    par: user.uid,
+    cibleType: String(cibleType || "").slice(0, 20),
+    cibleId: String(cibleId || "").slice(0, 200),
+    motif: String(motif || "autre").slice(0, 20),
+    at: serverTimestamp(),
+    etat: "nouveau"
+  };
+  if (apercu) doc0.apercu = String(apercu).slice(0, 400);
+  await addDoc(collection(db, "abus"), doc0);
+  return true;
+};
 window.fbLireSantePoints = async function() {
   try {
     var snap = await getDoc(doc(db, "_meta", "santePoints"));
     return snap.exists() ? (snap.data() || null) : null;
   } catch (e) { return null; }
+};
+/* Les signalements en attente. Reserve a l'administrateur par les regles.
+   Un bouton « signaler » sans ecran pour les lire ne sert a rien : c'est la
+   moitie qui compte. */
+window.fbLireSignalements = async function(combien) {
+  try {
+    var q = query(collection(db, "abus"), where("etat", "==", "nouveau"),
+                  orderBy("at", "desc"), limit(combien || 30));
+    var snap = await getDocs(q);
+    var out = [];
+    snap.forEach(function(d) {
+      var x = d.data() || {};
+      out.push({ id: d.id, par: x.par || "", cibleType: x.cibleType || "",
+                 cibleId: x.cibleId || "", motif: x.motif || "autre",
+                 apercu: x.apercu || "",
+                 quand: (x.at && x.at.toDate) ? x.at.toDate().toISOString() : null });
+    });
+    return out;
+  } catch (e) { console.warn("Lecture des signalements :", e); return null; }
+};
+/* Marquer traite. On ne SUPPRIME pas : le signalement et sa copie du contenu
+   restent, c'est la trace de ce qui a ete decide et quand. */
+window.fbTraiterSignalement = async function(id, decision) {
+  await updateDoc(doc(db, "abus", String(id)), {
+    etat: "traite",
+    decision: String(decision || "").slice(0, 40),
+    traiteLe: serverTimestamp()
+  });
+  return true;
 };
 window.fbLireJournalAdmin = async function(combien) {
   try {
@@ -6560,6 +6611,139 @@ function renderPriceAfterTag(s,did,ctx){
    La protection est posee sur la SEULE fonction qui ecrit, donc les sept
    endroits qui appellent tagScanToStore en heritent sans etre modifies.
    ============================================================================ */
+
+/* ══ SIGNALER UN CONTENU ══════════════════════════════════════════════════
+   Magofeed heberge deja des photos et des pseudos deposes par n'importe quel
+   visiteur, et il n'existait aucun moyen de signaler un contenu abusif : les
+   deux boutons « signaler » de l'app visent un magasin qui n'existe pas ou une
+   information fausse.
+
+   Huit motifs, aucun champ libre. On ne laisse pas ecrire une phrase : un
+   formulaire de signalement en texte libre finit toujours par servir a autre
+   chose que signaler, et il faudrait le moderer lui aussi.
+
+   L'APERCU EST COPIE AU MOMENT DU SIGNALEMENT. Sans ca, effacer le contenu
+   ferait disparaitre la preuve avec lui.
+   ══════════════════════════════════════════════════════════════════════════ */
+var MOTIFS_SIGNALEMENT=[
+  ["alcool","Contient de l'alcool"],
+  ["sexuel","Image ou propos sexuels"],
+  ["haine","Propos haineux ou insultants"],
+  ["harcelement","Harcelement"],
+  ["mineur","Met en danger un mineur"],
+  ["faux","Faux produit, fausse information"],
+  ["spam","Publicite, spam"],
+  ["autre","Autre"]
+];
+/* cibleType : "decouverte" | "photo" | "profil" | "commentaire".
+   apercu : ce qu'on voit du contenu, copie tel quel pour survivre a son
+   effacement (nom du produit, pseudo, description...). */
+function ouvrirSignalement(cibleType,cibleId,apercu,nomLisible){
+  if(!cibleId){toast("Rien a signaler ici");return;}
+  var ov=document.createElement("div");
+  ov.id="signal-sheet";
+  ov.setAttribute("role","dialog"); ov.setAttribute("aria-modal","true");
+  ov.style.cssText="position:fixed;inset:0;z-index:10600;display:flex;align-items:flex-end;"+
+    "background:rgba(12,10,8,.45);-webkit-tap-highlight-color:transparent";
+  var liste=MOTIFS_SIGNALEMENT.map(function(m){
+    return '<div class="sig-motif" data-motif="'+attr(m[0])+'" role="button" tabindex="0" '+
+      'style="padding:13px 14px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);'+
+      'font-size:13.5px;font-weight:700;color:var(--s1);margin-bottom:8px;cursor:pointer">'+sanitize(m[1])+'</div>';
+  }).join("");
+  ov.innerHTML='<div id="signal-carte" style="background:var(--app-bg);border-radius:22px 22px 0 0;'+
+      'padding:18px 20px calc(14px + env(safe-area-inset-bottom));width:100%;max-width:402px;margin:0 auto;'+
+      'max-height:86vh;overflow-y:auto;box-shadow:0 -8px 30px rgba(0,0,0,.3);'+
+      'animation:sheetUp .5s cubic-bezier(.3,1.38,.44,1) both">'+
+      '<div style="font-size:16px;font-weight:800;color:var(--s1)">Signaler</div>'+
+      (nomLisible?'<div style="font-size:12px;color:var(--s2);margin:3px 0 2px">'+sanitize(nomLisible)+'</div>':'')+
+      '<div style="font-size:11.5px;color:var(--s2);margin:6px 0 14px;line-height:1.5">'+
+        'Choisis ce qui ne va pas. On regarde tous les signalements.</div>'+
+      liste+
+      '<div id="signal-annuler" role="button" tabindex="0" style="text-align:center;margin-top:6px;'+
+        'font-size:12.5px;font-weight:700;color:var(--s3);cursor:pointer;padding:10px">Annuler</div>'+
+    '</div>';
+  document.body.appendChild(ov);
+  var fini=false;
+  var fermer=function(){
+    if(fini)return; fini=true;
+    try{document.removeEventListener("keydown",clav,true);}catch(e){}
+    try{ov.remove();}catch(e){}
+  };
+  var clav=function(ev){ if(ev.key==="Escape"){try{ev.preventDefault();}catch(e){}fermer();} };
+  document.addEventListener("keydown",clav,true);
+  var brancher=function(el,fn){
+    if(!el)return;
+    var fait=false;
+    var go=function(ev){
+      if(fait)return; fait=true;
+      try{ev.preventDefault();ev.stopPropagation();}catch(e){}
+      fn();
+    };
+    el.addEventListener("click",go);
+    el.addEventListener("touchend",go,{passive:false});
+    el.addEventListener("keydown",function(ev){
+      if(ev.key==="Enter"||ev.key===" "){try{ev.preventDefault();}catch(e){}go(ev);}
+    });
+  };
+  brancher(ov.querySelector("#signal-annuler"),fermer);
+  ov.addEventListener("click",function(ev){ if(ev.target===ov)fermer(); });
+  Array.prototype.forEach.call(ov.querySelectorAll(".sig-motif"),function(el){
+    brancher(el,function(){
+      var motif=el.getAttribute("data-motif");
+      fermer();
+      if(!window.fbSignaler){toast("Signalement impossible hors ligne");playSound("err");return;}
+      window.fbSignaler(cibleType,cibleId,motif,apercu).then(function(){
+        playSound("pop");
+        toast("Signalement envoyé. Merci, on regarde.");
+      }).catch(function(e){
+        playSound("err");
+        var c=String((e&&(e.code||e.message))||e);
+        toast(/permission/i.test(c)?"Connecte-toi pour signaler":"Envoi impossible, réessaie");
+      });
+    });
+  });
+}
+/* Le petit lien discret a poser sous un contenu. Volontairement pas un bouton
+   voyant : signaler doit etre possible, pas suggere.
+
+   LES DONNEES PASSENT PAR DES ATTRIBUTS, PAS PAR DU CODE DANS L'ATTRIBUT.
+   La premiere version fabriquait un appel JavaScript dans un onclick, avec le
+   nom du produit et le pseudo interpoles dedans. Ca peut marcher — mais il
+   faut alors raisonner juste sur DEUX echappements imbriques, celui de la
+   chaine JavaScript et celui de l'attribut HTML, sur du texte ecrit par
+   n'importe qui. Un ecouteur delegue et quatre data- supprime la question au
+   lieu de la resoudre. */
+function lienSignaler(cibleType,cibleId,apercu,nomLisible){
+  return '<span class="sig-lien" role="button" tabindex="0"'+
+    ' data-sig-type="'+attr(cibleType)+'"'+
+    ' data-sig-id="'+attr(cibleId)+'"'+
+    ' data-sig-apercu="'+attr(String(apercu==null?"":apercu).slice(0,400))+'"'+
+    ' data-sig-nom="'+attr(String(nomLisible==null?"":nomLisible).slice(0,120))+'"'+
+    ' style="font-size:10.5px;font-weight:700;color:var(--s3);cursor:pointer;padding:4px 6px;'+
+    'text-decoration:underline;text-underline-offset:2px">Signaler</span>';
+}
+/* Un seul ecouteur pour toute l'application : les liens peuvent etre crees et
+   detruits a volonte, ils n'ont jamais besoin d'etre rebranches. */
+(function(){
+  var ouvrir=function(el){
+    if(!el)return;
+    ouvrirSignalement(el.getAttribute("data-sig-type"),el.getAttribute("data-sig-id"),
+                      el.getAttribute("data-sig-apercu"),el.getAttribute("data-sig-nom"));
+  };
+  document.addEventListener("click",function(ev){
+    var el=ev.target&&ev.target.closest?ev.target.closest(".sig-lien"):null;
+    if(!el)return;
+    ev.preventDefault(); ev.stopPropagation();
+    ouvrir(el);
+  },true);
+  document.addEventListener("keydown",function(ev){
+    if(ev.key!=="Enter"&&ev.key!==" ")return;
+    var el=ev.target&&ev.target.closest?ev.target.closest(".sig-lien"):null;
+    if(!el)return;
+    ev.preventDefault(); ev.stopPropagation();
+    ouvrir(el);
+  },true);
+})();
 
 /* LA RELECTURE, EN UN COUP D'OEIL.
    Une seule question : est-ce le bon magasin ? Le nom en gros, la boisson en
@@ -18195,7 +18379,15 @@ function renderDiscoveries(){
       discFoundInHTML(d)+
       '<div style="font-size:11px;font-weight:600;margin-top:5px;color:'+(ready?(_discDark?"#4ade80":"#15803d"):(_discDark?"#e5a93a":"#8a5408"))+'">'+
       (ready?"Pr\u00EAte \u00E0 entrer au catalogue !":votes+"/"+ADMIN_VOTE_THRESHOLD+" votes \u00B7 encore "+missing+" pour le catalogue")+'</div></div>'+
-      (voted?'<span style="font-size:12px;font-weight:700;color:var(--txt2);flex-shrink:0">✓ Voté</span>':'<button class="vote-btn" style="background:var(--s1);color:var(--app-bg);min-height:44px" data-vote="'+attr(String(d.id))+'">'+T.vote+'</button>');
+      (voted?'<span style="font-size:12px;font-weight:700;color:var(--txt2);flex-shrink:0">✓ Voté</span>':'<button class="vote-btn" style="background:var(--s1);color:var(--app-bg);min-height:44px" data-vote="'+attr(String(d.id))+'">'+T.vote+'</button>')+
+      /* Une decouverte est un nom, une description et parfois une photo,
+         deposes par n'importe quel visiteur connecte. C'est le contenu le plus
+         exposé de l'app : il lui faut un moyen d'etre signale. Le nom et la
+         description sont copies dans l'apercu, pour que le signalement garde
+         un sens meme si la decouverte est effacee ensuite. */
+      '<div style="flex-basis:100%;text-align:right;margin-top:2px">'+
+        lienSignaler("decouverte",String(d.id||""),String(d.name||"")+" — "+String(desc||""),String(d.name||"Cette découverte"))+
+      '</div>';
     el.appendChild(div);
   });
   /* L'identifiant d'une decouverte est choisi par celui qui cree le document
@@ -20223,6 +20415,8 @@ function renderSecurite(){
     '<div id="sec-sauv" style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px;margin-bottom:10px">'+
       '<div style="font-size:12.5px;color:var(--s2)">Lecture de l\'\u00E9tat des sauvegardes\u2026</div></div>'+
     '<div id="sec-sante" style="display:none;background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px;margin-bottom:10px"></div>'+
+    '<div id="sec-abus" style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px;margin-bottom:10px">'+
+      '<div style="font-size:12.5px;color:var(--s2)">Lecture des signalements\u2026</div></div>'+
     '<div id="sec-journal"></div>';
 
   var bf=document.getElementById("sec-figer-go");
@@ -20337,6 +20531,63 @@ function renderSecurite(){
             'des Cloud Functions, le message y contient l\'adresse \u00E0 cliquer.</div>');
     }).catch(function(){});
   }
+
+  /* LES SIGNALEMENTS. C'est la moitie qui compte : un bouton « signaler »
+     sans ecran pour les lire ne sert a rien. Chaque ligne dit le motif, ce qui
+     est vise, et garde une COPIE du contenu — pour que la preuve survive a sa
+     suppression. Deux issues : « Rien a faire » ou « Traite ». Dans les deux
+     cas on marque, on n'efface pas : la trace de ce qui a ete decide, et
+     quand, est ce qui permet de repondre a une contestation. */
+  var abHost=document.getElementById("sec-abus");
+  var MOTIF_TXT={alcool:"Alcool",sexuel:"Sexuel",haine:"Haine",harcelement:"Harcelement",
+                 mineur:"Danger mineur",faux:"Faux",spam:"Spam",autre:"Autre"};
+  var peindreAbus=function(){
+    if(!abHost)return;
+    if(!window.fbLireSignalements){abHost.style.display="none";return;}
+    window.fbLireSignalements(30).then(function(list){
+      if(list===null){
+        abHost.innerHTML='<div style="font-size:12.5px;color:var(--s2)">Signalements illisibles \u2014 index manquant ou r\u00E8gles pas encore d\u00E9ploy\u00E9es</div>';
+        return;
+      }
+      if(!list.length){
+        abHost.innerHTML='<div style="display:flex;align-items:center;gap:10px">'+
+          '<div style="width:9px;height:9px;border-radius:50%;flex-shrink:0;background:#22c55e"></div>'+
+          '<div style="font-size:13px;font-weight:700;color:var(--s1)">Aucun signalement en attente</div></div>';
+        return;
+      }
+      abHost.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'+
+        '<div style="width:9px;height:9px;border-radius:50%;flex-shrink:0;background:#dc2626"></div>'+
+        '<div style="font-size:13px;font-weight:700;color:var(--s1)">'+list.length+' signalement'+(list.length>1?"s":"")+' \u00E0 regarder</div></div>'+
+        list.map(function(x){
+          return '<div style="padding:10px 12px;background:var(--app-bg);border:1.5px solid var(--border);border-radius:13px;margin-bottom:7px">'+
+            '<div style="font-size:12.5px;font-weight:800;color:#b91c1c">'+sanitize(MOTIF_TXT[x.motif]||x.motif)+
+              '<span style="color:var(--s2);font-weight:600"> \u00B7 '+sanitize(x.cibleType)+'</span></div>'+
+            (x.apercu?'<div style="font-size:11.5px;color:var(--s2);margin-top:3px;word-break:break-word">'+sanitize(x.apercu)+'</div>':'')+
+            '<div style="font-size:10.5px;color:var(--s3);margin-top:3px">'+sanitize(_dateCourte(x.quand)||"")+' \u00B7 '+sanitize(String(x.cibleId).slice(0,40))+'</div>'+
+            '<div style="display:flex;gap:7px;margin-top:8px">'+
+              '<button class="ab-ok" data-ab="'+attr(x.id)+'" type="button" style="flex:1;padding:8px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:11.5px;font-weight:700;cursor:pointer">Rien \u00E0 faire</button>'+
+              '<button class="ab-ko" data-ab="'+attr(x.id)+'" type="button" style="flex:1;padding:8px;border-radius:10px;border:none;background:#b91c1c;color:#fff;font-size:11.5px;font-weight:700;cursor:pointer">Trait\u00E9, retir\u00E9</button>'+
+            '</div></div>';
+        }).join("");
+      var fin=function(b,decision){
+        b.disabled=true; b.textContent="\u2026";
+        window.fbTraiterSignalement(b.getAttribute("data-ab"),decision).then(function(){
+          journaliserAction("Traiter un signalement",{etat:"terminee",compte:1});
+          peindreAbus();
+        }).catch(function(e){
+          b.disabled=false;
+          toast("\u00C9chec : "+String((e&&(e.code||e.message))||e).slice(0,60));
+        });
+      };
+      Array.prototype.forEach.call(abHost.querySelectorAll(".ab-ok"),function(b){
+        b.onclick=function(){fin(b,"rien-a-faire");};
+      });
+      Array.prototype.forEach.call(abHost.querySelectorAll(".ab-ko"),function(b){
+        b.onclick=function(){fin(b,"retire");};
+      });
+    }).catch(function(){ abHost.style.display="none"; });
+  };
+  peindreAbus();
 
   var jHost=document.getElementById("sec-journal");
   if(!window.fbLireJournalAdmin){ jHost.innerHTML=""; return; }
@@ -21106,7 +21357,12 @@ function openUserProfile(u){
       }).join("")+'</div>';
   })()+
   '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px" data-i18n="hisFavs">Ses boissons pr\u00E9f\u00E9r\u00E9es</div>'+
-  (favs.length?'<div id="userprofile-favs" style="display:flex;flex-direction:column;gap:8px"></div>':'<div style="font-size:12.5px;color:var(--s3);padding:8px 0">Aucun favori partag\u00E9 pour l\'instant</div>');
+  (favs.length?'<div id="userprofile-favs" style="display:flex;flex-direction:column;gap:8px"></div>':'<div style="font-size:12.5px;color:var(--s3);padding:8px 0">Aucun favori partag\u00E9 pour l\'instant</div>')+
+  /* Un profil public porte un pseudo et un avatar deposes par la personne :
+     c'est du contenu utilisateur, il doit pouvoir etre signale. Le pseudo est
+     copie dans l'apercu pour que le signalement garde un sens si la personne
+     le change juste apres. */
+  '<div style="text-align:center;margin-top:14px">'+lienSignaler("profil",String(u.uid||u.id||""),"pseudo : "+String(u.pseudo||""),String(u.pseudo||"Ce profil"))+'</div>';
   if(favs.length){
     var box=body.querySelector("#userprofile-favs");
     favs.slice(0,8).forEach(function(d){
