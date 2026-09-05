@@ -61,6 +61,21 @@ await doit('bloque : s ecrire 999999 points',
   ()=>assertFails(setDoc(doc(a,'users',ALICE),{points:999999},{merge:true})));
 await doit('bloque : se donner des points de parrainage',
   ()=>assertFails(setDoc(doc(a,'users',ALICE),{refPoints:5000,refCount:99},{merge:true})));
+/* LA FAILLE QUE CES TROIS TESTS FERMENT. La protection ci-dessus ne portait
+   que sur la MODIFICATION. La CREATION, elle, n'interdisait que les compteurs
+   d'e-mails et la sanction : « points » n'y figurait pas. Or chacun a le droit
+   d'effacer son propre profil. Il suffisait donc de le supprimer, puis de le
+   recreer avec points: 999999 — et toute la protection du classement tombait.
+   Les deux regles partagent desormais une seule liste, champsServeur(). */
+await doit('bloque : CREER son profil avec 999999 points',
+  ()=>assertFails(setDoc(doc(m,'users',MALLORY),{pseudo:'M',points:999999})));
+await doit('bloque : effacer son profil puis le recreer avec des points',
+  async ()=>{ await assertSucceeds(deleteDoc(doc(a,'users',ALICE)));
+              await assertFails(setDoc(doc(a,'users',ALICE),{pseudo:'Alice',points:999999}));
+              await assertSucceeds(setDoc(doc(a,'users',ALICE),{pseudo:'Alice',streak:0})); });
+await doit('legitime : creer un profil normal a l inscription',
+  ()=>assertSucceeds(setDoc(doc(m,'users',MALLORY),
+      {pseudo:'Mallory',avatar:null,favs:[],streak:0,bestStreak:0,confirms:0,signals:0,discAccepted:0})));
 await doit('legitime : avatar photo normal',
   ()=>assertSucceeds(setDoc(doc(a,'users',ALICE),{avatar:{type:'photo',v:'data:image/png;base64,AAAA'}},{merge:true})));
 await doit('legitime : quelqu un confirme une boisson en rayon',

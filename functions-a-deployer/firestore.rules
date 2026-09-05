@@ -60,6 +60,22 @@ service cloud.firestore {
        navigateur de celui qui regardait — administrateur compris — executait
        le contenu. L'app echappe desormais tout a l'affichage ; cette regle est
        la deuxieme barriere, celle qui empeche la valeur d'entrer. */
+    /* Les champs que SEUL le serveur ecrit (Cloud Functions via l'Admin SDK,
+       qui contourne ces regles). Une seule liste, utilisee par create ET par
+       update : les deux regles avaient diverge, et c'est par la que passait la
+       faille. `create` n'interdisait que les compteurs d'e-mails et la
+       sanction ; `points` n'y figurait pas. Comme `allow delete` autorise
+       chacun a effacer son propre profil, il suffisait de le supprimer puis de
+       le recreer avec points: 999999 — la protection posee sur `update` ne
+       servait alors plus a rien. Toute nouvelle colonne calculee par le
+       serveur s'ajoute ICI, et nulle part ailleurs. */
+    function champsServeur() {
+      return ['emailDay','emailCount','emailStartDay','emailStartCount',
+              'emailTestDay','emailTestCount',
+              'penalty','penaltyAt',
+              'points','pointsHerites','pointsPreuves','pointsJour','pointsJourTotal','pointsMaj',
+              'refPoints','refCount','refAt','refCode'];
+    }
     function profilValide() {
       let d = request.resource.data;
       return (!('pseudo' in d) || (d.pseudo is string && d.pseudo.size() <= 24))
@@ -81,9 +97,7 @@ service cloud.firestore {
       /* Les memes interdictions qu'en modification : sinon il suffisait
          d'effacer son profil et de le recreer pour repartir sans penalite. */
       allow create: if isSelf(uid) && profilValide()
-        && !request.resource.data.keys().hasAny(
-             ['emailDay','emailCount','emailStartDay','emailStartCount',
-              'emailTestDay','emailTestCount','penalty','penaltyAt']);
+        && !request.resource.data.keys().hasAny(champsServeur());
       // Les compteurs d'e-mails sont ecrits par les Cloud Functions (Admin SDK,
       // qui contourne ces regles). Le client n'y touche pas, sinon il lui
       // suffirait de les remettre a zero pour contourner l'anti-spam.
@@ -105,10 +119,7 @@ service cloud.firestore {
       //   refCode       le code court du parrain, attribue par le serveur
       allow update: if isSelf(uid)
         && profilValide()
-        && !changed().hasAny(['emailDay','emailCount','emailStartDay','emailStartCount','emailTestDay','emailTestCount',
-                              'penalty','penaltyAt',
-                              'points','pointsHerites','pointsPreuves','pointsJour','pointsJourTotal','pointsMaj',
-                              'refPoints','refCount','refAt','refCode']);
+        && !changed().hasAny(champsServeur());
       allow delete: if isSelf(uid) || isAdmin();
       /* Sous-collections eventuelles (favoris, etc.) : reservees au proprietaire.
          ATTENTION : il faut DEUX segments ({col}/{doc=**}), pas un seul. Ecrit
