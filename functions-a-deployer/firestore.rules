@@ -671,6 +671,37 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    /* LA CHASSE AUX CODES-BARRES.
+       Une fiche de catalogue nee d'une proposition PHOTO arrive sans code : elle
+       existe dans la recherche mais aucun scan ne la trouve. On demande donc a
+       la communaute de les retrouver en rayon. Un document par code-barre
+       propose, et il ne contient qu'une chose qui compte : QUI a confirme.
+
+       CE QUE CES REGLES EMPECHENT, ET C'EST TOUT L'INTERET :
+       - se compter deux fois (le meme uid ne peut pas s'ajouter deux fois) ;
+       - ajouter QUELQU'UN D'AUTRE que soi a la liste des confirmants ;
+       - toucher a autre chose que cette liste apres coup — ni la boisson visee,
+         ni le code, ni l'etat. Le lien propose ne peut donc pas etre detourne
+         vers une autre boisson une fois les confirmations reunies.
+       Poser reellement le code sur la fiche catalogue reste hors de portee du
+       client (catalog est en ecriture isAdmin()) : c'est la Cloud Function qui
+       le fait, a deux confirmations, avec l'Admin SDK. */
+    match /chasseCodes/{barcode} {
+      allow read: if true;
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['drinkId','drinkName','barcode','par','etat','createdAt'])
+        && request.resource.data.par == [request.auth.uid]
+        && request.resource.data.etat == 'attente'
+        && request.resource.data.barcode is string
+        && request.resource.data.barcode.size() <= 20;
+      allow update: if isSignedIn()
+        && resource.data.etat == 'attente'
+        && !(request.auth.uid in resource.data.par)
+        && request.resource.data.par == resource.data.par.concat([request.auth.uid])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['par']);
+      allow delete: if isAdmin();
+    }
+
     /* « Cette personne a soutenu le projet. » Son SEUL usage dans l'app : ne
        plus lui remettre la carte de don sous le nez, et lui dire merci. Ce
        document ne pose aucun droit et ne debloque rien — un don qui debloque
