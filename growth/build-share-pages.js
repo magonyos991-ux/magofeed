@@ -67,6 +67,31 @@ function defaultOgHTML() {
   </body></html>`;
 }
 
+/* Une fiche fusionnee (doublon absorbe par une autre) disparaît de DRINKS, donc
+   sa page /f/<ancien>.html ne serait plus generee — et tout lien deja partage
+   tomberait en 404. On garde donc une page qui pointe vers la fiche conservee.
+   Elle ne coûte rien : quelques centaines d'octets, et un lien partage il y a
+   six mois continue de marcher. */
+function pageFusionneeHTML(ancienId, cible) {
+  const versPage = cible.id + ".html";
+  const titre = "Où trouver " + (cible.name || "cette boisson") + " près de toi";
+  return `<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(titre)} · Magofeed</title>
+<link rel="canonical" href="${esc(BASE + "/f/" + versPage)}">
+<meta name="robots" content="noindex,follow">
+<meta http-equiv="refresh" content="0;url=${esc(versPage)}">
+<link rel="icon" href="../icons/favicon-32.png">
+<body style="background:#1a1714;color:#f6f1e9;font-family:system-ui,sans-serif;text-align:center;padding:40px">
+<p>Cette fiche a été fusionnée avec <a style="color:#e6a15a" href="${esc(versPage)}">${esc(cible.name || "")}</a>.</p>
+<script>location.replace(${JSON.stringify(versPage)});</script>
+</body>
+</html>`;
+}
+
 /* Page de partage d'une boisson : OG spécifiques + redirection dans l'app. */
 function drinkPageHTML(d) {
   const id = d.id;
@@ -77,6 +102,13 @@ function drinkPageHTML(d) {
     "Magofeed te montre les magasins qui l'ont en stock près de chez toi. Gratuit.";
   const prod = firstProductImg(d);
   const ogImg = prod ? prod : (BASE + "/" + OG_DEFAULT_REL);
+  /* On n'annonce 1200x630 que pour NOTRE carte de marque, qui fait vraiment
+     cette taille. Les photos produit d'OpenFoodFacts font 400 px de large
+     (front_xx.N.400.jpg) : declarer 1200x630 dessus fait reserver a WhatsApp
+     et TikTok un cadre trois fois trop grand, et l'apercu — la seule raison
+     d'exister de ces pages — s'affiche etire ou rogne. */
+  const ogDim = prod ? "" :
+    '<meta property="og:image:width" content="1200">\n<meta property="og:image:height" content="630">\n';
   const target = "../index.html#drink=" + id;
   const pageUrl = BASE + "/f/" + id + ".html";
   return `<!doctype html>
@@ -92,9 +124,7 @@ function drinkPageHTML(d) {
 <meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${esc(desc)}">
 <meta property="og:image" content="${esc(ogImg)}">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta property="og:url" content="${esc(pageUrl)}">
+${ogDim}<meta property="og:url" content="${esc(pageUrl)}">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${esc(title)}">
 <meta name="twitter:description" content="${esc(desc)}">
@@ -158,7 +188,28 @@ function drinkPageHTML(d) {
     id: d.id, name: d.name, brand: d.brand, cat: d.cat,
     formats: (d.formats || []).map(f => ({ img: f && f.img ? f.img : null })),
   })));
+  const merges = await page.evaluate(() => window.DRINK_MERGES || {});
   if (!drinks.length) { console.error("Aucune boisson lue depuis DRINKS — abandon."); process.exit(1); }
+
+  /* GARDE-FOU. Ce script efface TOUS les *.html de /f/ avant de les reecrire,
+     et l'etape est en continue-on-error dans le workflow de publication : une
+     lecture partielle de DRINKS (CDN lent, page pas finie de charger) elaguait
+     des centaines de pages sans que rien ne le signale, transformant des URLs
+     partagees en 404. On compare donc au compte du passage precedent, lu dans
+     le manifeste, et on refuse d'ecrire en dessous de 90 %. */
+  const manifPath = path.join(OUT_DIR, "manifest.json");
+  if (fs.existsSync(manifPath)) {
+    try {
+      const avant = JSON.parse(fs.readFileSync(manifPath, "utf8")).count || 0;
+      const seuil = Math.floor(avant * 0.9);
+      if (avant && drinks.length < seuil) {
+        console.error(`Lu ${drinks.length} boissons alors que le passage precedent en avait ${avant}.`);
+        console.error(`En dessous du seuil de ${seuil}, on n'ecrit rien : ce serait effacer des pages deja partagees.`);
+        console.error("Si la baisse est voulue, supprime f/manifest.json et relance.");
+        process.exit(1);
+      }
+    } catch (e) { console.warn("Manifeste illisible, garde-fou inactif :", e.message); }
+  }
 
   // 2) Image OG de marque par défaut (une seule).
   const ogPage = await ctx.newPage();
@@ -182,9 +233,20 @@ function drinkPageHTML(d) {
   }
   // Manifeste : la liste des ids ayant une page (pour info / vérif ; l'app se
   // base de son côté sur ses ids natifs, connus du même tableau DRINKS).
-  fs.writeFileSync(path.join(OUT_DIR, "manifest.json"),
-    JSON.stringify({ generatedFrom: "index.html DRINKS", count: ids.length, ids }, null, 0));
+  // 4) Les fiches fusionnees gardent une page qui renvoie vers celle conservee.
+  const parId = new Map(drinks.map(d => [Number(d.id), d]));
+  let renvois = 0;
+  for (const ancien of Object.keys(merges)) {
+    const cible = parId.get(Number(merges[ancien]));
+    if (!cible) continue;                       // cible communautaire : pas de page
+    if (parId.has(Number(ancien))) continue;    // encore vivante : rien a faire
+    fs.writeFileSync(path.join(OUT_DIR, ancien + ".html"), pageFusionneeHTML(ancien, cible));
+    renvois++;
+  }
 
-  console.log("✓ Pages de partage ->", OUT_DIR + "/  (" + ids.length + " boissons)");
+  fs.writeFileSync(path.join(OUT_DIR, "manifest.json"),
+    JSON.stringify({ generatedFrom: "index.html DRINKS", count: ids.length, ids, renvois }, null, 0));
+
+  console.log("✓ Pages de partage ->", OUT_DIR + "/  (" + ids.length + " boissons, " + renvois + " renvois de fusion)");
   await browser.close();
 })().catch(e => { console.error(e); process.exit(1); });
