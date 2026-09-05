@@ -5974,7 +5974,7 @@ function pickerFetchZone(force){
     window._pickerZoneTs=now;
     window._pickerZoneEnCours=true;
     try{renderStorePicker();}catch(e){}          // affiche « Recherche… » tout de suite
-    window.fbQueryZone(userLat,userLng,12).then(function(list){
+    magoAttendre(window.fbQueryZone(userLat,userLng,12)).then(function(list){
       list=list||[];
       var connus={};
       (STORES||[]).forEach(function(x){connus[String(x.fbId||x.id)]=1;});
@@ -7384,7 +7384,7 @@ function onBarcodeDetected(r){
     renderWhereFound(cachedDrink?{drinkId:cachedDrink.id,code:code}:(cachedDisc?{discoveryId:cachedDisc.id,code:code}:{pendingBarcode:code}));    playSound("win");toast("Déjà scanné : "+cached.name);
   } else {
     res.className="scan-result";
-    res.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:60px;gap:8px"><div class="spinner"></div><div style="font-size:13px;color:var(--s2)">Recherche...</div></div>';
+    res.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:74px">'+magoLoader(true,"Recherche\u2026")+'</div>';
     btn.style.display="none";
     fetchOFFProduct(code)
       .then(function(data){
@@ -7515,6 +7515,53 @@ function onBarcodeDetected(r){
         btn.onclick=startScan;
       });
   }
+}
+/* ── CHARGEMENT : deux formes, un seul vocabulaire ────────────────────────
+   magoLoader() : la goutte et l'onde, quand l'ecran est VIDE et qu'on attend.
+   magoCharge() : la barre fine du haut, quand l'ecran est DEJA rempli et
+   qu'on actualise — elle ne cache rien et ne pousse rien.
+
+   La barre compte les chargements en cours au lieu de s'allumer et s'eteindre
+   au hasard : deux requetes qui se chevauchent ne l'eteignent pas quand la
+   premiere finit. Et un plancher de 320 ms l'empeche de clignoter sur une
+   reponse instantanee — un eclair est plus derangeant qu'une attente. */
+function magoLoader(petit,texte){
+  return '<div style="display:flex;flex-direction:column;align-items:center;gap:10px">'+
+    '<div class="mago-load'+(petit?" sm":"")+'" role="status" aria-label="Chargement"><i></i><i></i><i></i><b></b></div>'+
+    (texte?'<div style="font-size:12px;font-weight:600;color:var(--s2)">'+sanitize(texte)+'</div>':'')+
+  '</div>';
+}
+var _magoChargeN=0,_magoChargeT=0,_magoChargeFin=null;
+function magoCharge(actif){
+  var el=document.getElementById("mago-barre");
+  if(!el){
+    el=document.createElement("div");
+    el.id="mago-barre"; el.setAttribute("aria-hidden","true");
+    el.innerHTML="<i></i>";
+    document.body.appendChild(el);
+  }
+  if(actif){
+    _magoChargeN++;
+    if(_magoChargeFin){clearTimeout(_magoChargeFin);_magoChargeFin=null;}
+    if(_magoChargeN===1){_magoChargeT=Date.now();el.classList.add("on");}
+    return;
+  }
+  _magoChargeN=Math.max(0,_magoChargeN-1);
+  if(_magoChargeN>0)return;
+  var reste=Math.max(0,320-(Date.now()-_magoChargeT));
+  _magoChargeFin=setTimeout(function(){
+    _magoChargeFin=null;
+    if(_magoChargeN===0)el.classList.remove("on");
+  },reste);
+}
+/* Enveloppe une promesse : la barre s'allume pendant, s'eteint apres, quoi
+   qu'il arrive. Sans le finally, un echec reseau laisserait la barre allumee
+   pour toujours. */
+function magoAttendre(promesse){
+  magoCharge(true);
+  var fin=function(){ magoCharge(false); };
+  try{ return Promise.resolve(promesse).then(function(v){fin();return v;},function(e){fin();throw e;}); }
+  catch(e){ fin(); throw e; }
 }
 function sanitize(str){var d=document.createElement("div");d.textContent=str;return d.innerHTML;}
 /* sanitize() passe par textContent : il neutralise < et >, mais PAS le
@@ -14659,7 +14706,7 @@ function osmAnalyze(){
         var k=s.id;if(seen[k])return false;seen[k]=1;return true;
       });
       status.textContent=found.length+" commerces trouv\u00E9s \u00B7 d\u00E9doublonnage\u2026";
-      var zone=window.fbQueryZone?window.fbQueryZone(cLat,cLng,km+0.5):Promise.resolve(STORES||[]);
+      var zone=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,km+0.5)):Promise.resolve(STORES||[]);
       return zone.then(function(existing){
         var news=found.filter(function(c){
           return !existing.some(function(s){
@@ -14828,7 +14875,7 @@ function autoImportZone(cLat,cLng){
       }).filter(Boolean).filter(function(s){var k=s.id;if(seen[k])return false;seen[k]=1;return true;});
       window._exploreDerniereRecherche={etat:"faite",quand:Date.now(),osm:found.length};
       if(!found.length){_relaisMonde(0);return;}
-      var zone=window.fbQueryZone?window.fbQueryZone(cLat,cLng,km+0.5):Promise.resolve(STORES||[]);
+      var zone=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,km+0.5)):Promise.resolve(STORES||[]);
       return zone.then(function(existing){
         var news=found.filter(function(c){
           return !existing.some(function(s){
@@ -16739,7 +16786,7 @@ function exploreLoadStores(useCache){
   var _seq = (window._exploreSeq = (window._exploreSeq || 0) + 1);
   var q;
   if(useCache&&window._exploreRawList){q=Promise.resolve(window._exploreRawList);}
-  else{if(status)status.textContent="Chargement\u2026";q=window.fbQueryZone?window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12)):Promise.resolve(STORES||[]);}
+  else{if(status)status.textContent="Chargement\u2026";q=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12))):Promise.resolve(STORES||[]);}
   q.then(function(list){
     if(_seq!==window._exploreSeq)return;      // un mouvement plus recent a pris la main
     list=list||[];
