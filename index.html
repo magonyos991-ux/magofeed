@@ -6501,18 +6501,23 @@ function renderPriceAfterTag(s,did,ctx){
    endroits qui appellent tagScanToStore en heritent sans etre modifies.
    ============================================================================ */
 
-/* LA FICHE DE RELECTURE. Rend une promesse : true si la personne confirme.
-   Elle n'ecrit rien elle-meme, elle ne fait que demander.
+/* LA RELECTURE, EN UN COUP D'OEIL.
+   Une seule question : est-ce le bon magasin ? Le nom en gros, la boisson en
+   petit au-dessus pour le contexte, la distance en dessous. Deux boutons.
+   Rien d'autre.
+
+   Premiere version : sur-titre, adresse, horaires, vignette de la boisson,
+   phrase d'avertissement, trois boutons. Ilias : « t'en as trop mis, ca doit
+   etre rapide ». Il a raison — a ce rythme on ne lit plus rien, et une fiche
+   qu'on ne lit pas ne protege de rien. Ce qui manquait c'etait le NOM, pas
+   un dossier.
 
    Couche creee a la volee, et non #map-sheet-modal : ce dernier est en
-   z-index 120, il passerait DERRIERE la carte plein ecran qui est en 4100.
-   On se place a 10500 : au-dessus de la carte, des feuilles d'ajout et de
-   #add-drink-ov, sous le garde-fou administrateur.
-
-   Voile volontairement LEGER : on doit continuer de voir la carte et le
-   cercle qui entoure le magasin touche. C'est ce cercle qui tranche le cas
-   des deux enseignes identiques a quatre-vingts metres, qu'aucun texte ne
-   tranchera jamais. */
+   z-index 120, il passerait derriere la carte plein ecran qui est en 4100.
+   Voile leger : on doit continuer de voir le cercle autour du magasin touche,
+   c'est lui qui tranche le cas de deux enseignes identiques a quatre-vingts
+   metres. « Non » ne ferme pas la carte : viser un autre pin EST le
+   « choisir un autre », sans bouton de plus. */
 function confirmerRattachement(ctx,s){
   return new Promise(function(resolve){
     var fini=false;
@@ -6521,77 +6526,43 @@ function confirmerRattachement(ctx,s){
     ov.setAttribute("role","dialog");
     ov.setAttribute("aria-modal","true");
     ov.style.cssText="position:fixed;inset:0;z-index:10500;display:flex;align-items:flex-end;"+
-      "background:rgba(12,10,8,.35);-webkit-tap-highlight-color:transparent";
+      "background:rgba(12,10,8,.3);-webkit-tap-highlight-color:transparent";
 
-    /* CE QU'ON RATTACHE. Trois cas, et les deux derniers n'ont ni vignette ni
-       nom de catalogue : sans ce repli, drinkIconHTML plante sur undefined et
-       la promesse ne se resout jamais. */
-    var d=null,titreBoisson="",sousBoisson="",vignette="";
+    /* Une ligne courte pour dire ce qu'on rattache. Les trois cas doivent
+       repondre : sans repli, une decouverte sans fiche catalogue ferait
+       planter la construction et la promesse ne se resoudrait jamais. */
+    var quoi="";
     try{
       if(ctx.drinkId!=null){
-        d=DRINKS.find(function(x){return Number(x.id)===Number(ctx.drinkId);})||null;
-        if(d){ titreBoisson=d.name; sousBoisson=d.brand||d.cat||""; vignette=drinkIconHTML(d); }
+        var d=DRINKS.find(function(x){return Number(x.id)===Number(ctx.drinkId);});
+        if(d)quoi=d.name;
       }
-      if(!titreBoisson&&ctx.discoveryId!=null){
+      if(!quoi&&ctx.discoveryId!=null){
         var dec=(typeof DISCOVERIES!=="undefined"&&DISCOVERIES)
           ? DISCOVERIES.find(function(x){return String(x.id)===String(ctx.discoveryId);}) : null;
-        titreBoisson=(dec&&dec.name)?dec.name:"Ta découverte";
-        sousBoisson="proposée par la communauté";
+        quoi=(dec&&dec.name)?dec.name:"Ta découverte";
       }
-      if(!titreBoisson&&ctx.pendingBarcode!=null){
-        titreBoisson="Nouveau produit";
-        sousBoisson="code-barres "+String(ctx.pendingBarcode).slice(0,20);
-      }
+      if(!quoi&&ctx.pendingBarcode!=null)quoi="Nouveau produit";
     }catch(e){ console.warn("relecture, boisson:",e); }
-    if(!titreBoisson)titreBoisson="Cette boisson";
 
-    /* L'IDENTITE DU MAGASIN, dans l'ordre ou on la lit pour le reconnaitre. */
-    try{ resolveStoreAddress(s); }catch(e){}
+    /* Une seule ligne d'identite, la plus courte qui distingue deux magasins
+       proches : la distance, et l'enseigne si elle ajoute quelque chose. */
     var bits=[];
-    if(s.brand&&String(s.brand)!==String(s.name))bits.push(sanitize(String(s.brand).slice(0,30)));
-    else if(s.type)bits.push(sanitize(String(s.type).slice(0,30)));
     if(typeof s.dist==="number")bits.push(sanitize(fmtDist(s.dist)));
-    var ligneIdent=bits.join(" · ");
-    var adresse=s.address?sanitize(String(s.address).slice(0,80)):"";
-    var ouvert="",coulOuvert="";
-    try{
-      var lbl=openLabel(s);
-      if(lbl){ ouvert=sanitize(lbl); coulOuvert=openSur(s)?"var(--s2)":"#b45309"; }
-    }catch(e){}
-
-    /* Deja rattache ? awardFree TESTE sans consommer, contrairement a
-       awardOnce qui brule la cle : la fiche peut donc poser la question sans
-       detruire les points. */
-    var deja=false;
-    try{
-      var k="tag:"+(ctx.drinkId!=null?ctx.drinkId:(ctx.discoveryId!=null?"d"+ctx.discoveryId:"b"+ctx.pendingBarcode))+":"+String(s.id);
-      deja=!awardFree(k,FOREVER);
-    }catch(e){}
+    if(s.brand&&String(s.brand)!==String(s.name))bits.push(sanitize(String(s.brand).slice(0,24)));
+    else if(s.type)bits.push(sanitize(String(s.type).slice(0,24)));
 
     ov.innerHTML='<div id="relecture-carte" style="background:var(--app-bg);border-radius:22px 22px 0 0;'+
-        'padding:18px 20px calc(16px + env(safe-area-inset-bottom));width:100%;max-width:402px;margin:0 auto;'+
-        'box-shadow:0 -8px 30px rgba(0,0,0,.28);animation:sheetUp .5s cubic-bezier(.3,1.38,.44,1) both">'+
-        '<div style="font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--s2)">'+
-          'À vérifier avant d\'envoyer</div>'+
-        '<div style="font-size:18px;font-weight:800;color:var(--s1);margin-top:8px;line-height:1.25">'+sanitize(String(s.name||"Ce magasin"))+'</div>'+
-        (ligneIdent?'<div style="font-size:12px;color:var(--s2);margin-top:3px">'+ligneIdent+
-          (ouvert?' · <span style="color:'+coulOuvert+';font-weight:700">'+ouvert+'</span>':'')+'</div>':'')+
-        (adresse?'<div style="font-size:12px;color:var(--s2);margin-top:2px">'+adresse+'</div>':'')+
-        '<div style="display:flex;align-items:center;gap:11px;margin:14px 0 10px;padding:10px 12px;'+
-          'background:var(--bg2);border:1.5px solid var(--border);border-radius:14px">'+
-          (vignette?'<div style="width:38px;height:38px;border-radius:11px;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center">'+vignette+'</div>':'')+
-          '<div style="min-width:0"><div style="font-size:13.5px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(titreBoisson)+'</div>'+
-          (sousBoisson?'<div style="font-size:11.5px;color:var(--s2);margin-top:1px">'+sanitize(sousBoisson)+'</div>':'')+'</div>'+
-        '</div>'+
-        '<div style="font-size:12px;color:var(--s2);line-height:1.5">Tu vas dire que cette boisson se vend ici. Tout le monde le verra, et ça ne peut pas être retiré.</div>'+
-        (deja?'<div style="font-size:12px;font-weight:700;color:#b45309;margin-top:8px">Tu l\'as déjà signalée ici.</div>':'')+
-        '<button id="relecture-oui" type="button" style="width:100%;margin-top:14px;padding:14px;border-radius:14px;border:none;'+
-          'background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer">Oui, c\'est bien ce magasin</button>'+
-        '<button id="relecture-autre" type="button" style="width:100%;margin-top:8px;padding:12px;border-radius:14px;'+
-          'border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer">'+
-          'Ce n\'est pas le bon — en choisir un autre</button>'+
-        '<div id="relecture-annuler" role="button" tabindex="0" style="text-align:center;margin-top:12px;font-size:11.5px;'+
-          'font-weight:700;color:var(--s3);cursor:pointer;padding:6px">Annuler</div>'+
+        'padding:20px 20px calc(16px + env(safe-area-inset-bottom));width:100%;max-width:402px;margin:0 auto;'+
+        'box-shadow:0 -8px 30px rgba(0,0,0,.28);text-align:center;'+
+        'animation:sheetUp .5s cubic-bezier(.3,1.38,.44,1) both">'+
+        (quoi?'<div style="font-size:11.5px;font-weight:700;color:var(--s2)">'+sanitize(quoi)+'</div>':'')+
+        '<div style="font-size:20px;font-weight:800;color:var(--s1);margin-top:4px;line-height:1.2">'+sanitize(String(s.name||"Ce magasin"))+'</div>'+
+        (bits.length?'<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:3px">'+bits.join(" · ")+'</div>':'')+
+        '<button id="relecture-oui" type="button" style="width:100%;margin-top:16px;padding:14px;border-radius:14px;border:none;'+
+          'background:var(--s1);color:var(--app-bg);font-size:15px;font-weight:800;cursor:pointer">C\'est bien ici</button>'+
+        '<div id="relecture-non" role="button" tabindex="0" style="margin-top:10px;font-size:12.5px;font-weight:700;'+
+          'color:var(--s3);cursor:pointer;padding:8px">Non</div>'+
       '</div>';
     document.body.appendChild(ov);
 
@@ -6601,9 +6572,9 @@ function confirmerRattachement(ctx,s){
       try{ov.remove();}catch(e){}
       resolve(!!ok);
     };
-    /* Le verrou de 450 ms est recopie de la porte de securite : sur telephone
-       un appui emet touchend PUIS click, et sans lui le second geste tombe sur
-       ce qui se trouve dessous une fois la feuille retiree. */
+    /* Verrou de la porte de securite : sur telephone un appui emet touchend
+       PUIS click, et sans lui le second geste tombe sur ce qui se trouve
+       dessous une fois la feuille retiree. */
     var brancher=function(el,fn){
       if(!el)return;
       var fait=false;
@@ -6622,8 +6593,7 @@ function confirmerRattachement(ctx,s){
     document.addEventListener("keydown",clavier,true);
 
     brancher(ov.querySelector("#relecture-oui"),function(){sortir(true);});
-    brancher(ov.querySelector("#relecture-autre"),function(){sortir(false);});
-    brancher(ov.querySelector("#relecture-annuler"),function(){sortir(false);});
+    brancher(ov.querySelector("#relecture-non"),function(){sortir(false);});
     /* Toucher a cote ferme sans rien envoyer : c'est le sens le plus sur. */
     ov.addEventListener("click",function(ev){ if(ev.target===ov)sortir(false); });
 
