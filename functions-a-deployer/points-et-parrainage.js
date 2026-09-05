@@ -489,7 +489,16 @@ exports.monCodeParrain = onCall({ region: REGION }, async (req) => {
   if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi d'abord.");
   const u = await db.doc(`users/${uid}`).get();
   const existant = u.exists ? (u.data() || {}).refCode : null;
-  if (existant) return { code: existant };
+  /* On ne rend l'ancien code que s'il EXISTE ENCORE dans refCodes. Revoquer un
+     code se fait en supprimant refCodes/{code} ; sans cette relecture, le
+     parrain continuait de diffuser un code mort : users/{uid}.refCode gardait
+     l'ancienne valeur, elle etait renvoyee telle quelle, et le filleul recevait
+     "code inconnu" sans que personne comprenne pourquoi. Si le code a disparu,
+     on en fabrique un neuf juste en dessous — la revocation devient reelle. */
+  if (existant) {
+    const encore = await db.doc(`refCodes/${existant}`).get();
+    if (encore.exists) return { code: existant };
+  }
   for (let essai = 0; essai < 12; essai++) {
     let code = "";
     for (let i = 0; i < 5; i++) code += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];

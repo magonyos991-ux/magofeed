@@ -1,123 +1,202 @@
 # Bascule : points infalsifiables + parrainage
 
-> À faire dans **cet ordre**. Chaque étape est sûre à elle seule ; c'est
-> l'inversion de deux d'entre elles qui casserait quelque chose, et je dis
-> laquelle à chaque fois.
+> Compte **une heure**, pas quinze minutes. La création des index Firestore
+> demande à elle seule 5 à 15 minutes d'attente, et tu ne peux pas l'accélérer.
 
 ## Pourquoi on fait ça
 
-Aujourd'hui ton application écrit elle-même `users/{uid}.points`, et la règle
-l'autorise. **N'importe qui peut ouvrir la console de son navigateur et
-s'écrire 999 999 points.** Ton classement est falsifiable sans effort
-particulier, et tant que c'est vrai, toute récompense — parrainage compris —
-est décorative.
-
-Après cette bascule, le score n'est plus *déclaré* par le téléphone : il est
-*calculé* par le serveur à partir des documents que les contributions laissent
-réellement dans Firestore. Il n'y a plus rien à falsifier, parce qu'il n'y a
-plus rien à déclarer.
+Le score était *déclaré* par le téléphone : n'importe qui pouvait ouvrir la
+console de son navigateur et s'écrire 999 999 points. Après cette bascule il
+est *calculé* par le serveur à partir des documents que les contributions
+laissent réellement dans Firestore. Il n'y a plus rien à falsifier, parce qu'il
+n'y a plus rien à déclarer.
 
 ---
 
-## Étape 1 — Déployer les fonctions (5 min)
+## Avant de commencer — ce qu'il te faut
+
+**Le projet Cloud Functions n'est pas dans ce dépôt.** Ce dossier
+(`functions-a-deployer/`) ne contient que les fichiers à copier ; il n'y a ici
+ni `firebase.json`, ni `.firebaserc`, ni dossier `functions/`. `firebase deploy`
+ne peut donc pas être lancé depuis ce dépôt. Repère d'abord le dossier où vit
+ton projet Firebase (celui qui contient `firebase.json`), et travaille là-bas.
+
+**Vérifie les versions.** `points-et-parrainage.js` importe
+`firebase-functions/v2/...` et `firebase-admin/firestore`, donc :
+
+- Node 18 minimum (`"engines": {"node": "20"}` dans `functions/package.json`)
+- `firebase-functions` v4 ou plus
+- `firebase-admin` v11 ou plus
+
+Sur un projet resté en v1 / Node 16, le déploiement échoue à l'import.
+
+**Il te faut un document `admins/{ton uid}`.** L'étape 3 en dépend et répondra
+`permission-denied` sinon. Pour connaître ton uid, ouvre l'app puis, dans la
+console du navigateur :
+
+```js
+window.fbAuth.currentUser.uid
+```
+
+Crée ensuite à la main, dans la console Firebase, le document
+`admins/<cet uid>` avec un champ quelconque (`{ok: true}`).
+
+---
+
+## Étape 1 — Les index Firestore d'abord (5 à 15 min d'attente)
+
+**C'est la seule étape qu'il faut vraiment faire en premier**, parce qu'elle
+attend. `dejaCompteAujourdhui` interroge `reports` avec `where('by','==',…)` et
+`where('createdAt','>=',…)` : Firestore exige un index composite, et sans lui
+`crediterContribution` lève une exception à chaque contribution — plus rien
+n'est crédité.
 
 ```bash
-cd magofeed-functions
-# copie points-et-parrainage.js dans le dossier des fonctions,
-# puis ajoute la ligne d'export dans index.js :
-#   Object.assign(exports, require("./points-et-parrainage"));
-firebase deploy --only functions
+firebase deploy --only firestore:indexes
+```
+
+Le fichier `firestore.indexes.json` de ce dossier les déclare déjà. Attends que
+la console Firebase affiche « Activé » pour chacun avant de continuer.
+
+---
+
+## Étape 2 — Déployer les fonctions
+
+Copie `points-et-parrainage.js` dans le dossier `functions/` de ton projet, puis
+ajoute la ligne d'export dans `functions/index.js` :
+
+```js
+Object.assign(exports, require("./points-et-parrainage"));
+```
+
+⚠️ **`firebase deploy --only functions` supprime en production toute fonction
+absente du code source.** Si ton `index.js` n'exporte pas aussi
+`notifications-push.js`, `emails-brevo.js`, `partage.js`, `anti-farm.js`, ces
+fonctions-là seront effacées. Vérifie d'abord ce qui tourne :
+
+```bash
+firebase functions:list
+```
+
+Puis déploie, de préférence fonction par fonction la première fois :
+
+```bash
+firebase deploy --only functions:crediterContribution,functions:crediterDecouverte,functions:crediterEntraide,functions:crediterPromotion,functions:scoreApresSanction,functions:monCodeParrain,functions:utiliserCodeParrain,functions:figerPointsExistants
 ```
 
 **Le double crédit de promotion n'est plus possible.** L'ancien
-`awardPromotionPoints` (`points-serveur-PHASE2.js`) versait lui aussi +50. Vérifié
-en production : il n'a jamais été déployé, et le fichier a été supprimé du dépôt
-pour qu'on ne puisse plus le déployer par mégarde. `crediterPromotion` est
-désormais le seul chemin.
+`awardPromotionPoints` versait lui aussi +50 ; il n'a jamais été déployé et le
+fichier a été supprimé du dépôt. `crediterPromotion` est le seul chemin.
 
-**Rien ne change encore pour personne** à cette étape : les fonctions
-créditent `pointsPreuves`, mais `points` reste écrit par le client. C'est
-voulu — on veut vérifier que les fonctions tournent avant de couper le client.
+**L'ordre entre cette étape et la suivante n'a plus d'importance.**
+`recalculerScore` fige `pointsHerites` dans sa propre transaction dès la
+première contribution d'une personne : même si tu oublies l'étape 3, personne
+ne perd ses points. C'était le vrai piège de cette bascule ; il est désarmé
+dans le code, pas dans la procédure.
 
 ---
 
-## Étape 2 — Figer les soldes actuels (1 min) — **NE PAS SAUTER**
+## Étape 3 — Figer les soldes de tout le monde
 
-C'est cette étape qui fait que **personne ne perd ses points**. Elle recopie le
-solde de chacun dans `pointsHerites`, et le score final vaudra toujours
-`hérité + preuves + parrainage − sanctions`.
+L'étape 2 protège les gens un par un, à leur première contribution. Celle-ci
+traite tout le monde d'un coup, y compris ceux qui ne contribuent jamais.
 
-Depuis l'application, connecté avec ton compte admin, ouvre la console du
-navigateur et lance :
+Ouvre l'app, connecté avec ton compte admin, et dans la console du navigateur :
 
 ```js
-const f = firebase.functions().httpsCallable('figerPointsExistants');
-await f({});
+await window.fbFigerPoints()
 ```
 
-Ou plus simple si tu préfères : depuis la page, tape dans la console
-`await window.fbFigerPoints?.()` — si la fonction n'est pas exposée, utilise la
-forme ci-dessus.
+C'est la **seule** forme qui marche. L'app charge le SDK Firebase *modulaire*
+10.12.2 : `firebase.functions()` n'existe pas et répondrait
+`ReferenceError: firebase is not defined`. Le helper, lui, vise déjà la bonne
+région (`europe-west1`) et pose un timeout de 9 minutes.
 
-Elle répond `{ok:true, traites:N}`. Elle est **rejouable sans risque** : un
-compte déjà figé est ignoré.
+Elle répond `{ok:true, traites:N}`. Elle traite par lots de 300 :
+**relance-la jusqu'à obtenir `traites:0`.**
 
-**Si tu sautes cette étape et que tu passes à l'étape 3, tout le monde retombe
-à ce que les preuves rapportent — donc beaucoup perdent des points.** C'est le
-seul vrai piège de cette bascule.
+Elle est rejouable sans risque **pendant la migration** — un compte déjà figé
+est ignoré. Après, ne la relance plus : un compte créé depuis la bascule n'a
+pas de `pointsHerites`, et la relancer recopierait son `points` (qui contient
+déjà le parrainage) dans `pointsHerites`, comptant le parrainage deux fois.
 
 ---
 
-## Étape 3 — Publier les règles (2 min)
+## Étape 4 — Publier les règles
 
 Console Firebase → **Firestore Database → Règles** → colle le contenu de
 `firestore.rules` → **Publier**.
 
-À partir de là :
-- le client ne peut plus écrire `points`, `refPoints`, `refCode` ni les
-  compteurs de preuves ;
-- il ne peut plus marquer ses propres contributions comme « déjà payées » ;
-- `refCodes` et `referrals` sont fermés en écriture au client — seul le
-  serveur y touche.
+⚠️ **Lis d'abord les marqueurs `ADAPTE` en haut du fichier** : il faut choisir
+la casse de la collection magasins (`stores` ou `Stores`) et vérifier la région.
 
-**Ne fais pas l'étape 3 avant l'étape 1.** Sinon les fonctions n'existent pas
-encore, le client ne peut plus écrire, et plus rien ne crédite : les compteurs
-gèleraient jusqu'au déploiement.
+⚠️ **Ce fichier ne touche pas que les points.** Il restreint aussi la lecture de
+`reports`, ferme `refCodes`, `referrals` et `penalties`, et modifie `presence`,
+`hunts`, `userNotifs`, `discoveries`. **Copie tes règles actuelles dans un
+fichier avant de publier** — la console Firebase garde un historique, mais
+autant ne pas en dépendre.
+
+Avant de publier, fais tourner le banc d'essai :
+
+```bash
+cd functions-a-deployer/tests-regles
+npm install          # une seule fois
+npm test
+```
+
+Il attaque une base jetable locale et échoue si une attaque réussit. Si une
+ligne passe de `ok` à `ECHEC`, **ne publie pas**.
 
 ---
 
-## Étape 4 — Vérifier (5 min)
+## Étape 5 — Vérifier
 
 1. Ouvre l'app, confirme un stock quelque part.
-2. Console Firebase → Firestore → `reports` → le document doit recevoir
-   `counted:true` et `credited:3` en quelques secondes.
+2. Console Firebase → `reports` → le document reçoit `counted:true` et
+   `credited:3` en quelques secondes. *S'il ne reçoit rien, l'index de
+   l'étape 1 n'est pas actif.*
 3. `users/{ton uid}` → `pointsPreuves` a augmenté, et `points` vaut
-   `pointsHerites + pointsPreuves`.
-4. Refais **la même** confirmation, même magasin, même boisson : le second
-   document doit recevoir `credited:0` et `raison:"rejeu"`. C'est l'anti-rejeu.
-5. Dans la console du navigateur, essaie de tricher :
+   **`pointsHerites + pointsPreuves + refPoints − penalty`**. (La formule
+   complète : sur un compte sanctionné ou parrainé, `hérité + preuves` seul ne
+   tombera pas juste.)
+4. Essaie de tricher, dans la console du navigateur. L'app expose déjà ce
+   qu'il faut (`window.db`, `fbDoc`, `fbUpdateDoc`, `fbAuth`) — le SDK est
+   modulaire 10.12.2, donc **pas** de `firebase.firestore()`, qui n'existe pas
+   et répondrait `ReferenceError` : tu conclurais à tort que les règles ne sont
+   pas publiées.
+
    ```js
-   // doit échouer avec « Missing or insufficient permissions »
-   firebase.firestore().doc('users/'+firebase.auth().currentUser.uid)
-     .set({points: 999999}, {merge:true});
+   // Doit échouer : « Missing or insufficient permissions »
+   await window.fbUpdateDoc(
+     window.fbDoc(window.db, 'users', window.fbAuth.currentUser.uid),
+     { points: 999999 }
+   );
    ```
-   Si ça passe, l'étape 3 n'a pas été publiée.
+
+   Si ça passe, l'étape 4 n'a pas été publiée.
+
+5. La seconde attaque — **effacer son profil pour le recréer avec des points** —
+   ne se teste pas depuis la console sans détruire ton propre profil. Elle est
+   couverte par le banc d'essai de l'étape 4, qui la rejoue sur une base
+   jetable. Elle passait encore récemment : `allow create` n'interdisait pas
+   `points` alors que `allow update` le faisait.
 
 ---
 
 ## Le parrainage
 
-Rien à faire de plus : il est dans le même fichier de fonctions.
+Rien à déployer de plus : il est dans le même fichier.
 
-**Comment ça marche pour la personne.** Elle touche « Inviter un ami » : le
-serveur lui fabrique un code court (5 caractères, sans I/L/O/U pour qu'on
-puisse le dicter au téléphone) et le glisse dans le lien partagé. Son ami
-arrive, le code est retenu, et une intention de parrainage est enregistrée.
+**Comment ça marche.** La personne touche « Inviter un ami » : le serveur lui
+fabrique un code court (5 caractères, sans I/L/O/U pour qu'on puisse le dicter
+au téléphone) et le glisse dans le lien partagé, sous la forme `#p=CODE`.
 
-**Quand la récompense tombe.** Pas à l'inscription — créer un compte ne coûte
-rien ici, la connexion anonyme est automatique, donc payer l'arrivée
-reviendrait à installer une imprimante à points. On paie quand le filleul est
-devenu **réellement actif** :
+⚠️ **Le code n'est créé qu'au premier appui sur « Inviter un ami ».** Et si
+`monCodeParrain` n'est pas déployée, l'app partage silencieusement un lien
+**sans code**. Vérifie que la fonction répond avant d'annoncer le parrainage à
+qui que ce soit.
+
+**Quand la récompense tombe.**
 
 | Condition | Valeur |
 |---|---|
@@ -129,15 +208,23 @@ devenu **réellement actif** :
 | Filleul | +10 points |
 | Plafond | 3 par semaine, 10 à vie |
 
-**Exposition maximale si tout va mal : 200 points par compte, à vie.** C'est le
-seul chiffre à retenir. À ce prix-là, farmer demande plus de travail que de
-contribuer honnêtement — et c'est exactement ce qu'on cherche.
+⚠️ **Le délai de 7 jours n'est pas un minuteur.** `evaluerParrainage` n'est
+appelée que depuis `crediterContribution` et `crediterDecouverte` : la
+récompense tombe à la **prochaine contribution du filleul après le 7e jour**,
+pas toute seule le 7e jour. Un filleul qui remplit ses trois conditions puis
+disparaît ne rapporte jamais rien.
+
+**Exposition maximale : 210 points par compte** — 200 comme parrain (10 × 20)
+et 10 comme filleul. Et c'est un plafond **par compte**, pas par personne :
+rien ne borne le nombre de comptes qu'on peut créer. À ce prix-là, farmer
+demande plus de travail que contribuer honnêtement, ce qui est exactement le
+but.
 
 **Le lien ne contient jamais ton identifiant.** `users/{uid}` est lisible par
 tout le monde (c'est ce qui fait marcher le classement), donc un identifiant
 collé dans un groupe WhatsApp serait une clé de lecture permanente vers ton
-profil. Un code court, lui, se révoque : il suffit de supprimer le document
-`refCodes/{code}`.
+profil. Un code court, lui, se révoque : supprime le document
+`refCodes/{code}`, et `monCodeParrain` en fabriquera un neuf au prochain appel.
 
 ---
 
@@ -147,6 +234,18 @@ profil. Un code court, lui, se révoque : il suffit de supprimer le document
 réellement 3 contributions honnêtes pour débloquer le parrainage d'un ami. Ce
 n'est d'ailleurs pas de la triche : les contributions sont vraies, l'app y
 gagne. Le plafond de 10 filleuls borne le tout.
+
+**Effacer son profil efface sa sanction.** `allow delete` autorise chacun à
+supprimer son propre document, et `penalty` est absent d'un document neuf. Le
+score repart donc à zéro — on ne gagne rien, mais on efface une sanction.
+Corriger cela demande de déplacer la sanction dans une collection que
+l'utilisateur ne peut pas supprimer. **Ce n'est pas fait.**
+
+**Le barème et la sanction ne sont plus cohérents.** `anti-farm.js` retire 10
+points avec le commentaire « exactement ce que rapportait l'annonce stock », or
+une annonce de stock rapporte désormais 3 (`BAREME_REPORT.stock`). La sanction
+vaut plus de trois fois le gain. À trancher — ce n'est pas forcément un défaut,
+mais ce n'est plus ce qui était écrit.
 
 **Les récompenses locales ne comptent plus au classement.** Série de jours,
 missions quotidiennes, note d'une boisson, partage : elles ne laissent aucune
