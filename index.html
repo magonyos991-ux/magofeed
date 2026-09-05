@@ -1705,13 +1705,12 @@ async function queryNearbyStoresByGeohash(lat, lng, radiusKm) {
 /* Fusions de fiches : ancien id -> id conserve. Applique au chargement de chaque
    magasin : les references Firestore aux anciens ids restent valides sans migration.
    Les fusions decidees par l'admin sont dans meta/drinkMerges et chargees au boot. */
-window.DRINK_MERGES = { 11286: 3301, 11287: 3300,
-  11433: 10068, 11434: 11224,   // Hawai -> Hawaï (Tropical, Ananas)
-  11235: 14,     11055: 3500,   // Mecca-Cola -> Mecca Cola ; Club-Mate -> Club Mate
-  11037: 10060,  11288: 10066,  // Sprite Zero -> Sprite Zéro ; Canada Dry (doublon)
-  11306: 10112,  11460: 11016,  // Uludag -> Uludağ ; Nalu Exotic (doublon)
-  11302: 11088,  11303: 11089   // Binggrae Banana / Strawberry (doublons)
-};
+/* La table statique est declaree plus bas, dans un script ORDINAIRE, juste
+   avant le chargement du catalogue : ce module-ci est differe et depend du CDN
+   Firebase, si bien que les fusions connues d'avance n'existaient pas tant que
+   le reseau n'avait pas repondu — et les doublons restaient visibles. Ici on
+   garantit seulement l'objet ; fbLoadDrinkMerges y ajoute celles du serveur. */
+window.DRINK_MERGES = window.DRINK_MERGES || {};
 function remapDrinkId(x) { return window.DRINK_MERGES[Number(x)] || Number(x); }
 function applyMergesToStore(data) {
   if (data.drinks && data.drinks.length) {
@@ -4096,7 +4095,39 @@ window.fbLoadCommunityData();
      d'exécution n'a aucune importance ici. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js" integrity="sha512-bCsBoYoW6zE0aja5xcIyoCDPfT27+cGr7AOCqelttLVRGay6EKGQbR6wm6SUcUGOMGXJpj+jrIpMS6i80+kZPw==" crossorigin="anonymous" async></script>
 
+<script>
+/* Fusions de fiches connues d'avance : ancien id -> id conserve. Declarees ici,
+   dans un script ordinaire execute pendant l'analyse du document, et non dans
+   le module Firebase qui est differe : un doublon doit disparaitre au
+   chargement du catalogue, pas a la reponse du reseau. */
+window.DRINK_MERGES = { 11286: 3301, 11287: 3300,
+  11433: 10068, 11434: 11224,   // Hawai -> Hawaï (Tropical, Ananas)
+  11235: 14,     11055: 3500,   // Mecca-Cola -> Mecca Cola ; Club-Mate -> Club Mate
+  11037: 10060,  11288: 10066,  // Sprite Zero -> Sprite Zéro ; Canada Dry (doublon)
+  11306: 10112,  11460: 11016,  // Uludag -> Uludağ ; Nalu Exotic (doublon)
+  11302: 11088,  11303: 11089,  // Binggrae Banana / Strawberry (doublons)
+  // Doublons trouves en verifiant les codes-barres (septembre 2026) : deux
+  // fiches pour un meme produit, ecrites differemment. On garde la plus
+  // ancienne, sauf pour Camlica ou l'on conserve l'orthographe turque exacte,
+  // comme deja fait pour Uludag -> Uludag.
+  11126: 10049,  // Rauch Happy Day Orange -> Happy Day Orange (meme photo OFF)
+  11110: 10079,  // Selecto -> Hamoud Boualem Selecto
+  11061: 2401,   // Jarritos Tamarindo -> la fiche 2401, renommee Tamarindo
+  11324: 11238,  // Camlica Gazoz -> Camlica Gazoz (orthographe turque)
+  13088: 11347   // Mogu Mogu Bubble Gum -> Mogu Mogu Bubblegum
+};
+</script>
 <script src="data/drinks.js"></script>
+<script>
+/* Les fusions ci-dessus sont connues des maintenant : on les applique tout de
+   suite. Celles decidees par l'admin arrivent plus tard et restent traitees
+   par l'ecouteur "fbMergesLoaded". */
+try{
+  if(window.DRINKS&&window.DRINK_MERGES){
+    window.DRINKS=window.DRINKS.filter(function(d){return !window.DRINK_MERGES[Number(d.id)];});
+  }
+}catch(e){}
+</script>
 <script src="data/alcool.js"></script>
 <script src="data/drinkart.js"></script>
 <script src="data/state.js"></script>
@@ -6809,7 +6840,7 @@ function confirmFamilyFormat(family,barcode,fmt){
   // Localement : le code-barre rejoint la famille tout de suite
   // (le prochain scan du meme code sera reconnu sans OFF)
   if(!family.barcodes)family.barcodes=[];
-  if(family.barcodes.indexOf(String(barcode))===-1)family.barcodes.push(String(barcode));
+  if(indexCode(family.barcodes,barcode)===-1)family.barcodes.push(String(barcode));
   /* ET SUR LE DISQUE. Le tableau ci-dessus vit en memoire : il repart a chaque
      rechargement, et la personne se retrouvait devant la meme question apres
      avoir deja repondu. */
@@ -6949,7 +6980,7 @@ function dateCourte(ts){
    ne fait plus dire « au catalogue »). */
 function findStatus(e){
   var code=String(e.code||"");
-  var drink=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(code)!==-1&&!barcodeDisavowed(code,x.id);});
+  var drink=DRINKS.find(function(x){return porteCode(x.barcodes,code)&&!barcodeDisavowed(code,x.id);});
   if(!drink&&e.drinkId!=null)drink=DRINKS.find(function(x){return Number(x.id)===Number(e.drinkId);})||null;
   // Entrees d'avant : reconnues au catalogue au moment du scan (src catalog /
   // format) mais sans identifiant memorise — on retrouve la boisson par son nom.
@@ -7134,9 +7165,28 @@ var _scanVotes={code:null,count:0};
 function badLinks(){
   try{ return JSON.parse(localStorage.getItem("magoBadLinks")||"{}")||{}; }catch(e){ return {}; }
 }
+/* Un meme article se lit sous plusieurs longueurs : EAN-8 (8 chiffres), UPC-A
+   (12) et EAN-13 (13) designent le meme produit, les formes courtes n'etant
+   que la longue privee de ses zeros de tete. Selon le decodeur, le lecteur du
+   telephone rend tantot l'une, tantot l'autre — et jusqu'ici on comparait les
+   chaines telles quelles : un produit enregistre en 13 chiffres ne repondait
+   jamais a son propre scan en 12. On compare desormais la forme sans zeros. */
+function codeNu(c){ return String(c==null?"":c).replace(/\D/g,"").replace(/^0+/,""); }
+function indexCode(liste,code){
+  var x=codeNu(code);
+  if(!liste||!liste.length||!x)return -1;
+  for(var i=0;i<liste.length;i++) if(codeNu(liste[i])===x) return i;
+  return -1;
+}
+function porteCode(liste,code){ return indexCode(liste,code)!==-1; }
 function barcodeDisavowed(code,drinkId){
-  var l=badLinks()[String(code)];
-  return !!l && l.indexOf(Number(drinkId))!==-1;
+  var all=badLinks(), x=codeNu(code);
+  for(var k in all){
+    if(!Object.prototype.hasOwnProperty.call(all,k))continue;
+    if(codeNu(k)!==x)continue;
+    if(all[k] && all[k].indexOf(Number(drinkId))!==-1) return true;
+  }
+  return false;
 }
 /* ── LES LIENS CODE-BARRE ↔ BOISSON POSES PAR LA PERSONNE ELLE-MEME ───────
    Quand quelqu'un dit « ce code, c'est cette boisson-la », confirmFamilyFormat
@@ -7163,7 +7213,7 @@ function linkBarcodeLocally(code,drinkId){
    plus fort que dire « oui ». */
 function drinkForBarcode(code){
   var c=String(code);
-  var d=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(c)!==-1&&!barcodeDisavowed(c,x.id);});
+  var d=DRINKS.find(function(x){return porteCode(x.barcodes,c)&&!barcodeDisavowed(c,x.id);});
   if(d)return d;
   var id=ownLinks()[c];
   if(id==null||barcodeDisavowed(c,id))return undefined;
@@ -7171,7 +7221,7 @@ function drinkForBarcode(code){
   /* Le lien remis dans le tableau en memoire : tout le reste de l'app
      (« nouveau format detecte », renderWhereFound, l'historique) continue de
      lire drink.barcodes sans rien savoir de ce stockage. */
-  if(perso){ if(!perso.barcodes)perso.barcodes=[]; if(perso.barcodes.indexOf(c)===-1)perso.barcodes.push(c); }
+  if(perso){ if(!perso.barcodes)perso.barcodes=[]; if(indexCode(perso.barcodes,c)===-1)perso.barcodes.push(c); }
   return perso;
 }
 function disavowBarcode(code,drinkId){
@@ -7193,7 +7243,7 @@ function disavowBarcode(code,drinkId){
   try{
     var d=DRINKS.find(function(x){return Number(x.id)===Number(drinkId);});
     if(d&&d.barcodes){
-      var i=d.barcodes.indexOf(String(code));
+      var i=indexCode(d.barcodes,code);
       if(i!==-1)d.barcodes.splice(i,1);
     }
   }catch(e){}
@@ -14194,7 +14244,7 @@ function rafaleAddCode(code){
   // Anti-rebond : le même code tenu en main déclenche plusieurs lectures.
   if(window._rafaleLast&&window._rafaleLast.code===code&&(now-window._rafaleLast.ts)<3000){window._rafaleLast.ts=now;return;}
   window._rafaleLast={code:code,ts:now};
-  var d=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(code)!==-1&&!barcodeDisavowed(code,x.id);});
+  var d=DRINKS.find(function(x){return porteCode(x.barcodes,code)&&!barcodeDisavowed(code,x.id);});
   if(!d){
     rafaleFlash("#f59e0b");playSound("err");rafaleNote("Pas au catalogue — au suivant","#fbbf24");
     if(navigator.vibrate)try{navigator.vibrate(30);}catch(e){}
@@ -19257,7 +19307,7 @@ function renderFormatSuggestions(){
       card.querySelector(".fs-ok").onclick=function(){
         if(d){
           if(!d.barcodes)d.barcodes=[];
-          if(d.barcodes.indexOf(String(r.barcode))===-1)d.barcodes.push(String(r.barcode));
+          if(indexCode(d.barcodes,r.barcode)===-1)d.barcodes.push(String(r.barcode));
           if(r.type){if(!d.formats)d.formats=[];
             if(!d.formats.some(function(f){return f.type===r.type&&Number(f.cl)===Number(r.cl);}))d.formats.push(r.cl?{type:r.type,cl:r.cl}:{type:r.type});}
         }
@@ -19682,7 +19732,7 @@ function renderContribFeed(){
             fix.textContent="\u2713 Retire";fix.style.background="#16a34a";
             try{
               var dd=DRINKS.find(function(x){return String(x.id)===String(_did);});
-              if(dd&&dd.barcodes){var i=dd.barcodes.indexOf(String(_code));if(i!==-1)dd.barcodes.splice(i,1);}
+              if(dd&&dd.barcodes){var i=indexCode(dd.barcodes,_code);if(i!==-1)dd.barcodes.splice(i,1);}
             }catch(e){}
           }).catch(function(){ fix.textContent="\u00C9chec \u2014 r\u00E9essaie";fix.style.background="#dc2626"; });
         };
