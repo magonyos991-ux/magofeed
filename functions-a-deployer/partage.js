@@ -7,7 +7,7 @@
  * en UNE page : quelle que soit la boisson partagée, c'est toujours le même
  * index.html qui est lu — donc toujours la même vignette générique.
  *
- * Les 571 boissons du catalogue du fichier ont déjà leur page pré-générée
+ * Les boissons du catalogue du fichier ont déjà leur page pré-générée
  * (dossier f/). Mais deux choses n'en ont pas, et ce sont justement les plus
  * partageables :
  *   - les boissons ajoutées par la communauté (elles vivent dans Firestore,
@@ -88,6 +88,20 @@ function page(o) {
 <meta name="twitter:image" content="${esc(o.image)}">
 <meta name="theme-color" content="#1a1714">
 <link rel="icon" href="${esc(APP_URL)}icons/favicon-32.png">
+<!-- Meme decision que pour les 570 pages pre-generees de /f/, et pour la meme
+     raison : ce sont des tremplins d'apercu, pas des pages a lire. Elles
+     redirigent toutes vers l'app, ne contiennent qu'une phrase, et Google
+     appelle « pages satellites » un lot de pages quasi identiques qui
+     canalisent vers une autre — le risque de sanction porte sur le DOMAINE
+     ENTIER, donc sur l'app elle-meme.
+     C'est plus vrai ici qu'ailleurs : contrairement a /f/, cette page est
+     fabriquee a partir de CONTENU COMMUNAUTAIRE — un nom de boisson ou de
+     magasin ecrit par n'importe qui. Le laisser entrer dans l'index de Google
+     sans moderation, c'est y publier ce qu'on n'a pas relu.
+     Les robots des reseaux sociaux ignorent cette balise : les apercus de
+     liens partages continuent de s'afficher exactement pareil — c'est meme
+     tout l'objet de cette fonction, et il est preserve. -->
+<meta name="robots" content="noindex,follow">
 <meta http-equiv="refresh" content="0;url=${cible}">
 <style>
   html,body{height:100%;margin:0}
