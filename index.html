@@ -2223,6 +2223,15 @@ window.fbLoadDrinkPhoto = async function(drinkId) {
 };
 /* Retrait d'une boisson promue par erreur (doublon Golden Power...) :
    supprime du catalogue partage — reserve a l'admin par les regles. */
+/* Coller un code-barre sur une fiche du catalogue. Reserve a l'administrateur
+   (regles : catalog est en ecriture isAdmin()). Sert a reparer les fiches nees
+   d'une proposition PHOTO, qui arrivent sans code et restent donc introuvables
+   au scan — voir renderFichesSansCode(). */
+window.fbSetCatalogBarcodes = async function(drinkId, barcodes) {
+  await setDoc(doc(db, "catalog", String(drinkId)),
+    { barcodes: (barcodes || []).map(String), updatedAt: serverTimestamp() },
+    { merge: true });
+};
 window.fbRemoveCatalogDrink = async function(drinkId) {
   await deleteDoc(doc(db, "catalog", String(drinkId)));
   try { await deleteDoc(doc(db, "drinkPhotos", String(drinkId))); } catch (e) {}
@@ -19157,6 +19166,7 @@ function renderAdmin(){
   renderPhotoSuggestions();
   try{ renderShopClaims(); }catch(e){ console.warn("shopClaims:",e); }
   renderFormatSuggestions();
+  try{ renderFichesSansCode(); }catch(e){ console.warn("sansCode:",e); }
   renderAdminHistory();
   try{ renderSecurite(); }catch(e){ console.warn("securite:",e); }
   var pending=DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected&&!nameLooksAlcoholic(d.name,d.brand);});
@@ -19229,6 +19239,84 @@ function renderAdmin(){
    examine ("cette photo est-elle meilleure ?") puis les traite. Pour
    appliquer une meilleure photo publiquement, l'outil de la fiche
    (fiche Open Food Facts) reste la voie officielle. */
+/* ── LES FICHES QU'AUCUN SCAN NE PEUT TROUVER ─────────────────────────────
+   Une fiche de catalogue sans code-barre n'est atteignable que par son nom.
+   Personne ne s'en rend compte : elle existe, elle s'affiche dans la recherche,
+   elle a sa photo — mais scanner le produit qu'elle decrit repond « pas encore
+   dans Magofeed », et la personne cree un doublon. C'est arrive au
+   « Golden Power Energy drink ».
+   ON NE LISTE QUE LES FICHES VENUES DE FIRESTORE, reconnaissables a leur
+   identifiant : promoteDiscovery pose Date.now(), soit 13 chiffres. Les 595
+   boissons du fichier de base qui n'ont pas de code-barre ne sont pas un
+   probleme a reparer — elles n'ont jamais pretendu en avoir, et les noyer dans
+   cette liste la rendrait inutilisable. */
+function renderFichesSansCode(){
+  var host=document.getElementById("admin-sans-code");
+  if(!host){
+    host=document.createElement("div");
+    host.id="admin-sans-code";
+    var list=document.getElementById("admin-list");
+    if(list&&list.parentNode)list.parentNode.insertBefore(host,list);
+  }
+  host.innerHTML="";
+  var orphelines=(window.DRINKS||[]).filter(function(d){
+    return Number(d.id)>=1e12&&!(d.barcodes&&d.barcodes.length);
+  });
+  if(!orphelines.length)return;
+  var hd=document.createElement("div");
+  hd.style.cssText="font-size:13px;font-weight:800;color:var(--s1);margin:4px 0 4px";
+  hd.textContent="Fiches sans code-barre ("+orphelines.length+")";
+  host.appendChild(hd);
+  var sub=document.createElement("div");
+  sub.style.cssText="font-size:11.5px;font-weight:600;color:var(--s2);line-height:1.45;margin:0 0 10px";
+  sub.textContent="Elles existent dans la recherche, mais scanner le produit ne les trouve pas \u2014 et cr\u00E9e un doublon. Scanne-le, ou colle son code.";
+  host.appendChild(sub);
+  orphelines.forEach(function(d){
+    var row=document.createElement("div");
+    row.style.cssText="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:13px;background:var(--bg2);border:1.5px solid var(--border);margin-bottom:7px";
+    row.innerHTML='<div style="flex:1;min-width:0">'+
+      '<div style="font-size:13px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(d.name||"")+'</div>'+
+      '<div style="font-size:11px;font-weight:600;color:var(--s2)">'+sanitize(d.brand||"")+'</div></div>';
+    var btn=document.createElement("span");
+    btn.setAttribute("role","button");btn.setAttribute("tabindex","0");
+    btn.style.cssText="flex-shrink:0;padding:9px 12px;border-radius:11px;background:var(--s1);color:var(--app-bg);font-size:11.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent";
+    btn.textContent="Coller le code";
+    var poser=function(){
+      var c=prompt("Code-barre de \u00AB "+String(d.name||"")+" \u00BB :\n\nCelui imprim\u00E9 sur le produit. V\u00E9rifie la variante \u2014 un code = UNE boisson pr\u00E9cise.","");
+      if(c===null)return;
+      c=String(c).replace(/[^0-9]/g,"");
+      if(c.length<6||!validGTIN(c)){toast("Code-barre invalide");playSound("err");return;}
+      /* Deja pris par une autre boisson ? Deux fiches portant le meme code, et
+         le scan devient un tirage au sort. */
+      var prise=(window.DRINKS||[]).find(function(x){
+        return x!==d&&x.barcodes&&x.barcodes.indexOf(c)!==-1;
+      });
+      if(prise){toast("Ce code est d\u00E9j\u00E0 sur \u00AB "+prise.name+" \u00BB");playSound("err");return;}
+      if(!d.barcodes)d.barcodes=[];
+      d.barcodes.push(c);
+      try{linkBarcodeLocally(c,d.id);}catch(e){}
+      if(window.fbSetCatalogBarcodes){
+        window.fbSetCatalogBarcodes(d.id,d.barcodes).then(function(){
+          toast("\u2713 "+d.name+" est maintenant trouvable au scan");playSound("win");
+          try{renderFichesSansCode();}catch(e){}
+        }).catch(function(e){
+          /* L'ecriture partagee a echoue : on ne ment pas en disant que c'est
+             regle. Le lien local, lui, tient pour cet appareil. */
+          console.warn("fbSetCatalogBarcodes:",e&&e.message);
+          toast("Enregistr\u00E9 sur cet appareil seulement (\u00E9criture catalogue refus\u00E9e)");
+          playSound("err");
+        });
+      }else{
+        toast("Enregistr\u00E9 sur cet appareil");playSound("pop");
+        try{renderFichesSansCode();}catch(e){}
+      }
+    };
+    btn.onclick=poser;
+    btn.onkeydown=function(ev){if(ev.key==="Enter")poser();};
+    row.appendChild(btn);
+    host.appendChild(row);
+  });
+}
 function renderFormatSuggestions(){
   var host=document.getElementById("admin-format-suggestions");
   if(!host){
@@ -20319,6 +20407,33 @@ function promoteDiscovery(d){
   var cat=adminCatChoice[key]||d.cat||classifyDrink(d.name,d.brand);
   if(VALID_CATS.indexOf(cat)===-1){toast("Choisis d'abord une cat\u00E9gorie");playSound("err");return;}
   var def=CAT_DEFAULTS[cat];
+  /* LE CODE-BARRE NE DOIT PLUS SE PERDRE EN SILENCE.
+     Une proposition venue d'une PHOTO porte un identifiant synthetique
+     ("m1783615360754") : le test ci-dessous echoue, et la fiche arrivait au
+     catalogue avec barcodes:[] — donc INTROUVABLE AU SCAN, a vie. Six fiches
+     etaient deja dans ce cas, dont un « Golden Power Energy drink » que son
+     proprietaire a rescanne sans jamais le retrouver.
+     On ne bloque pas la promotion pour autant : sur une photo, l'admin n'a
+     souvent pas le produit en main. On DEMANDE, on explique ce qu'on perd, et
+     on laisse repartir sans — mais en le sachant, et avec un rattrapage
+     possible (« Fiches sans code-barre » plus bas dans cet ecran). */
+  var codeReel=(d.barcode&&/^[0-9]{6,}$/.test(String(d.barcode)))?String(d.barcode):"";
+  if(!codeReel){
+    var saisi=prompt(
+      "Code-barre de \u00AB "+String(d.name||"cette boisson")+" \u00BB ?\n\n"+
+      "Cette proposition n'en porte pas (elle vient d'une photo). Sans code, la "+
+      "fiche ne sera JAMAIS retrouvee par un scan \u2014 seulement par son nom.\n\n"+
+      "Laisse vide si tu ne l'as pas : tu pourras le coller plus tard depuis "+
+      "\u00AB Fiches sans code-barre \u00BB, en bas de l'administration.", "");
+    if(saisi===null)return;                       // Annuler : on ne promeut rien
+    saisi=String(saisi).replace(/[^0-9]/g,"");
+    if(saisi){
+      if(saisi.length<6||!validGTIN(saisi)){
+        toast("Code-barre invalide \u2014 rien n'a \u00E9t\u00E9 promu");playSound("err");return;
+      }
+      codeReel=saisi;
+    }
+  }
   var entry={
     id:Date.now(),
     name:String(d.name).slice(0,60),
@@ -20327,10 +20442,7 @@ function promoteDiscovery(d){
     emoji:def.emoji,color:def.color,light:def.light,
     tag:String(d.name).toUpperCase().slice(0,20),
     stars:4.0,
-    // N'inscrire que les VRAIS codes-barres (chiffres) : les propositions
-    // manuelles portent un id synthetique "m1699..." qui ne matchera jamais un
-    // scan et ne doit pas polluer le tableau barcodes de la fiche catalogue.
-    barcodes:(d.barcode&&/^[0-9]{6,}$/.test(String(d.barcode)))?[String(d.barcode)]:[]
+    barcodes:codeReel?[codeReel]:[]
   };
   d.promoted=true;
   mergeCatalog([entry]);
@@ -20340,7 +20452,12 @@ function promoteDiscovery(d){
     if(s){if(!s.drinks)s.drinks=[];s.drinks.push(entry.id);}
   });
   renderDiscoveries();renderAdmin();
-  playSound("win");toast("\u2713 \u00AB "+d.name+" \u00BB promue au catalogue !");
+  playSound("win");
+  /* Dire ce qui manque au moment ou ca se produit, pas trois mois plus tard
+     quand quelqu'un scanne le produit et ne le trouve pas. */
+  toast(codeReel
+    ? ("\u2713 \u00AB "+d.name+" \u00BB promue au catalogue !")
+    : ("\u00AB "+d.name+" \u00BB promue \u2014 SANS code-barre : introuvable au scan tant qu'on ne lui en colle pas un"));
   if(window.fbPromoteDiscovery){
     window.fbPromoteDiscovery(d,entry).catch(function(e){
       console.warn("Promotion Firestore error:",e);
