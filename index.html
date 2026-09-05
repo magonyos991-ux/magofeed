@@ -1497,9 +1497,16 @@ onAuthStateChanged(auth, async function(user) {
       /* Un robot d'apercu n'est pas un joueur : on ne lui cree pas de compte.
              (Un humain mal detecte n'y perd rien : sa premiere contribution
              cree le document par fbSyncUserStats, en merge.) */
+          /* `points` n'est PAS ecrit ici, meme a zero. Le score appartient au
+             serveur, et la regle Firestore refuse desormais le champ AUSSI a la
+             creation — pas seulement a la modification, sinon il suffisait
+             d'effacer son profil pour le recreer avec 999 999. Envoyer
+             « points: 0 » ferait rejeter le document ENTIER : pas de pseudo,
+             et surtout pas de createdAt, dont depend le garde-fou anti-sybil
+             du parrainage. Un compte neuf part de toute facon a zero. */
           if (!magoRobotProbable()) await setDoc(userDocRef(user.uid), {
         pseudo: String(localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
-        points: 0, signals: 0, confirms: 0,
+        signals: 0, confirms: 0,
         createdAt: serverTimestamp()
       }, { merge: true });
     }
@@ -7228,8 +7235,25 @@ function barcodeDisavowed(code,drinkId){
 function ownLinks(){
   try{ return JSON.parse(localStorage.getItem("magoLiensCode")||"{}")||{}; }catch(e){ return {}; }
 }
+/* Retrouve la clef d'un dictionnaire indexe par code-barre, quelle que soit la
+   longueur sous laquelle le code a ete enregistre. Le catalogue compare deja
+   les codes par leur forme sans zeros de tete (codeNu) ; ces dictionnaires
+   locaux, eux, etaient encore interroges par clef exacte. Un lien pose le jour
+   ou le lecteur rendait 12 chiffres restait donc introuvable le jour ou il en
+   rendait 13 — et l'app reposait la question a laquelle la personne avait
+   deja repondu. */
+function cleCode(obj,code){
+  var x=codeNu(code);
+  if(!obj||!x)return null;
+  if(Object.prototype.hasOwnProperty.call(obj,String(code)))return String(code);
+  for(var k in obj) if(Object.prototype.hasOwnProperty.call(obj,k)&&codeNu(k)===x)return k;
+  return null;
+}
 function linkBarcodeLocally(code,drinkId){
-  var all=ownLinks();
+  var all=ownLinks(), k=cleCode(all,code);
+  // On reecrit sur la clef existante s'il y en a une, pour ne pas garder deux
+  // entrees (12 et 13 chiffres) qui designent le meme article.
+  if(k!=null&&k!==String(code))delete all[k];
   all[String(code)]=Number(drinkId);
   try{ localStorage.setItem("magoLiensCode",JSON.stringify(all)); }catch(e){}
 }
@@ -7241,7 +7265,8 @@ function drinkForBarcode(code){
   var c=String(code);
   var d=DRINKS.find(function(x){return porteCode(x.barcodes,c)&&!barcodeDisavowed(c,x.id);});
   if(d)return d;
-  var id=ownLinks()[c];
+  var liens=ownLinks(), k=cleCode(liens,c);
+  var id=k==null?null:liens[k];
   if(id==null||barcodeDisavowed(c,id))return undefined;
   var perso=DRINKS.find(function(x){return Number(x.id)===Number(id);});
   /* Le lien remis dans le tableau en memoire : tout le reste de l'app
@@ -7254,9 +7279,9 @@ function disavowBarcode(code,drinkId){
   /* Desavouer efface le lien inverse : sans ca, drinkForBarcode le remettrait
      aussitot dans barcodes et le desaveu ne tiendrait pas un rechargement. */
   try{
-    var l=ownLinks();
-    if(l[String(code)]!=null&&Number(l[String(code)])===Number(drinkId)){
-      delete l[String(code)];
+    var l=ownLinks(), cle=cleCode(l,code);
+    if(cle!=null&&Number(l[cle])===Number(drinkId)){
+      delete l[cle];
       localStorage.setItem("magoLiensCode",JSON.stringify(l));
     }
   }catch(e){}

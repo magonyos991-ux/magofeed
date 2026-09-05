@@ -72,21 +72,29 @@ function defaultOgHTML() {
    tomberait en 404. On garde donc une page qui pointe vers la fiche conservee.
    Elle ne coûte rien : quelques centaines d'octets, et un lien partage il y a
    six mois continue de marcher. */
-function pageFusionneeHTML(ancienId, cible) {
-  const versPage = cible.id + ".html";
-  const titre = "Où trouver " + (cible.name || "cette boisson") + " près de toi";
+function pageFusionneeHTML(ancienId, cible, cibleId) {
+  /* La fiche conservee n'est pas toujours dans le catalogue du fichier : elle
+     peut etre une boisson communautaire, qui vit dans Firestore et n'a donc pas
+     de page pre-generee. On renvoie alors vers le lien profond de l'app, qui la
+     resout au chargement. Sans ce cas, la page de l'ancien identifiant n'etait
+     pas ecrite du tout — et comme le script efface tout /f/ avant de reecrire,
+     le lien partage tombait en 404. C'est exactement ce qu'on voulait eviter. */
+  const versPage = cible ? cible.id + ".html" : "../index.html#drink=" + cibleId;
+  const titre = cible
+    ? "Où trouver " + (cible.name || "cette boisson") + " près de toi"
+    : "Cette fiche a été fusionnée · Magofeed";
   return `<!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(titre)} · Magofeed</title>
-<link rel="canonical" href="${esc(BASE + "/f/" + versPage)}">
+<title>${esc(titre)}</title>
+${cible ? '<link rel="canonical" href="' + esc(BASE + "/f/" + versPage) + '">' : ""}
 <meta name="robots" content="noindex,follow">
 <meta http-equiv="refresh" content="0;url=${esc(versPage)}">
 <link rel="icon" href="../icons/favicon-32.png">
 <body style="background:#1a1714;color:#f6f1e9;font-family:system-ui,sans-serif;text-align:center;padding:40px">
-<p>Cette fiche a été fusionnée avec <a style="color:#e6a15a" href="${esc(versPage)}">${esc(cible.name || "")}</a>.</p>
+<p>Cette fiche a été fusionnée avec <a style="color:#e6a15a" href="${esc(versPage)}">${esc(cible ? (cible.name || "") : "la fiche conservée")}</a>.</p>
 <script>location.replace(${JSON.stringify(versPage)});</script>
 </body>
 </html>`;
@@ -237,10 +245,12 @@ ${ogDim}<meta property="og:url" content="${esc(pageUrl)}">
   const parId = new Map(drinks.map(d => [Number(d.id), d]));
   let renvois = 0;
   for (const ancien of Object.keys(merges)) {
-    const cible = parId.get(Number(merges[ancien]));
-    if (!cible) continue;                       // cible communautaire : pas de page
     if (parId.has(Number(ancien))) continue;    // encore vivante : rien a faire
-    fs.writeFileSync(path.join(OUT_DIR, ancien + ".html"), pageFusionneeHTML(ancien, cible));
+    const cibleId = Number(merges[ancien]);
+    // Cible absente du catalogue du fichier (boisson communautaire) : on renvoie
+    // vers le lien profond plutot que de ne rien ecrire du tout.
+    fs.writeFileSync(path.join(OUT_DIR, ancien + ".html"),
+      pageFusionneeHTML(ancien, parId.get(cibleId) || null, cibleId));
     renvois++;
   }
 

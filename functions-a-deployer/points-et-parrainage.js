@@ -171,9 +171,21 @@ async function crediter(uid, montant, motif) {
    profil pour que l'affichage reste juste.
    Requete a champ unique : Firestore l'indexe tout seul, aucun index composite
    a creer. Les sanctions sont rares, la lecture est donc quasi toujours vide. */
-async function sanctionReelle(uid) {
+const PENALITES_MAX = 2000;
+async function sanctionReelle(uid, tx) {
   try {
-    const snap = await db.collection("penalties").where("uid", "==", String(uid)).limit(500).get();
+    const q = db.collection("penalties").where("uid", "==", String(uid)).limit(PENALITES_MAX);
+    // Lue DANS la transaction quand on en a une : sans cela, une sanction qui
+    // tombe entre la lecture et l'ecriture etait ecrasee par un total perime.
+    const snap = tx ? await tx.get(q) : await q.get();
+    if (snap.size >= PENALITES_MAX) {
+      /* Tronque : mieux vaut garder la valeur du profil que d'ecrire un total
+         SOUS-ESTIME, qui allegerait la sanction de quelqu'un sans que rien ne
+         le signale. A ce nombre de sanctions, le compte releve de toute facon
+         d'une decision humaine. */
+      console.warn("sanctionReelle : plus de " + PENALITES_MAX + " sanctions pour " + uid + ", total non fiable");
+      return null;
+    }
     let total = 0;
     snap.forEach((doc) => { total += Number((doc.data() || {}).points) || 0; });
     return total;
@@ -188,10 +200,10 @@ async function sanctionReelle(uid) {
 async function recalculerScore(uid) {
   if (!uid) return;
   const ref = db.doc(`users/${uid}`);
-  // Lue AVANT la transaction : une transaction Firestore n'accepte pas de
-  // requete, seulement des lectures de documents par leur chemin.
-  const sanction = await sanctionReelle(uid);
   await db.runTransaction(async (tx) => {
+    /* Les LECTURES d'abord, ecritures ensuite : Firestore l'impose. La requete
+       sur `penalties` en fait partie — l'Admin SDK accepte tx.get(query). */
+    const sanction = await sanctionReelle(uid, tx);
     const snap = await tx.get(ref);
     if (!snap.exists) return;
     const d = snap.data() || {};

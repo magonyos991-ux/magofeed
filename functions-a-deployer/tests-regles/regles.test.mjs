@@ -34,11 +34,13 @@ const R=[]; let ko=0;
 async function doit(nom, fn){ try{ await fn(); R.push(['ok  ',nom]); }
                               catch(e){ ko++; R.push(['ECHEC',nom+' — '+String(e.message).slice(0,110)]); } }
 
-const ALICE='alice', MALLORY='mallory', ADMIN='admin1';
+const ALICE='alice', MALLORY='mallory', ADMIN='admin1', NOUVEAU='nouveau1';
 const a = env.authenticatedContext(ALICE).firestore();
 const m = env.authenticatedContext(MALLORY).firestore();
 const ad = env.authenticatedContext(ADMIN).firestore();
 const anon = env.unauthenticatedContext().firestore();
+// Identite SANS document : sert a tester la CREATION de profil, pas sa mise a jour.
+const nv = env.authenticatedContext(NOUVEAU).firestore();
 
 await env.withSecurityRulesDisabled(async (c)=>{
   const db=c.firestore();
@@ -76,6 +78,20 @@ await doit('bloque : effacer son profil puis le recreer avec des points',
 await doit('legitime : creer un profil normal a l inscription',
   ()=>assertSucceeds(setDoc(doc(m,'users',MALLORY),
       {pseudo:'Mallory',avatar:null,favs:[],streak:0,bestStreak:0,confirms:0,signals:0,discAccepted:0})));
+/* Le document que l'app ecrit VRAIMENT a la premiere connexion (index.html,
+   onAuthStateChanged). Il portait « points: 0 » : inoffensif en apparence, mais
+   la regle refuse le champ, donc le document ENTIER etait rejete — pas de
+   pseudo, et surtout pas de createdAt, dont depend le garde-fou anti-sybil du
+   parrainage. Ce test fige la forme reelle du document d'inscription. */
+await doit('legitime : le document exact ecrit a la premiere connexion',
+  ()=>assertSucceeds(setDoc(doc(m,'users',MALLORY),
+      {pseudo:'Explorateur',signals:0,confirms:0,createdAt:serverTimestamp()},{merge:true})));
+await doit('bloque : le meme document avec points:0 (le champ appartient au serveur)',
+  ()=>assertFails(setDoc(doc(nv,'users',NOUVEAU),
+      {pseudo:'Explorateur',points:0,signals:0,confirms:0,createdAt:serverTimestamp()})));
+await doit('legitime : et sans points, la creation passe',
+  ()=>assertSucceeds(setDoc(doc(nv,'users',NOUVEAU),
+      {pseudo:'Explorateur',signals:0,confirms:0,createdAt:serverTimestamp()})));
 await doit('legitime : avatar photo normal',
   ()=>assertSucceeds(setDoc(doc(a,'users',ALICE),{avatar:{type:'photo',v:'data:image/png;base64,AAAA'}},{merge:true})));
 await doit('legitime : quelqu un confirme une boisson en rayon',
