@@ -72,6 +72,7 @@ plus bas.
 | Fichier | Ce qui manque |
 |---|---|
 | `verification-commercant.js` | un compte Stripe, puis `STRIPE_CLE` et `STRIPE_WEBHOOK` |
+| `chasse-codes.js` | **La chasse aux codes-barres** : pose le code sur la fiche quand deux personnes différentes ont confirmé l'avoir en main, et crédite les points à ce moment-là | Faible (n'écrit qu'un code déjà confirmé deux fois) | Quand tu veux — sans elle, les confirmations s'accumulent et tu poses le code à la main |
 | `dons.js` | un compte Stripe, puis `STRIPE_CLE` et `STRIPE_WEBHOOK_DON` |
 | `recap-fondateur.js` | ta décision : il t'envoie une push par jour, tous les jours |
 
