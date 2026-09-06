@@ -69,6 +69,10 @@ service cloud.firestore {
         && (!('confirms' in d) || d.confirms is number)
         && (!('signals' in d) || d.signals is number)
         && (!('discAccepted' in d) || d.discAccepted is number)
+        /* Aider en discret : les points sont verses, le nom n'apparait pas
+           dans les coups de main. C'est un choix de la personne, donc elle
+           l'ecrit elle-meme — et c'est un booleen, rien de plus. */
+        && (!('aideDiscrete' in d) || d.aideDiscrete is bool)
         && (!('favs' in d) || (d.favs is list && d.favs.size() <= 10))
         && (!('avatar' in d) || d.avatar == null
             || (d.avatar is map
@@ -214,6 +218,34 @@ service cloud.firestore {
          copie du contenu restent, c'est la trace de ce qui a ete decide et
          quand. La suppression reste possible pour purger apres un an. */
       allow update, delete: if isAdmin();
+    }
+
+    /* ══ LES COUPS DE MAIN ═══════════════════════════════════════════════
+       Quand quelqu'un tape « je l'ai vue en rayon » et que ca repond a la
+       chasse d'une autre personne, le serveur verse deja des points a
+       l'aidant et previent le chercheur. Les deux s'entraident donc — et ne
+       se voient jamais. Voici le chainon manquant.
+
+       CE N'EST PAS UN CANAL, ET LES REGLES SONT CE QUI L'EN EMPECHE.
+       Le chercheur LIT une projection choisie par le serveur, champ par
+       champ ; la collection reports n'est jamais ouverte. Il ne peut rien
+       ecrire d'autre que « merci », un booleen. Aucun champ de texte
+       n'existe nulle part, donc rien de nocif ne peut y transiter.
+
+       Et la gratitude remonte sans que l'identite redescende : l'aidant
+       recoit « quelqu'un te remercie pour X », jamais un nom. C'est
+       exactement ce qui empeche ce chainon de devenir une messagerie. */
+    match /coupsDeMain/{uid}/recus/{id} {
+      allow read:   if isSelf(uid);
+      allow create, delete: if isAdmin();     // ecrit par la Cloud Function
+      /* Un seul champ modifiable, et il ne peut aller que dans un sens :
+         on remercie, on ne « de-remercie » pas. Sans ce dernier test, le
+         merci pourrait etre remis a false puis a true en boucle, et chaque
+         bascule declencherait une notification chez l'aidant. */
+      allow update: if isSelf(uid)
+                    && changed().hasOnly(['merci'])
+                    && request.resource.data.merci == true
+                    && resource.data.merci != true;
     }
 
     match /userNotifs/{docId} {

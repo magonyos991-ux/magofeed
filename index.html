@@ -460,6 +460,10 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <button type="button" role="tab" data-chasse-tab="tendances" onclick="chasseSegTap('tendances')"><span data-i18n="segTrends">Tendances</span></button>
       </div>
       <div id="chasse-trouver">
+        <!-- LES COUPS DE MAIN RECUS. Quelqu'un a repondu a ta chasse : on le
+             dit, et on te laisse le remercier. C'est la seule chose que
+             l'entraide de l'app ne disait pas encore. -->
+        <div id="coups-card" style="padding:0 20px;margin-bottom:14px"></div>
         <div id="chasse-tips" style="padding:0 20px"></div>
         <!-- TES ALERTES. Cette carte n'avait qu'un seul hote : la feuille de la
              boule flottante. Les douze appels a renderAlertsCard() disperses
@@ -623,6 +627,15 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 8a5 5 0 0 1 0 8"/></svg></div>
           <div class="set-txt"><div class="set-title" data-i18n="sounds">Effets sonores</div><div class="set-sub" data-i18n="soundsSub">Sons lors des interactions</div></div>
           <div id="sound-toggle" class="sw on" aria-hidden="true"><div id="sound-knob" class="sw-knob"></div></div>
+        </div>
+        <!-- AIDER EN DISCRET. Le choix est respecte cote SERVEUR au moment
+             d'ecrire le coup de main : si la case est cochee, aucun nom n'est
+             ecrit du tout. Un reglage de confidentialite qui ne tiendrait qu'a
+             l'affichage n'en serait pas un. -->
+        <div id="discret-row" class="set-row static sw-row" role="switch" aria-checked="false" tabindex="0" aria-label="Aider en discret" onclick="basculerAideDiscrete()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();basculerAideDiscrete();}">
+          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z"/><circle cx="12" cy="12" r="2.6"/><path d="M4 20 20 4"/></svg></div>
+          <div class="set-txt"><div class="set-title">Aider en discret</div><div class="set-sub">Tes points restent, ton nom n'apparaît pas quand tu dépannes quelqu'un</div></div>
+          <div id="discret-toggle" class="sw" aria-hidden="true"><div class="sw-knob"></div></div>
         </div>
       </div>
       <div class="theme-row">
@@ -3633,6 +3646,44 @@ window.fbLireSantePoints = async function() {
 /* Les signalements en attente. Reserve a l'administrateur par les regles.
    Un bouton « signaler » sans ecran pour les lire ne sert a rien : c'est la
    moitie qui compte. */
+/* LES COUPS DE MAIN RECUS. Ecrits par la Cloud Function chez le chercheur
+   seul. On ne lit jamais la collection reports : le serveur a choisi ce qui
+   descend, champ par champ. */
+window.fbCoupsDeMain = async function() {
+  try {
+    var user = auth.currentUser; if (!user) return [];
+    var q = query(collection(db, "coupsDeMain", user.uid, "recus"),
+                  orderBy("at", "desc"), limit(12));
+    var snap = await getDocs(q);
+    var out = [];
+    snap.forEach(function(d) {
+      var x = d.data() || {};
+      out.push({ id: d.id, aidantUid: x.aidantUid || null,
+                 aidantPseudo: x.aidantPseudo || null,
+                 drinkId: x.drinkId, storeId: x.storeId || "",
+                 at: x.at || 0, merci: x.merci === true });
+    });
+    return out;
+  } catch (e) { console.warn("Coups de main :", e); return []; }
+};
+/* Le seul champ que le chercheur peut ecrire, et dans un seul sens. Les
+   regles refusent de repasser a false : sans ca, une bascule en boucle ferait
+   sonner le telephone de l'aidant a volonte. */
+window.fbDireMerci = async function(id) {
+  var user = auth.currentUser; if (!user) throw new Error("non connecte");
+  await updateDoc(doc(db, "coupsDeMain", user.uid, "recus", String(id)), { merci: true });
+  return true;
+};
+/* Aider en discret : les points sont verses, le nom n'apparait pas. Le choix
+   est respecte cote SERVEUR au moment d'ecrire le coup de main, pas a
+   l'affichage — un reglage de confidentialite qui ne tiendrait qu'a
+   l'interface n'en serait pas un. */
+window.fbAideDiscrete = async function(actif) {
+  await ensureAuthed();
+  var user = auth.currentUser; if (!user) return false;
+  await setDoc(userDocRef(user.uid), { aideDiscrete: !!actif }, { merge: true });
+  return true;
+};
 window.fbLireSignalements = async function(combien) {
   try {
     var q = query(collection(db, "abus"), where("etat", "==", "nouveau"),
@@ -18066,6 +18117,91 @@ function _chasseDistLabel(distKm){
   if(distKm<=12)return _tr("huntNear");
   return _tr("huntAbout").replace("{km}",Math.round(distKm));
 }
+/* Aider en discret. On ecrit d'abord en local pour que l'interrupteur reponde
+   tout de suite, puis on envoie au serveur — et on remet l'interrupteur dans
+   son etat d'origine si l'envoi echoue, plutot que de laisser croire a un
+   reglage qui n'a pas pris. */
+function peindreAideDiscrete(){
+  var t=document.getElementById("discret-toggle"),r=document.getElementById("discret-row");
+  var on=false;
+  try{ on=localStorage.getItem("magoAideDiscrete")==="1"; }catch(e){}
+  if(t)t.classList.toggle("on",on);
+  if(r)r.setAttribute("aria-checked",on?"true":"false");
+  return on;
+}
+function basculerAideDiscrete(){
+  var avant=peindreAideDiscrete();
+  var apres=!avant;
+  try{ localStorage.setItem("magoAideDiscrete",apres?"1":"0"); }catch(e){}
+  peindreAideDiscrete();
+  try{ playSound("pop"); }catch(e){}
+  if(!window.fbAideDiscrete)return;
+  window.fbAideDiscrete(apres).then(function(){
+    toast(apres?"Tu aides en discret" : "Ton nom apparaîtra à nouveau");
+  }).catch(function(){
+    try{ localStorage.setItem("magoAideDiscrete",avant?"1":"0"); }catch(e){}
+    peindreAideDiscrete();
+    toast("Réglage non enregistré, réessaie");
+  });
+}
+
+/* ══ « X t'a donne un coup de main » ══════════════════════════════════════
+   L'app faisait deja tout le travail : quand quelqu'un signale en rayon une
+   boisson que tu cherches, il recoit des points et tu recois une notification.
+   Mais tu ne savais pas QUI, et lui ne savait pas qu'il avait rendu service a
+   quelqu'un de reel.
+
+   Une ligne, un nom, une date. Un bouton « Merci » qui part une seule fois.
+   Et le merci remonte SANS ton nom : l'aidant lit « quelqu'un te remercie pour
+   Ramune Original ». La gratitude monte, l'identite ne redescend jamais —
+   c'est ce qui empeche cette ligne de devenir une conversation.
+   ══════════════════════════════════════════════════════════════════════════ */
+function renderCoupsDeMain(){
+  var host=document.getElementById("coups-card");
+  if(!host)return;
+  if(!window.fbCoupsDeMain){host.innerHTML="";return;}
+  window.fbCoupsDeMain().then(function(list){
+    list=(list||[]).filter(function(x){return x&&x.drinkId!=null;});
+    if(!list.length){host.innerHTML="";return;}
+    host.innerHTML='<div style="font-size:12px;font-weight:800;text-transform:uppercase;'+
+        'letter-spacing:1px;color:var(--s3);margin-bottom:10px">On t\'a aidé</div>'+
+      list.slice(0,6).map(function(x){
+        var d=(DRINKS||[]).find(function(y){return Number(y.id)===Number(x.drinkId);});
+        var st=(STORES||[]).find(function(y){return String(y.id)===String(x.storeId)||String(y.fbId)===String(x.storeId);});
+        var qui=x.aidantPseudo?sanitize(x.aidantPseudo):"Quelqu'un";
+        var bouts=[];
+        if(d)bouts.push(sanitize(d.name));
+        if(st)bouts.push(sanitize(st.name));
+        var quand=jourGrossier(x.at);
+        if(quand)bouts.push(sanitize(quand));
+        return '<div style="display:flex;align-items:center;gap:11px;padding:11px 12px;background:var(--bg2);'+
+            'border:1.5px solid var(--border);border-radius:14px;margin-bottom:8px">'+
+            (d?'<div style="width:36px;height:36px;border-radius:11px;overflow:hidden;flex-shrink:0;background:'+attr(d.light||"var(--bg3)")+';display:flex;align-items:center;justify-content:center">'+drinkIconHTML(d)+'</div>':'')+
+            '<div style="flex:1;min-width:0">'+
+              '<div style="font-size:13px;font-weight:800;color:var(--s1)">'+qui+' t\'a donné un coup de main</div>'+
+              '<div style="font-size:11.5px;color:var(--s2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+bouts.join(" · ")+'</div>'+
+            '</div>'+
+            (x.merci
+              ? '<span style="font-size:11px;font-weight:800;color:var(--s3);flex-shrink:0">Remercié</span>'
+              : '<button class="cdm-merci" data-cdm="'+attr(x.id)+'" type="button" style="flex-shrink:0;padding:8px 13px;border-radius:11px;border:none;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer">Merci</button>')+
+          '</div>';
+      }).join("");
+    Array.prototype.forEach.call(host.querySelectorAll(".cdm-merci"),function(b){
+      b.onclick=function(){
+        b.disabled=true; b.textContent="…";
+        window.fbDireMerci(b.getAttribute("data-cdm")).then(function(){
+          try{playSound("pop");}catch(e){}
+          renderCoupsDeMain();
+        }).catch(function(e){
+          b.disabled=false; b.textContent="Merci";
+          toast("Envoi impossible, réessaie");
+          console.warn(e);
+        });
+      };
+    });
+  }).catch(function(){ host.innerHTML=""; });
+}
+
 /* Le badge de l'onglet Decouvrir. Il remplace celui de la boule flottante,
    avec une difference qui compte : il ne peut etre ni masque, ni deplace hors
    de l'ecran, ni pose par-dessus la camera de scan. */
@@ -18088,6 +18224,7 @@ function renderChasse(){
   _majCompteurValider();
   setChasseSeg(_chasseSegCourant());
   try{ renderAlertsCard(); }catch(e){}
+  try{ renderCoupsDeMain(); }catch(e){}
   renderMesChasses();
   /* Tant que les magasins ne sont pas charges, TOUT parait introuvable. On se
      tait plutot que d'annoncer un manque qui n'existe pas. */
@@ -21391,6 +21528,7 @@ try{
      doit annoncer. Les conteneurs de l'onglet existent dans le document meme
      quand il n'est pas affiche, la peinture est donc sans effet visible. */
   try{renderChasse();}catch(e){}
+  try{peindreAideDiscrete();}catch(e){}
   try{refreshBell();}catch(e){}
   renderLangGrid();renderDiscoveries();
   renderFavs();

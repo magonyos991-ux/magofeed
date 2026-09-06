@@ -341,6 +341,40 @@ await doit('legitime : tout le monde peut LIRE la chasse (sans compte)',
 await doit('bloque : se declarer administrateur',
   ()=>assertFails(setDoc(doc(m,'admins',MALLORY),{ok:true})));
 
+/* Les deux coups de main d'Alice sont poses par le serveur (Admin SDK), donc
+   regles desactivees — exactement comme en production. */
+await env.withSecurityRulesDisabled(async (c)=>{
+  const db=c.firestore();
+  await setDoc(doc(db,'coupsDeMain',ALICE,'recus','r1'),
+    {aidantUid:'aide1',aidantPseudo:'Lina',drinkId:1,storeId:'s1',at:1756000000000,merci:false});
+  await setDoc(doc(db,'coupsDeMain',ALICE,'recus','r2'),
+    {aidantUid:'aide2',aidantPseudo:'Sam',drinkId:2,storeId:'s2',at:1756000000000,merci:true});
+});
+
+/* ── LES COUPS DE MAIN ───────────────────────────────────────────────────
+   Ce n'est pas un canal, et ces epreuves sont ce qui l'en empeche. Le
+   chercheur lit une projection choisie par le serveur ; il ne peut ecrire
+   qu'un booleen, et dans un seul sens. Sans le dernier test, une bascule en
+   boucle ferait sonner le telephone de l'aidant a volonte. ── */
+await doit('legitime : Alice lit ses coups de main',
+  ()=>assertSucceeds(getDoc(doc(a,'coupsDeMain',ALICE,'recus','r1'))));
+await doit('bloque : lire les coups de main de quelqu un d autre',
+  ()=>assertFails(getDoc(doc(m,'coupsDeMain',ALICE,'recus','r1'))));
+await doit('bloque : s ecrire un coup de main',
+  ()=>assertFails(setDoc(doc(m,'coupsDeMain',MALLORY,'recus','r9'),
+      {aidantUid:MALLORY,aidantPseudo:'Moi',drinkId:1,storeId:'s1',at:1,merci:false})));
+await doit('legitime : dire merci une fois',
+  ()=>assertSucceeds(updateDoc(doc(a,'coupsDeMain',ALICE,'recus','r1'),{merci:true})));
+await doit('bloque : retirer son merci (relance de notification)',
+  ()=>assertFails(updateDoc(doc(a,'coupsDeMain',ALICE,'recus','r2'),{merci:false})));
+await doit('bloque : changer autre chose que le merci',
+  ()=>assertFails(updateDoc(doc(a,'coupsDeMain',ALICE,'recus','r1'),
+      {merci:true,aidantPseudo:'AutreNom'})));
+await doit('legitime : cocher aider en discret sur son profil',
+  ()=>assertSucceeds(setDoc(doc(a,'users',ALICE),{aideDiscrete:true},{merge:true})));
+await doit('bloque : aideDiscrete qui n est pas un booleen',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),{aideDiscrete:'oui'},{merge:true})));
+
 /* ── LES SIGNALEMENTS ────────────────────────────────────────────────────
    Le motif vient d'une liste FERMEE : c'est ce qui empeche un formulaire de
    signalement de devenir un canal pour insulter la personne visee. Et

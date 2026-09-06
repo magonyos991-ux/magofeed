@@ -43,4 +43,33 @@ async function sendToAdmins(title, body) {
   }
 }
 
-module.exports = { sendToAdmins };
+/* Une push a UNE personne. Copiee de notifications-push.js, qui ne l'exporte
+   pas : la dupliquer ici evite de faire dependre le credit des points du
+   fichier des notifications, et un jeton perime est efface des deux cotes de
+   la meme facon. */
+async function pushToUser(uid, title, body, data, link) {
+  if (!uid) return;
+  try {
+    const snap = await db.collection("pushTokens").doc(String(uid)).get();
+    const token = snap.exists && snap.data().token;
+    if (!token) return;              // pas de jeton : l'in-app suffit
+    await admin.messaging().send({
+      token: token,
+      notification: { title: title, body: body },
+      data: data || {},
+      webpush: {
+        notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png" },
+        fcmOptions: { link: link || "https://magonyos991-ux.github.io/magofeed/" }
+      }
+    });
+  } catch (e) {
+    if (e && (e.code === "messaging/registration-token-not-registered" ||
+              e.code === "messaging/invalid-registration-token")) {
+      try { await db.collection("pushTokens").doc(String(uid)).delete(); } catch (_) {}
+    } else {
+      console.warn("push error:", e && e.message);
+    }
+  }
+}
+
+module.exports = { sendToAdmins, pushToUser };

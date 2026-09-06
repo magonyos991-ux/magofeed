@@ -47,6 +47,7 @@
  * Firebase Functions v2 (Node 18+).
  */
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { pushToUser } = require("./outils-admin");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
@@ -333,6 +334,81 @@ exports.crediterEntraide = onDocumentCreated(
     const verse = await crediter(aide.by, montant, "entraide");
     await db.doc(`reports/${aide.id}`).set(Object.assign(marque, { huntCreditedPts: verse }), { merge: true });
     await recalculerScore(aide.by);
+    await noterCoupDeMain(rep.by, aide);
+  }
+);
+
+/* ── LE CHAINON MANQUANT ─────────────────────────────────────────────────
+   Tout ce qui precede fonctionnait deja : l'aidant recoit ses points, le
+   chercheur recoit sa notification « trouvee pres de toi ». Deux personnes
+   s'entraidaient et ne se voyaient jamais.
+
+   On depose donc, chez le CHERCHEUR seul, une projection minimale de ce qui
+   vient de se passer. Trois precautions valent d'etre nommees :
+
+   Le pseudo est relu depuis users/{uid} et RECOUPE, jamais recopie du champ
+   byPseudo du rapport — celui-la est du texte libre ecrit par le client, et
+   il finirait affiche tel quel chez quelqu'un d'autre.
+
+   L'heure est arrondie a l'heure pleine, comme le fait deja seenAt cote
+   application. Dire « hier » suffit ; dire « a 19 h 43 » raconterait ou
+   quelqu'un se trouvait a la minute pres.
+
+   Et « aider en discret » est respecte ici, pas a l'affichage : si la
+   personne l'a coche, aucun nom n'est ecrit du tout. Un choix de
+   confidentialite qui ne tiendrait qu'a l'interface n'en est pas un. */
+async function noterCoupDeMain(uidChercheur, aide) {
+  try {
+    if (!uidChercheur || !aide || !aide.by) return;
+    let pseudo = null;
+    const ua = await db.doc(`users/${aide.by}`).get();
+    const da = ua.exists ? (ua.data() || {}) : {};
+    if (da.aideDiscrete !== true && typeof da.pseudo === "string") {
+      pseudo = da.pseudo.slice(0, 24);
+      if (pseudo === "Explorateur") pseudo = null;   // pseudo par defaut : pas un nom
+    }
+    const quand = aide.createdAt && aide.createdAt.toMillis
+      ? Math.floor(aide.createdAt.toMillis() / 3600000) * 3600000
+      : Math.floor(Date.now() / 3600000) * 3600000;
+    await db.doc(`coupsDeMain/${uidChercheur}/recus/${aide.id}`).set({
+      aidantUid: pseudo ? String(aide.by) : null,   // pas de nom, pas de lien vers le profil
+      aidantPseudo: pseudo,
+      drinkId: Number(aide.drinkId),
+      storeId: String(aide.storeId || ""),
+      at: quand,
+      merci: false
+    }, { merge: true });
+  } catch (e) {
+    /* Jamais bloquant : le credit des points a deja eu lieu et compte plus
+       que cette ligne d'affichage. */
+    console.warn("coup de main:", e && e.message);
+  }
+}
+
+/* Le merci remonte, l'identite ne redescend pas. L'aidant apprend qu'on le
+   remercie et pour quelle boisson — jamais par qui. C'est precisement ce qui
+   empeche ce chemin de devenir un canal de discussion a deux.
+   Les regles garantissent qu'on ne peut passer merci qu'une fois de false a
+   true : sans ca, une bascule en boucle ferait sonner le telephone de
+   quelqu'un a volonte. */
+exports.direMerci = onDocumentUpdated(
+  { document: "coupsDeMain/{uid}/recus/{id}", region: REGION },
+  async (event) => {
+    const av = event.data.before.data() || {};
+    const ap = event.data.after.data() || {};
+    if (av.merci === true || ap.merci !== true) return;
+    if (!ap.aidantUid) return;                     // aide en discret : rien a envoyer
+    let nom = "une boisson";
+    try {
+      const c = await db.doc(`catalog/${String(ap.drinkId)}`).get();
+      if (c.exists && (c.data() || {}).name) nom = String(c.data().name).slice(0, 40);
+    } catch (e) { /* le catalogue natif n'est pas dans Firestore : on reste vague */ }
+    await pushToUser(
+      String(ap.aidantUid),
+      "Quelqu'un te remercie",
+      "Ton coup de main pour " + nom + " a servi.",
+      { type: "merci" }
+    );
   }
 );
 

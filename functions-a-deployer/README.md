@@ -65,6 +65,7 @@ plus bas.
 | `don-notification.js` | notification à chaque don Ko-fi | `KOFI_JETON` (en place) |
 | `notif-admin.js` | push quand quelqu'un s'inscrit ou lie son Gmail | aucun |
 | `catalogue-ia.js` | fiche écrite par l'IA sur un code-barres inconnu, alcool écarté | `ANTHROPIC_API_KEY` (en place) |
+| `points-et-parrainage.js` porte aussi | `direMerci` : le merci d'un coup de main, envoyé sans nom | aucun |
 | `outils-admin.js` | **pas une fonction** : l'outil partagé qui prévient les admins | aucun |
 
 ## Ce qui attend, et ce qui l'attend
@@ -181,8 +182,8 @@ d'essai doit passer :
 ```
 cd functions-a-deployer/tests-regles
 npm install          # une seule fois
-npm test             # doit afficher : 114/114 conformes
+npm test             # doit afficher : 122/122 conformes
 ```
 
 Il attaque une base jetable sur ta machine. Rien ne part en ligne. S'il
-n'affiche pas `114/114`, ne déploie pas.
+n'affiche pas `122/122`, ne déploie pas.
