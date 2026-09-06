@@ -12723,33 +12723,71 @@ window._leafletState = window._leafletState || null;   // null | "loading" | "re
    etre a l'ecran. Si les conditions d'Esri posaient probleme un jour, il suffit
    de renvoyer toujours l'URL OSM ci-dessous pour revenir en arriere.
    ============================================================================ */
-var FOND_ATTRIB='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>, commerces <a href="https://overturemaps.org">Overture Maps</a>';
+var FOND_ATTRIB='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, commerces <a href="https://overturemaps.org">Overture Maps</a>';
 function fondMago(sombre){
-  /* UN SEUL FOND, MONDIAL, A TOUS LES ZOOMS.
+  /* UN SEUL FOND, MONDIAL, SANS CLE ET SANS FILIGRANE.
 
-     L'ancien montage Esri (canevas gris, puis bascule World_Street_Map au
-     zoom 17) tenait a Bruxelles — mais il n'avait ete mesure QUE depuis
-     Bruxelles. Hors Europe et Amerique du Nord, les DEUX jeux Esri
-     s'arretent bien plus tot : a Seoul, des le zoom 14, canevas ET rues
-     renvoient le meme placeholder « Map data not yet available » de
-     2 521 octets (mesure, zooms 14 a 16). Vu en production : une recherche
-     de ville asiatique affichait ses pins sur un fond gris vide. Aucune
-     bascule ne sauve un fournisseur qui n'a pas la donnee.
+     Deux fournisseurs ont echoue coup sur coup, et pour deux raisons
+     differentes — les deux valent d'etre gardees ecrites.
 
-     On passe donc au fond CARTO (light_all / dark_all), base OpenStreetMap :
-     couverture mondiale mesuree jusqu'au zoom 18 a Seoul comme a Bruxelles,
-     meme sobriete grise que le canevas (le fond « Positron » classique),
-     version sombre native — le filtre CSS qui desaturait les tuiles rue
-     n'a plus de raison d'etre. {r} sert le @2x aux ecrans Retina. Gratuit
-     avec attribution ; le script promo l'utilisait deja
-     (promo/carrousel/capture-app.mjs). */
-  return L.tileLayer(
-    "https://{s}.basemaps.cartocdn.com/"+(sombre?"dark_all":"light_all")+"/{z}/{x}/{y}{r}.png",
-    { maxZoom:20,
-      subdomains:"abcd",
+     ESRI n'a pas la donnee. Le montage precedent (canevas gris jusqu'au zoom
+     16, puis World_Street_Map) tenait a Bruxelles, mais il n'avait ete mesure
+     QUE depuis l'Europe. A Seoul, des le zoom 14, les TROIS jeux Esri —
+     canevas, rues et topo — renvoient le meme placeholder « Map data not yet
+     available » de 2 521 octets. Vu en production : une recherche de ville
+     asiatique affichait ses pins sur un fond gris vide. Aucune bascule ne
+     sauve un fournisseur qui n'a pas la donnee.
+
+     CARTO a la donnee, mais la barre. Ses tuiles repondent HTTP 200, avec un
+     PNG valide, de taille differente a chaque zoom : tous les tests
+     automatiques passent au vert. Il faut DECODER l'image pour voir que
+     chacune porte « API KEY REQUIRED / carto.com/basemaps/apikey » en travers.
+     Mesure a Seoul et a Bruxelles, du zoom 14 au zoom 18. C'est la deuxieme
+     fois que ce piege se referme sur ce depot ; un test qui ne regarde que le
+     code de retour et le poids du fichier ne le verra jamais.
+
+     RESTE OPENSTREETMAP. Verifie a Seoul, Dakar, Sao Paulo et Bruxelles :
+     de vraies tuiles partout, aucune clef, aucun filigrane. Il est colore et
+     charge, ce qui encombrerait sous les pins — un filtre CSS le desature et
+     l'eclaircit, et il redevient le canevas sobre qu'on veut. Rendu et compare
+     en image avant d'etre pose ici.
+
+     LA CONTREPARTIE, ET IL FAUT LA CONNAITRE : les tuiles d'OpenStreetMap sont
+     servies par des dons. Leur politique d'usage tolere une application de
+     cette taille, pas un service a fort trafic. Le jour ou Magofeed decolle,
+     il faudra son propre serveur de tuiles ou un fournisseur payant. Ce n'est
+     pas un probleme pour aujourd'hui, c'en est un pour le succes. */
+  var FILTRE=sombre
+    ? "grayscale(1) invert(1) contrast(.88) brightness(.55)"
+    : "grayscale(1) contrast(.66) brightness(1.18)";
+  var Fond=L.TileLayer.extend({
+    createTile:function(coords,done){
+      var t=L.TileLayer.prototype.createTile.call(this,coords,done);
+      t.style.filter=FILTRE;
+      return t;
+    }
+  });
+  var couche=new Fond(
+    "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { maxZoom:19,
       keepBuffer:1,          // moitie moins de tuiles gardees hors ecran
       updateWhenZooming:false, // une seule reconstruction de grille, a la fin du zoom
       attribution:FOND_ATTRIB });
+  /* LE FILET, parce que la panne est arrivee DEUX FOIS sans que personne ne le
+     voie. Un fond casse ne leve aucune erreur : les tuiles repondent, elles
+     sont juste vides ou barrees. On compte les echecs reels de chargement et
+     on le dit une seule fois, plutot que de l'apprendre par une capture
+     d'ecran des semaines plus tard. */
+  var rates=0;
+  couche.on("tileerror",function(){
+    rates++;
+    if(rates===12&&!window._fondPrevenu){
+      window._fondPrevenu=true;
+      try{ toast("La carte de fond ne répond pas"); }catch(e){}
+      console.warn("fond de carte : 12 tuiles en echec");
+    }
+  });
+  return couche;
 }
 function ensureLeaflet(onReady, onFail){
   if (window.L) { window._leafletState="ready"; onReady&&onReady(); return; }
