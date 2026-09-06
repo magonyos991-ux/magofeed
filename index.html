@@ -12723,60 +12723,30 @@ window._leafletState = window._leafletState || null;   // null | "loading" | "re
    etre a l'ecran. Si les conditions d'Esri posaient probleme un jour, il suffit
    de renvoyer toujours l'URL OSM ci-dessous pour revenir en arriere.
    ============================================================================ */
-var FOND_ATTRIB='Esri, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, commerces <a href="https://overturemaps.org">Overture Maps</a>';
+var FOND_ATTRIB='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>, commerces <a href="https://overturemaps.org">Overture Maps</a>';
 function fondMago(sombre){
-  /* DEUX FONDS, CHACUN LA OU IL EST BON.
+  /* UN SEUL FOND, MONDIAL, A TOUS LES ZOOMS.
 
-     Le fond sobre d'Esri (Light Gray Canvas) est parfait de loin : presque
-     rien a l'ecran, donc les pins ressortent. C'est pour ca qu'il a ete
-     choisi. Mais SA DONNEE S'ARRETE AU ZOOM 16 — mesure : au-dela, le serveur
-     renvoie une tuile « pas de donnee » de 2 521 octets, a l'octet pres, du
-     zoom 17 au zoom 19. Leaflet reutilisait donc la tuile 16 en l'agrandissant
-     jusqu'a huit fois, d'ou des noms de rue enormes et flous des qu'on
-     s'approche. Le commentaire d'origine appelait ca « adouci » et « assume ».
-     Ca ne l'etait pas : au niveau de la rue, c'est-a-dire exactement quand on
-     cherche a reconnaitre un magasin, la carte devenait illisible.
+     L'ancien montage Esri (canevas gris, puis bascule World_Street_Map au
+     zoom 17) tenait a Bruxelles — mais il n'avait ete mesure QUE depuis
+     Bruxelles. Hors Europe et Amerique du Nord, les DEUX jeux Esri
+     s'arretent bien plus tot : a Seoul, des le zoom 14, canevas ET rues
+     renvoient le meme placeholder « Map data not yet available » de
+     2 521 octets (mesure, zooms 14 a 16). Vu en production : une recherche
+     de ville asiatique affichait ses pins sur un fond gris vide. Aucune
+     bascule ne sauve un fournisseur qui n'a pas la donnee.
 
-     Au-dela du zoom 16, on passe donc a World_Street_Map, du MEME fournisseur,
-     qui a de vraies tuiles jusqu'au zoom 19 (mesure aussi). Il est en couleurs,
-     ce qui encombrerait ; un filtre CSS le desature et l'eclaircit, et il
-     redevient le canevas gris qu'on veut. Verifie en image sur Bruxelles avant
-     d'etre ecrit ici.
-
-     UNE SEULE COUCHE : c'est getTileUrl qui choisit la source, tuile par
-     tuile. Donc un seul cache, aucun clignotement de bascule, et le filtre
-     n'est pose que sur les tuiles qui en ont besoin.
-
-     Meme fournisseur des deux cotes, donc aucune licence nouvelle, aucune cle
-     a demander, et l'attribution existante couvre deja les deux. */
-  var ESRI="https://server.arcgisonline.com/ArcGIS/rest/services/";
-  var CANEVAS=ESRI+"Canvas/"+(sombre?"World_Dark_Gray_Base":"World_Light_Gray_Base")+"/MapServer/tile/{z}/{y}/{x}";
-  var RUE=ESRI+"World_Street_Map/MapServer/tile/{z}/{y}/{x}";
-  var BASCULE=17;   // le canevas n'a plus de donnee a partir d'ici
-  /* Desature et eclaircit la carte routiere pour qu'elle ressemble au canevas.
-     En sombre : on inverse d'abord, puis on assombrit — les rues restent
-     claires sur un fond noir, comme le Dark Gray Canvas. */
-  var FILTRE=sombre
-    ? "grayscale(1) invert(1) contrast(.85) brightness(.62)"
-    : "grayscale(1) contrast(.82) brightness(1.09)";
-
-  var FondMago=L.TileLayer.extend({
-    getTileUrl:function(coords){
-      /* _url est propre a cette couche : on l'oriente juste avant que Leaflet
-         ne compose l'adresse. Toutes les tuiles d'une meme grille partagent le
-         zoom, donc pas de melange possible. */
-      this._url=(this._getZoomForUrl()>=BASCULE)?RUE:CANEVAS;
-      return L.TileLayer.prototype.getTileUrl.call(this,coords);
-    },
-    createTile:function(coords,done){
-      var t=L.TileLayer.prototype.createTile.call(this,coords,done);
-      if(coords.z>=BASCULE)t.style.filter=FILTRE;
-      return t;
-    }
-  });
-
-  return new FondMago(CANEVAS,
-    { maxZoom:19,            // et cette fois la donnee suit jusqu'au bout
+     On passe donc au fond CARTO (light_all / dark_all), base OpenStreetMap :
+     couverture mondiale mesuree jusqu'au zoom 18 a Seoul comme a Bruxelles,
+     meme sobriete grise que le canevas (le fond « Positron » classique),
+     version sombre native — le filtre CSS qui desaturait les tuiles rue
+     n'a plus de raison d'etre. {r} sert le @2x aux ecrans Retina. Gratuit
+     avec attribution ; le script promo l'utilisait deja
+     (promo/carrousel/capture-app.mjs). */
+  return L.tileLayer(
+    "https://{s}.basemaps.cartocdn.com/"+(sombre?"dark_all":"light_all")+"/{z}/{x}/{y}{r}.png",
+    { maxZoom:20,
+      subdomains:"abcd",
       keepBuffer:1,          // moitie moins de tuiles gardees hors ecran
       updateWhenZooming:false, // une seule reconstruction de grille, a la fin du zoom
       attribution:FOND_ATTRIB });
