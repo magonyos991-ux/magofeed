@@ -11,6 +11,10 @@ Généré le 27/07/2026. Coche au fur et à mesure.
 - [x] **Conditions d'utilisation (URL publique)** → `https://magonyos991-ux.github.io/magofeed/terms.html`
 - [x] **Suppression de compte in-app** → Réglages → « Supprimer mon compte » (exigé par Apple ET Google dès qu'un login existe)
 - [x] **Avatar sécurisé** (plus d'injection `innerHTML`)
+- [x] **Projet Capacitor généré** (`package.json`, `capacitor.config.json`, `android/`, `ios/`) — appId `com.magofeed.app`
+- [x] **Permissions déclarées** : `android/app/src/main/AndroidManifest.xml` (bloc de la section 1) et `ios/App/App/Info.plist` (textes d'usage localisation + caméra)
+- [x] **Icônes et écrans de démarrage natifs** générés depuis `icons/icon-1024.png` (fond crème #F2EDE4, sombre #17110a) via `npx @capacitor/assets generate`
+- [x] **Web embarqué en liste blanche** : `npm run build:web` assemble `www/` (app seule, sans notes internes ni code serveur), copié dans le natif par `npx cap sync`
 
 ---
 
@@ -115,10 +119,26 @@ Après `npx cap open android`, lance l'app dans l'émulateur Android Studio (Pix
 
 ## 6. Commandes Capacitor de référence
 
+Le projet est déjà généré et committé. Sur ton PC :
+
+```bash
+git pull
+npm install
+npm run android        # assemble www/, synchronise, ouvre Android Studio
+```
+
+Pour iOS (nécessite un Mac avec Xcode, ou un service de build type Codemagic) :
+
 ```bash
 npm install
-npx cap add android
-npx cap sync android
+npm run ios            # assemble www/, synchronise, ouvre Xcode
+```
+
+Commandes unitaires si besoin :
+
+```bash
+npm run build:web      # assemble www/ (liste blanche)
+npx cap sync android   # copie www/ dans le projet natif
 npx cap open android   # ouvre Android Studio pour build/signer
 ```
 
