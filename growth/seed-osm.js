@@ -17,7 +17,12 @@
  *   ou il s'est arrete dans .seed-cursor.json : relance le lendemain, il reprend.
  */
 const fs = require("fs");
-const admin = require("firebase-admin");
+/* API modulaire uniquement : admin.firestore() a ete retiree des versions
+   recentes du SDK. initializeApp() sans argument lit toujours
+   GOOGLE_APPLICATION_CREDENTIALS, le comportement ne change pas.
+   Voir la note en tete de functions-a-deployer/outils-admin.js. */
+const { initializeApp } = require("firebase-admin/app");
+const { getFirestore } = require("firebase-admin/firestore");
 
 const SHOP =
   "convenience|supermarket|kiosk|beverages|greengrocer|deli|newsagent|frozen_food|" +
@@ -57,8 +62,8 @@ const CURSOR = __dirname + "/.seed-cursor.json";
 
 if (!PAYS[iso]) { console.error("Pays inconnu :", iso, "→", Object.keys(PAYS).join(" ")); process.exit(1); }
 
-admin.initializeApp();
-const db = admin.firestore();
+initializeApp();
+const db = getFirestore();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

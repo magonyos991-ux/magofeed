@@ -5,7 +5,7 @@ Généré le 27/07/2026. Coche au fur et à mesure.
 
 ---
 
-## ✅ Déjà fait (dans le code)
+## Déjà fait (dans le code)
 
 - [x] **Politique de confidentialité (URL publique)** → `https://magonyos991-ux.github.io/magofeed/privacy.html`
 - [x] **Conditions d'utilisation (URL publique)** → `https://magonyos991-ux.github.io/magofeed/terms.html`
@@ -79,7 +79,7 @@ Coordonnées (e-mail si login Google), Contenu utilisateur. Aucune n'est utilis�
 - [x] **Icône** 512×512 (Play, `icons/icon-512.png`) et 1024×1024 (App Store, `icons/icon-1024.png`)
 - [x] **Feature graphic** Google Play 1024×500 (`icons/feature-graphic.png`)
 - [x] **Description** courte + longue (voir `STORE-LISTING.md`)
-- [ ] **Captures d'écran** (voir section 5 ci-dessous)
+- [x] **Captures d'écran** — générées dans `promo/stores/` (voir section 5)
 - [ ] **Catégorie** : Shopping ou Style de vie · **Classification d'âge** : Tout public
 - [ ] **Compte développeur** : Google Play (25 $ une fois) · Apple Developer (99 $/an)
 - [ ] **Signature de l'app** : keystore Android (`keytool`) · certificat de distribution iOS
@@ -90,32 +90,53 @@ Coordonnées (e-mail si login Google), Contenu utilisateur. Aucune n'est utilis�
 
 ## 5. Captures d'écran — mode d'emploi
 
-### Dimensions exigées
+Les captures sont **déjà générées** dans `promo/stores/`, aux dimensions exactes
+exigées par chaque magasin. Rien à refaire à la main.
+
+| Fichier | Format | Écran |
+|---|---|---|
+| `play-1-accueil.png` · `appstore-1-accueil.png` | 1080x1920 · 1290x2796 | Accueil, « Autour de toi » et « À découvrir » |
+| `play-2-recherche.png` · `appstore-2-recherche.png` | idem | Recherche « mountain dew », la gamme entière |
+| `play-3-carte.png` · `appstore-3-carte.png` | idem | Carte, pins verts vérifiés et gris non confirmés |
+| `play-4-fiche-magasin.png` · `appstore-4-fiche-magasin.png` | idem | Fiche magasin, « Y aller », boissons référencées |
+| `play-5-scan.png` · `appstore-5-scan.png` | idem | Écran du scanner |
+
+Play en accepte 2 à 8, l'App Store 3 à 10 : les quatre premières suffisent, la
+cinquième est facultative — elle montre l'état vide du journal de trouvailles,
+ce qui est honnête mais moins parlant que les autres.
+
+### Comment elles sont produites
+
+    node promo/captures-stores.mjs
+
+Le script sert l'app en local, coupe Firestore et l'authentification, sert le
+SDK Firebase et Leaflet depuis un cache disque, et récupère les tuiles
+OpenStreetMap par curl. Chaque format est rendu dans sa propre fenêtre au bon
+rapport : aucune image n'est agrandie, car un agrandissement se voit et les
+magasins refusent les captures floues.
+
+### Ce que les captures montrent, et ne montrent pas
+
+Les cinq magasins sont **fictifs** et ne servent qu'à montrer la mise en page.
+Aucune capture ne prétend qu'une boisson est réellement disponible quelque part.
+L'écran de scan est pris **avant** l'allumage de la caméra : plutôt qu'un faux
+rayon de supermarché, on montre l'écran d'accueil réel du scanner avec ses
+vraies instructions.
+
+### Dimensions exigées, pour mémoire
+
 | Store | Format | Nombre |
 |---|---|---|
-| Google Play (téléphone) | min. 320 px côté court, ratio 16:9 ou 9:16 (ex. **1080×1920**) | 2 à 8 |
-| App Store (iPhone 6.7") | **1290×2796** | 3 à 10 |
-| App Store (iPhone 6.5") | **1242×2688** | facultatif si 6.7" fourni |
+| Google Play (téléphone) | min. 320 px côté court, ratio 16:9 ou 9:16 — ici **1080x1920** | 2 à 8 |
+| App Store (iPhone 6.7") | **1290x2796** | 3 à 10 |
+| App Store (iPhone 6.5") | 1242x2688 | facultatif si 6.7" fourni |
 
-### Les 4 écrans à capturer (dans cet ordre)
-1. **Accueil** — « Bonjour 👋 Que boit-on ? » + barre de recherche
-2. **Résultat de recherche** — une boisson + les magasins triés par distance
-3. **Carte** — magasins autour de toi avec les pins
-4. **Scan** — l'écran caméra de scan code-barres
+### Si tu préfères capturer depuis ton propre téléphone
 
-### Comment les prendre (le plus simple)
-1. Ouvre l'app **en vrai sur ton téléphone** (le login/la géoloc marchent, contrairement au PC).
-2. Mets-toi dans chaque écran ci-dessus et fais une capture native :
-   - **Android** : Volume bas + Power
-   - **iPhone** : Volume haut + Power
-3. Les captures du téléphone sont déjà aux bonnes dimensions natives → utilisables directement.
-
-> Astuce cadrage : évite d'avoir une barre de statut avec ton % de batterie à 12 % ou des notifs perso visibles. Mets le téléphone en mode « ne pas déranger » avant.
-
-### Alternative sans téléphone (émulateur)
-Après `npx cap open android`, lance l'app dans l'émulateur Android Studio (Pixel 6) et capture via l'icône appareil photo de la barre latérale de l'émulateur.
-
----
+Ouvre l'app, mets-toi sur chaque écran et fais une capture native (Android :
+Volume bas + Power ; iPhone : Volume haut + Power). Mets le téléphone en mode
+« ne pas déranger » avant, pour qu'aucune notification personnelle ne traîne
+sur l'image.
 
 ## 6. Commandes Capacitor de référence
 
@@ -142,4 +163,4 @@ npx cap sync android   # copie www/ dans le projet natif
 npx cap open android   # ouvre Android Studio pour build/signer
 ```
 
-> ⚠️ Avant chaque build : `npx cap sync` pour copier le web (`index.html`) dans le natif.
+> Attention — avant chaque build : `npx cap sync` pour copier le web (`index.html`) dans le natif.
