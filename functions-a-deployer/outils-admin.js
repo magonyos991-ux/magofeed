@@ -9,10 +9,16 @@
  * Origine : recupere le 4 septembre 2026 depuis le code deploye d'une
  * fonction ecrite en juillet, dont la source n'existait plus nulle part.
  */
-const admin = require("firebase-admin");
+/* API MODULAIRE UNIQUEMENT. L'ancienne forme namespacee — require("firebase-admin")
+   puis admin.firestore() / admin.messaging() — a ete retiree des versions
+   recentes du SDK : la propriete n'y est plus une fonction. Le fichier plantait
+   alors des le chargement, et « firebase deploy » echouait sur « User code
+   failed to load », sans jamais nommer le vrai coupable. */
 const { getApps, initializeApp } = require("firebase-admin/app");
+const { getFirestore } = require("firebase-admin/firestore");
+const { getMessaging } = require("firebase-admin/messaging");
 if (!getApps().length) initializeApp();
-const db = admin.firestore();
+const db = getFirestore();
 
 /* Envoie une push a chaque administrateur qui a un jeton enregistre.
    Un jeton refuse par Google est efface : sans ca, la liste se remplit de
@@ -27,7 +33,7 @@ async function sendToAdmins(title, body) {
       const token = tokDoc.exists ? (tokDoc.data() || {}).token : null;
       if (!token) continue;
       sends.push(
-        admin.messaging().send({
+        getMessaging().send({
           token,
           webpush: { notification: { title: title, body: body, icon: "icons/icon-192.png" } }
         }).catch((e) => {
@@ -53,7 +59,7 @@ async function pushToUser(uid, title, body, data, link) {
     const snap = await db.collection("pushTokens").doc(String(uid)).get();
     const token = snap.exists && snap.data().token;
     if (!token) return;              // pas de jeton : l'in-app suffit
-    await admin.messaging().send({
+    await getMessaging().send({
       token: token,
       notification: { title: title, body: body },
       data: data || {},
