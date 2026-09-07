@@ -35,11 +35,26 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 const { getStorage } = require("firebase-admin/storage");
-const { v1 } = require("@google-cloud/firestore");
+/* CHARGEMENT PARESSEUX. Cette bibliotheque n'est pas necessaire pour DECRIRE
+   les fonctions, seulement pour les EXECUTER. Or « firebase deploy » commence
+   par charger tout le code dans un serveur de decouverte, avec dix secondes
+   pour repondre : chaque bibliotheque lourde chargee en tete de fichier compte
+   dans ce delai, sur une machine froide comme sur une machine chargee.
+   Un deploiement echouait ainsi par intermittence sur « User code failed to
+   load. Cannot determine backend specification. Timeout after 10000 » — un
+   message qui ne nomme ni fichier, ni ligne, ni bibliotheque. On la charge
+   donc au premier appel reel, et une seule fois grace au cache de require. */
+let _client = null;
+function clientAdmin() {
+  if (!_client) {
+    const { v1 } = require("@google-cloud/firestore");
+    _client = new v1.FirestoreAdminClient();
+  }
+  return _client;
+}
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
-const client = new v1.FirestoreAdminClient();
 
 const PROJET = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
 /* LE NOM DU SEAU NE SE DEVINE PLUS. Il etait ecrit en dur comme
@@ -69,9 +84,9 @@ function jour(d) {
 }
 
 async function exporter(motif) {
-  const nom = client.databasePath(PROJET, "(default)");
+  const nom = clientAdmin().databasePath(PROJET, "(default)");
   const dossier = BUCKET + "/sauvegardes/" + jour(new Date());
-  const [op] = await client.exportDocuments({
+  const [op] = await clientAdmin().exportDocuments({
     name: nom,
     outputUriPrefix: dossier,
     collectionIds: []      // vide = TOUTE la base
@@ -109,7 +124,7 @@ async function verifierPrecedente() {
     const snap = await db.collection("_meta").doc("sauvegardes").get();
     const prec = snap.exists ? ((snap.data() || {}).derniere || null) : null;
     if (!prec || prec.etat !== "lancee" || !prec.operation) return;
-    const [op] = await client.operationsClient.getOperation({ name: prec.operation });
+    const [op] = await clientAdmin().operationsClient.getOperation({ name: prec.operation });
     if (!op || !op.done) return;                    // encore en cours : on attend
     await db.collection("_meta").doc("sauvegardes").set({
       derniere: Object.assign({}, prec, op.error

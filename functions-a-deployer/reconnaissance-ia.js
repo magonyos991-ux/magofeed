@@ -34,7 +34,16 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
-const Anthropic = require("@anthropic-ai/sdk");
+/* CHARGEMENT PARESSEUX. Cette bibliotheque n'est pas necessaire pour DECRIRE
+   les fonctions, seulement pour les EXECUTER. Or « firebase deploy » commence
+   par charger tout le code dans un serveur de decouverte, avec dix secondes
+   pour repondre : chaque bibliotheque lourde chargee en tete de fichier compte
+   dans ce delai, sur une machine froide comme sur une machine chargee.
+   Un deploiement echouait ainsi par intermittence sur « User code failed to
+   load. Cannot determine backend specification. Timeout after 10000 » — un
+   message qui ne nomme ni fichier, ni ligne, ni bibliotheque. On la charge
+   donc au premier appel reel, et une seule fois grace au cache de require. */
+function chargerAnthropic() { return require("@anthropic-ai/sdk"); }
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
@@ -106,6 +115,7 @@ exports.identifyDrink = onCall(
     const quota = await quotaJour(db, uid, "day", "count", 25, "produit", PLAFOND_JOUR_PRODUIT);
     if (quota.blocked) return { ok: false, reason: quota.raison };
 
+    const Anthropic = chargerAnthropic();
     const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
     let resp;
     try {
