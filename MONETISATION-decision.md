@@ -61,6 +61,40 @@ Un paiement ne doit JAMAIS acheter un signal de confiance sur la carte.
 Melanger les deux ferait mentir la carte. C'est la regle fondatrice de
 l'application et elle prime sur toute recette.
 
+## CE QUI A ETE CONSTRUIT DEPUIS (6 septembre 2026)
+
+Ilias a redemande les paliers. Ils sont faits, cote PRODUIT. La caisse, non.
+
+- `merchants/{uid}.pass` : trois niveaux, `aucun` / `frigo` / `complet`.
+  Ecrit par l'administrateur seul. Dix-neuf epreuves au banc le prouvent :
+  personne ne peut s'accorder un pass, ni s'attribuer la boutique d'un autre,
+  ni ecrire un niveau invente — l'administrateur pas plus que les autres.
+- Le scan de frigo est retranche par le pass, cote serveur.
+- Un commercant tout juste certifie recoit le pass `frigo` OFFERT
+  (`passOrigine: 'lancement'`). On ne retire rien, et on apprend gratuitement
+  si un commercant s'en sert avant de lui demander dix euros.
+- `annonces/{storeId}` : le contenu du pass complet. Une phrase de 90
+  caracteres maximum, ecrite par le gerant, affichee sur sa fiche sous
+  l'etiquette « Annonce du commercant », signalable, effacable par
+  l'administrateur. Barriere anti-alcool a l'ecriture.
+
+Un bug trouve au passage, et il portait sur la fonction meme qu'on voulait
+vendre : le lien gerant-magasin avait ete deplace de `stores/{id}.owner` vers
+`merchants/{uid}` pour une raison de securite, mais deux controles n'avaient
+pas suivi. Aucun commercant certifie depuis ce changement ne voyait son
+tableau de bord ni ne pouvait scanner son frigo.
+
+## Ce qui manque encore, et qui ne depend pas du code
+
+1. Une structure juridique permettant d'encaisser un abonnement recurrent.
+2. L'app dans les stores.
+3. Des commercants qui se servent de la version gratuite.
+
+Le canal d'encaissement le plus court est Ko-fi : `kofiWebhook` est deja
+deploye et vivant pour les dons ponctuels, et Ko-fi gere aussi les
+abonnements mensuels. `verification-commercant.js` (Stripe) reste debranche,
+ligne 94 de `index.js`.
+
 ## Declencheur de reprise
 
 Reprendre ce chantier quand les trois conditions sont reunies :

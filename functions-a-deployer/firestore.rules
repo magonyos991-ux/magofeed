@@ -198,7 +198,12 @@ service cloud.firestore {
       return request.resource.data.keys().hasOnly(
                ['par','cibleType','cibleId','motif','apercu','at','etat'])
         && request.resource.data.par == request.auth.uid
-        && request.resource.data.cibleType in ['decouverte','photo','profil','commentaire']
+        /* 'annonce' ajoute avec le pass complet : une annonce est du texte
+           ecrit par un commercant et lu par tout le monde, elle doit donc
+           pouvoir etre signalee comme le reste. Sans cette entree, le lien de
+           signalement s'affichait mais l'ecriture etait refusee — un bouton qui
+           ne fait rien est pire que pas de bouton du tout. */
+        && request.resource.data.cibleType in ['decouverte','photo','profil','commentaire','annonce']
         && request.resource.data.cibleId is string
         && request.resource.data.cibleId.size() > 0
         && request.resource.data.cibleId.size() <= 200
@@ -750,6 +755,45 @@ service cloud.firestore {
       allow read: if isSelf(uid) || isAdmin();
       allow create, update: if isAdmin() && passCommercantValide();
       allow delete: if isAdmin();
+    }
+
+    /* L'ANNONCE DU COMMERCANT. C'est le contenu du pass complet : une phrase
+       courte, ecrite par le gerant, affichee sur la fiche de SON magasin et
+       annoncee comme venant de lui.
+
+       CE QU'ELLE N'EST PAS. Elle ne touche ni a la pastille bleue, ni au stock,
+       ni a la position sur la carte : rien de ce qu'un visiteur lit comme un
+       fait verifie ne peut etre achete. Une annonce est un message signe, pas
+       une information de la carte.
+
+       DEUX LECTURES SUPPLEMENTAIRES par ecriture (le compte commercant, deux
+       fois). C'est le prix a payer pour que le controle porte sur le pass reel
+       et non sur ce que le client pretend avoir. Les annonces s'ecrivent
+       rarement — quelques fois par mois et par commerce.
+
+       L'administrateur peut toujours effacer : une annonce est du texte ecrit
+       par un tiers, et il faut pouvoir la retirer sans attendre son auteur. */
+    function compteCommercantDeLAppelant() {
+      return get(/databases/$(database)/documents/merchants/$(request.auth.uid)).data;
+    }
+    function aLePassComplet(storeId) {
+      return exists(/databases/$(database)/documents/merchants/$(request.auth.uid))
+        && compteCommercantDeLAppelant().pass == 'complet'
+        && storeId in compteCommercantDeLAppelant().stores;
+    }
+    function annonceValide() {
+      return request.resource.data.keys().hasOnly(['texte', 'par', 'maj', 'actif'])
+        && request.resource.data.keys().hasAll(['texte', 'par', 'actif'])
+        && request.resource.data.par == request.auth.uid
+        && request.resource.data.texte is string
+        && request.resource.data.texte.size() > 0
+        && request.resource.data.texte.size() <= 90
+        && request.resource.data.actif is bool;
+    }
+    match /annonces/{storeId} {
+      allow read: if true;
+      allow create, update: if pasAnonyme() && annonceValide() && aLePassComplet(storeId);
+      allow delete: if isAdmin() || (pasAnonyme() && aLePassComplet(storeId));
     }
 
     /* Traces de verification par paiement. Ecrites UNIQUEMENT par la Cloud

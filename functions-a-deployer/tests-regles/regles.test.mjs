@@ -460,6 +460,45 @@ await doit('bloque : une origine de pass inventee, meme par l admin',
 await doit('legitime : l admin retire le pass',
   ()=>assertSucceeds(setDoc(doc(ad,'merchants',ALICE),{pass:'aucun'},{merge:true})));
 
+/* L'ANNONCE DU COMMERCANT — le contenu du pass complet. Elle doit etre
+   ecrivable par le gerant au pass complet de CE magasin, et par personne
+   d'autre : ni un visiteur, ni un gerant au pass frigo, ni le gerant d'un
+   AUTRE magasin. Elle est publique en lecture, comme le magasin qu'elle
+   accompagne, et l'administrateur doit pouvoir l'effacer sans son auteur. */
+await env.withSecurityRulesDisabled(async (c)=>{
+  const db=c.firestore();
+  await setDoc(doc(db,'merchants',ALICE),{stores:['s1'],pass:'complet',passOrigine:'paiement'});
+  await setDoc(doc(db,'merchants',MALLORY),{stores:['s2'],pass:'frigo',passOrigine:'lancement'});
+  await setDoc(doc(db,'stores','s2'),{name:'Autre',brand:'',lat:50.8,lng:4.3,addedBy:MALLORY,
+      drinks:[],drinksVerified:[],confirmations:{},seenAt:{}});
+});
+const ANN={texte:'Livraison offerte des 20 euros',par:ALICE,actif:true};
+await doit('legitime : Alice au pass complet publie son annonce',
+  ()=>assertSucceeds(setDoc(doc(a,'annonces','s1'),ANN)));
+await doit('legitime : n importe qui lit une annonce',
+  ()=>assertSucceeds(getDoc(doc(anon,'annonces','s1'))));
+await doit('bloque : un visiteur publie une annonce',
+  ()=>assertFails(setDoc(doc(m,'annonces','s1'),{texte:'Faux',par:MALLORY,actif:true})));
+await doit('bloque : Mallory au pass frigo publie une annonce',
+  ()=>assertFails(setDoc(doc(m,'annonces','s2'),{texte:'Promo',par:MALLORY,actif:true})));
+await doit('bloque : signer une annonce du nom d un autre',
+  ()=>assertFails(setDoc(doc(a,'annonces','s1'),{texte:'Coucou',par:MALLORY,actif:true})));
+await doit('bloque : une annonce de plus de 90 caracteres',
+  ()=>assertFails(setDoc(doc(a,'annonces','s1'),{texte:'x'.repeat(91),par:ALICE,actif:true})));
+await doit('bloque : une annonce vide',
+  ()=>assertFails(setDoc(doc(a,'annonces','s1'),{texte:'',par:ALICE,actif:true})));
+await doit('bloque : glisser un champ en plus dans l annonce',
+  ()=>assertFails(setDoc(doc(a,'annonces','s1'),{texte:'Promo',par:ALICE,actif:true,certified:true})));
+await doit('bloque : Alice publie sur un magasin qui n est pas le sien',
+  ()=>assertFails(setDoc(doc(a,'annonces','s2'),{texte:'Promo',par:ALICE,actif:true})));
+await doit('legitime : l admin efface une annonce',
+  ()=>assertSucceeds(deleteDoc(doc(ad,'annonces','s1'))));
+
+await doit('legitime : signaler une annonce de commercant',
+  ()=>assertSucceeds(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'annonce',cibleId:'s1',motif:'alcool',
+       apercu:'texte de l annonce',at:new Date(),etat:'nouveau'})));
+
 R.forEach(r=>console.log(r[0],'|',r[1]));
 console.log('\n'+(R.length-ko)+'/'+R.length+' conformes');
 await env.cleanup();

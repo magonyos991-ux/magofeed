@@ -974,6 +974,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <button class="sd-icon" id="sd-share-btn" onclick="shareStore()" aria-label="Partager ce magasin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg><span>Partager</span></button>
         </div>
       </div>
+      <div id="sd-annonce"></div>
       <div style="padding:16px 20px 0">
         <div class="searchbox" style="cursor:text;margin-bottom:12px">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--s3)" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="var(--s3)" stroke-width="2" stroke-linecap="round"/></svg>
@@ -2791,6 +2792,45 @@ window.fbMonCompteCommercant = async function() {
 window.fbMesMagasins = async function() {
   var c = await window.fbMonCompteCommercant();
   return c.stores;
+};
+
+/* L'ANNONCE DU COMMERCANT — ce que le pass complet permet d'ecrire.
+   Une phrase courte, signee, affichee sur la fiche de SON magasin.
+
+   ELLE NE TOUCHE A RIEN DE VERIFIE. Ni la pastille bleue, ni le stock, ni la
+   position sur la carte. Un visiteur doit pouvoir la lire comme un message du
+   commercant, jamais comme un constat de l'application. C'est la difference
+   entre une publicite assumee et une carte qui ment.
+
+   'actif' a false garde le texte sans l'afficher : le commercant peut eteindre
+   son annonce sans la reecrire a chaque fois. */
+window.fbLireAnnonce = async function(storeId) {
+  try {
+    var snap = await getDoc(doc(db, "annonces", String(storeId)));
+    if (!snap.exists()) return null;
+    var d = snap.data() || {};
+    var t = String(d.texte || "").slice(0, 90).trim();
+    if (!t) return null;
+    return { texte: t, actif: d.actif === true, par: d.par || null };
+  } catch (e) { return null; }
+};
+window.fbEcrireAnnonce = async function(storeId, texte, actif) {
+  var u = auth.currentUser;
+  if (!u || u.isAnonymous) throw new Error("Connecte-toi d'abord.");
+  var t = String(texte || "").trim().slice(0, 90);
+  /* Les regles exigent un texte non vide meme quand l'annonce est eteinte :
+     un document sans texte n'a aucune raison d'exister, et l'autoriser
+     ouvrirait la porte a des documents vides poses en masse. Pour retirer une
+     annonce, on efface le document. */
+  if (!t) throw new Error("Ecris d'abord ton annonce.");
+  await setDoc(doc(db, "annonces", String(storeId)), {
+    texte: t, par: u.uid, actif: actif !== false, maj: serverTimestamp()
+  });
+  return true;
+};
+window.fbEffacerAnnonce = async function(storeId) {
+  await deleteDoc(doc(db, "annonces", String(storeId)));
+  return true;
 };
 window.fbSubmitShopClaim = async function(store, infos) {
   var user = await ensureAuthed();
@@ -13418,6 +13458,10 @@ function openStoreDetail(storeId){
     ownTools.style.display=estGerant?"block":"none";
     if(estGerant)try{ rendrePass(s); }catch(e){ console.warn("pass:",e); }
   }
+  /* Hors du bloc du gerant : une annonce s'adresse aux VISITEURS. La rendre
+     dans le panneau du commercant l'aurait rendue invisible a ceux a qui elle
+     est destinee. */
+  try{ rendreAnnonce(s); }catch(e){ console.warn("annonce:",e); }
   /* L'etat de certification se lit et se change ICI, sur le magasin qu'on
      regarde. La liste des demandes ne couvre que ceux passes par une demande
      de commercant — un magasin certifie depuis la reprise des rayons n'y
@@ -14022,6 +14066,42 @@ function passOuvre(st,niveau){
   if(niveau==="complet")return p==="complet";
   return false;
 }
+/* L'ANNONCE, telle que la voit un VISITEUR.
+   Elle porte toujours l'etiquette « Annonce du commercant ». Ce n'est pas une
+   politesse : sans elle, une phrase ecrite par un gerant se lirait comme un
+   constat de l'application, et l'app affirmerait quelque chose qu'elle n'a pas
+   verifie. L'etiquette est ce qui separe une publicite assumee d'une carte qui
+   ment, et elle n'est donc jamais optionnelle.
+
+   Le lien de signalement suit, comme pour tout contenu ecrit par un tiers.
+   La lecture est asynchrone : on efface d'abord, on remplit ensuite, sinon
+   l'annonce du magasin precedent resterait affichee sur le suivant. */
+function rendreAnnonce(st){
+  var hote=document.getElementById("sd-annonce");
+  if(!hote)return;
+  hote.innerHTML="";
+  if(!st||!window.fbLireAnnonce)return;
+  var sid=String(st.fbId||st.id);
+  hote.dataset.pour=sid;
+  window.fbLireAnnonce(sid).then(function(a){
+    /* La fiche a pu changer pendant la lecture reseau. Sans ce controle,
+       l'annonce d'un magasin s'affichait sur la fiche d'un autre. */
+    if(hote.dataset.pour!==sid)return;
+    if(!a||!a.actif)return;
+    hote.innerHTML=
+      '<div style="margin:14px 20px 0;padding:11px 13px;border-radius:14px;'+
+      'background:var(--card-bg);border:1.5px dashed var(--bord)">'+
+        '<div class="c3" style="font-size:10.5px;font-weight:700;letter-spacing:.03em;'+
+        'text-transform:uppercase">Annonce du commerçant</div>'+
+        '<div style="font-size:13px;font-weight:600;margin-top:4px;line-height:1.4">'+
+          sanitize(a.texte)+'</div>'+
+        '<div style="margin-top:6px">'+
+          lienSignaler("annonce",sid,a.texte,String(st.name||""))+
+        '</div>'+
+      '</div>';
+  }).catch(function(){});
+}
+
 /* LE PASS DU COMMERCANT, dans sa propre fiche.
    Trois niveaux, et le texte dit exactement ce que chacun ouvre. On n'y vend
    rien : tant que l'encaissement n'existe pas, promettre un achat serait
@@ -14038,12 +14118,12 @@ function rendrePass(st){
   var titre,corps,suite;
   if(p==="complet"){
     titre="Pass complet";
-    corps="Tu scannes tes frigos, tu signes tes boissons, et ton commerce est mis en avant.";
+    corps="Tu scannes tes frigos, tu signes tes boissons, et tu publies une annonce sur ta fiche.";
     suite="";
   }else if(p==="frigo"){
     titre="Pass frigo"+(_monPass==="frigo"&&_passOrigine==="lancement"?" — offert au lancement":"");
     corps="Tu peux scanner tes frigos et signer les boissons de ton rayon.";
-    suite="Le pass complet ajoutera la mise en avant de ton commerce. Il n'est pas encore ouvert.";
+    suite="Le pass complet ajoute une annonce sur ta fiche. Il s'accorde à la main pour l'instant.";
   }else{
     titre="Aucun pass";
     corps="Le scan de frigo demande le pass frigo.";
@@ -14061,6 +14141,69 @@ function rendrePass(st){
      absent : le commercant croit que l'app est cassee. */
   var bf=document.getElementById("sd-btn-frigo");
   if(bf)bf.style.display=passOuvre(st,"frigo")?"":"none";
+
+  /* L'EDITEUR D'ANNONCE, au pass complet seulement. On charge le texte
+     existant apres coup : le champ apparait vide puis se remplit, plutot que
+     de retarder tout le panneau pour une lecture reseau. */
+  if(passOuvre(st,"complet")){
+    var sid=String(st.fbId||st.id);
+    hote.insertAdjacentHTML("beforeend",
+      '<div style="margin:0 0 12px;padding:12px 14px;border-radius:14px;background:var(--card-bg);'+
+      'border:1.5px solid var(--bord)">'+
+        '<div style="font-size:13px;font-weight:800">Ton annonce</div>'+
+        '<div class="c3" style="font-size:11.5px;margin-top:3px;line-height:1.45">'+
+          'Une phrase, 90 caractères. Elle apparaît sur ta fiche, annoncée comme venant de toi. '+
+          'Aucune boisson alcoolisée, même sans alcool.</div>'+
+        '<input id="ann-txt" maxlength="90" placeholder="Ex : Livraison offerte dès 20 euros" '+
+        'style="width:100%;margin-top:8px;padding:10px 12px;border-radius:11px;border:1.5px solid var(--bord);'+
+        'background:var(--bg);color:inherit;font-size:13px;font-family:inherit">'+
+        '<div style="display:flex;gap:8px;margin-top:8px">'+
+          '<button class="ghost-btn" onclick="annoncePublier(\''+attr(sid)+'\')" '+
+          'style="flex:1;min-height:40px;border-radius:11px;font-size:12.5px">Publier</button>'+
+          '<button class="ghost-btn quiet" onclick="annonceRetirer(\''+attr(sid)+'\')" '+
+          'style="min-height:40px;border-radius:11px;font-size:12.5px">Retirer</button>'+
+        '</div>'+
+      '</div>');
+    if(window.fbLireAnnonce)window.fbLireAnnonce(sid).then(function(a){
+      var champ=document.getElementById("ann-txt");
+      if(champ&&a&&a.texte&&!champ.value)champ.value=a.texte;
+    }).catch(function(){});
+  }
+}
+
+/* PUBLIER. Deux barrieres avant l'ecriture, et elles ne servent pas la meme
+   chose. nameLooksAlcoholic attrape l'alcool : c'est la regle absolue de
+   l'application, et une annonce est lue par des mineurs comme par tout le
+   monde. Elle n'est pas une securite — un commercant determine ecrirait
+   directement dans la base — mais elle arrete l'erreur de bonne foi, et le
+   signalement plus l'effacement par l'administrateur couvrent le reste. */
+function annoncePublier(sid){
+  var champ=document.getElementById("ann-txt");
+  var t=champ?String(champ.value||"").trim():"";
+  if(!t){ toast("Écris d'abord ton annonce"); return; }
+  if(typeof nameLooksAlcoholic==="function"&&nameLooksAlcoholic(t,"")){
+    toast("Aucune boisson alcoolisée dans une annonce");
+    return;
+  }
+  if(!window.fbEcrireAnnonce){ toast("Indisponible hors ligne"); return; }
+  magoAttendre(window.fbEcrireAnnonce(sid,t,true)).then(function(){
+    toast("Annonce publiée");
+    try{ if(curStoreDetail)rendreAnnonce(curStoreDetail); }catch(e){}
+  }).catch(function(e){
+    console.warn("annonce:",e);
+    toast("Publication refusée");
+  });
+}
+function annonceRetirer(sid){
+  if(!window.fbEffacerAnnonce){ toast("Indisponible hors ligne"); return; }
+  magoAttendre(window.fbEffacerAnnonce(sid)).then(function(){
+    var champ=document.getElementById("ann-txt"); if(champ)champ.value="";
+    toast("Annonce retirée");
+    try{ if(curStoreDetail)rendreAnnonce(curStoreDetail); }catch(e){}
+  }).catch(function(e){
+    console.warn("annonce:",e);
+    toast("Retrait impossible");
+  });
 }
 function estProprietaire(st){
   try{
