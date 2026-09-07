@@ -1015,13 +1015,14 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       </div>
       <div id="sd-owner-tools" style="display:none">
         <div class="sd-adm-title">Ton magasin — visible uniquement par toi</div>
+        <div id="sd-pass"></div>
         <div class="sd-adm-row">
           <button class="sd-adm" onclick="startRafale()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12z"/></svg>
             <b>Scanner mon rayon (rafale)</b>
             <i>Scanne tes boissons à la chaîne — elles apparaissent pour tes clients</i>
           </button>
-          <button class="sd-adm" onclick="scanFridgeStart()">
+          <button class="sd-adm" id="sd-btn-frigo" onclick="scanFridgeStart()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2.5" width="14" height="19" rx="2.5"/><path d="M5 10h14M8.5 6.2v1.6M8.5 13.5v3"/></svg>
             <b>Scanner mon frigo</b>
             <i>Une photo du frigo — toutes les boissons sont reconnues et ajoutées d'un coup</i>
@@ -2765,15 +2766,31 @@ window.fbEstSoutien = async function() {
     return snap.exists();
   } catch (e) { return false; }
 };
-window.fbMesMagasins = async function() {
+/* MON COMPTE COMMERCANT : mes boutiques ET mon pass, en une seule lecture.
+   Deux lectures separees auraient double le cout et pouvaient se contredire —
+   la liste chargee, le pass pas encore, et un bouton qui clignote. */
+window.fbMonCompteCommercant = async function() {
+  var vide = { stores: [], pass: "aucun", passOrigine: null };
   var u = auth.currentUser;
-  if (!u || u.isAnonymous) return [];
+  if (!u || u.isAnonymous) return vide;
   try {
     var snap = await getDoc(doc(db, "merchants", u.uid));
-    if (!snap.exists()) return [];
+    if (!snap.exists()) return vide;
     var d = snap.data() || {};
-    return Array.isArray(d.stores) ? d.stores.map(String) : [];
-  } catch (e) { return []; }
+    var p = String(d.pass || "");
+    return {
+      stores: Array.isArray(d.stores) ? d.stores.map(String) : [],
+      /* On n'accepte que les trois niveaux connus. Une valeur inattendue
+         (champ a moitie ecrit, migration ratee) doit fermer la porte, jamais
+         l'ouvrir : le doute se tranche toujours du cote le moins permissif. */
+      pass: ["aucun", "frigo", "complet"].indexOf(p) !== -1 ? p : "aucun",
+      passOrigine: d.passOrigine || null
+    };
+  } catch (e) { return vide; }
+};
+window.fbMesMagasins = async function() {
+  var c = await window.fbMonCompteCommercant();
+  return c.stores;
 };
 window.fbSubmitShopClaim = async function(store, infos) {
   var user = await ensureAuthed();
@@ -2878,10 +2895,25 @@ window.fbApproveShopClaim = async function(claim) {
     certifiedAt: serverTimestamp()
   }, { merge: true });
   if (claim.by) {
-    await setDoc(doc(db, "merchants", String(claim.by)), {
-      stores: arrayUnion(sid),
-      updatedAt: serverTimestamp()
-    }, { merge: true });
+    /* LE PASS DE LANCEMENT. Un commercant tout juste certifie repart avec le
+       pass « frigo » offert : il peut scanner ses frigos et signer ses
+       boissons. C'est le niveau vendu dix euros, donne gratuitement tant que
+       l'app n'est pas installee par grand monde.
+       Deux raisons, et aucune n'est de la generosite. On ne retire pas une
+       fonction qui vient de se remettre a marcher. Et surtout, c'est la seule
+       facon d'apprendre ce qu'aucun code ne dira : un commercant qui ne s'en
+       sert pas gratuitement ne paiera jamais pour l'avoir.
+       'passOrigine' garde la trace de POURQUOI il l'a — le jour ou le
+       paiement existe, on saura distinguer les offerts des payants sans avoir
+       a le deviner. On ne touche jamais au pass de quelqu'un qui en a deja un :
+       merge ne remplace que ce qu'on nomme, et on ne nomme le pass que s'il
+       n'y en avait pas. */
+    var mRef = doc(db, "merchants", String(claim.by));
+    var mSnap = await getDoc(mRef);
+    var dejaUnPass = mSnap.exists() && ["frigo", "complet"].indexOf(String((mSnap.data() || {}).pass || "")) !== -1;
+    var maj = { stores: arrayUnion(sid), updatedAt: serverTimestamp() };
+    if (!dejaUnPass) { maj.pass = "frigo"; maj.passOrigine = "lancement"; maj.passDepuis = serverTimestamp(); }
+    await setDoc(mRef, maj, { merge: true });
   }
   await setDoc(doc(db, "shopClaims", sid), {
     status: "approved",
@@ -13382,7 +13414,9 @@ function openStoreDetail(storeId){
        de son gerant : tout commercant certifie APRES ce changement ne voyait
        donc jamais son tableau de bord. estProprietaire lit merchants/{uid},
        et garde l'ancien champ en secours pour les certifies d'avant. */
-    ownTools.style.display=(!isAdmin&&estProprietaire(s))?"block":"none";
+    var estGerant=!isAdmin&&estProprietaire(s);
+    ownTools.style.display=estGerant?"block":"none";
+    if(estGerant)try{ rendrePass(s); }catch(e){ console.warn("pass:",e); }
   }
   /* L'etat de certification se lit et se change ICI, sur le magasin qu'on
      regarde. La liste des demandes ne couvre que ceux passes par une demande
@@ -13952,16 +13986,81 @@ function isMyShop(id){ return myShops().indexOf(String(id))!==-1; }
    tient. On la charge une fois a la connexion et on la garde en memoire :
    estProprietaire est appele a chaque rendu de fiche, il ne peut pas faire une
    lecture reseau a chaque fois. */
-var _mesMagasins=null;
+var _mesMagasins=null,_monPass="aucun",_passOrigine=null;
 window.chargerMesMagasins=chargerMesMagasins;
 function chargerMesMagasins(){
-  if(!window.fbMesMagasins){ _mesMagasins=_mesMagasins||{}; return; }
-  window.fbMesMagasins().then(function(ids){
-    var m={}; (ids||[]).forEach(function(id){ m[String(id)]=1; });
+  if(!window.fbMonCompteCommercant){ _mesMagasins=_mesMagasins||{}; return; }
+  window.fbMonCompteCommercant().then(function(c){
+    var m={}; ((c&&c.stores)||[]).forEach(function(id){ m[String(id)]=1; });
     _mesMagasins=m;
+    _monPass=(c&&c.pass)||"aucun";
+    _passOrigine=(c&&c.passOrigine)||null;
     // Une fiche deja ouverte doit reveler ses outils sans qu'on la rouvre.
     try{ if(curStoreDetail&&typeof renderStoreDetail==="function")renderStoreDetail(); }catch(e){}
-  }).catch(function(){ _mesMagasins={}; });
+  }).catch(function(){ _mesMagasins={}; _monPass="aucun"; _passOrigine=null; });
+}
+/* MON NIVEAU DE PASS, tel que l'app le croit. Ce n'est qu'un confort
+   d'affichage : le serveur retranche de toute facon a chaque appel. Si cette
+   valeur mentait, elle ne ferait qu'afficher un bouton qui echouerait ensuite
+   proprement — jamais ouvrir une fonction payante.
+   Les gerants certifies AVANT l'existence du pass n'ont pas de document
+   merchants : on leur reconnait le niveau « frigo », comme le fait le serveur,
+   pour ne rien leur retirer. */
+function monPass(st){
+  if(_mesMagasins===null)chargerMesMagasins();
+  try{
+    var u=window._fbUser&&window._fbUser.uid;
+    var sid=st?String(st.fbId||st.id):null;
+    if(sid&&_mesMagasins&&_mesMagasins[sid])return _monPass;
+    if(st&&st.owner&&u&&String(st.owner)===String(u))return "frigo";
+  }catch(e){}
+  return _monPass;
+}
+function passOuvre(st,niveau){
+  var p=monPass(st);
+  if(niveau==="frigo")return p==="frigo"||p==="complet";
+  if(niveau==="complet")return p==="complet";
+  return false;
+}
+/* LE PASS DU COMMERCANT, dans sa propre fiche.
+   Trois niveaux, et le texte dit exactement ce que chacun ouvre. On n'y vend
+   rien : tant que l'encaissement n'existe pas, promettre un achat serait
+   mentir. On annonce donc ce qui existe, et ce qui n'existe pas encore.
+
+   CE QUE LE PASS N'ACHETE PAS. La pastille bleue n'apparait nulle part ici :
+   elle atteste d'une identite verifiee, elle se gagne, et aucun paiement ne
+   doit pouvoir la poser. Le jour ou payer changerait ce que la carte affirme,
+   la carte mentirait. */
+function rendrePass(st){
+  var hote=document.getElementById("sd-pass");
+  if(!hote)return;
+  var p=monPass(st);
+  var titre,corps,suite;
+  if(p==="complet"){
+    titre="Pass complet";
+    corps="Tu scannes tes frigos, tu signes tes boissons, et ton commerce est mis en avant.";
+    suite="";
+  }else if(p==="frigo"){
+    titre="Pass frigo"+(_monPass==="frigo"&&_passOrigine==="lancement"?" — offert au lancement":"");
+    corps="Tu peux scanner tes frigos et signer les boissons de ton rayon.";
+    suite="Le pass complet ajoutera la mise en avant de ton commerce. Il n'est pas encore ouvert.";
+  }else{
+    titre="Aucun pass";
+    corps="Le scan de frigo demande le pass frigo.";
+    suite="Ecris-nous depuis les reglages pour l'activer.";
+  }
+  hote.innerHTML=
+    '<div style="margin:0 0 12px;padding:12px 14px;border-radius:14px;background:var(--card-bg);'+
+    'border:1.5px solid var(--bord)">'+
+      '<div style="font-size:13px;font-weight:800">'+sanitize(titre)+'</div>'+
+      '<div class="c2" style="font-size:12px;margin-top:3px;line-height:1.45">'+sanitize(corps)+'</div>'+
+      (suite?'<div class="c3" style="font-size:11.5px;margin-top:5px;line-height:1.45">'+sanitize(suite)+'</div>':'')+
+    '</div>';
+  /* Le bouton du frigo suit le pass. Le cacher ne protege rien — le serveur
+     retranche de toute facon — mais un bouton qui echoue est pire qu'un bouton
+     absent : le commercant croit que l'app est cassee. */
+  var bf=document.getElementById("sd-btn-frigo");
+  if(bf)bf.style.display=passOuvre(st,"frigo")?"":"none";
 }
 function estProprietaire(st){
   try{

@@ -726,9 +726,30 @@ service cloud.firestore {
        Elle remplace le champ public stores/{id}.owner, qui reliait une
        boutique certifiee au profil personnel de son gerant : les magasins sont
        publics en lecture, les profils aussi, deux requetes suffisaient. */
+    /* LE COMPTE COMMERCANT. Contient la liste des boutiques qu'il tient et son
+       PASS. Ecrit par l'administrateur seul : si le client pouvait ecrire ici,
+       il lui suffirait de se declarer « pass complet » pour s'offrir les
+       fonctions payantes, et de s'attribuer la boutique du voisin.
+
+       Trois niveaux, et rien d'autre n'est accepte :
+         aucun    certifie, mais sans outil de gestion
+         frigo    scanne ses frigos et signe ses boissons  (10 EUR)
+         complet  tout le precedent, plus la mise en avant (20 EUR)
+
+       CE QUE LE PASS N'ACHETE PAS. La pastille bleue vit dans
+       stores/{id}.certified et ne depend pas de ce champ : elle atteste d'une
+       identite verifiee, elle se gagne. Un pass n'ouvre que des OUTILS. Le jour
+       ou payer changerait ce que la carte affirme, la carte mentirait. */
+    function passCommercantValide() {
+      return (!request.resource.data.keys().hasAny(['pass'])
+              || request.resource.data.pass in ['aucun', 'frigo', 'complet'])
+        && (!request.resource.data.keys().hasAny(['passOrigine'])
+              || request.resource.data.passOrigine in ['lancement', 'admin', 'paiement']);
+    }
     match /merchants/{uid} {
       allow read: if isSelf(uid) || isAdmin();
-      allow write: if isAdmin();
+      allow create, update: if isAdmin() && passCommercantValide();
+      allow delete: if isAdmin();
     }
 
     /* Traces de verification par paiement. Ecrites UNIQUEMENT par la Cloud

@@ -90,13 +90,29 @@ exports.identifyFridge = onCall(
          d'abord, et l'ancien champ seulement en secours, pour ne priver aucun
          gerant certifie de l'ancienne epoque. */
       const mer = await db.collection("merchants").doc(uid).get();
-      const aLui = mer.exists && Array.isArray((mer.data() || {}).stores)
-        && mer.data().stores.map(String).indexOf(storeId) !== -1;
-      if (!aLui) {
+      const dm = mer.exists ? (mer.data() || {}) : {};
+      const aLui = Array.isArray(dm.stores) && dm.stores.map(String).indexOf(storeId) !== -1;
+
+      /* LE PASS. Le lien ne suffit pas : le scan de frigo appelle un modele qui
+         coute de l'argent a chaque photo, et c'est la fonction que le pass a dix
+         euros vend. Le bouton est deja cache cote app pour qui n'a pas le pass,
+         mais du CSS n'a jamais protege personne — un appel direct passerait.
+
+         Les gerants certifies AVANT l'existence du pass n'ont pas de document
+         merchants : on les considere au niveau « frigo », ils avaient ce droit
+         et on ne le leur retire pas. */
+      let pass = "aucun";
+      if (aLui) {
+        pass = ["frigo", "complet"].indexOf(String(dm.pass || "")) !== -1 ? String(dm.pass) : "aucun";
+      } else {
         const st = await db.collection("stores").doc(storeId).get();
         if (!st.exists || st.data().owner !== uid)
           throw new HttpsError("permission-denied", "Reserve a l'administrateur et aux gerants certifies.");
+        pass = "frigo";
       }
+      if (pass === "aucun")
+        throw new HttpsError("permission-denied",
+          "Le scan de frigo demande le pass commercant. Ouvre la fiche de ton magasin pour l'activer.");
     }
 
     /* Plafond commun a toute l'app, en plus des 10 par personne : un compte

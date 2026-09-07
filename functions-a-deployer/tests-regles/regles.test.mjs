@@ -431,6 +431,35 @@ await doit('bloque : ecrire dans Stores (majuscule, collection morte)',
 await doit('bloque : lire Stores (majuscule, collection morte)',
   ()=>assertFails(getDoc(doc(m,'Stores','ss7GMAGpBfvLmkgwMw9B'))));
 
+/* LE PASS COMMERCANT. Trois niveaux, ecrits par l'administrateur seul. Si le
+   client pouvait ecrire dans merchants/{uid}, il lui suffirait de se declarer
+   « pass complet » pour s'offrir les fonctions payantes — et de s'attribuer la
+   boutique du voisin, ce qui lui ouvrirait le scan de frigo de ce magasin.
+   La pastille bleue, elle, ne depend pas du pass : elle vit dans
+   stores/{id}.certified et atteste d'une identite, pas d'un paiement. */
+await doit('legitime : l admin accorde le pass frigo',
+  ()=>assertSucceeds(setDoc(doc(ad,'merchants',ALICE),
+      {stores:['s1'],pass:'frigo',passOrigine:'lancement'})));
+await doit('legitime : Alice lit son propre compte commercant',
+  ()=>assertSucceeds(getDoc(doc(a,'merchants',ALICE))));
+await doit('bloque : lire le compte commercant de quelqu un d autre',
+  ()=>assertFails(getDoc(doc(m,'merchants',ALICE))));
+await doit('bloque : s accorder le pass complet soi-meme',
+  ()=>assertFails(setDoc(doc(m,'merchants',MALLORY),
+      {stores:[],pass:'complet',passOrigine:'paiement'})));
+await doit('bloque : s ajouter la boutique d un autre',
+  ()=>assertFails(setDoc(doc(m,'merchants',MALLORY),{stores:['s1']},{merge:true})));
+await doit('bloque : hausser son propre pass par une mise a jour',
+  ()=>assertFails(updateDoc(doc(a,'merchants',ALICE),{pass:'complet'})));
+await doit('bloque : un pass invente, meme par l admin',
+  ()=>assertFails(setDoc(doc(ad,'merchants',ALICE),
+      {stores:['s1'],pass:'illimite'},{merge:true})));
+await doit('bloque : une origine de pass inventee, meme par l admin',
+  ()=>assertFails(setDoc(doc(ad,'merchants',ALICE),
+      {stores:['s1'],pass:'frigo',passOrigine:'cadeau'},{merge:true})));
+await doit('legitime : l admin retire le pass',
+  ()=>assertSucceeds(setDoc(doc(ad,'merchants',ALICE),{pass:'aucun'},{merge:true})));
+
 R.forEach(r=>console.log(r[0],'|',r[1]));
 console.log('\n'+(R.length-ko)+'/'+R.length+' conformes');
 await env.cleanup();
