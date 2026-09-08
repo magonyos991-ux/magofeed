@@ -336,8 +336,119 @@ await doit('bloque : lire le soutien de quelqu un d autre',
 await doit('legitime : Alice lit son propre soutien',
   ()=>assertSucceeds(getDoc(doc(a,'soutiens',ALICE))));
 
+/* LA CHASSE AUX CODES-BARRES. Ces regles laissent la communaute ECRIRE : ce
+   sont donc celles qu'il faut le plus attaquer. Ce qu'on verifie ici, c'est
+   qu'on ne peut ni se compter deux fois, ni ajouter quelqu'un d'autre, ni
+   detourner un lien vers une autre boisson une fois les confirmations reunies. */
+await doit('legitime : Alice propose un code pour une boisson orpheline',
+  ()=>assertSucceeds(setDoc(doc(a,'chasseCodes','5000112637939'),
+      {drinkId:1783615414484,drinkName:'Golden Power',barcode:'5000112637939',
+       par:[ALICE],etat:'attente',createdAt:serverTimestamp()})));
+await doit('bloque : proposer en se declarant deja confirme par un autre',
+  ()=>assertFails(setDoc(doc(m,'chasseCodes','5449000000996'),
+      {drinkId:1,drinkName:'X',barcode:'5449000000996',
+       par:[ALICE,MALLORY],etat:'attente',createdAt:serverTimestamp()})));
+await doit('bloque : proposer un lien deja marque comme pose',
+  ()=>assertFails(setDoc(doc(m,'chasseCodes','5449000011527'),
+      {drinkId:1,drinkName:'X',barcode:'5449000011527',
+       par:[MALLORY],etat:'pose',createdAt:serverTimestamp()})));
+await doit('legitime : Mallory confirme la proposition d Alice',
+  ()=>assertSucceeds(updateDoc(doc(m,'chasseCodes','5000112637939'),
+      {par:[ALICE,MALLORY]})));
+await doit('bloque : se compter une deuxieme fois',
+  ()=>assertFails(updateDoc(doc(m,'chasseCodes','5000112637939'),
+      {par:[ALICE,MALLORY,MALLORY]})));
+await doit('bloque : detourner le lien vers une autre boisson en confirmant',
+  ()=>assertFails(updateDoc(doc(a,'chasseCodes','5000112637939'),
+      {par:[ALICE,MALLORY,ALICE],drinkId:99999})));
+await doit('bloque : se declarer soi-meme valide (etat pose)',
+  ()=>assertFails(updateDoc(doc(a,'chasseCodes','5000112637939'),{etat:'pose'})));
+await doit('bloque : un anonyme confirme un code',
+  ()=>assertFails(updateDoc(doc(anon,'chasseCodes','5000112637939'),
+      {par:[ALICE,MALLORY,'anon']})));
+await doit('legitime : tout le monde peut LIRE la chasse (sans compte)',
+  ()=>assertSucceeds(getDoc(doc(anon,'chasseCodes','5000112637939'))));
+
 await doit('bloque : se declarer administrateur',
   ()=>assertFails(setDoc(doc(m,'admins',MALLORY),{ok:true})));
+
+/* Les deux coups de main d'Alice sont poses par le serveur (Admin SDK), donc
+   regles desactivees — exactement comme en production. */
+await env.withSecurityRulesDisabled(async (c)=>{
+  const db=c.firestore();
+  await setDoc(doc(db,'coupsDeMain',ALICE,'recus','r1'),
+    {aidantUid:'aide1',aidantPseudo:'Lina',drinkId:1,storeId:'s1',at:1756000000000,merci:false});
+  await setDoc(doc(db,'coupsDeMain',ALICE,'recus','r2'),
+    {aidantUid:'aide2',aidantPseudo:'Sam',drinkId:2,storeId:'s2',at:1756000000000,merci:true});
+});
+
+/* ── LES COUPS DE MAIN ───────────────────────────────────────────────────
+   Ce n'est pas un canal, et ces epreuves sont ce qui l'en empeche. Le
+   chercheur lit une projection choisie par le serveur ; il ne peut ecrire
+   qu'un booleen, et dans un seul sens. Sans le dernier test, une bascule en
+   boucle ferait sonner le telephone de l'aidant a volonte. ── */
+await doit('legitime : Alice lit ses coups de main',
+  ()=>assertSucceeds(getDoc(doc(a,'coupsDeMain',ALICE,'recus','r1'))));
+await doit('bloque : lire les coups de main de quelqu un d autre',
+  ()=>assertFails(getDoc(doc(m,'coupsDeMain',ALICE,'recus','r1'))));
+await doit('bloque : s ecrire un coup de main',
+  ()=>assertFails(setDoc(doc(m,'coupsDeMain',MALLORY,'recus','r9'),
+      {aidantUid:MALLORY,aidantPseudo:'Moi',drinkId:1,storeId:'s1',at:1,merci:false})));
+await doit('legitime : dire merci une fois',
+  ()=>assertSucceeds(updateDoc(doc(a,'coupsDeMain',ALICE,'recus','r1'),{merci:true})));
+await doit('bloque : retirer son merci (relance de notification)',
+  ()=>assertFails(updateDoc(doc(a,'coupsDeMain',ALICE,'recus','r2'),{merci:false})));
+await doit('bloque : changer autre chose que le merci',
+  ()=>assertFails(updateDoc(doc(a,'coupsDeMain',ALICE,'recus','r1'),
+      {merci:true,aidantPseudo:'AutreNom'})));
+await doit('legitime : cocher aider en discret sur son profil',
+  ()=>assertSucceeds(setDoc(doc(a,'users',ALICE),{aideDiscrete:true},{merge:true})));
+await doit('bloque : aideDiscrete qui n est pas un booleen',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),{aideDiscrete:'oui'},{merge:true})));
+
+/* ── LES SIGNALEMENTS ────────────────────────────────────────────────────
+   Le motif vient d'une liste FERMEE : c'est ce qui empeche un formulaire de
+   signalement de devenir un canal pour insulter la personne visee. Et
+   personne ne relit ses propres signalements, meme leur auteur : les ouvrir
+   en lecture ferait de la collection un canal (« je vois que tu m'as
+   signale »). ── */
+await doit('legitime : signaler une decouverte avec un motif de la liste',
+  ()=>assertSucceeds(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'decouverte',cibleId:'d1',motif:'sexuel',
+       apercu:'Nom du produit',at:new Date(),etat:'nouveau'})));
+await doit('bloque : signaler au nom de quelqu un d autre',
+  ()=>assertFails(addDoc(collection(m,'abus'),
+      {par:ALICE,cibleType:'decouverte',cibleId:'d1',motif:'spam',at:new Date(),etat:'nouveau'})));
+await doit('bloque : un motif invente (texte libre deguise)',
+  ()=>assertFails(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'profil',cibleId:'u1',motif:'tu es un imbecile',at:new Date(),etat:'nouveau'})));
+await doit('bloque : un champ en plus pour glisser du texte',
+  ()=>assertFails(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'profil',cibleId:'u1',motif:'spam',
+       message:'insulte',at:new Date(),etat:'nouveau'})));
+await doit('bloque : se declarer deja traite',
+  ()=>assertFails(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'profil',cibleId:'u1',motif:'spam',at:new Date(),etat:'traite'})));
+await doit('bloque : un apercu de plus de 400 caracteres',
+  ()=>assertFails(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'profil',cibleId:'u1',motif:'spam',
+       apercu:'x'.repeat(401),at:new Date(),etat:'nouveau'})));
+await doit('bloque : lire les signalements, meme les siens',
+  ()=>assertFails(getDocs(collection(m,'abus'))));
+await doit('bloque : un type de cible invente',
+  ()=>assertFails(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'magasin',cibleId:'s1',motif:'spam',at:new Date(),etat:'nouveau'})));
+
+/* LE CODE DE PARRAINAGE. Il vivait dans users/{uid}, qui est en lecture
+   publique pour faire marcher le classement : lister les profils suffisait a
+   reconstituer les codes de tout le monde. La table refCodes (code vers uid)
+   etait bien protegee, la table INVERSE ne l'etait pas. */
+await doit('legitime : Alice lit son propre code de parrainage',
+  ()=>assertSucceeds(getDoc(doc(a,'refMine',ALICE))));
+await doit('bloque : lire le code de parrainage de quelqu un d autre',
+  ()=>assertFails(getDoc(doc(m,'refMine',ALICE))));
+await doit('bloque : s ecrire un code de parrainage',
+  ()=>assertFails(setDoc(doc(m,'refMine',MALLORY),{code:'ABCDE'})));
 
 /* « Stores » AVEC UNE MAJUSCULE. Vestige d'une ancienne version : un seul
    document y dormait et aucun code ne la lisait, mais elle avait un jeu de
@@ -350,6 +461,74 @@ await doit('bloque : ecrire dans Stores (majuscule, collection morte)',
       {name:'Faux magasin',lat:50.8,lng:4.3})));
 await doit('bloque : lire Stores (majuscule, collection morte)',
   ()=>assertFails(getDoc(doc(m,'Stores','ss7GMAGpBfvLmkgwMw9B'))));
+
+/* LE PASS COMMERCANT. Trois niveaux, ecrits par l'administrateur seul. Si le
+   client pouvait ecrire dans merchants/{uid}, il lui suffirait de se declarer
+   « pass complet » pour s'offrir les fonctions payantes — et de s'attribuer la
+   boutique du voisin, ce qui lui ouvrirait le scan de frigo de ce magasin.
+   La pastille bleue, elle, ne depend pas du pass : elle vit dans
+   stores/{id}.certified et atteste d'une identite, pas d'un paiement. */
+await doit('legitime : l admin accorde le pass frigo',
+  ()=>assertSucceeds(setDoc(doc(ad,'merchants',ALICE),
+      {stores:['s1'],pass:'frigo',passOrigine:'lancement'})));
+await doit('legitime : Alice lit son propre compte commercant',
+  ()=>assertSucceeds(getDoc(doc(a,'merchants',ALICE))));
+await doit('bloque : lire le compte commercant de quelqu un d autre',
+  ()=>assertFails(getDoc(doc(m,'merchants',ALICE))));
+await doit('bloque : s accorder le pass complet soi-meme',
+  ()=>assertFails(setDoc(doc(m,'merchants',MALLORY),
+      {stores:[],pass:'complet',passOrigine:'paiement'})));
+await doit('bloque : s ajouter la boutique d un autre',
+  ()=>assertFails(setDoc(doc(m,'merchants',MALLORY),{stores:['s1']},{merge:true})));
+await doit('bloque : hausser son propre pass par une mise a jour',
+  ()=>assertFails(updateDoc(doc(a,'merchants',ALICE),{pass:'complet'})));
+await doit('bloque : un pass invente, meme par l admin',
+  ()=>assertFails(setDoc(doc(ad,'merchants',ALICE),
+      {stores:['s1'],pass:'illimite'},{merge:true})));
+await doit('bloque : une origine de pass inventee, meme par l admin',
+  ()=>assertFails(setDoc(doc(ad,'merchants',ALICE),
+      {stores:['s1'],pass:'frigo',passOrigine:'cadeau'},{merge:true})));
+await doit('legitime : l admin retire le pass',
+  ()=>assertSucceeds(setDoc(doc(ad,'merchants',ALICE),{pass:'aucun'},{merge:true})));
+
+/* L'ANNONCE DU COMMERCANT — le contenu du pass complet. Elle doit etre
+   ecrivable par le gerant au pass complet de CE magasin, et par personne
+   d'autre : ni un visiteur, ni un gerant au pass frigo, ni le gerant d'un
+   AUTRE magasin. Elle est publique en lecture, comme le magasin qu'elle
+   accompagne, et l'administrateur doit pouvoir l'effacer sans son auteur. */
+await env.withSecurityRulesDisabled(async (c)=>{
+  const db=c.firestore();
+  await setDoc(doc(db,'merchants',ALICE),{stores:['s1'],pass:'complet',passOrigine:'paiement'});
+  await setDoc(doc(db,'merchants',MALLORY),{stores:['s2'],pass:'frigo',passOrigine:'lancement'});
+  await setDoc(doc(db,'stores','s2'),{name:'Autre',brand:'',lat:50.8,lng:4.3,addedBy:MALLORY,
+      drinks:[],drinksVerified:[],confirmations:{},seenAt:{}});
+});
+const ANN={texte:'Livraison offerte des 20 euros',par:ALICE,actif:true};
+await doit('legitime : Alice au pass complet publie son annonce',
+  ()=>assertSucceeds(setDoc(doc(a,'annonces','s1'),ANN)));
+await doit('legitime : n importe qui lit une annonce',
+  ()=>assertSucceeds(getDoc(doc(anon,'annonces','s1'))));
+await doit('bloque : un visiteur publie une annonce',
+  ()=>assertFails(setDoc(doc(m,'annonces','s1'),{texte:'Faux',par:MALLORY,actif:true})));
+await doit('bloque : Mallory au pass frigo publie une annonce',
+  ()=>assertFails(setDoc(doc(m,'annonces','s2'),{texte:'Promo',par:MALLORY,actif:true})));
+await doit('bloque : signer une annonce du nom d un autre',
+  ()=>assertFails(setDoc(doc(a,'annonces','s1'),{texte:'Coucou',par:MALLORY,actif:true})));
+await doit('bloque : une annonce de plus de 90 caracteres',
+  ()=>assertFails(setDoc(doc(a,'annonces','s1'),{texte:'x'.repeat(91),par:ALICE,actif:true})));
+await doit('bloque : une annonce vide',
+  ()=>assertFails(setDoc(doc(a,'annonces','s1'),{texte:'',par:ALICE,actif:true})));
+await doit('bloque : glisser un champ en plus dans l annonce',
+  ()=>assertFails(setDoc(doc(a,'annonces','s1'),{texte:'Promo',par:ALICE,actif:true,certified:true})));
+await doit('bloque : Alice publie sur un magasin qui n est pas le sien',
+  ()=>assertFails(setDoc(doc(a,'annonces','s2'),{texte:'Promo',par:ALICE,actif:true})));
+await doit('legitime : l admin efface une annonce',
+  ()=>assertSucceeds(deleteDoc(doc(ad,'annonces','s1'))));
+
+await doit('legitime : signaler une annonce de commercant',
+  ()=>assertSucceeds(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'annonce',cibleId:'s1',motif:'alcool',
+       apercu:'texte de l annonce',at:new Date(),etat:'nouveau'})));
 
 R.forEach(r=>console.log(r[0],'|',r[1]));
 console.log('\n'+(R.length-ko)+'/'+R.length+' conformes');

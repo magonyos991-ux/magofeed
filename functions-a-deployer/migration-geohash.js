@@ -73,11 +73,16 @@
  * ============================================================================
  */
 
-const admin = require("firebase-admin");
+/* API modulaire uniquement : la forme namespacee n'existe plus dans les
+   versions recentes du SDK. Ce script se lance a la main, il n'aurait donc
+   pas casse le deploiement — mais il aurait plante au premier lancement,
+   au pire moment. Voir la note en tete de outils-admin.js. */
+const { initializeApp, cert } = require("firebase-admin/app");
+const { getFirestore, FieldPath } = require("firebase-admin/firestore");
 const serviceAccount = require("./serviceAccount.json");
 
-admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-const db = admin.firestore();
+initializeApp({ credential: cert(serviceAccount) });
+const db = getFirestore();
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const COLLECTION = "stores";   // ADAPTE si ton app écrit dans "Stores" (majuscule)
@@ -114,7 +119,7 @@ async function main() {
   let cursor = null, lu = 0, ecrits = 0, dejaFaits = 0, sansPosition = 0;
 
   for (;;) {
-    let q = db.collection(COLLECTION).orderBy(admin.firestore.FieldPath.documentId()).limit(PAGE_SIZE);
+    let q = db.collection(COLLECTION).orderBy(FieldPath.documentId()).limit(PAGE_SIZE);
     if (cursor) q = q.startAfter(cursor);
     const snap = await q.get();
     if (snap.empty) break;

@@ -44,12 +44,14 @@
  */
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
-const admin = require("firebase-admin");
+/* API modulaire uniquement : la forme namespacee n'existe plus dans les
+   versions recentes du SDK. Voir la note en tete de outils-admin.js. */
 const { getApps, initializeApp } = require("firebase-admin/app");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { sendToAdmins } = require("./outils-admin");
 
 if (!getApps().length) initializeApp();
-const db = admin.firestore();
+const db = getFirestore();
 const REGION = "europe-west1";
 const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
 
@@ -238,7 +240,7 @@ exports.aiCatalogDiscovery = onDocumentCreated(
     }
     if (dup) {
       if (barcode) {
-        await dup.ref.update({ barcodes: admin.firestore.FieldValue.arrayUnion(barcode) });
+        await dup.ref.update({ barcodes: FieldValue.arrayUnion(barcode) });
       }
       await snap.ref.update({ aiVerdict: "duplicate", catalogId: dup.id });
       await sendToAdmins("Code-barres rattache",
@@ -266,7 +268,7 @@ exports.aiCatalogDiscovery = onDocumentCreated(
       barcodes: barcode ? [barcode] : [],
       stars: 4.0,                                  // amorcage, jamais affiche (voir realAgg)
       ai: true,
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
+      createdAt: FieldValue.serverTimestamp()
     });
     await snap.ref.update({ aiVerdict: "added", catalogId: String(id) });
     await sendToAdmins("Fiche creee par l'IA",

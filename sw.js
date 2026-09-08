@@ -66,7 +66,6 @@ function isLiveOnly(url) {
          url.hostname.indexOf("firebasestorage.app") !== -1 ||
          url.hostname.indexOf("nominatim.openstreetmap.org") !== -1 ||
          url.hostname.indexOf("tile.openstreetmap.org") !== -1 ||
-         url.hostname.indexOf("basemaps.cartocdn.com") !== -1 ||
          url.hostname.indexOf("routing.openstreetmap.de") !== -1;
 }
 

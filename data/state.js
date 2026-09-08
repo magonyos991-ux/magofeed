@@ -28,7 +28,22 @@ var favorites=JSON.parse(localStorage.getItem("magofavs")||"[]");
 var searchHistory=JSON.parse(localStorage.getItem("magosearchhist")||"[]");
 var userRatings=JSON.parse(localStorage.getItem("mago_ratings")||"{}");
 var userRecs=JSON.parse(localStorage.getItem("mago_recs")||"{}");
+/* DEUX COMPTEURS, ET ILS NE DOIVENT JAMAIS SE MELANGER.
+
+   scanCounts       MES scans a moi. Sert au chiffre « Scans » du profil, au
+                    badge Scanneur, et a savoir si quelqu'un est nouveau.
+   scanCountsGlobal ceux de TOUT LE MONDE, lus dans stats/scanCounts. Sert aux
+                    tendances : le rail d'accueil, les boissons qui montent.
+
+   Ils n'en faisaient qu'un. Le compteur communautaire etait deverse dans le
+   compteur personnel a chaque chargement, et le profil d'une personne qui
+   venait d'installer l'app affichait 84 scans — le nombre de boissons scannees
+   par l'ensemble des utilisateurs. Pire : le premier scan de cette personne
+   reecrivait le tout dans son stockage local, gravant la confusion chez elle
+   pour de bon. Le document stats/scanCounts est lisible sans compte, donc le
+   faux chiffre s'affichait meme avant toute connexion. */
 var scanCounts=JSON.parse(localStorage.getItem("magoscans")||"{}");
+var scanCountsGlobal={};
 var curSort="distance";
 var soundEnabled=localStorage.getItem("magosound")!=="0";
 var deferredInstallPrompt=null;
@@ -51,6 +66,31 @@ var leaderboardRows=null;
 var leaderboardLoadedAt=0;
 var userStreak=JSON.parse(localStorage.getItem("magoStreak")||'{"streak":0,"last":"","best":0}');
 var scanHist=JSON.parse(localStorage.getItem("magoScanHist")||"[]");
+/* REPARATION, UNE SEULE FOIS PAR APPAREIL. Les installations qui ont vecu avec
+   le melange gardent les identifiants communautaires dans leur stockage local :
+   les effacer ne suffit pas, il faut RECONSTRUIRE le vrai compteur personnel.
+   La seule source fiable est magoScanHist, le journal des scans reellement
+   faits sur cet appareil.
+   La valeur est remise a 1 et non au compte d'origine : ce compte etait
+   melange, donc faux, et aucun affichage ne lit la valeur — les trois usages
+   personnels comptent des CLES (combien de boissons differentes), jamais des
+   occurrences. Mieux vaut un 1 honnete qu'un nombre invente.
+   Limite assumee : le journal ne garde que 50 entrees. Quelqu'un qui aurait
+   scanne plus de 50 boissons differentes verrait son compteur plafonne — c'est
+   toujours plus vrai que le chiffre de la communaute affiche comme le sien. */
+(function reparerCompteurPersonnel(){
+  try{
+    if(localStorage.getItem("magoscansRepare")==="1")return;
+    var perso={};
+    (scanHist||[]).forEach(function(e){
+      var id=(e&&e.drinkId!=null)?String(e.drinkId):"";
+      if(id!=="")perso[id]=1;
+    });
+    scanCounts=perso;
+    localStorage.setItem("magoscans",JSON.stringify(perso));
+    localStorage.setItem("magoscansRepare","1");
+  }catch(e){}
+})();
 var curBrandFilter=null;
 var isAdmin=false;
 // v3 : purge des resolutions automatiques de l'ancienne verification (incident

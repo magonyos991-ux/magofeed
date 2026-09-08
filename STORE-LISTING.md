@@ -12,7 +12,7 @@ Vérifie les chiffres (nombre de magasins, pays) avant publication.
 
 - **App Store — sous-titre** (max 30) : `Trouve ta boisson près de toi` *(29)*
 - **Google Play — description courte** (max 80) :
-  `Trouve quel magasin a ta boisson en stock autour de toi, confirmé en temps réel.` *(79)*
+  `Trouve quel magasin a ta boisson en stock autour de toi, confirmé en temps réel.` *(80 — pile à la limite)*
 
 ## Texte promotionnel (App Store, max 170)
 `La communauté qui sait quel magasin a VRAIMENT ta boisson en stock, près de toi. Signale, confirme, trouve l'itinéraire — en temps réel.` *(134)*
@@ -26,11 +26,11 @@ Vérifie les chiffres (nombre de magasins, pays) avant publication.
 Sodas, ice tea, energy drinks, jus, limonades japonaises… Magofeed est l'app communautaire qui te montre **quels magasins autour de toi ont vraiment ta boisson en stock** — pas « peut-être », mais confirmé par d'autres utilisateurs, en temps réel.
 
 **Comment ça marche**
-• 🔍 Cherche ta boisson par son nom (Fanta Citron, Mogu Mogu, Prime, Monster…)
-• 📍 Vois les magasins qui l'ont, triés par distance, avec l'itinéraire en un tap
-• ✅ Confirme ou signale une rupture — c'est la communauté qui garde la carte fiable
-• 📷 Tu croises une pépite ? Scanne son code-barres pour la partager
-• 🏆 Gagne des points, garde ton streak, grimpe au classement
+• Cherche ta boisson par son nom (Fanta Citron, Mogu Mogu, Prime, Monster…)
+• Vois les magasins qui l'ont, triés par distance, avec l'itinéraire en un tap
+• Confirme ou signale une rupture — c'est la communauté qui garde la carte fiable
+• Tu croises une pépite ? Scanne son code-barres pour la partager
+• Gagne des points, garde ton streak, grimpe au classement
 
 **Pourquoi tu vas l'adopter**
 • Fini les tournées de magasins pour rien
@@ -40,7 +40,7 @@ Sodas, ice tea, energy drinks, jus, limonades japonaises… Magofeed est l'app c
 
 Magofeed n'indexe **aucune boisson alcoolisée** : c'est une app tout public, pensée pour la communauté des amateurs de boissons.
 
-Rejoins le mouvement — repère, confirme, partage. La prochaine bouteille est plus proche que tu ne crois. 🥤
+Rejoins le mouvement — repère, confirme, partage. La prochaine bouteille est plus proche que tu ne crois.
 
 ---
 
@@ -60,7 +60,7 @@ Rejoins le mouvement — repère, confirme, partage. La prochaine bouteille est 
 ---
 
 ## Rappel — éléments visuels à fournir
-- Icône : `icons/icon-512.png` (Play) · `icons/icon-1024.png` (App Store) ✅ prêtes
+- Icône : `icons/icon-512.png` (Play) · `icons/icon-1024.png` (App Store) — prêtes
 - Captures : min. 2 (Play) / 3 (Apple), format téléphone — écrans conseillés :
   Accueil · Résultat de recherche avec magasins · Carte · Scan code-barres
 - Bannière Play (feature graphic) : 1024×500 px

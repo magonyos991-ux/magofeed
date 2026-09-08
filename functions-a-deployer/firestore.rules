@@ -85,6 +85,10 @@ service cloud.firestore {
         && (!('confirms' in d) || d.confirms is number)
         && (!('signals' in d) || d.signals is number)
         && (!('discAccepted' in d) || d.discAccepted is number)
+        /* Aider en discret : les points sont verses, le nom n'apparait pas
+           dans les coups de main. C'est un choix de la personne, donc elle
+           l'ecrit elle-meme — et c'est un booleen, rien de plus. */
+        && (!('aideDiscrete' in d) || d.aideDiscrete is bool)
         && (!('favs' in d) || (d.favs is list && d.favs.size() <= 10))
         && (!('avatar' in d) || d.avatar == null
             || (d.avatar is map
@@ -143,6 +147,15 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow write: if false;          // cree par la Cloud Function monCodeParrain
     }
+    /* MON code de parrainage, lisible par moi seul. Il vivait dans
+       users/{uid}, qui est en lecture publique pour faire marcher le
+       classement : lister les profils suffisait a reconstituer les codes de
+       tout le monde. La table refCodes (code vers uid) etait bien protegee,
+       la table inverse ne l'etait pas. */
+    match /refMine/{uid} {
+      allow read: if isSelf(uid);
+      allow write: if false;          // ecrit par la Cloud Function uniquement
+    }
 
     // ── Parrainages. L'identifiant du document EST l'uid du filleul : il ne
     //    peut donc etre parraine qu'une fois dans sa vie, par construction.
@@ -171,6 +184,86 @@ service cloud.firestore {
 
     // ── Notifications in-app : le destinataire lit les siennes et peut les
     //    marquer lues ; SEUL un admin en crée (à la promotion / au rejet photo).
+    /* ══ SIGNALEMENTS ════════════════════════════════════════════════════
+       Magofeed heberge deja du contenu depose par n'importe quel visiteur :
+       photos de decouvertes, suggestions de photos, pseudos et avatars
+       publics. Il n'existait aucun moyen de signaler quoi que ce soit — les
+       deux boutons « signaler » de l'app visent un magasin qui n'existe pas
+       ou une information fausse, jamais un contenu abusif.
+
+       Le mecanisme de notification et action de l'article 16 du reglement
+       europeen sur les services numeriques s'applique quelle que soit la
+       taille du service : l'exemption prevue pour les micro-entreprises ne
+       couvre que les articles 20 a 28. Apple et Google le demandent aussi a
+       la soumission d'une application.
+
+       ON N'EFFACE PAS AVANT D'AVOIR COPIE : le signalement porte lui-meme la
+       description de ce qui est vise, pour que la preuve survive a la
+       suppression du contenu d'origine. Sinon la personne qui signale perd ce
+       qu'elle signalait.
+
+       Personne ne relit ses propres signalements : les ouvrir en lecture,
+       meme a leur auteur, transformerait la collection en canal (« je vois
+       que tu m'as signale »). L'accuse de reception passe par userNotifs. */
+    function signalementValide() {
+      return request.resource.data.keys().hasOnly(
+               ['par','cibleType','cibleId','motif','apercu','at','etat'])
+        && request.resource.data.par == request.auth.uid
+        /* 'annonce' ajoute avec le pass complet : une annonce est du texte
+           ecrit par un commercant et lu par tout le monde, elle doit donc
+           pouvoir etre signalee comme le reste. Sans cette entree, le lien de
+           signalement s'affichait mais l'ecriture etait refusee — un bouton qui
+           ne fait rien est pire que pas de bouton du tout. */
+        && request.resource.data.cibleType in ['decouverte','photo','profil','commentaire','annonce']
+        && request.resource.data.cibleId is string
+        && request.resource.data.cibleId.size() > 0
+        && request.resource.data.cibleId.size() <= 200
+        /* Liste FERMEE : aucun texte libre ne peut entrer ici, donc aucun
+           signalement ne peut servir a insulter la personne visee. */
+        && request.resource.data.motif in
+             ['alcool','sexuel','haine','harcelement','faux','spam','mineur','autre']
+        && (!('apercu' in request.resource.data)
+            || (request.resource.data.apercu is string
+                && request.resource.data.apercu.size() <= 400))
+        && request.resource.data.etat == 'nouveau';
+    }
+    match /abus/{id} {
+      allow read:   if isAdmin();
+      allow create: if isSignedIn() && signalementValide();
+      /* L'administrateur marque TRAITE, il n'efface pas : le signalement et sa
+         copie du contenu restent, c'est la trace de ce qui a ete decide et
+         quand. La suppression reste possible pour purger apres un an. */
+      allow update, delete: if isAdmin();
+    }
+
+    /* ══ LES COUPS DE MAIN ═══════════════════════════════════════════════
+       Quand quelqu'un tape « je l'ai vue en rayon » et que ca repond a la
+       chasse d'une autre personne, le serveur verse deja des points a
+       l'aidant et previent le chercheur. Les deux s'entraident donc — et ne
+       se voient jamais. Voici le chainon manquant.
+
+       CE N'EST PAS UN CANAL, ET LES REGLES SONT CE QUI L'EN EMPECHE.
+       Le chercheur LIT une projection choisie par le serveur, champ par
+       champ ; la collection reports n'est jamais ouverte. Il ne peut rien
+       ecrire d'autre que « merci », un booleen. Aucun champ de texte
+       n'existe nulle part, donc rien de nocif ne peut y transiter.
+
+       Et la gratitude remonte sans que l'identite redescende : l'aidant
+       recoit « quelqu'un te remercie pour X », jamais un nom. C'est
+       exactement ce qui empeche ce chainon de devenir une messagerie. */
+    match /coupsDeMain/{uid}/recus/{id} {
+      allow read:   if isSelf(uid);
+      allow create, delete: if isAdmin();     // ecrit par la Cloud Function
+      /* Un seul champ modifiable, et il ne peut aller que dans un sens :
+         on remercie, on ne « de-remercie » pas. Sans ce dernier test, le
+         merci pourrait etre remis a false puis a true en boucle, et chaque
+         bascule declencherait une notification chez l'aidant. */
+      allow update: if isSelf(uid)
+                    && changed().hasOnly(['merci'])
+                    && request.resource.data.merci == true
+                    && resource.data.merci != true;
+    }
+
     match /userNotifs/{docId} {
       allow read:   if isSignedIn() && resource.data.to == request.auth.uid;
       allow create: if isAdmin();
@@ -649,9 +742,69 @@ service cloud.firestore {
        Elle remplace le champ public stores/{id}.owner, qui reliait une
        boutique certifiee au profil personnel de son gerant : les magasins sont
        publics en lecture, les profils aussi, deux requetes suffisaient. */
+    /* LE COMPTE COMMERCANT. Contient la liste des boutiques qu'il tient et son
+       PASS. Ecrit par l'administrateur seul : si le client pouvait ecrire ici,
+       il lui suffirait de se declarer « pass complet » pour s'offrir les
+       fonctions payantes, et de s'attribuer la boutique du voisin.
+
+       Trois niveaux, et rien d'autre n'est accepte :
+         aucun    certifie, mais sans outil de gestion
+         frigo    scanne ses frigos et signe ses boissons  (10 EUR)
+         complet  tout le precedent, plus la mise en avant (20 EUR)
+
+       CE QUE LE PASS N'ACHETE PAS. La pastille bleue vit dans
+       stores/{id}.certified et ne depend pas de ce champ : elle atteste d'une
+       identite verifiee, elle se gagne. Un pass n'ouvre que des OUTILS. Le jour
+       ou payer changerait ce que la carte affirme, la carte mentirait. */
+    function passCommercantValide() {
+      return (!request.resource.data.keys().hasAny(['pass'])
+              || request.resource.data.pass in ['aucun', 'frigo', 'complet'])
+        && (!request.resource.data.keys().hasAny(['passOrigine'])
+              || request.resource.data.passOrigine in ['lancement', 'admin', 'paiement']);
+    }
     match /merchants/{uid} {
       allow read: if isSelf(uid) || isAdmin();
-      allow write: if isAdmin();
+      allow create, update: if isAdmin() && passCommercantValide();
+      allow delete: if isAdmin();
+    }
+
+    /* L'ANNONCE DU COMMERCANT. C'est le contenu du pass complet : une phrase
+       courte, ecrite par le gerant, affichee sur la fiche de SON magasin et
+       annoncee comme venant de lui.
+
+       CE QU'ELLE N'EST PAS. Elle ne touche ni a la pastille bleue, ni au stock,
+       ni a la position sur la carte : rien de ce qu'un visiteur lit comme un
+       fait verifie ne peut etre achete. Une annonce est un message signe, pas
+       une information de la carte.
+
+       DEUX LECTURES SUPPLEMENTAIRES par ecriture (le compte commercant, deux
+       fois). C'est le prix a payer pour que le controle porte sur le pass reel
+       et non sur ce que le client pretend avoir. Les annonces s'ecrivent
+       rarement — quelques fois par mois et par commerce.
+
+       L'administrateur peut toujours effacer : une annonce est du texte ecrit
+       par un tiers, et il faut pouvoir la retirer sans attendre son auteur. */
+    function compteCommercantDeLAppelant() {
+      return get(/databases/$(database)/documents/merchants/$(request.auth.uid)).data;
+    }
+    function aLePassComplet(storeId) {
+      return exists(/databases/$(database)/documents/merchants/$(request.auth.uid))
+        && compteCommercantDeLAppelant().pass == 'complet'
+        && storeId in compteCommercantDeLAppelant().stores;
+    }
+    function annonceValide() {
+      return request.resource.data.keys().hasOnly(['texte', 'par', 'maj', 'actif'])
+        && request.resource.data.keys().hasAll(['texte', 'par', 'actif'])
+        && request.resource.data.par == request.auth.uid
+        && request.resource.data.texte is string
+        && request.resource.data.texte.size() > 0
+        && request.resource.data.texte.size() <= 90
+        && request.resource.data.actif is bool;
+    }
+    match /annonces/{storeId} {
+      allow read: if true;
+      allow create, update: if pasAnonyme() && annonceValide() && aLePassComplet(storeId);
+      allow delete: if isAdmin() || (pasAnonyme() && aLePassComplet(storeId));
     }
 
     /* Traces de verification par paiement. Ecrites UNIQUEMENT par la Cloud
@@ -680,6 +833,37 @@ service cloud.firestore {
     match /dons/{id} {
       allow read: if isAdmin();
       allow write: if false;
+    }
+
+    /* LA CHASSE AUX CODES-BARRES.
+       Une fiche de catalogue nee d'une proposition PHOTO arrive sans code : elle
+       existe dans la recherche mais aucun scan ne la trouve. On demande donc a
+       la communaute de les retrouver en rayon. Un document par code-barre
+       propose, et il ne contient qu'une chose qui compte : QUI a confirme.
+
+       CE QUE CES REGLES EMPECHENT, ET C'EST TOUT L'INTERET :
+       - se compter deux fois (le meme uid ne peut pas s'ajouter deux fois) ;
+       - ajouter QUELQU'UN D'AUTRE que soi a la liste des confirmants ;
+       - toucher a autre chose que cette liste apres coup — ni la boisson visee,
+         ni le code, ni l'etat. Le lien propose ne peut donc pas etre detourne
+         vers une autre boisson une fois les confirmations reunies.
+       Poser reellement le code sur la fiche catalogue reste hors de portee du
+       client (catalog est en ecriture isAdmin()) : c'est la Cloud Function qui
+       le fait, a deux confirmations, avec l'Admin SDK. */
+    match /chasseCodes/{barcode} {
+      allow read: if true;
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['drinkId','drinkName','barcode','par','etat','createdAt'])
+        && request.resource.data.par == [request.auth.uid]
+        && request.resource.data.etat == 'attente'
+        && request.resource.data.barcode is string
+        && request.resource.data.barcode.size() <= 20;
+      allow update: if isSignedIn()
+        && resource.data.etat == 'attente'
+        && !(request.auth.uid in resource.data.par)
+        && request.resource.data.par == resource.data.par.concat([request.auth.uid])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['par']);
+      allow delete: if isAdmin();
     }
 
     /* « Cette personne a soutenu le projet. » Son SEUL usage dans l'app : ne

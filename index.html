@@ -274,14 +274,20 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       <!-- ACCUEIL ÉPURÉ : l'essentiel d'abord — autour de toi, ce que tu attends
            (alertes + chasses), puis à découvrir. Le reste est plus bas. -->
       <div id="nearby-card" style="margin-bottom:16px"></div>
-      <!-- Alertes et chasses ne sont plus ici : elles vivent dans la pastille
-           de chasse (mission-fab), qui porte deja leur compteur. L'accueil
-           s'ouvre sur l'accueil. -->
+      <!-- Alertes et chasses ne sont plus ici : elles vivent dans l'onglet
+           Chasse, qui porte leur compteur sur son badge de navigation.
+           L'accueil s'ouvre sur l'accueil. -->
       <div class="sec-hd">
         <div class="t-section" id="t-trends">À découvrir</div>
         <div class="sec-count" id="trends-count"></div>
       </div>
       <div class="grid" id="trends"></div>
+      <!-- LES MISSIONS SONT HORS DE #home-extras, et volontairement.
+           Ce bloc est masque des qu'une categorie est filtree ; la feuille de
+           la boule flottante etait alors le SEUL acces aux missions, et elle
+           va disparaitre. Sortie d'ici, la carte reste accessible dans tous
+           les cas. -->
+      <div id="missions-card" style="margin-bottom:14px"></div>
       <div id="home-extras">
       <div id="wanted-card" style="margin-bottom:14px"></div>
       <div class="sec-hd">
@@ -289,7 +295,9 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <div class="sec-count" id="brands-count"></div>
       </div>
       <div class="brands-rail" id="brands-rail"></div>
-      <div id="missions-card" style="margin-bottom:14px"></div>
+      <!-- LA CHASSE AUX CODES-BARRES : rempli par renderChasseCodes(),
+           vide (et invisible) quand aucune fiche n'est orpheline. -->
+      <div id="chasse-card"></div>
       <div id="deals-wrap"></div>
       <div id="top-rail-wrap" style="display:none">
         <div class="sec-hd"><div class="t-section"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3 2.5.5 5 2.5 5 5.5a4.5 4.5 0 1 1-9 0c0-1.15.43-2.2 1-3 .28.6.5 1.5 1.5 3z"/><path d="M12 2c1 3 4 4.5 4 8.5"/><path d="M12 2C8 5 6 8 6 11.5"/></svg> <span id="t-toprail">Tes plus recherchées</span></div></div>
@@ -458,7 +466,20 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <button type="button" role="tab" data-chasse-tab="tendances" onclick="chasseSegTap('tendances')"><span data-i18n="segTrends">Tendances</span></button>
       </div>
       <div id="chasse-trouver">
+        <!-- LES COUPS DE MAIN RECUS. Quelqu'un a repondu a ta chasse : on le
+             dit, et on te laisse le remercier. C'est la seule chose que
+             l'entraide de l'app ne disait pas encore. -->
+        <div id="coups-card" style="padding:0 20px;margin-bottom:14px"></div>
         <div id="chasse-tips" style="padding:0 20px"></div>
+        <!-- TES ALERTES. Cette carte n'avait qu'un seul hote : la feuille de la
+             boule flottante. Les douze appels a renderAlertsCard() disperses
+             dans l'app sortaient donc tous sur « if(!host)return » — sans une
+             erreur, sans un test rouge. Retirer la boule aurait fait
+             disparaitre en silence le seul ecran ou l'on voit ses veilles avec
+             leur statut, le magasin, la date et qui a signale. Elle a
+             desormais sa place ici, au-dessus de #chasse-mine qui n'en est que
+             la version degradee. -->
+        <div id="alerts-card" style="padding:0 20px;margin-bottom:14px"></div>
         <div id="chasse-mine" style="padding:0 20px 12px"></div>
         <div id="chasse-list" style="padding:0 20px 18px"></div>
         <div id="chasse-found" style="padding:0 20px 20px"></div>
@@ -613,10 +634,14 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div class="set-txt"><div class="set-title" data-i18n="sounds">Effets sonores</div><div class="set-sub" data-i18n="soundsSub">Sons lors des interactions</div></div>
           <div id="sound-toggle" class="sw on" aria-hidden="true"><div id="sound-knob" class="sw-knob"></div></div>
         </div>
-        <div id="hunt-fab-row" class="set-row static sw-row" role="switch" aria-checked="true" tabindex="0" aria-label="Bouton de chasse flottant" onclick="toggleHuntFab()" onkeydown="if(event.key==='Enter'){toggleHuntFab();}">
-          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg></div>
-          <div class="set-txt"><div class="set-title">Bouton de chasse flottant</div><div class="set-sub">La pastille sur l'écran d'accueil — appui long dessus pour la masquer</div></div>
-          <div id="huntfab-toggle" class="sw on" aria-hidden="true"><div class="sw-knob"></div></div>
+        <!-- AIDER EN DISCRET. Le choix est respecte cote SERVEUR au moment
+             d'ecrire le coup de main : si la case est cochee, aucun nom n'est
+             ecrit du tout. Un reglage de confidentialite qui ne tiendrait qu'a
+             l'affichage n'en serait pas un. -->
+        <div id="discret-row" class="set-row static sw-row" role="switch" aria-checked="false" tabindex="0" aria-label="Aider en discret" onclick="basculerAideDiscrete()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();basculerAideDiscrete();}">
+          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z"/><circle cx="12" cy="12" r="2.6"/><path d="M4 20 20 4"/></svg></div>
+          <div class="set-txt"><div class="set-title">Aider en discret</div><div class="set-sub">Tes points restent, ton nom n'apparaît pas quand tu dépannes quelqu'un</div></div>
+          <div id="discret-toggle" class="sw" aria-hidden="true"><div class="sw-knob"></div></div>
         </div>
       </div>
       <div class="theme-row">
@@ -955,6 +980,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <button class="sd-icon" id="sd-share-btn" onclick="shareStore()" aria-label="Partager ce magasin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg><span>Partager</span></button>
         </div>
       </div>
+      <div id="sd-annonce"></div>
       <div style="padding:16px 20px 0">
         <div class="searchbox" style="cursor:text;margin-bottom:12px">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--s3)" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="var(--s3)" stroke-width="2" stroke-linecap="round"/></svg>
@@ -996,13 +1022,14 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       </div>
       <div id="sd-owner-tools" style="display:none">
         <div class="sd-adm-title">Ton magasin — visible uniquement par toi</div>
+        <div id="sd-pass"></div>
         <div class="sd-adm-row">
           <button class="sd-adm" onclick="startRafale()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12z"/></svg>
             <b>Scanner mon rayon (rafale)</b>
             <i>Scanne tes boissons à la chaîne — elles apparaissent pour tes clients</i>
           </button>
-          <button class="sd-adm" onclick="scanFridgeStart()">
+          <button class="sd-adm" id="sd-btn-frigo" onclick="scanFridgeStart()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2.5" width="14" height="19" rx="2.5"/><path d="M5 10h14M8.5 6.2v1.6M8.5 13.5v3"/></svg>
             <b>Scanner mon frigo</b>
             <i>Une photo du frigo — toutes les boissons sont reconnues et ajoutées d'un coup</i>
@@ -1060,6 +1087,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
     <div class="ntab" data-screen="discover" onclick="navTo('discover')" role="button" tabindex="0" aria-label="Découvrir" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();navTo('discover');}">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 20s-7-4.5-7-9.5A3.5 3.5 0 0112 7a3.5 3.5 0 017 3.5C19 15.5 12 20 12 20z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
       <span class="ntab-lbl" id="nt-disc">Découvrir</span>
+      <span class="ntab-badge" id="nt-disc-badge" hidden aria-hidden="true"></span>
     </div>
     <div class="ntab" data-screen="profile" onclick="navTo('profile')" role="button" tabindex="0" aria-label="Profil" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();navTo('profile');}">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 12a4 4 0 100-8 4 4 0 000 8zM5 20c0-3.5 3-6 7-6s7 2.5 7 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -1272,6 +1300,11 @@ window.fbLoadMyScore = async function() {
     if (!snap.exists()) return null;
     var d = snap.data() || {};
     if (typeof d.points !== "number") return null;    // bascule pas encore faite
+    /* refCode n'est plus ici : il vivait dans le profil PUBLIC, donc lister
+       users suffisait a reconstituer les codes de tout le monde. Il est passe
+       dans refMine/{uid}, lisible par son seul proprietaire, et s'obtient par
+       fbMonCodeParrain(). On le laisse en repli le temps que les comptes
+       d'avant la correction soient migres au premier appel. */
     return { points: d.points, refCode: d.refCode || null, refCount: d.refCount || 0 };
   } catch (e) { console.warn("Lecture du score :", e); return null; }
 };
@@ -1495,20 +1528,34 @@ onAuthStateChanged(auth, async function(user) {
       // arriverait parfois en dernier et effacerait le consentement — plus
       // aucun e-mail, sans que rien ne le signale.
       /* Un robot d'apercu n'est pas un joueur : on ne lui cree pas de compte.
-             (Un humain mal detecte n'y perd rien : sa premiere contribution
-             cree le document par fbSyncUserStats, en merge.) */
-          /* `points` n'est PAS ecrit ici, meme a zero. Le score appartient au
-             serveur, et la regle Firestore refuse desormais le champ AUSSI a la
-             creation — pas seulement a la modification, sinon il suffisait
-             d'effacer son profil pour le recreer avec 999 999. Envoyer
-             « points: 0 » ferait rejeter le document ENTIER : pas de pseudo,
-             et surtout pas de createdAt, dont depend le garde-fou anti-sybil
-             du parrainage. Un compte neuf part de toute facon a zero. */
-          if (!magoRobotProbable()) await setDoc(userDocRef(user.uid), {
-        pseudo: String(localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
-        signals: 0, confirms: 0,
-        createdAt: serverTimestamp()
-      }, { merge: true });
+
+         MAIS UN HUMAIN MAL DETECTE Y PERDAIT QUELQUE CHOSE. On disait qu'il se
+         rattraperait a sa premiere contribution, via fbSyncUserStats. C'est
+         vrai — sauf pour celui qui ouvre l'app, regarde, et ne contribue pas
+         encore. Celui-la n'existait nulle part : aucun document, donc aucune
+         notification « nouvel utilisateur », donc un arrivant invisible.
+         On garde donc la porte ouverte : au premier geste tactile reel, qu'un
+         robot d'apercu ne produit jamais, on cree le compte.
+
+         `points` n'est PAS ecrit ici, meme a zero. Le score appartient au
+         serveur, et la regle Firestore refuse desormais le champ AUSSI a la
+         creation — pas seulement a la modification, sinon il suffisait
+         d'effacer son profil pour le recreer avec 999 999. Envoyer « points: 0 »
+         ferait rejeter le document ENTIER : pas de pseudo, et surtout pas de
+         createdAt, dont depend le garde-fou anti-sybil du parrainage. Un compte
+         neuf part de toute facon a zero. */
+      if (magoRobotProbable()) {
+        window._magoCompteEnAttente = user.uid;
+        /* Si la personne a deja touche l'ecran pendant que Firebase reflechissait,
+           on ne l'attend pas une seconde fois. */
+        try { window.magoTenterCompteEnAttente(); } catch (e) {}
+      } else {
+        await setDoc(userDocRef(user.uid), {
+          pseudo: String(localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
+          signals: 0, confirms: 0,
+          createdAt: serverTimestamp()
+        }, { merge: true });
+      }
     }
   } catch (e) { console.warn("Firestore user doc error:", e); }
   window.dispatchEvent(new CustomEvent("fbAuthChanged", { detail: user }));
@@ -2255,6 +2302,58 @@ window.fbLoadDrinkPhoto = async function(drinkId) {
 };
 /* Retrait d'une boisson promue par erreur (doublon Golden Power...) :
    supprime du catalogue partage — reserve a l'admin par les regles. */
+/* Coller un code-barre sur une fiche du catalogue. Reserve a l'administrateur
+   (regles : catalog est en ecriture isAdmin()). Sert a reparer les fiches nees
+   d'une proposition PHOTO, qui arrivent sans code et restent donc introuvables
+   au scan — voir renderFichesSansCode(). */
+window.fbSetCatalogBarcodes = async function(drinkId, barcodes) {
+  await setDoc(doc(db, "catalog", String(drinkId)),
+    { barcodes: (barcodes || []).map(String), updatedAt: serverTimestamp() },
+    { merge: true });
+};
+/* ── LA CHASSE AUX CODES-BARRES ────────────────────────────────────────────
+   Proposer un code pour une boisson orpheline. Le document ne porte QUE la
+   liste de ceux qui ont confirme : ni le point, ni la pose sur la fiche ne
+   sont decides ici. C'est la Cloud Function qui tranche, a deux confirmations
+   (voir functions-a-deployer/chasse-codes.js). Le client ne peut pas se
+   declarer valide : les regles le lui interdisent. */
+window.fbProposerCodeChasse = async function(drinkId, drinkName, barcode) {
+  var user = await ensureAuthed();
+  if (user.isAnonymous) throw new Error("compte requis");
+  var ref = doc(db, "chasseCodes", String(barcode));
+  var snap = await getDoc(ref);
+  if (!snap.exists()) {
+    await setDoc(ref, {
+      drinkId: Number(drinkId) || drinkId,
+      drinkName: String(drinkName).slice(0, 60),
+      barcode: String(barcode),
+      par: [user.uid],
+      etat: "attente",
+      createdAt: serverTimestamp()
+    });
+    return { nb: 1, deja: false };
+  }
+  var d = snap.data() || {};
+  var par = Array.isArray(d.par) ? d.par : [];
+  if (d.etat !== "attente") return { nb: par.length, deja: true, pose: true };
+  if (par.indexOf(user.uid) !== -1) return { nb: par.length, deja: true };
+  /* On envoie la liste complete plutot qu'un arrayUnion : les regles exigent
+     exactement « l'ancienne liste + moi », ce qui rend impossible d'ajouter
+     quelqu'un d'autre au passage. */
+  await updateDoc(ref, { par: par.concat([user.uid]) });
+  return { nb: par.length + 1, deja: false };
+};
+window.fbChargerChasseCodes = async function() {
+  try {
+    var snap = await getDocs(query(collection(db, "chasseCodes"), where("etat", "==", "attente")));
+    var out = {};
+    snap.forEach(function (d) {
+      var v = d.data() || {};
+      out[String(v.barcode || d.id)] = { drinkId: v.drinkId, nb: (v.par || []).length };
+    });
+    return out;
+  } catch (e) { console.warn("chasseCodes:", e && e.message); return {}; }
+};
 window.fbRemoveCatalogDrink = async function(drinkId) {
   await deleteDoc(doc(db, "catalog", String(drinkId)));
   try { await deleteDoc(doc(db, "drinkPhotos", String(drinkId))); } catch (e) {}
@@ -2714,15 +2813,70 @@ window.fbEstSoutien = async function() {
     return snap.exists();
   } catch (e) { return false; }
 };
-window.fbMesMagasins = async function() {
+/* MON COMPTE COMMERCANT : mes boutiques ET mon pass, en une seule lecture.
+   Deux lectures separees auraient double le cout et pouvaient se contredire —
+   la liste chargee, le pass pas encore, et un bouton qui clignote. */
+window.fbMonCompteCommercant = async function() {
+  var vide = { stores: [], pass: "aucun", passOrigine: null };
   var u = auth.currentUser;
-  if (!u || u.isAnonymous) return [];
+  if (!u || u.isAnonymous) return vide;
   try {
     var snap = await getDoc(doc(db, "merchants", u.uid));
-    if (!snap.exists()) return [];
+    if (!snap.exists()) return vide;
     var d = snap.data() || {};
-    return Array.isArray(d.stores) ? d.stores.map(String) : [];
-  } catch (e) { return []; }
+    var p = String(d.pass || "");
+    return {
+      stores: Array.isArray(d.stores) ? d.stores.map(String) : [],
+      /* On n'accepte que les trois niveaux connus. Une valeur inattendue
+         (champ a moitie ecrit, migration ratee) doit fermer la porte, jamais
+         l'ouvrir : le doute se tranche toujours du cote le moins permissif. */
+      pass: ["aucun", "frigo", "complet"].indexOf(p) !== -1 ? p : "aucun",
+      passOrigine: d.passOrigine || null
+    };
+  } catch (e) { return vide; }
+};
+window.fbMesMagasins = async function() {
+  var c = await window.fbMonCompteCommercant();
+  return c.stores;
+};
+
+/* L'ANNONCE DU COMMERCANT — ce que le pass complet permet d'ecrire.
+   Une phrase courte, signee, affichee sur la fiche de SON magasin.
+
+   ELLE NE TOUCHE A RIEN DE VERIFIE. Ni la pastille bleue, ni le stock, ni la
+   position sur la carte. Un visiteur doit pouvoir la lire comme un message du
+   commercant, jamais comme un constat de l'application. C'est la difference
+   entre une publicite assumee et une carte qui ment.
+
+   'actif' a false garde le texte sans l'afficher : le commercant peut eteindre
+   son annonce sans la reecrire a chaque fois. */
+window.fbLireAnnonce = async function(storeId) {
+  try {
+    var snap = await getDoc(doc(db, "annonces", String(storeId)));
+    if (!snap.exists()) return null;
+    var d = snap.data() || {};
+    var t = String(d.texte || "").slice(0, 90).trim();
+    if (!t) return null;
+    return { texte: t, actif: d.actif === true, par: d.par || null };
+  } catch (e) { return null; }
+};
+window.fbEcrireAnnonce = async function(storeId, texte, actif) {
+  var u = auth.currentUser;
+  if (!u || u.isAnonymous) throw new Error("Connecte-toi d'abord.");
+  var t = String(texte || "").trim().slice(0, 90);
+  /* Les regles exigent un texte non vide meme quand l'annonce est eteinte :
+     un document sans texte n'a aucune raison d'exister, et l'autoriser
+     ouvrirait la porte a des documents vides poses en masse. Pour retirer une
+     annonce, on efface le document. */
+  if (!t) throw new Error("Ecris d'abord ton annonce.");
+  await setDoc(doc(db, "annonces", String(storeId)), {
+    texte: t, par: u.uid, actif: actif !== false, maj: serverTimestamp()
+  });
+  return true;
+};
+window.fbEffacerAnnonce = async function(storeId) {
+  await deleteDoc(doc(db, "annonces", String(storeId)));
+  return true;
 };
 window.fbSubmitShopClaim = async function(store, infos) {
   var user = await ensureAuthed();
@@ -2827,10 +2981,25 @@ window.fbApproveShopClaim = async function(claim) {
     certifiedAt: serverTimestamp()
   }, { merge: true });
   if (claim.by) {
-    await setDoc(doc(db, "merchants", String(claim.by)), {
-      stores: arrayUnion(sid),
-      updatedAt: serverTimestamp()
-    }, { merge: true });
+    /* LE PASS DE LANCEMENT. Un commercant tout juste certifie repart avec le
+       pass « frigo » offert : il peut scanner ses frigos et signer ses
+       boissons. C'est le niveau vendu dix euros, donne gratuitement tant que
+       l'app n'est pas installee par grand monde.
+       Deux raisons, et aucune n'est de la generosite. On ne retire pas une
+       fonction qui vient de se remettre a marcher. Et surtout, c'est la seule
+       facon d'apprendre ce qu'aucun code ne dira : un commercant qui ne s'en
+       sert pas gratuitement ne paiera jamais pour l'avoir.
+       'passOrigine' garde la trace de POURQUOI il l'a — le jour ou le
+       paiement existe, on saura distinguer les offerts des payants sans avoir
+       a le deviner. On ne touche jamais au pass de quelqu'un qui en a deja un :
+       merge ne remplace que ce qu'on nomme, et on ne nomme le pass que s'il
+       n'y en avait pas. */
+    var mRef = doc(db, "merchants", String(claim.by));
+    var mSnap = await getDoc(mRef);
+    var dejaUnPass = mSnap.exists() && ["frigo", "complet"].indexOf(String((mSnap.data() || {}).pass || "")) !== -1;
+    var maj = { stores: arrayUnion(sid), updatedAt: serverTimestamp() };
+    if (!dejaUnPass) { maj.pass = "frigo"; maj.passOrigine = "lancement"; maj.passDepuis = serverTimestamp(); }
+    await setDoc(mRef, maj, { merge: true });
   }
   await setDoc(doc(db, "shopClaims", sid), {
     status: "approved",
@@ -2992,6 +3161,52 @@ function magoRobotProbable() {
     return indices >= 2;
   } catch (e) { return false; }
 }
+/* LE RATTRAPAGE. Un vrai doigt sur un vrai ecran : aucun robot d'apercu ne
+   produit ca. On n'ecoute qu'une seule fois, et seulement si la creation du
+   compte avait ete refusee — sinon on ne fait rien du tout. */
+/* DEUX ORDRES POSSIBLES, ET IL FAUT LES DEUX. Le geste peut arriver AVANT que
+   Firebase ait rendu son verdict d'identite — quelqu'un qui touche l'ecran dans
+   la premiere seconde. Une premiere version retirait l'ecouteur des le premier
+   geste : si l'identite n'etait pas encore prete, le rattrapage se desarmait
+   dans le vide et la personne restait invisible pour de bon. On retient donc
+   qu'un humain s'est manifeste, et c'est le second arrive des deux qui declenche
+   la creation. */
+window._magoGesteHumain = false;
+window.magoTenterCompteEnAttente = function () {
+  if (!window._magoGesteHumain) return;
+  var uid = window._magoCompteEnAttente;
+  if (!uid || !window.fbCreerCompteEnAttente) return;
+  window._magoCompteEnAttente = null;      // avant l'appel : jamais deux fois
+  window.fbCreerCompteEnAttente(uid);
+};
+(function ecouterPremierGesteHumain(){
+  function humain() {
+    if (window._magoGesteHumain) return;
+    window._magoGesteHumain = true;
+    ["touchstart", "pointerdown"].forEach(function (t) {
+      try { window.removeEventListener(t, humain, true); } catch (e) {}
+    });
+    window.magoTenterCompteEnAttente();
+  }
+  ["touchstart", "pointerdown"].forEach(function (t) {
+    try { window.addEventListener(t, humain, { capture: true, passive: true }); } catch (e) {}
+  });
+})();
+window.fbCreerCompteEnAttente = async function (uid) {
+  try {
+    var user = auth.currentUser;
+    if (!user || user.uid !== uid) return;
+    var snap = await getDoc(userDocRef(uid));
+    if (snap.exists()) return;                 // deja cree entre-temps
+    // Pas de `points: 0` : la regle refuse le champ a la creation, et le
+    // document ENTIER serait rejete — cet arrivant n'aurait jamais de compte.
+    await setDoc(userDocRef(uid), {
+      pseudo: String(localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
+      signals: 0, confirms: 0,
+      createdAt: serverTimestamp()
+    }, { merge: true });
+  } catch (e) { console.warn("creation differee:", e && e.message); }
+};
 window.fbHeartbeat = async function() {
   try {
     var user = auth.currentUser; if (!user) return;
@@ -3564,11 +3779,100 @@ window.fbNettoyerEmojis = async function() {
    est bien enregistree, mais elle ne rapporte rien. Sans cette lecture, la
    panne reste invisible — c'est celle qui a deja bloque tous les points de
    l'application sans que rien ne l'annonce. */
+/* SIGNALER UN CONTENU. Ecrit dans « abus », que seul l'administrateur relit.
+   L'apercu est une COPIE de ce qui est vise, faite au moment du signalement :
+   sans elle, effacer le contenu ferait disparaitre la preuve avec lui, et la
+   personne qui signale se retrouverait a avoir denonce du vide.
+   Le motif vient d'une liste fermee cote regles : rien de ce qui part d'ici ne
+   peut servir a insulter la personne visee. */
+window.fbSignaler = async function(cibleType, cibleId, motif, apercu) {
+  await ensureAuthed();
+  var user = auth.currentUser;
+  if (!user) throw new Error("non connecte");
+  var doc0 = {
+    par: user.uid,
+    cibleType: String(cibleType || "").slice(0, 20),
+    cibleId: String(cibleId || "").slice(0, 200),
+    motif: String(motif || "autre").slice(0, 20),
+    at: serverTimestamp(),
+    etat: "nouveau"
+  };
+  if (apercu) doc0.apercu = String(apercu).slice(0, 400);
+  await addDoc(collection(db, "abus"), doc0);
+  return true;
+};
 window.fbLireSantePoints = async function() {
   try {
     var snap = await getDoc(doc(db, "_meta", "santePoints"));
     return snap.exists() ? (snap.data() || null) : null;
   } catch (e) { return null; }
+};
+/* Les signalements en attente. Reserve a l'administrateur par les regles.
+   Un bouton « signaler » sans ecran pour les lire ne sert a rien : c'est la
+   moitie qui compte. */
+/* LES COUPS DE MAIN RECUS. Ecrits par la Cloud Function chez le chercheur
+   seul. On ne lit jamais la collection reports : le serveur a choisi ce qui
+   descend, champ par champ. */
+window.fbCoupsDeMain = async function() {
+  try {
+    var user = auth.currentUser; if (!user) return [];
+    var q = query(collection(db, "coupsDeMain", user.uid, "recus"),
+                  orderBy("at", "desc"), limit(12));
+    var snap = await getDocs(q);
+    var out = [];
+    snap.forEach(function(d) {
+      var x = d.data() || {};
+      out.push({ id: d.id, aidantUid: x.aidantUid || null,
+                 aidantPseudo: x.aidantPseudo || null,
+                 drinkId: x.drinkId, storeId: x.storeId || "",
+                 at: x.at || 0, merci: x.merci === true });
+    });
+    return out;
+  } catch (e) { console.warn("Coups de main :", e); return []; }
+};
+/* Le seul champ que le chercheur peut ecrire, et dans un seul sens. Les
+   regles refusent de repasser a false : sans ca, une bascule en boucle ferait
+   sonner le telephone de l'aidant a volonte. */
+window.fbDireMerci = async function(id) {
+  var user = auth.currentUser; if (!user) throw new Error("non connecte");
+  await updateDoc(doc(db, "coupsDeMain", user.uid, "recus", String(id)), { merci: true });
+  return true;
+};
+/* Aider en discret : les points sont verses, le nom n'apparait pas. Le choix
+   est respecte cote SERVEUR au moment d'ecrire le coup de main, pas a
+   l'affichage — un reglage de confidentialite qui ne tiendrait qu'a
+   l'interface n'en serait pas un. */
+window.fbAideDiscrete = async function(actif) {
+  await ensureAuthed();
+  var user = auth.currentUser; if (!user) return false;
+  await setDoc(userDocRef(user.uid), { aideDiscrete: !!actif }, { merge: true });
+  return true;
+};
+window.fbLireSignalements = async function(combien) {
+  try {
+    var q = query(collection(db, "abus"), where("etat", "==", "nouveau"),
+                  orderBy("at", "desc"), limit(combien || 30));
+    var snap = await getDocs(q);
+    var out = [];
+    snap.forEach(function(d) {
+      var x = d.data() || {};
+      out.push({ id: d.id, par: x.par || "", cibleType: x.cibleType || "",
+                 cibleId: x.cibleId || "", motif: x.motif || "autre",
+                 apercu: x.apercu || "",
+                 quand: (x.at && x.at.toDate) ? x.at.toDate().toISOString() : null });
+    });
+    return out;
+  } catch (e) { console.warn("Lecture des signalements :", e); return null; }
+};
+/* Marquer traite. On ne SUPPRIME pas : le signalement et sa copie du contenu
+   restent, c'est la trace de ce qui a ete decide et quand. */
+window.fbTraiterSignalement = async function(id, decision) {
+  await updateDoc(doc(db, "abus", String(id)), {
+    etat: "traite",
+    decision: String(decision || "").slice(0, 40),
+    traiteLe: serverTimestamp()
+  });
+  return true;
 };
 window.fbLireJournalAdmin = async function(combien) {
   try {
@@ -4512,7 +4816,7 @@ function refreshLocation(cb,opts){
     if(window.fbLoadNearbyStores){try{window.fbLoadNearbyStores(userLat,userLng,10);}catch(e){}}
     // Maintenant qu'on a une vraie position, on redessine les chasses avec les
     // bonnes distances (sinon la liste chargée sans GPS restait figée).
-    try{var hp=document.getElementById("s-home");if(hp&&hp.classList.contains("on"))renderHunts();}catch(e){}
+    try{var hp=document.getElementById("s-discover");if(hp&&hp.classList.contains("on"))renderChasse();}catch(e){}
     try{renderNearby();}catch(e){}
     cb&&cb(true);
   },function(){_gpsRefreshing=false;cb&&cb(false);},
@@ -4607,7 +4911,6 @@ function emptyStateHTML(icon,title,sub,btnLabel,onclick){
 }
 /* Action d'un etat vide : ferme une eventuelle feuille missions puis navigue */
 function emptyGo(tab){
-  var ms=document.getElementById("mission-sheet");if(ms)ms.remove();
   navTo(tab);
 }
 function show(s){
@@ -4630,12 +4933,12 @@ function _showRaw(s){
   if(s==="profile"){try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}try{renderDonCard();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
   if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}}
-  if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{_verifierAides();}catch(e){}try{renderHunts();}catch(e){}    // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
+  if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderChasseCodes();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{_verifierAides();}catch(e){}try{renderChasse();}catch(e){}    // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
     // le filtre boisson de la carte (sinon la carte rouvrait toujours sur la derniere
     // boisson cherchee, ex. "Red Bull", au lieu de montrer tous les magasins).
     try{var _q=document.getElementById("q");if(_q)_q.value="";var _sl=document.getElementById("search-list");if(_sl)_sl.innerHTML="";exploreFilter=null;window._exploreFromDrink=false;}catch(e){}
   }
-  try{updateMissionFab();}catch(e){}
+  try{renderChasse();}catch(e){}
   // Quitter l'écran scan met fin au remplissage rafale (nettoie HUD + état).
   if(s!=="scan"&&window._rafaleStore)try{endRafale(true);}catch(e){}
   if(s!=="scan"&&scanActive)stopScan();
@@ -5637,6 +5940,28 @@ function startScan(){
         if(_tb)_tb.style.display=(_caps&&_caps.torch)?"flex":"none";
       }catch(e){}
       hint.textContent="Approche le code-barre…";
+      /* CE QUI MANQUAIT QUAND CA NE PREND PAS.
+         L'ecran disait « approche le code-barre » et ne disait plus rien
+         ensuite : au bout de dix secondes on ne sait pas si l'app cherche, si
+         elle a plante, ou ce qu'on fait mal. On donne donc les conseils qui
+         marchent vraiment, dans l'ordre ou ils servent, et on finit par
+         rappeler que la saisie a la main existe. */
+      try{clearInterval(window._scanAide);}catch(e){}
+      window._scanAideT=0;
+      window._scanAide=setInterval(function(){
+        if(!scanActive){try{clearInterval(window._scanAide);}catch(e){}return;}
+        if(_scanVotes.count>0)return;              // ca lit : on se tait
+        window._scanAideT+=1;
+        var h=document.getElementById("scan-hint"); if(!h)return;
+        if(window._scanAideT===6)h.textContent="Le code doit remplir la largeur du cadre";
+        else if(window._scanAideT===12)h.textContent="Recule un peu, puis rapproche lentement";
+        else if(window._scanAideT===18)h.textContent="Plus de lumière, et bien à plat — pas sur l'arrondi";
+        else if(window._scanAideT===26){
+          h.textContent="Tu peux aussi taper le code à la main";
+          try{var _r=document.getElementById("scan-manual-row");if(_r&&_r.style.display!=="flex")toggleManualCode();}catch(e){}
+          try{clearInterval(window._scanAide);}catch(e){}
+        }
+      },1000);
       btn.style.display="none";
       document.getElementById("scan-result").style.display="none";
       if(quaggaRunning)return;
@@ -5649,7 +5974,22 @@ function startScan(){
         btn.style.display="";
         return;
       }
-      Quagga.init({inputStream:{type:"LiveStream",target:video,constraints:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}}},locator:{patchSize:"medium",halfSample:true},decoder:{readers:["ean_reader","ean_8_reader","code_128_reader","upc_reader"]}},
+      /* LES LECTEURS ACTIFS, ET SURTOUT CELUI QU'ON A RETIRE.
+         « code_128_reader » etait la. Le Code 128 est un format a LONGUEUR
+         LIBRE : il accepte a peu pres n'importe quelle suite de barres et en
+         sort un resultat plausible. Aucune boisson n'en porte — les produits
+         de grande distribution sont en EAN-13, EAN-8 ou UPC. Le garder, c'est
+         donner a la camera le droit d'inventer un code a chaque image floue.
+         C'est la cause la plus probable des « scans trop rapides avec le
+         mauvais chiffre ».
+         « upc_e_reader » entre a sa place : c'est l'UPC compresse des PETITES
+         canettes (souvent americaines), qui n'etait pas lu du tout — donc une
+         part des « il n'arrive pas a prendre le code ».
+         RESOLUTION : 1920 au lieu de 1280. halfSample divise l'image par deux
+         avant de chercher le code ; on passait donc 640x360 au localisateur, ce
+         qui est juste pour un code-barre dense photographie de biais. On lui en
+         donne 960x540 pour le meme travail. */
+      Quagga.init({inputStream:{type:"LiveStream",target:video,constraints:{facingMode:"environment",width:{ideal:1920},height:{ideal:1080}}},locator:{patchSize:"medium",halfSample:true},decoder:{readers:["ean_reader","ean_8_reader","upc_reader","upc_e_reader"]}},
         function(err){
           if(err){hint.textContent="✕ "+err;return;}
           _scanVotes={code:null,count:0};
@@ -5685,6 +6025,7 @@ function setScanState(st){var el=document.getElementById("s-scan");if(el)el.data
       on perdait la seule reference qui permettait de les couper.
    On coupe donc tout ce qui vit, dans l'ordre, avant d'oublier quoi que ce soit. */
 function stopScan(){
+  try{clearInterval(window._scanAide);window._scanAide=null;}catch(e){}
   var sa=document.querySelector("#s-scan .scan-area");if(sa)sa.classList.remove("live");
   var tb=document.getElementById("scan-torch");if(tb)tb.style.display="none";
   window._torchOn=false;
@@ -6038,7 +6379,7 @@ function pickerFetchZone(force){
     window._pickerZoneTs=now;
     window._pickerZoneEnCours=true;
     try{renderStorePicker();}catch(e){}          // affiche « Recherche… » tout de suite
-    window.fbQueryZone(userLat,userLng,12).then(function(list){
+    magoAttendre(window.fbQueryZone(userLat,userLng,12)).then(function(list){
       list=list||[];
       var connus={};
       (STORES||[]).forEach(function(x){connus[String(x.fbId||x.id)]=1;});
@@ -6609,18 +6950,156 @@ function renderPriceAfterTag(s,did,ctx){
    endroits qui appellent tagScanToStore en heritent sans etre modifies.
    ============================================================================ */
 
-/* LA FICHE DE RELECTURE. Rend une promesse : true si la personne confirme.
-   Elle n'ecrit rien elle-meme, elle ne fait que demander.
+/* ══ SIGNALER UN CONTENU ══════════════════════════════════════════════════
+   Magofeed heberge deja des photos et des pseudos deposes par n'importe quel
+   visiteur, et il n'existait aucun moyen de signaler un contenu abusif : les
+   deux boutons « signaler » de l'app visent un magasin qui n'existe pas ou une
+   information fausse.
+
+   Huit motifs, aucun champ libre. On ne laisse pas ecrire une phrase : un
+   formulaire de signalement en texte libre finit toujours par servir a autre
+   chose que signaler, et il faudrait le moderer lui aussi.
+
+   L'APERCU EST COPIE AU MOMENT DU SIGNALEMENT. Sans ca, effacer le contenu
+   ferait disparaitre la preuve avec lui.
+   ══════════════════════════════════════════════════════════════════════════ */
+var MOTIFS_SIGNALEMENT=[
+  ["alcool","Contient de l'alcool"],
+  ["sexuel","Image ou propos sexuels"],
+  ["haine","Propos haineux ou insultants"],
+  ["harcelement","Harcelement"],
+  ["mineur","Met en danger un mineur"],
+  ["faux","Faux produit, fausse information"],
+  ["spam","Publicite, spam"],
+  ["autre","Autre"]
+];
+/* cibleType : "decouverte" | "photo" | "profil" | "commentaire".
+   apercu : ce qu'on voit du contenu, copie tel quel pour survivre a son
+   effacement (nom du produit, pseudo, description...). */
+function ouvrirSignalement(cibleType,cibleId,apercu,nomLisible){
+  if(!cibleId){toast("Rien a signaler ici");return;}
+  var ov=document.createElement("div");
+  ov.id="signal-sheet";
+  ov.setAttribute("role","dialog"); ov.setAttribute("aria-modal","true");
+  ov.style.cssText="position:fixed;inset:0;z-index:10600;display:flex;align-items:flex-end;"+
+    "background:rgba(12,10,8,.45);-webkit-tap-highlight-color:transparent";
+  var liste=MOTIFS_SIGNALEMENT.map(function(m){
+    return '<div class="sig-motif" data-motif="'+attr(m[0])+'" role="button" tabindex="0" '+
+      'style="padding:13px 14px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);'+
+      'font-size:13.5px;font-weight:700;color:var(--s1);margin-bottom:8px;cursor:pointer">'+sanitize(m[1])+'</div>';
+  }).join("");
+  ov.innerHTML='<div id="signal-carte" style="background:var(--app-bg);border-radius:22px 22px 0 0;'+
+      'padding:18px 20px calc(14px + env(safe-area-inset-bottom));width:100%;max-width:402px;margin:0 auto;'+
+      'max-height:86vh;overflow-y:auto;box-shadow:0 -8px 30px rgba(0,0,0,.3);'+
+      'animation:sheetUp .5s cubic-bezier(.3,1.38,.44,1) both">'+
+      '<div style="font-size:16px;font-weight:800;color:var(--s1)">Signaler</div>'+
+      (nomLisible?'<div style="font-size:12px;color:var(--s2);margin:3px 0 2px">'+sanitize(nomLisible)+'</div>':'')+
+      '<div style="font-size:11.5px;color:var(--s2);margin:6px 0 14px;line-height:1.5">'+
+        'Choisis ce qui ne va pas. On regarde tous les signalements.</div>'+
+      liste+
+      '<div id="signal-annuler" role="button" tabindex="0" style="text-align:center;margin-top:6px;'+
+        'font-size:12.5px;font-weight:700;color:var(--s3);cursor:pointer;padding:10px">Annuler</div>'+
+    '</div>';
+  document.body.appendChild(ov);
+  var fini=false;
+  var fermer=function(){
+    if(fini)return; fini=true;
+    try{document.removeEventListener("keydown",clav,true);}catch(e){}
+    try{ov.remove();}catch(e){}
+  };
+  var clav=function(ev){ if(ev.key==="Escape"){try{ev.preventDefault();}catch(e){}fermer();} };
+  document.addEventListener("keydown",clav,true);
+  var brancher=function(el,fn){
+    if(!el)return;
+    var fait=false;
+    var go=function(ev){
+      if(fait)return; fait=true;
+      try{ev.preventDefault();ev.stopPropagation();}catch(e){}
+      fn();
+    };
+    el.addEventListener("click",go);
+    el.addEventListener("touchend",go,{passive:false});
+    el.addEventListener("keydown",function(ev){
+      if(ev.key==="Enter"||ev.key===" "){try{ev.preventDefault();}catch(e){}go(ev);}
+    });
+  };
+  brancher(ov.querySelector("#signal-annuler"),fermer);
+  ov.addEventListener("click",function(ev){ if(ev.target===ov)fermer(); });
+  Array.prototype.forEach.call(ov.querySelectorAll(".sig-motif"),function(el){
+    brancher(el,function(){
+      var motif=el.getAttribute("data-motif");
+      fermer();
+      if(!window.fbSignaler){toast("Signalement impossible hors ligne");playSound("err");return;}
+      window.fbSignaler(cibleType,cibleId,motif,apercu).then(function(){
+        playSound("pop");
+        toast("Signalement envoyé. Merci, on regarde.");
+      }).catch(function(e){
+        playSound("err");
+        var c=String((e&&(e.code||e.message))||e);
+        toast(/permission/i.test(c)?"Connecte-toi pour signaler":"Envoi impossible, réessaie");
+      });
+    });
+  });
+}
+/* Le petit lien discret a poser sous un contenu. Volontairement pas un bouton
+   voyant : signaler doit etre possible, pas suggere.
+
+   LES DONNEES PASSENT PAR DES ATTRIBUTS, PAS PAR DU CODE DANS L'ATTRIBUT.
+   La premiere version fabriquait un appel JavaScript dans un onclick, avec le
+   nom du produit et le pseudo interpoles dedans. Ca peut marcher — mais il
+   faut alors raisonner juste sur DEUX echappements imbriques, celui de la
+   chaine JavaScript et celui de l'attribut HTML, sur du texte ecrit par
+   n'importe qui. Un ecouteur delegue et quatre data- supprime la question au
+   lieu de la resoudre. */
+function lienSignaler(cibleType,cibleId,apercu,nomLisible){
+  return '<span class="sig-lien" role="button" tabindex="0"'+
+    ' data-sig-type="'+attr(cibleType)+'"'+
+    ' data-sig-id="'+attr(cibleId)+'"'+
+    ' data-sig-apercu="'+attr(String(apercu==null?"":apercu).slice(0,400))+'"'+
+    ' data-sig-nom="'+attr(String(nomLisible==null?"":nomLisible).slice(0,120))+'"'+
+    ' style="font-size:10.5px;font-weight:700;color:var(--s3);cursor:pointer;padding:4px 6px;'+
+    'text-decoration:underline;text-underline-offset:2px">Signaler</span>';
+}
+/* Un seul ecouteur pour toute l'application : les liens peuvent etre crees et
+   detruits a volonte, ils n'ont jamais besoin d'etre rebranches. */
+(function(){
+  var ouvrir=function(el){
+    if(!el)return;
+    ouvrirSignalement(el.getAttribute("data-sig-type"),el.getAttribute("data-sig-id"),
+                      el.getAttribute("data-sig-apercu"),el.getAttribute("data-sig-nom"));
+  };
+  document.addEventListener("click",function(ev){
+    var el=ev.target&&ev.target.closest?ev.target.closest(".sig-lien"):null;
+    if(!el)return;
+    ev.preventDefault(); ev.stopPropagation();
+    ouvrir(el);
+  },true);
+  document.addEventListener("keydown",function(ev){
+    if(ev.key!=="Enter"&&ev.key!==" ")return;
+    var el=ev.target&&ev.target.closest?ev.target.closest(".sig-lien"):null;
+    if(!el)return;
+    ev.preventDefault(); ev.stopPropagation();
+    ouvrir(el);
+  },true);
+})();
+
+/* LA RELECTURE, EN UN COUP D'OEIL.
+   Une seule question : est-ce le bon magasin ? Le nom en gros, la boisson en
+   petit au-dessus pour le contexte, la distance en dessous. Deux boutons.
+   Rien d'autre.
+
+   Premiere version : sur-titre, adresse, horaires, vignette de la boisson,
+   phrase d'avertissement, trois boutons. Ilias : « t'en as trop mis, ca doit
+   etre rapide ». Il a raison — a ce rythme on ne lit plus rien, et une fiche
+   qu'on ne lit pas ne protege de rien. Ce qui manquait c'etait le NOM, pas
+   un dossier.
 
    Couche creee a la volee, et non #map-sheet-modal : ce dernier est en
-   z-index 120, il passerait DERRIERE la carte plein ecran qui est en 4100.
-   On se place a 10500 : au-dessus de la carte, des feuilles d'ajout et de
-   #add-drink-ov, sous le garde-fou administrateur.
-
-   Voile volontairement LEGER : on doit continuer de voir la carte et le
-   cercle qui entoure le magasin touche. C'est ce cercle qui tranche le cas
-   des deux enseignes identiques a quatre-vingts metres, qu'aucun texte ne
-   tranchera jamais. */
+   z-index 120, il passerait derriere la carte plein ecran qui est en 4100.
+   Voile leger : on doit continuer de voir le cercle autour du magasin touche,
+   c'est lui qui tranche le cas de deux enseignes identiques a quatre-vingts
+   metres. « Non » ne ferme pas la carte : viser un autre pin EST le
+   « choisir un autre », sans bouton de plus. */
 function confirmerRattachement(ctx,s){
   return new Promise(function(resolve){
     var fini=false;
@@ -6629,77 +7108,43 @@ function confirmerRattachement(ctx,s){
     ov.setAttribute("role","dialog");
     ov.setAttribute("aria-modal","true");
     ov.style.cssText="position:fixed;inset:0;z-index:10500;display:flex;align-items:flex-end;"+
-      "background:rgba(12,10,8,.35);-webkit-tap-highlight-color:transparent";
+      "background:rgba(12,10,8,.3);-webkit-tap-highlight-color:transparent";
 
-    /* CE QU'ON RATTACHE. Trois cas, et les deux derniers n'ont ni vignette ni
-       nom de catalogue : sans ce repli, drinkIconHTML plante sur undefined et
-       la promesse ne se resout jamais. */
-    var d=null,titreBoisson="",sousBoisson="",vignette="";
+    /* Une ligne courte pour dire ce qu'on rattache. Les trois cas doivent
+       repondre : sans repli, une decouverte sans fiche catalogue ferait
+       planter la construction et la promesse ne se resoudrait jamais. */
+    var quoi="";
     try{
       if(ctx.drinkId!=null){
-        d=DRINKS.find(function(x){return Number(x.id)===Number(ctx.drinkId);})||null;
-        if(d){ titreBoisson=d.name; sousBoisson=d.brand||d.cat||""; vignette=drinkIconHTML(d); }
+        var d=DRINKS.find(function(x){return Number(x.id)===Number(ctx.drinkId);});
+        if(d)quoi=d.name;
       }
-      if(!titreBoisson&&ctx.discoveryId!=null){
+      if(!quoi&&ctx.discoveryId!=null){
         var dec=(typeof DISCOVERIES!=="undefined"&&DISCOVERIES)
           ? DISCOVERIES.find(function(x){return String(x.id)===String(ctx.discoveryId);}) : null;
-        titreBoisson=(dec&&dec.name)?dec.name:"Ta découverte";
-        sousBoisson="proposée par la communauté";
+        quoi=(dec&&dec.name)?dec.name:"Ta découverte";
       }
-      if(!titreBoisson&&ctx.pendingBarcode!=null){
-        titreBoisson="Nouveau produit";
-        sousBoisson="code-barres "+String(ctx.pendingBarcode).slice(0,20);
-      }
+      if(!quoi&&ctx.pendingBarcode!=null)quoi="Nouveau produit";
     }catch(e){ console.warn("relecture, boisson:",e); }
-    if(!titreBoisson)titreBoisson="Cette boisson";
 
-    /* L'IDENTITE DU MAGASIN, dans l'ordre ou on la lit pour le reconnaitre. */
-    try{ resolveStoreAddress(s); }catch(e){}
+    /* Une seule ligne d'identite, la plus courte qui distingue deux magasins
+       proches : la distance, et l'enseigne si elle ajoute quelque chose. */
     var bits=[];
-    if(s.brand&&String(s.brand)!==String(s.name))bits.push(sanitize(String(s.brand).slice(0,30)));
-    else if(s.type)bits.push(sanitize(String(s.type).slice(0,30)));
     if(typeof s.dist==="number")bits.push(sanitize(fmtDist(s.dist)));
-    var ligneIdent=bits.join(" · ");
-    var adresse=s.address?sanitize(String(s.address).slice(0,80)):"";
-    var ouvert="",coulOuvert="";
-    try{
-      var lbl=openLabel(s);
-      if(lbl){ ouvert=sanitize(lbl); coulOuvert=openSur(s)?"var(--s2)":"#b45309"; }
-    }catch(e){}
-
-    /* Deja rattache ? awardFree TESTE sans consommer, contrairement a
-       awardOnce qui brule la cle : la fiche peut donc poser la question sans
-       detruire les points. */
-    var deja=false;
-    try{
-      var k="tag:"+(ctx.drinkId!=null?ctx.drinkId:(ctx.discoveryId!=null?"d"+ctx.discoveryId:"b"+ctx.pendingBarcode))+":"+String(s.id);
-      deja=!awardFree(k,FOREVER);
-    }catch(e){}
+    if(s.brand&&String(s.brand)!==String(s.name))bits.push(sanitize(String(s.brand).slice(0,24)));
+    else if(s.type)bits.push(sanitize(String(s.type).slice(0,24)));
 
     ov.innerHTML='<div id="relecture-carte" style="background:var(--app-bg);border-radius:22px 22px 0 0;'+
-        'padding:18px 20px calc(16px + env(safe-area-inset-bottom));width:100%;max-width:402px;margin:0 auto;'+
-        'box-shadow:0 -8px 30px rgba(0,0,0,.28);animation:sheetUp .5s cubic-bezier(.3,1.38,.44,1) both">'+
-        '<div style="font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--s2)">'+
-          'À vérifier avant d\'envoyer</div>'+
-        '<div style="font-size:18px;font-weight:800;color:var(--s1);margin-top:8px;line-height:1.25">'+sanitize(String(s.name||"Ce magasin"))+'</div>'+
-        (ligneIdent?'<div style="font-size:12px;color:var(--s2);margin-top:3px">'+ligneIdent+
-          (ouvert?' · <span style="color:'+coulOuvert+';font-weight:700">'+ouvert+'</span>':'')+'</div>':'')+
-        (adresse?'<div style="font-size:12px;color:var(--s2);margin-top:2px">'+adresse+'</div>':'')+
-        '<div style="display:flex;align-items:center;gap:11px;margin:14px 0 10px;padding:10px 12px;'+
-          'background:var(--bg2);border:1.5px solid var(--border);border-radius:14px">'+
-          (vignette?'<div style="width:38px;height:38px;border-radius:11px;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center">'+vignette+'</div>':'')+
-          '<div style="min-width:0"><div style="font-size:13.5px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(titreBoisson)+'</div>'+
-          (sousBoisson?'<div style="font-size:11.5px;color:var(--s2);margin-top:1px">'+sanitize(sousBoisson)+'</div>':'')+'</div>'+
-        '</div>'+
-        '<div style="font-size:12px;color:var(--s2);line-height:1.5">Tu vas dire que cette boisson se vend ici. Tout le monde le verra, et ça ne peut pas être retiré.</div>'+
-        (deja?'<div style="font-size:12px;font-weight:700;color:#b45309;margin-top:8px">Tu l\'as déjà signalée ici.</div>':'')+
-        '<button id="relecture-oui" type="button" style="width:100%;margin-top:14px;padding:14px;border-radius:14px;border:none;'+
-          'background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer">Oui, c\'est bien ce magasin</button>'+
-        '<button id="relecture-autre" type="button" style="width:100%;margin-top:8px;padding:12px;border-radius:14px;'+
-          'border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer">'+
-          'Ce n\'est pas le bon — en choisir un autre</button>'+
-        '<div id="relecture-annuler" role="button" tabindex="0" style="text-align:center;margin-top:12px;font-size:11.5px;'+
-          'font-weight:700;color:var(--s3);cursor:pointer;padding:6px">Annuler</div>'+
+        'padding:20px 20px calc(16px + env(safe-area-inset-bottom));width:100%;max-width:402px;margin:0 auto;'+
+        'box-shadow:0 -8px 30px rgba(0,0,0,.28);text-align:center;'+
+        'animation:sheetUp .5s cubic-bezier(.3,1.38,.44,1) both">'+
+        (quoi?'<div style="font-size:11.5px;font-weight:700;color:var(--s2)">'+sanitize(quoi)+'</div>':'')+
+        '<div style="font-size:20px;font-weight:800;color:var(--s1);margin-top:4px;line-height:1.2">'+sanitize(String(s.name||"Ce magasin"))+'</div>'+
+        (bits.length?'<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:3px">'+bits.join(" · ")+'</div>':'')+
+        '<button id="relecture-oui" type="button" style="width:100%;margin-top:16px;padding:14px;border-radius:14px;border:none;'+
+          'background:var(--s1);color:var(--app-bg);font-size:15px;font-weight:800;cursor:pointer">C\'est bien ici</button>'+
+        '<div id="relecture-non" role="button" tabindex="0" style="margin-top:10px;font-size:12.5px;font-weight:700;'+
+          'color:var(--s3);cursor:pointer;padding:8px">Non</div>'+
       '</div>';
     document.body.appendChild(ov);
 
@@ -6709,9 +7154,9 @@ function confirmerRattachement(ctx,s){
       try{ov.remove();}catch(e){}
       resolve(!!ok);
     };
-    /* Le verrou de 450 ms est recopie de la porte de securite : sur telephone
-       un appui emet touchend PUIS click, et sans lui le second geste tombe sur
-       ce qui se trouve dessous une fois la feuille retiree. */
+    /* Verrou de la porte de securite : sur telephone un appui emet touchend
+       PUIS click, et sans lui le second geste tombe sur ce qui se trouve
+       dessous une fois la feuille retiree. */
     var brancher=function(el,fn){
       if(!el)return;
       var fait=false;
@@ -6730,8 +7175,7 @@ function confirmerRattachement(ctx,s){
     document.addEventListener("keydown",clavier,true);
 
     brancher(ov.querySelector("#relecture-oui"),function(){sortir(true);});
-    brancher(ov.querySelector("#relecture-autre"),function(){sortir(false);});
-    brancher(ov.querySelector("#relecture-annuler"),function(){sortir(false);});
+    brancher(ov.querySelector("#relecture-non"),function(){sortir(false);});
     /* Toucher a cote ferme sans rien envoyer : c'est le sens le plus sur. */
     ov.addEventListener("click",function(ev){ if(ev.target===ov)sortir(false); });
 
@@ -7009,6 +7453,9 @@ function renderBrandKinChoice(kin,best,code,p,tout){
   btn.textContent=(kin.length===1?"Non \u2014 c'est un nouveau produit":(kin.length===2?"Aucun des deux \u2014 nouveau produit":"Aucun de ceux-l\u00e0 \u2014 nouveau produit"));
   btn.style.background="#e67e22";btn.style.display="block";
   btn.onclick=function(){addDiscovery(best.name,best.brand,code,best.cat);};
+  /* Avant de proposer une nouvelle decouverte : est-ce l'une des boissons que
+     la chasse cherche ? Sinon on cree un doublon de ce qui existe deja. */
+  try{ proposerChasse(code,best,res); }catch(e){}
   recordScan(code,best.name,best.brand,best.cat,"off");
   renderWhereFound({pendingBarcode:code});
   playSound("win");
@@ -7218,7 +7665,16 @@ function renderScanHistory(){
    camera ne se reproduit jamais a l'identique.
 ================================ */
 function validGTIN(code){
-  if(!/^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/.test(code))return true; // formats non GS1 : pas de cle a verifier
+  /* TOUT CE QUI N'EST PAS UNE LONGUEUR GS1 EST REFUSE.
+     Cette ligne renvoyait « true » — donc « valide » — pour n'importe quelle
+     longueur inconnue, sous pretexte qu'il n'y a pas de cle a verifier. Un code
+     de 7 ou 11 chiffres sorti d'une lecture ratee passait ainsi SANS AUCUN
+     CONTROLE, et allait se coller sur une boisson. Un code produit fait 8, 12,
+     13 ou 14 chiffres : il n'y a pas de cinquieme cas a accepter.
+     La saisie manuelle passe aussi par ici : quelqu'un qui tape 12 chiffres au
+     lieu de 13 est desormais arrete tout de suite, au lieu de creer une
+     decouverte qu'aucun scan ne retrouvera jamais. */
+  if(!/^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/.test(code))return false;
   var digits=code.split("").map(Number);
   var check=digits.pop();
   var sum=0,w=3;
@@ -7417,16 +7873,45 @@ function openBarcodeDispute(drink,code){
   bCancel.onkeydown=function(ev){if(ev.key==="Enter")bCancel.onclick();};
   if(input)input.focus();
 }
+/* CE QUE QUAGGA SAIT ET QU'ON NE LUI DEMANDAIT PAS.
+   Chaque symbole decode porte sa propre marge d'erreur : c'est la distance
+   entre les barres mesurees et les barres theoriques. Une lecture nette a une
+   erreur quasi nulle ; une lecture de biais, floue, ou sur un code deforme par
+   la courbe d'une canette monte tres vite. On lui posait la question a aucun
+   moment — d'ou des lectures acceptees alors que la camera n'etait pas sure.
+   0,12 est deliberement severe : sur un code-barre, se tromper coute bien plus
+   cher que de demander une seconde de plus. */
+var SCAN_ERREUR_MAX=0.12;
+function qualiteLecture(r){
+  try{
+    var d=r&&r.codeResult&&r.codeResult.decodedCodes;
+    if(!d||!d.length)return 0;                 // le lecteur ne la fournit pas : on ne penalise pas
+    var somme=0,nb=0;
+    for(var i=0;i<d.length;i++){
+      if(typeof d[i].error==="number"){somme+=d[i].error;nb++;}
+    }
+    return nb?somme/nb:0;
+  }catch(e){ return 0; }
+}
 function onBarcodeDetected(r){
   var rawCode=r&&r.codeResult&&r.codeResult.code;
   if(!rawCode)return;
-  if(!validGTIN(rawCode))return;              // verrou 1 : cle invalide, lecture rejetee
+  if(!validGTIN(rawCode))return;              // verrou 1 : longueur ou cle invalide
+  if(qualiteLecture(r)>SCAN_ERREUR_MAX){      // verrou 2 : la camera n'est pas sure d'elle
+    _scanVotes={code:null,count:0};           // on repart de zero : une lecture douteuse
+    return;                                    // ne doit pas compter comme un vote
+  }
   if(_scanVotes.code===rawCode){_scanVotes.count++;}
   else{_scanVotes={code:rawCode,count:1};}
-  if(_scanVotes.count<2){
+  /* TROIS lectures identiques, plus deux. A une dizaine d'images par seconde,
+     la troisieme coute un dixieme de seconde — et deux lectures identiques
+     mais fausses, ca arrive: un code mal eclaire se lit souvent de travers
+     TOUJOURS DE LA MEME FACON. C'est la troisieme qui separe une vraie lecture
+     stable d'une erreur stable. */
+  if(_scanVotes.count<3){
     // Premiere lecture : retour visuel immediat, le scan "reflechit"
     var h=document.getElementById("scan-hint");
-    if(h)h.textContent="Lecture\u2026 garde le code stable";
+    if(h)h.textContent=_scanVotes.count>=2?"Presque\u2026 ne bouge plus":"Lecture\u2026 garde le code stable";
     var f=document.querySelector(".scan-frame");
     if(f)f.classList.add("reading");
     return;                                    // verrou 2 : on attend la confirmation
@@ -7559,7 +8044,7 @@ function onBarcodeDetected(r){
     renderWhereFound(cachedDrink?{drinkId:cachedDrink.id,code:code}:(cachedDisc?{discoveryId:cachedDisc.id,code:code}:{pendingBarcode:code}));    playSound("win");toast("Déjà scanné : "+cached.name);
   } else {
     res.className="scan-result";
-    res.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:60px;gap:8px"><div class="spinner"></div><div style="font-size:13px;color:var(--s2)">Recherche...</div></div>';
+    res.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:74px">'+magoLoader(true,"Recherche\u2026")+'</div>';
     btn.style.display="none";
     fetchOFFProduct(code)
       .then(function(data){
@@ -7641,6 +8126,7 @@ function onBarcodeDetected(r){
           }
           btn.textContent="Ajouter aux découvertes";btn.style.background="#e67e22";btn.style.display="block";
           btn.onclick=function(){addDiscovery(best.name,best.brand,code,best.cat);};
+          try{ proposerChasse(code,best,res); }catch(e){}
           recordScan(code,best.name,best.brand,best.cat,"off");
           var lnk2=document.createElement("div");
           lnk2.className="scan-injected";
@@ -7690,6 +8176,53 @@ function onBarcodeDetected(r){
         btn.onclick=startScan;
       });
   }
+}
+/* ── CHARGEMENT : deux formes, un seul vocabulaire ────────────────────────
+   magoLoader() : la goutte et l'onde, quand l'ecran est VIDE et qu'on attend.
+   magoCharge() : la barre fine du haut, quand l'ecran est DEJA rempli et
+   qu'on actualise — elle ne cache rien et ne pousse rien.
+
+   La barre compte les chargements en cours au lieu de s'allumer et s'eteindre
+   au hasard : deux requetes qui se chevauchent ne l'eteignent pas quand la
+   premiere finit. Et un plancher de 320 ms l'empeche de clignoter sur une
+   reponse instantanee — un eclair est plus derangeant qu'une attente. */
+function magoLoader(petit,texte){
+  return '<div style="display:flex;flex-direction:column;align-items:center;gap:10px">'+
+    '<div class="mago-load'+(petit?" sm":"")+'" role="status" aria-label="Chargement"><i></i><i></i><i></i><b></b></div>'+
+    (texte?'<div style="font-size:12px;font-weight:600;color:var(--s2)">'+sanitize(texte)+'</div>':'')+
+  '</div>';
+}
+var _magoChargeN=0,_magoChargeT=0,_magoChargeFin=null;
+function magoCharge(actif){
+  var el=document.getElementById("mago-barre");
+  if(!el){
+    el=document.createElement("div");
+    el.id="mago-barre"; el.setAttribute("aria-hidden","true");
+    el.innerHTML="<i></i>";
+    document.body.appendChild(el);
+  }
+  if(actif){
+    _magoChargeN++;
+    if(_magoChargeFin){clearTimeout(_magoChargeFin);_magoChargeFin=null;}
+    if(_magoChargeN===1){_magoChargeT=Date.now();el.classList.add("on");}
+    return;
+  }
+  _magoChargeN=Math.max(0,_magoChargeN-1);
+  if(_magoChargeN>0)return;
+  var reste=Math.max(0,320-(Date.now()-_magoChargeT));
+  _magoChargeFin=setTimeout(function(){
+    _magoChargeFin=null;
+    if(_magoChargeN===0)el.classList.remove("on");
+  },reste);
+}
+/* Enveloppe une promesse : la barre s'allume pendant, s'eteint apres, quoi
+   qu'il arrive. Sans le finally, un echec reseau laisserait la barre allumee
+   pour toujours. */
+function magoAttendre(promesse){
+  magoCharge(true);
+  var fin=function(){ magoCharge(false); };
+  try{ return Promise.resolve(promesse).then(function(v){fin();return v;},function(e){fin();throw e;}); }
+  catch(e){ fin(); throw e; }
 }
 function sanitize(str){var d=document.createElement("div");d.textContent=str;return d.innerHTML;}
 /* sanitize() passe par textContent : il neutralise < et >, mais PAS le
@@ -8703,7 +9236,7 @@ function renderMissions(){
       '<div style="font-size:13px;font-weight:800;color:var(--s1)">Missions du jour</div>'+
       '<div style="font-size:11px;font-weight:800;color:'+(all?"#c69a57":"var(--s2)")+'">'+(all?"\u2713 +10 pts !":done+"/"+defs.length)+'</div>'+
     '</div>'+rows+'</div>';
-  try{updateMissionFab();}catch(e){}
+  try{renderChasse();}catch(e){}
 }
 /* \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
    "AUTOUR DE TOI" \u2014 le pouls local, tout en haut de l'accueil.
@@ -8908,10 +9441,18 @@ function majBlocParrainage(){
   window.fbLoadMyScore().then(function(d){
     if(!d)return;
     var bouts=[];
-    if(d.refCode)bouts.push("Ton code : <b>"+sanitize(d.refCode)+"</b>");
     if(d.refCount)bouts.push(d.refCount+" filleul"+(d.refCount>1?"s":"")+" r\u00e9compens\u00e9"+(d.refCount>1?"s":""));
-    el.innerHTML=bouts.length?bouts.join(" \u00b7 "):"";
-    el.style.display=bouts.length?"block":"none";
+    var poser=function(code){
+      var b=code?["Ton code : <b>"+sanitize(code)+"</b>"].concat(bouts):bouts;
+      el.innerHTML=b.length?b.join(" \u00b7 "):"";
+      el.style.display=b.length?"block":"none";
+    };
+    /* Le code se demande au serveur : il n'est plus dans le profil public.
+       On n'appelle la fonction que si le bloc est reellement visible, pour ne
+       pas reveiller une Cloud Function a chaque ouverture du profil. */
+    if(window.fbMonCodeParrain){
+      window.fbMonCodeParrain().then(function(r){ poser(r&&r.code); }).catch(function(){ poser(d.refCode||null); });
+    }else poser(d.refCode||null);
   }).catch(function(){});
 }
 /* ═════════════════════════════════════════════════════════════════════════
@@ -9139,199 +9680,23 @@ function donRetour(){
   try{renderDonCard();renderDonRow();}catch(e){}
 }
 
-/* \u2500\u2500 Pastille MISSIONS flottante et deplacable \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-   Acces permanent aux missions/chasses depuis n'importe quel ecran. Badge =
-   missions du jour a finir + chasses actives autour. Deplacable a la verticale
-   (position memorisee en local). Tap = ouvre l'accueil sur les missions. */
-var MISSION_FAB_W=58;
-/* Le bouton flottant peut deranger : un appui long le masque, et il se
-   reaffiche depuis les Reglages — ou tout seul quand on lance une nouvelle
-   chasse, puisqu'a ce moment-la il redevient utile (c'est lui qui porte le
-   compteur des chasses). Masquer pour toujours un bouton qu'on vient de
-   rendre necessaire serait un piege. */
-function huntFabWanted(){ try{ return localStorage.getItem("magoHuntFab")!=="0"; }catch(e){ return true; } }
-function applyHuntFabSwitch(){
-  var on=huntFabWanted();
-  var t=document.getElementById("huntfab-toggle"); if(t)t.classList.toggle("on",on);
-  var r=document.getElementById("hunt-fab-row"); if(r)r.setAttribute("aria-checked",on?"true":"false");
-}
-function hideMissionFab(){
-  if(!confirm("Masquer le bouton de chasse ?\n\nTu peux le r\u00e9afficher dans R\u00e9glages, et il reviendra de lui-m\u00eame si tu lances une nouvelle chasse."))return;
-  try{localStorage.setItem("magoHuntFab","0");}catch(e){}
-  var f=document.getElementById("mission-fab"); if(f)f.remove();
-  applyHuntFabSwitch();
-  toast("Bouton masqu\u00e9 \u00b7 r\u00e9affichable dans R\u00e9glages");
-  playSound("pop");
-}
-function toggleHuntFab(){
-  if(huntFabWanted()){
-    try{localStorage.setItem("magoHuntFab","0");}catch(e){}
-    var f=document.getElementById("mission-fab"); if(f)f.remove();
-  }else{
-    try{localStorage.setItem("magoHuntFab","1");}catch(e){}
-    try{ensureMissionFab();}catch(e){}
-  }
-  applyHuntFabSwitch();
-  playSound("pop");
-}
-function ensureMissionFab(){
-  applyHuntFabSwitch();
-  if(!huntFabWanted())return null;
-  var ex=document.getElementById("mission-fab");
-  if(ex)return ex;
-  var W=MISSION_FAB_W;
-  var fab=document.createElement("div");
-  fab.id="mission-fab";
-  fab.setAttribute("role","button");
-  fab.setAttribute("tabindex","0");
-  fab.setAttribute("aria-label","Voir mes missions et chasses");
-  fab.style.cssText="position:fixed;z-index:900;width:"+W+"px;height:"+W+"px;border-radius:50%;background:radial-gradient(130% 130% at 32% 24%,#2c2824,#191512 60%,#0e0c0a);box-shadow:0 10px 26px rgba(0,0,0,.42),0 2px 12px rgba(16,138,67,.30),inset 0 1.5px 0 rgba(255,255,255,.14),inset 0 -4px 10px rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none;opacity:1;transition:opacity .3s ease";
-  var vw=window.innerWidth||390,vh=window.innerHeight||700;
-  var savedTop=parseInt(localStorage.getItem("magoFabTop")||"",10);
-  var savedSide=localStorage.getItem("magoFabSide")||"right";
-  var top=(savedTop&&savedTop>60)?Math.min(savedTop,vh-140):Math.round(vh*0.6);
-  fab.style.top=top+"px";
-  fab.style.left=(savedSide==="left"?12:(vw-W-12))+"px";
-  fab.innerHTML='<svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 1.5px 1.5px rgba(0,0,0,.35))"><circle cx="12" cy="12" r="7.2" stroke="#fff" stroke-width="2"/><path d="M12 1.8v3.4M12 18.8v3.4M1.8 12h3.4M18.8 12h3.4" stroke="#fff" stroke-width="2"/><circle cx="12" cy="12" r="2.6" fill="#37d98c"/></svg>'+
-    '<span id="mission-fab-badge" style="position:absolute;top:-4px;right:-4px;min-width:21px;height:21px;padding:0 5px;border-radius:11px;background:#e67e22;color:#1a1714;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2.5px solid var(--app-bg);box-shadow:0 2px 6px rgba(0,0,0,.25)">0</span>';
-  document.body.appendChild(fab);
-  var sx=0,sy=0,ox=0,oy=0,moved=false,dragging=false,idleT=null,lpT=null;
-  function idle(){if(idleT)clearTimeout(idleT);fab.style.opacity="1";idleT=setTimeout(function(){fab.style.opacity="0.6";},2600);}
-  function P(e){return (e.touches&&e.touches[0])?e.touches[0]:e;}
-  function down(e){dragging=true;moved=false;
-    /* Appui long (650 ms sans bouger) = proposer de masquer le bouton. Le
-       glissement pour le deplacer et le tap pour ouvrir restent inchanges :
-       des que le doigt bouge, le minuteur est annule. */
-    if(lpT)clearTimeout(lpT);
-    lpT=setTimeout(function(){ if(dragging&&!moved){ dragging=false; fab.style.cursor="grab"; hideMissionFab(); } },650);
-    var p=P(e);sx=p.clientX;sy=p.clientY;ox=parseInt(fab.style.left,10)||0;oy=parseInt(fab.style.top,10)||0;fab.style.transition="opacity .2s ease";fab.style.cursor="grabbing";fab.style.opacity="1";if(idleT)clearTimeout(idleT);if(e.cancelable)e.preventDefault();}
-  function move(e){if(!dragging)return;var p=P(e);var dx=p.clientX-sx,dy=p.clientY-sy;if(Math.abs(dx)>4||Math.abs(dy)>4){moved=true;if(lpT){clearTimeout(lpT);lpT=null;}}var w=window.innerWidth,h=window.innerHeight;fab.style.left=Math.max(8,Math.min(ox+dx,w-W-8))+"px";fab.style.top=Math.max(60,Math.min(oy+dy,h-140))+"px";if(e.cancelable)e.preventDefault();}
-  function snap(){
-    var w=window.innerWidth,h=window.innerHeight;
-    var cx=(parseInt(fab.style.left,10)||0)+W/2;
-    var side=cx<w/2?"left":"right";
-    var t=Math.max(60,Math.min(parseInt(fab.style.top,10)||0,h-140));
-    fab.style.transition="left .34s cubic-bezier(.34,1.4,.4,1),top .34s cubic-bezier(.34,1.4,.4,1),opacity .3s ease";
-    fab.style.left=(side==="left"?12:(w-W-12))+"px";fab.style.top=t+"px";
-    try{localStorage.setItem("magoFabSide",side);localStorage.setItem("magoFabTop",String(t));}catch(_){}
-    idle();
-  }
-  function up(){if(lpT){clearTimeout(lpT);lpT=null;}if(!dragging)return;dragging=false;fab.style.cursor="grab";if(moved){snap();}else{openMissions();idle();}}
-  fab.addEventListener("touchstart",down,{passive:false});
-  fab.addEventListener("touchmove",move,{passive:false});
-  fab.addEventListener("touchend",up);
-  fab.addEventListener("mousedown",down);
-  window.addEventListener("mousemove",move);
-  window.addEventListener("mouseup",up);
-  fab.addEventListener("keydown",function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();openMissions();}});
-  window.addEventListener("resize",function(){var side=localStorage.getItem("magoFabSide")||"right";var w=window.innerWidth,h=window.innerHeight;fab.style.transition="none";fab.style.left=(side==="left"?12:(w-W-12))+"px";fab.style.top=Math.max(60,Math.min(parseInt(fab.style.top,10)||0,h-140))+"px";});
-  idle();
-  return fab;
-}
-/* Panneau missions & chasses (ouvert au tap sur la pastille) : missions du jour
-   + chasses autour, avec les VRAIES photos des boissons. */
-/* Effet "goutte d'eau" : un cercle qui jaillit de la pastille et s'elargit. */
-function fabRipple(){
-  try{
-    var f=document.getElementById("mission-fab");if(!f)return;
-    var r=f.getBoundingClientRect();var cx=r.left+r.width/2,cy=r.top+r.height/2;
-    var rip=document.createElement("div");
-    rip.style.cssText="position:fixed;left:"+cx+"px;top:"+cy+"px;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;background:radial-gradient(circle,rgba(34,192,127,.55),rgba(14,122,77,.12) 70%,transparent);z-index:999;pointer-events:none;transform:scale(0);opacity:.95;transition:transform .55s cubic-bezier(.2,.7,.3,1),opacity .55s ease";
-    document.body.appendChild(rip);
-    requestAnimationFrame(function(){rip.style.transform="scale(70)";rip.style.opacity="0";});
-    setTimeout(function(){if(rip.parentNode)rip.remove();},600);
-  }catch(e){}
-}
-function openMissions(){
-  if(document.getElementById("mission-sheet"))return;
-  fabRipple();
-  var defs=[];try{defs=missionDefs();}catch(e){}
-  var hunts=window._huntList||[];
-  var missDone=defs.filter(function(m){return m.have>=m.need;}).length;
-  var missRows=defs.map(function(m){
-    var ok=m.have>=m.need;
-    return '<div style="display:flex;align-items:center;gap:11px;padding:9px 0">'+
-      '<span style="width:22px;height:22px;border-radius:50%;border:2px solid '+(ok?"#16a34a":"var(--border)")+';display:flex;align-items:center;justify-content:center;font-size:12px;color:#16a34a;flex-shrink:0">'+(ok?"✓":"")+'</span>'+
-      '<span style="flex:1;font-size:13.5px;font-weight:700;color:var(--s1);'+(ok?"text-decoration:line-through;opacity:.55":"")+'">'+m.label+'</span>'+
-      '<span style="font-size:12px;font-weight:800;color:var(--s2)">'+Math.min(m.have,m.need)+'/'+m.need+'</span></div>';
-  }).join("");
-  var huntRows=hunts.length?hunts.slice(0,8).map(function(h){
-    var hd=DRINKS.find(function(x){return Number(x.id)===Number(h.drinkId);});
-    if(hd&&!getCachedDrinkImage(hd)){try{fetchVerifiedOFFImage(hd);}catch(e){}}
-    var who=h.seekers>1?(h.seekers+" cherchent"):(h.mine?"Tu cherches":"1 cherche");
-    var thumb=hd?drinkIconHTML(hd):magoCatIcon("Autre",20,"#7a4a10");
-    return '<div class="ms-hunt" data-did="'+nbSur(h.drinkId)+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 0;cursor:pointer;border-top:1px solid var(--border)">'+
-      '<span class="ms-thumb" data-did="'+nbSur(h.drinkId)+'" role="button" tabindex="0" aria-label="Voir cette boisson sur la carte" style="width:40px;height:40px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">'+thumb+'</span>'+
-      '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(h.drinkName||"Boisson")+'</div><div style="font-size:11.5px;font-weight:600;color:var(--s2)">'+who+' près d\'ici</div></div>'+
-      '<span style="font-size:12px;font-weight:800;color:#e67e22;flex-shrink:0">Je l\'ai vue →</span></div>';
-  }).join(""):emptyStateHTML("radar","Aucune chasse en cours","Cherche une boisson introuvable et lance la chasse : les explorateurs autour de toi seront prévenus dès qu\'elle est repérée.","Explorer les boissons","emptyGo(\'search\')");
-  // Bloc « Tes alertes » : il vivait sur l'accueil, il vit maintenant ici.
-  var alertsBlock="";
-  if((drinkWatches||[]).length){
-    alertsBlock='<div id="alerts-card" style="margin-bottom:14px"></div>';
-  }
-  var ov=document.createElement("div");
-  ov.id="mission-sheet";
-  ov.style.cssText="position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center";
-  ov.innerHTML='<div id="ms-card" style="background:var(--app-bg);border-radius:24px 24px 0 0;width:100%;max-width:520px;max-height:82vh;overflow-y:auto;padding:10px 20px calc(24px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.35);transform:translateY(100%);transition:transform .5s cubic-bezier(.3,1.38,.44,1)">'+
-    '<div style="width:40px;height:4px;border-radius:3px;background:var(--border);margin:0 auto 14px"></div>'+
-    '<div style="font-size:18px;font-weight:850;color:var(--s1);margin-bottom:2px">Tes missions &amp; chasses</div>'+
-    '<div style="font-size:12.5px;font-weight:600;color:var(--s2);margin-bottom:14px">Gagne des points en contribuant près de chez toi.</div>'+
-    '<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:12px 15px;margin-bottom:14px">'+
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px"><span style="font-size:13px;font-weight:800;color:var(--s1)">Missions du jour</span><span style="font-size:11.5px;font-weight:800;color:'+(defs.length&&missDone===defs.length?"#c69a57":"var(--s2)")+'">'+missDone+'/'+defs.length+'</span></div>'+
-      missRows+
-    '</div>'+
-    alertsBlock+
-    '<div style="font-size:13px;font-weight:800;color:var(--s1);margin:0 2px 2px">Chasses près de toi</div>'+
-    huntRows+
-    '<button id="ms-close" style="width:100%;margin-top:18px;padding:13px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">Fermer</button>'+
-  '</div>';
-  document.body.appendChild(ov);
-  try{ renderAlertsCard(); }catch(e){}
-  var card=document.getElementById("ms-card");
-  requestAnimationFrame(function(){if(card)card.style.transform="none";});
-  var close=function(){if(card)card.style.transform="translateY(100%)";setTimeout(function(){if(ov.parentNode)ov.remove();},300);};
-  var cb=document.getElementById("ms-close");if(cb)cb.onclick=close;
-  ov.addEventListener("click",function(e){if(e.target===ov)close();});
-  // Glisser la feuille vers le bas pour la fermer (comme une vraie bottom sheet).
-  var _sy=null,_dy=0;
-  if(card){
-    card.addEventListener("touchstart",function(e){if(card.scrollTop>0){_sy=null;return;}_sy=e.touches[0].clientY;_dy=0;card.style.transition="none";},{passive:true});
-    card.addEventListener("touchmove",function(e){if(_sy===null)return;var d=e.touches[0].clientY-_sy;if(d<0)return;_dy=d;card.style.transform="translateY("+d+"px)";},{passive:true});
-    card.addEventListener("touchend",function(){if(_sy===null)return;card.style.transition="transform .3s cubic-bezier(.2,.8,.2,1)";if(_dy>110){close();}else{card.style.transform="none";}_sy=null;_dy=0;},{passive:true});
-  }
-  ov.querySelectorAll(".ms-thumb").forEach(function(th){
-    th.onclick=function(ev){
-      ev.stopPropagation();
-      var did=Number(th.getAttribute("data-did"));
-      close();
-      setTimeout(function(){alertOpenOnMap(did);},260);
-    };
-    th.onkeydown=function(ev){if(ev.key==="Enter"){ev.preventDefault();th.onclick(ev);}};
-  });
-  ov.querySelectorAll(".ms-hunt").forEach(function(row){
-    row.onclick=function(){var did=Number(row.getAttribute("data-did"));var d=DRINKS.find(function(x){return Number(x.id)===did;});close();if(d)setTimeout(function(){pick(d);},260);else toast("Boisson introuvable");};
-    row.onkeydown=function(ev){if(ev.key==="Enter")row.click();};
-  });
-  try{playSound("pop");}catch(e){}
-}
-function updateMissionFab(){
-  try{
-    var fab=ensureMissionFab();
-    // Ne jamais montrer la pastille pendant le splash ou l'intro (onboarding).
-    var _ob=document.getElementById("onboarding"),_sp=document.getElementById("splash");
-    var _introUp=(_ob&&getComputedStyle(_ob).display!=="none"&&!_ob.classList.contains("hidden"))||(_sp&&getComputedStyle(_sp).display!=="none"&&!_sp.classList.contains("hidden"));
-    if(_introUp){fab.style.display="none";return;}
-    var newcomer=ptsNets()<1&&!Object.keys(scanCounts||{}).length&&!(userStats.signals||0)&&!(userStats.confirms||0);
-    var miss=0;
-    if(!newcomer){try{miss=missionDefs().filter(function(m){return m.have<m.need;}).length;}catch(e){}}
-    var hunts=window._huntCount||0;
-    var total=miss+hunts;
-    var badge=document.getElementById("mission-fab-badge");
-    if(total>0){ if(badge)badge.textContent=(total>99?"99+":total); fab.style.display="flex"; }
-    else{ fab.style.display="none"; }
-  }catch(e){}
-}
+/* ── LA PASTILLE FLOTTANTE A ETE SUPPRIMEE ───────────────────────────────
+   Elle donnait acces aux missions, aux chasses et aux alertes depuis
+   n'importe quel ecran. Les deux premieres faisaient doublon avec l'accueil
+   et l'onglet Chasse — l'onglet fait meme mieux : il ecarte les boissons
+   qu'on trouve dans un magasin d'a cote, et il porte les boutons qui
+   rapportent des points.
+
+   « Tes alertes » n'existait nulle part ailleurs : sa carte a d'abord ete
+   demenagee dans l'onglet Chasse, et le badge est passe sur l'onglet
+   Decouvrir, AVANT cette suppression. Dans l'autre ordre, on perdait en
+   silence le seul ecran ou l'on voit ses veilles.
+
+   Ce qui part avec elle : une pastille posee par-dessus la camera de scan,
+   deux ecouteurs mousemove/mouseup laisses sur window et jamais retires, un
+   reglage dont le libelle mentait (« la pastille sur l'ecran d'accueil »
+   alors qu'elle flottait partout), et un second compteur de chasses qui ne
+   disait pas la meme chose que celui de l'onglet. */
 /* Mission « boisson recherchée » : l'app met en avant une boisson du catalogue
    dont AUCUN magasin n'est connu (localement) et récompense l'utilisateur qui la
    repère en magasin (+30 pts). Double bénéfice : remplit les données manquantes
@@ -9392,8 +9757,9 @@ function renderTopRail(){
   if(!wrap||!rail)return;
   // La SELECTION reste le classement par scans (c'est l'identite du rail) ;
   // seul l'ORDRE d'affichage met les vraies photos devant les vignettes.
-  var top=DRINKS.slice().sort(function(a,b){return(scanCounts[b.id]||0)-(scanCounts[a.id]||0);})
-    .filter(function(d){return scanCounts[d.id];}).slice(0,8);
+  // Tendances = ce que scanne LA COMMUNAUTE, jamais mes propres scans.
+  var top=DRINKS.slice().sort(function(a,b){return(scanCountsGlobal[b.id]||0)-(scanCountsGlobal[a.id]||0);})
+    .filter(function(d){return scanCountsGlobal[d.id];}).slice(0,8);
   top=top.filter(function(d){return !!getCachedDrinkImage(d);})
     .concat(top.filter(function(d){return !getCachedDrinkImage(d);}));
   if(top.length<2){wrap.style.display="none";return;}
@@ -9426,10 +9792,22 @@ function applyHomeFilter(){
   var filtering=curCat&&curCat!=="Tous";
   var ex=document.getElementById("home-extras");if(ex)ex.style.display=filtering?"none":"";
   var rc=document.getElementById("home-recents");if(rc)rc.style.display=filtering?"none":"";
-  // Sélection d'une catégorie = accès direct aux résultats : on masque aussi les
-  // blocs perso du haut (autour de toi, alertes, chasses) pour ne montrer que la
-  // catégorie. Ils réapparaissent en revenant sur « Tous ».
-  ["nearby-card","alerts-card","hunts-card"].forEach(function(id){var e=document.getElementById(id);if(e)e.style.display=filtering?"none":"";});
+  /* Selection d'une categorie = acces direct aux resultats : on masque les
+     blocs perso du haut pour ne montrer que la categorie.
+
+     DEUX IDENTIFIANTS ONT ETE RETIRES DE CETTE LISTE. « alerts-card » vit
+     desormais dans l'onglet Chasse : le masquer d'ici revenait a effacer les
+     alertes d'un AUTRE ecran parce qu'on avait filtre une categorie sur
+     l'accueil — et a ne jamais les remontrer tant qu'on n'etait pas revenu
+     sur « Tous ». « hunts-card » n'existe plus nulle part dans le document.
+
+     Les MISSIONS, elles, restent visibles meme en filtrant : la feuille de la
+     boule flottante en etait le seul autre acces, et elle va disparaitre. */
+  ["nearby-card"].forEach(function(id){var e=document.getElementById(id);if(e)e.style.display=filtering?"none":"";});
+  /* Rien a faire pour les missions : leur carte a ete SORTIE de #home-extras
+     dans le document, elle n'est donc plus masquee par ce filtre. Lui rendre
+     un display en JavaScript ne servait a rien — un enfant d'un parent masque
+     reste masque. */
   var tt=document.getElementById("t-trends");
   if(tt)tt.textContent=filtering?curCat:"À découvrir";
 }
@@ -9648,11 +10026,11 @@ function renderSearchDefault(el){
   }
   // 2) Boissons qui montent : classees par scans reels, puis par note en repli
   var pop=DRINKS.slice().sort(function(a,b){
-    var sa=scanCounts[a.id]||0,sb=scanCounts[b.id]||0;
+    var sa=scanCountsGlobal[a.id]||0,sb=scanCountsGlobal[b.id]||0;
     if(sb!==sa)return sb-sa;
     return(b.stars||0)-(a.stars||0);
   }).slice(0,12);
-  var anyScanned=pop.some(function(d){return scanCounts[d.id];});
+  var anyScanned=pop.some(function(d){return scanCountsGlobal[d.id];});
   var th=document.createElement("div");
   th.style.cssText="display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:11px";
   th.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/></svg><span>'+(anyScanned?"Ce qui monte en ce moment":"Populaires en ce moment")+'</span>';
@@ -10342,8 +10720,6 @@ function _dragOverlayOpen(){
   if(ex&&ex.style.display!=="none"&&ex.classList.contains("in"))return ex;
   var ac=document.getElementById("activity-ov");
   if(ac)return ac;
-  var ms=document.getElementById("mission-sheet");
-  if(ms)return ms;
   var au=document.getElementById("auth-sheet");
   if(au&&au.style.display!=="none")return au;
   return null;
@@ -10352,7 +10728,7 @@ function _dragCloseOverlay(el){
   if(el.id==="img-zoom")closeDrinkZoom();
   else if(el.id==="store-picker")closeStorePicker();
   else if(el.id==="explore-map-host"){try{closeExploreMap();}catch(e){}}
-  else if(el.id==="activity-ov"||el.id==="mission-sheet"){try{el.remove();}catch(e){}}
+  else if(el.id==="activity-ov"){try{el.remove();}catch(e){}}
   else if(el.id==="auth-sheet"){try{closeAuthSheet();}catch(e){}}
   else closeProposeForm();
 }
@@ -11654,12 +12030,11 @@ function toggleWatch(d){
        lui qui porte le compteur des chasses actives, le laisser cache rendrait
        invisible la chasse qu'on vient de lancer. Ici et seulement ici — sur le
        GESTE de l'utilisateur, jamais sur une synchronisation automatique. */
-    try{
-      if(localStorage.getItem("magoHuntFab")==="0"){
-        localStorage.setItem("magoHuntFab","1");
-        ensureMissionFab();
-      }
-    }catch(e){}
+    /* Ici on remettait de force la pastille flottante quand elle avait ete
+       masquee, parce qu'une nouvelle chasse la rendait utile. Ce role de
+       protection passe au badge de l'onglet Decouvrir, qui lui ne peut pas
+       etre masque du tout : il n'y a plus rien a remettre. */
+    try{ renderChasse(); }catch(e){}
     pushActivity({
       type:"hunt",
       title:"Chasse lanc\u00e9e \u00b7 "+d.name,
@@ -11682,7 +12057,7 @@ function toggleWatch(d){
   saveWatches();
   try{renderStoreList();}catch(e){}
   try{renderAlertsCard();}catch(e){}
-  try{renderHunts();}catch(e){}
+  try{renderChasse();}catch(e){}
 }
 function resetWatchTrigger(drinkId,storeId){
   var changed=false;
@@ -11800,7 +12175,14 @@ function _runActivityAction(act){
   if(act.kind==="store"&&act.storeId!=null){try{openWatchStore(String(act.storeId),act.drinkId);}catch(e){}return;}
   if(act.kind==="storeMap"&&act.lat!=null){try{showStoreOnMap(Number(act.lat),Number(act.lng));}catch(e){}return;}
   if(act.kind==="drink"&&act.drinkId!=null){var d=DRINKS.find(function(x){return Number(x.id)===Number(act.drinkId);});if(d){try{pick(d);}catch(e){}}return;}
-  if(act.kind==="hunts"){try{show("home");}catch(e){}setTimeout(function(){var el=document.getElementById("hunts-card");if(el)el.scrollIntoView({behavior:"smooth",block:"center"});},280);return;}
+  if(act.kind==="hunts"){
+    /* Ce lien faisait defiler l'accueil vers #hunts-card, un conteneur qui
+       n'existe plus : il ne se passait donc rien du tout. Les chasses vivent
+       dans l'onglet Decouvrir. */
+    try{show("discover");}catch(e){}
+    setTimeout(function(){try{renderChasse();}catch(e){}},60);
+    return;
+  }
 }
 function _renderActivityList(){
   var host=document.getElementById("act-list");if(!host)return;
@@ -12384,84 +12766,20 @@ function removeWatch(id,force){
    tu aides la communauté ET tu gagnes des points. Rendu au chargement de
    l'accueil ; données réelles agrégées (aucun nom, position arrondie).
 ================================ */
-function _drawHunts(map,noReflow){
-  var list=Object.keys(map).map(function(k){return map[k];}).filter(function(h){return h.seekers>0;});
-  list.sort(function(a,b){return b.seekers-a.seekers;});
-  // IMPORTANT : on alimente la pastille AVANT de chercher un conteneur.
-  // L'accueil n'en a plus ; sortir trop tot laisserait la pastille vide.
-  window._huntCount=list.length;window._huntList=list;window._huntMap=map;try{updateMissionFab();}catch(e){}
-  var host=document.getElementById("hunts-card");if(!host)return;
-  if(!list.length){host.innerHTML="";return;}
-  var needPhoto=false;
-  var LIMIT=window._huntsExpanded?999:4;   // liste courte + "voir plus" (pas d'infini)
-  var rows=list.slice(0,LIMIT).map(function(h){
-    var who=h.seekers>1?(h.seekers+" personnes cherchent"):(h.mine?"Tu cherches":"1 personne cherche");
-    var hd=DRINKS.find(function(x){return Number(x.id)===Number(h.drinkId);});
-    // Vraie photo du produit (OpenFoodFacts verifie) si connue, sinon canette
-    // stylisee — plus jamais un simple glyphe. On declenche le chargement de la
-    // photo pour les boissons pas encore vues.
-    if(hd&&!getCachedDrinkImage(hd)){needPhoto=true;try{fetchVerifiedOFFImage(hd);}catch(e){}}
-    var thumb=hd?drinkIconHTML(hd):magoCatIcon("Autre",22,"#7a4a10");
-    return '<div class="hunt-row" data-did="'+nbSur(h.drinkId)+'" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 0;cursor:pointer">'+
-      '<span class="hunt-thumb" data-did="'+nbSur(h.drinkId)+'" role="button" tabindex="0" aria-label="Voir cette boisson sur la carte" style="width:42px;height:42px;border-radius:12px;overflow:hidden;background:#fff;border:1px solid rgba(240,184,64,.55);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">'+thumb+'</span>'+
-      '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:800;color:#2a1e12;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(h.drinkName||"Boisson")+'</div>'+
-      '<div style="font-size:11px;font-weight:600;color:#8a6338">'+who+' près d\'ici</div></div>'+
-      '<span style="font-size:11px;font-weight:800;color:#e67e22;flex-shrink:0">Je l\'ai vue →</span>'+
-    '</div>';
-  }).join("");
-  var moreRow="";
-  if(list.length>4){
-    moreRow=window._huntsExpanded
-      ?'<div id="hunts-more" role="button" tabindex="0" style="text-align:center;padding:10px 0 4px;font-size:12px;font-weight:800;color:#b45309;cursor:pointer">Voir moins ▲</div>'
-      :'<div id="hunts-more" role="button" tabindex="0" style="text-align:center;padding:10px 0 4px;font-size:12px;font-weight:800;color:#b45309;cursor:pointer">Voir plus (+'+(list.length-4)+') ▼</div>';
-  }
-  host.innerHTML='<div style="background:linear-gradient(135deg,#fff3e0,#ffe8cc);border:1.5px solid #f0b840;border-radius:18px;padding:13px 16px 6px;margin-bottom:14px">'+
-    '<div style="font-size:13px;font-weight:800;color:#7a4a10;margin-bottom:1px">Chasses près de toi</div>'+
-    '<div style="font-size:11px;font-weight:600;color:#9a6a2a;margin-bottom:4px">Tu croises une de ces boissons en magasin ? Signale-la — tu gagnes des points en aidant.</div>'+rows+moreRow+'</div>';
-  var moreEl=document.getElementById("hunts-more");
-  if(moreEl)moreEl.onclick=function(){window._huntsExpanded=!window._huntsExpanded;try{playSound("pop");}catch(e){}_drawHunts(window._huntMap,true);};
-  host.querySelectorAll(".hunt-row").forEach(function(row){
-    row.onclick=function(){
-      var did=Number(row.getAttribute("data-did"));
-      var d=DRINKS.find(function(x){return Number(x.id)===did;});
-      if(d)pick(d);else toast("Boisson introuvable");
-    };
-    row.onkeydown=function(ev){if(ev.key==="Enter")row.click();};
-  });
-  host.querySelectorAll(".hunt-thumb").forEach(function(th){
-    th.onclick=function(ev){ev.stopPropagation();alertOpenOnMap(Number(th.getAttribute("data-did")));};
-    th.onkeydown=function(ev){if(ev.key==="Enter"){ev.preventDefault();th.onclick(ev);}};
-  });
-  // Les photos OpenFoodFacts arrivent en asynchrone : on redessine UNE fois (sans
-  // re-interroger le reseau) quand elles sont pretes, si on est encore sur l'accueil.
-  if(needPhoto&&!noReflow){
-    setTimeout(function(){try{var hp=document.getElementById("s-home");if(hp&&hp.classList.contains("on")&&window._huntMap)_drawHunts(window._huntMap,true);}catch(e){}},1800);
-  }
-}
-function renderHunts(){
-  // Plus de conteneur sur l'accueil : les chasses alimentent la pastille (et
-  // son panneau). On ne sort donc PAS ici, sinon le compteur resterait a zero.
-  // Base LOCALE : tes propres veilles = tes chasses, affichées TOUT DE SUITE
-  // (même si Firestore est lent ou que les règles ne sont pas encore prêtes).
-  var map={};
-  (drinkWatches||[]).forEach(function(w){
-    map[w.id]={drinkId:w.id,drinkName:w.name,emoji:w.emoji,seekers:1,mine:true};
-  });
-  _drawHunts(map);
-  // Puis on enrichit avec les chasses des AUTRES autour (Firestore).
-  if(window.fbLoadNearbyHunts){
-    window.fbLoadNearbyHunts(userLat,userLng,15).then(function(hunts){
-      var merged={};
-      (hunts||[]).forEach(function(h){merged[h.drinkId]={drinkId:h.drinkId,drinkName:h.drinkName,emoji:h.emoji,seekers:h.seekers||0,mine:!!h.mine};});
-      // On garde nos veilles locales même si le distant ne les renvoie pas encore
-      Object.keys(map).forEach(function(k){
-        if(merged[k]){merged[k].mine=true;merged[k].seekers=Math.max(merged[k].seekers,1);}
-        else merged[k]=map[k];
-      });
-      _drawHunts(merged);
-    }).catch(function(){/* on garde l'affichage local */});
-  }
-}
+/* ── renderHunts / _drawHunts ONT ETE SUPPRIMEES ─────────────────────────
+   Elles peignaient les chasses dans #hunts-card, un conteneur qui n'existe
+   plus dans le document depuis que l'accueil a ete epure. Elles sortaient
+   donc immediatement sur « if(!host)return » — mais APRES avoir appele
+   fbLoadNearbyHunts. A chaque affichage de l'accueil, l'app payait donc une
+   lecture Firestore complete des chasses du voisinage pour jeter le
+   resultat. La seule chose qu'elles alimentaient encore, window._huntCount,
+   n'etait plus lue par personne depuis la suppression de la pastille
+   flottante.
+
+   L'onglet Chasse fait le meme travail, en mieux, avec renderChasse et
+   _peindreChasse : meme source, meme requete, mais il ecarte les boissons
+   trouvables a cote et il porte les boutons qui rapportent des points. */
+
 function renderAlertsCard(){
   var host=document.getElementById("alerts-card");if(!host)return;
   if(!drinkWatches.length){host.innerHTML="";return;}
@@ -12494,7 +12812,10 @@ function renderAlertsCard(){
   // L'hote est recree a chaque ouverture de la feuille : on rebranche le
   // geste apres chaque reconstruction (la garde _swpInit evite les doublons).
   try{initSwipeToDelete(host);}catch(e){}
-  if(_alertNeedPhoto&&!window._alertReflow){window._alertReflow=true;setTimeout(function(){window._alertReflow=false;try{var hp=document.getElementById("s-home");if(hp&&hp.classList.contains("on"))renderAlertsCard();}catch(e){}},1800);}
+  /* La carte vit dans l'onglet Chasse, plus dans la feuille de la boule : on
+     teste l'ecran ou elle se trouve REELLEMENT, sinon les vignettes de
+     boissons ne se completeraient jamais apres leur chargement. */
+  if(_alertNeedPhoto&&!window._alertReflow){window._alertReflow=true;setTimeout(function(){window._alertReflow=false;try{var hp=document.getElementById("s-discover");if(hp&&hp.classList.contains("on"))renderAlertsCard();}catch(e){}},1800);}
 }
 /* Rayon vide pour cette boisson : on montre quand meme les magasins autour,
    clairement marques "pas encore confirmee ici", avec un bouton "Trouvee ici !"
@@ -12680,63 +13001,71 @@ window._leafletState = window._leafletState || null;   // null | "loading" | "re
    etre a l'ecran. Si les conditions d'Esri posaient probleme un jour, il suffit
    de renvoyer toujours l'URL OSM ci-dessous pour revenir en arriere.
    ============================================================================ */
-var FOND_ATTRIB='Esri, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, commerces <a href="https://overturemaps.org">Overture Maps</a>';
+var FOND_ATTRIB='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, commerces <a href="https://overturemaps.org">Overture Maps</a>';
 function fondMago(sombre){
-  /* DEUX FONDS, CHACUN LA OU IL EST BON.
+  /* UN SEUL FOND, MONDIAL, SANS CLE ET SANS FILIGRANE.
 
-     Le fond sobre d'Esri (Light Gray Canvas) est parfait de loin : presque
-     rien a l'ecran, donc les pins ressortent. C'est pour ca qu'il a ete
-     choisi. Mais SA DONNEE S'ARRETE AU ZOOM 16 — mesure : au-dela, le serveur
-     renvoie une tuile « pas de donnee » de 2 521 octets, a l'octet pres, du
-     zoom 17 au zoom 19. Leaflet reutilisait donc la tuile 16 en l'agrandissant
-     jusqu'a huit fois, d'ou des noms de rue enormes et flous des qu'on
-     s'approche. Le commentaire d'origine appelait ca « adouci » et « assume ».
-     Ca ne l'etait pas : au niveau de la rue, c'est-a-dire exactement quand on
-     cherche a reconnaitre un magasin, la carte devenait illisible.
+     Deux fournisseurs ont echoue coup sur coup, et pour deux raisons
+     differentes — les deux valent d'etre gardees ecrites.
 
-     Au-dela du zoom 16, on passe donc a World_Street_Map, du MEME fournisseur,
-     qui a de vraies tuiles jusqu'au zoom 19 (mesure aussi). Il est en couleurs,
-     ce qui encombrerait ; un filtre CSS le desature et l'eclaircit, et il
-     redevient le canevas gris qu'on veut. Verifie en image sur Bruxelles avant
-     d'etre ecrit ici.
+     ESRI n'a pas la donnee. Le montage precedent (canevas gris jusqu'au zoom
+     16, puis World_Street_Map) tenait a Bruxelles, mais il n'avait ete mesure
+     QUE depuis l'Europe. A Seoul, des le zoom 14, les TROIS jeux Esri —
+     canevas, rues et topo — renvoient le meme placeholder « Map data not yet
+     available » de 2 521 octets. Vu en production : une recherche de ville
+     asiatique affichait ses pins sur un fond gris vide. Aucune bascule ne
+     sauve un fournisseur qui n'a pas la donnee.
 
-     UNE SEULE COUCHE : c'est getTileUrl qui choisit la source, tuile par
-     tuile. Donc un seul cache, aucun clignotement de bascule, et le filtre
-     n'est pose que sur les tuiles qui en ont besoin.
+     CARTO a la donnee, mais la barre. Ses tuiles repondent HTTP 200, avec un
+     PNG valide, de taille differente a chaque zoom : tous les tests
+     automatiques passent au vert. Il faut DECODER l'image pour voir que
+     chacune porte « API KEY REQUIRED / carto.com/basemaps/apikey » en travers.
+     Mesure a Seoul et a Bruxelles, du zoom 14 au zoom 18. C'est la deuxieme
+     fois que ce piege se referme sur ce depot ; un test qui ne regarde que le
+     code de retour et le poids du fichier ne le verra jamais.
 
-     Meme fournisseur des deux cotes, donc aucune licence nouvelle, aucune cle
-     a demander, et l'attribution existante couvre deja les deux. */
-  var ESRI="https://server.arcgisonline.com/ArcGIS/rest/services/";
-  var CANEVAS=ESRI+"Canvas/"+(sombre?"World_Dark_Gray_Base":"World_Light_Gray_Base")+"/MapServer/tile/{z}/{y}/{x}";
-  var RUE=ESRI+"World_Street_Map/MapServer/tile/{z}/{y}/{x}";
-  var BASCULE=17;   // le canevas n'a plus de donnee a partir d'ici
-  /* Desature et eclaircit la carte routiere pour qu'elle ressemble au canevas.
-     En sombre : on inverse d'abord, puis on assombrit — les rues restent
-     claires sur un fond noir, comme le Dark Gray Canvas. */
+     RESTE OPENSTREETMAP. Verifie a Seoul, Dakar, Sao Paulo et Bruxelles :
+     de vraies tuiles partout, aucune clef, aucun filigrane. Il est colore et
+     charge, ce qui encombrerait sous les pins — un filtre CSS le desature et
+     l'eclaircit, et il redevient le canevas sobre qu'on veut. Rendu et compare
+     en image avant d'etre pose ici.
+
+     LA CONTREPARTIE, ET IL FAUT LA CONNAITRE : les tuiles d'OpenStreetMap sont
+     servies par des dons. Leur politique d'usage tolere une application de
+     cette taille, pas un service a fort trafic. Le jour ou Magofeed decolle,
+     il faudra son propre serveur de tuiles ou un fournisseur payant. Ce n'est
+     pas un probleme pour aujourd'hui, c'en est un pour le succes. */
   var FILTRE=sombre
-    ? "grayscale(1) invert(1) contrast(.85) brightness(.62)"
-    : "grayscale(1) contrast(.82) brightness(1.09)";
-
-  var FondMago=L.TileLayer.extend({
-    getTileUrl:function(coords){
-      /* _url est propre a cette couche : on l'oriente juste avant que Leaflet
-         ne compose l'adresse. Toutes les tuiles d'une meme grille partagent le
-         zoom, donc pas de melange possible. */
-      this._url=(this._getZoomForUrl()>=BASCULE)?RUE:CANEVAS;
-      return L.TileLayer.prototype.getTileUrl.call(this,coords);
-    },
+    ? "grayscale(1) invert(1) contrast(.88) brightness(.55)"
+    : "grayscale(1) contrast(.66) brightness(1.18)";
+  var Fond=L.TileLayer.extend({
     createTile:function(coords,done){
       var t=L.TileLayer.prototype.createTile.call(this,coords,done);
-      if(coords.z>=BASCULE)t.style.filter=FILTRE;
+      t.style.filter=FILTRE;
       return t;
     }
   });
-
-  return new FondMago(CANEVAS,
-    { maxZoom:19,            // et cette fois la donnee suit jusqu'au bout
+  var couche=new Fond(
+    "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { maxZoom:19,
       keepBuffer:1,          // moitie moins de tuiles gardees hors ecran
       updateWhenZooming:false, // une seule reconstruction de grille, a la fin du zoom
       attribution:FOND_ATTRIB });
+  /* LE FILET, parce que la panne est arrivee DEUX FOIS sans que personne ne le
+     voie. Un fond casse ne leve aucune erreur : les tuiles repondent, elles
+     sont juste vides ou barrees. On compte les echecs reels de chargement et
+     on le dit une seule fois, plutot que de l'apprendre par une capture
+     d'ecran des semaines plus tard. */
+  var rates=0;
+  couche.on("tileerror",function(){
+    rates++;
+    if(rates===12&&!window._fondPrevenu){
+      window._fondPrevenu=true;
+      try{ toast("La carte de fond ne répond pas"); }catch(e){}
+      console.warn("fond de carte : 12 tuiles en echec");
+    }
+  });
+  return couche;
 }
 function ensureLeaflet(onReady, onFail){
   if (window.L) { window._leafletState="ready"; onReady&&onReady(); return; }
@@ -13326,10 +13655,19 @@ function openStoreDetail(storeId){
      L'admin, lui, a deja tout : pas la peine d'empiler les deux panneaux. */
   var ownTools=document.getElementById("sd-owner-tools");
   if(ownTools){
-    var _uid=null;
-    try{_uid=(window.fbAuth&&window.fbAuth.currentUser)?window.fbAuth.currentUser.uid:null;}catch(e){}
-    ownTools.style.display=(!isAdmin&&s.owner&&_uid&&s.owner===_uid)?"block":"none";
+    /* estProprietaire(), et surtout PAS s.owner. Le champ public 'owner' n'est
+       plus jamais ecrit depuis qu'il reliait une boutique au profil personnel
+       de son gerant : tout commercant certifie APRES ce changement ne voyait
+       donc jamais son tableau de bord. estProprietaire lit merchants/{uid},
+       et garde l'ancien champ en secours pour les certifies d'avant. */
+    var estGerant=!isAdmin&&estProprietaire(s);
+    ownTools.style.display=estGerant?"block":"none";
+    if(estGerant)try{ rendrePass(s); }catch(e){ console.warn("pass:",e); }
   }
+  /* Hors du bloc du gerant : une annonce s'adresse aux VISITEURS. La rendre
+     dans le panneau du commercant l'aurait rendue invisible a ceux a qui elle
+     est destinee. */
+  try{ rendreAnnonce(s); }catch(e){ console.warn("annonce:",e); }
   /* L'etat de certification se lit et se change ICI, sur le magasin qu'on
      regarde. La liste des demandes ne couvre que ceux passes par une demande
      de commercant — un magasin certifie depuis la reprise des rayons n'y
@@ -13898,16 +14236,180 @@ function isMyShop(id){ return myShops().indexOf(String(id))!==-1; }
    tient. On la charge une fois a la connexion et on la garde en memoire :
    estProprietaire est appele a chaque rendu de fiche, il ne peut pas faire une
    lecture reseau a chaque fois. */
-var _mesMagasins=null;
+var _mesMagasins=null,_monPass="aucun",_passOrigine=null;
 window.chargerMesMagasins=chargerMesMagasins;
 function chargerMesMagasins(){
-  if(!window.fbMesMagasins){ _mesMagasins=_mesMagasins||{}; return; }
-  window.fbMesMagasins().then(function(ids){
-    var m={}; (ids||[]).forEach(function(id){ m[String(id)]=1; });
+  if(!window.fbMonCompteCommercant){ _mesMagasins=_mesMagasins||{}; return; }
+  window.fbMonCompteCommercant().then(function(c){
+    var m={}; ((c&&c.stores)||[]).forEach(function(id){ m[String(id)]=1; });
     _mesMagasins=m;
+    _monPass=(c&&c.pass)||"aucun";
+    _passOrigine=(c&&c.passOrigine)||null;
     // Une fiche deja ouverte doit reveler ses outils sans qu'on la rouvre.
     try{ if(curStoreDetail&&typeof renderStoreDetail==="function")renderStoreDetail(); }catch(e){}
-  }).catch(function(){ _mesMagasins={}; });
+  }).catch(function(){ _mesMagasins={}; _monPass="aucun"; _passOrigine=null; });
+}
+/* MON NIVEAU DE PASS, tel que l'app le croit. Ce n'est qu'un confort
+   d'affichage : le serveur retranche de toute facon a chaque appel. Si cette
+   valeur mentait, elle ne ferait qu'afficher un bouton qui echouerait ensuite
+   proprement — jamais ouvrir une fonction payante.
+   Les gerants certifies AVANT l'existence du pass n'ont pas de document
+   merchants : on leur reconnait le niveau « frigo », comme le fait le serveur,
+   pour ne rien leur retirer. */
+function monPass(st){
+  if(_mesMagasins===null)chargerMesMagasins();
+  try{
+    var u=window._fbUser&&window._fbUser.uid;
+    var sid=st?String(st.fbId||st.id):null;
+    if(sid&&_mesMagasins&&_mesMagasins[sid])return _monPass;
+    if(st&&st.owner&&u&&String(st.owner)===String(u))return "frigo";
+  }catch(e){}
+  return _monPass;
+}
+function passOuvre(st,niveau){
+  var p=monPass(st);
+  if(niveau==="frigo")return p==="frigo"||p==="complet";
+  if(niveau==="complet")return p==="complet";
+  return false;
+}
+/* L'ANNONCE, telle que la voit un VISITEUR.
+   Elle porte toujours l'etiquette « Annonce du commercant ». Ce n'est pas une
+   politesse : sans elle, une phrase ecrite par un gerant se lirait comme un
+   constat de l'application, et l'app affirmerait quelque chose qu'elle n'a pas
+   verifie. L'etiquette est ce qui separe une publicite assumee d'une carte qui
+   ment, et elle n'est donc jamais optionnelle.
+
+   Le lien de signalement suit, comme pour tout contenu ecrit par un tiers.
+   La lecture est asynchrone : on efface d'abord, on remplit ensuite, sinon
+   l'annonce du magasin precedent resterait affichee sur le suivant. */
+function rendreAnnonce(st){
+  var hote=document.getElementById("sd-annonce");
+  if(!hote)return;
+  hote.innerHTML="";
+  if(!st||!window.fbLireAnnonce)return;
+  var sid=String(st.fbId||st.id);
+  hote.dataset.pour=sid;
+  window.fbLireAnnonce(sid).then(function(a){
+    /* La fiche a pu changer pendant la lecture reseau. Sans ce controle,
+       l'annonce d'un magasin s'affichait sur la fiche d'un autre. */
+    if(hote.dataset.pour!==sid)return;
+    if(!a||!a.actif)return;
+    hote.innerHTML=
+      '<div style="margin:14px 20px 0;padding:11px 13px;border-radius:14px;'+
+      'background:var(--card-bg);border:1.5px dashed var(--bord)">'+
+        '<div class="c3" style="font-size:10.5px;font-weight:700;letter-spacing:.03em;'+
+        'text-transform:uppercase">Annonce du commerçant</div>'+
+        '<div style="font-size:13px;font-weight:600;margin-top:4px;line-height:1.4">'+
+          sanitize(a.texte)+'</div>'+
+        '<div style="margin-top:6px">'+
+          lienSignaler("annonce",sid,a.texte,String(st.name||""))+
+        '</div>'+
+      '</div>';
+  }).catch(function(){});
+}
+
+/* LE PASS DU COMMERCANT, dans sa propre fiche.
+   Trois niveaux, et le texte dit exactement ce que chacun ouvre. On n'y vend
+   rien : tant que l'encaissement n'existe pas, promettre un achat serait
+   mentir. On annonce donc ce qui existe, et ce qui n'existe pas encore.
+
+   CE QUE LE PASS N'ACHETE PAS. La pastille bleue n'apparait nulle part ici :
+   elle atteste d'une identite verifiee, elle se gagne, et aucun paiement ne
+   doit pouvoir la poser. Le jour ou payer changerait ce que la carte affirme,
+   la carte mentirait. */
+function rendrePass(st){
+  var hote=document.getElementById("sd-pass");
+  if(!hote)return;
+  var p=monPass(st);
+  var titre,corps,suite;
+  if(p==="complet"){
+    titre="Pass complet";
+    corps="Tu scannes tes frigos, tu signes tes boissons, et tu publies une annonce sur ta fiche.";
+    suite="";
+  }else if(p==="frigo"){
+    titre="Pass frigo"+(_monPass==="frigo"&&_passOrigine==="lancement"?" — offert au lancement":"");
+    corps="Tu peux scanner tes frigos et signer les boissons de ton rayon.";
+    suite="Le pass complet ajoute une annonce sur ta fiche. Il s'accorde à la main pour l'instant.";
+  }else{
+    titre="Aucun pass";
+    corps="Le scan de frigo demande le pass frigo.";
+    suite="Ecris-nous depuis les reglages pour l'activer.";
+  }
+  hote.innerHTML=
+    '<div style="margin:0 0 12px;padding:12px 14px;border-radius:14px;background:var(--card-bg);'+
+    'border:1.5px solid var(--bord)">'+
+      '<div style="font-size:13px;font-weight:800">'+sanitize(titre)+'</div>'+
+      '<div class="c2" style="font-size:12px;margin-top:3px;line-height:1.45">'+sanitize(corps)+'</div>'+
+      (suite?'<div class="c3" style="font-size:11.5px;margin-top:5px;line-height:1.45">'+sanitize(suite)+'</div>':'')+
+    '</div>';
+  /* Le bouton du frigo suit le pass. Le cacher ne protege rien — le serveur
+     retranche de toute facon — mais un bouton qui echoue est pire qu'un bouton
+     absent : le commercant croit que l'app est cassee. */
+  var bf=document.getElementById("sd-btn-frigo");
+  if(bf)bf.style.display=passOuvre(st,"frigo")?"":"none";
+
+  /* L'EDITEUR D'ANNONCE, au pass complet seulement. On charge le texte
+     existant apres coup : le champ apparait vide puis se remplit, plutot que
+     de retarder tout le panneau pour une lecture reseau. */
+  if(passOuvre(st,"complet")){
+    var sid=String(st.fbId||st.id);
+    hote.insertAdjacentHTML("beforeend",
+      '<div style="margin:0 0 12px;padding:12px 14px;border-radius:14px;background:var(--card-bg);'+
+      'border:1.5px solid var(--bord)">'+
+        '<div style="font-size:13px;font-weight:800">Ton annonce</div>'+
+        '<div class="c3" style="font-size:11.5px;margin-top:3px;line-height:1.45">'+
+          'Une phrase, 90 caractères. Elle apparaît sur ta fiche, annoncée comme venant de toi. '+
+          'Aucune boisson alcoolisée, même sans alcool.</div>'+
+        '<input id="ann-txt" maxlength="90" placeholder="Ex : Livraison offerte dès 20 euros" '+
+        'style="width:100%;margin-top:8px;padding:10px 12px;border-radius:11px;border:1.5px solid var(--bord);'+
+        'background:var(--bg);color:inherit;font-size:13px;font-family:inherit">'+
+        '<div style="display:flex;gap:8px;margin-top:8px">'+
+          '<button class="ghost-btn" onclick="annoncePublier(\''+attr(sid)+'\')" '+
+          'style="flex:1;min-height:40px;border-radius:11px;font-size:12.5px">Publier</button>'+
+          '<button class="ghost-btn quiet" onclick="annonceRetirer(\''+attr(sid)+'\')" '+
+          'style="min-height:40px;border-radius:11px;font-size:12.5px">Retirer</button>'+
+        '</div>'+
+      '</div>');
+    if(window.fbLireAnnonce)window.fbLireAnnonce(sid).then(function(a){
+      var champ=document.getElementById("ann-txt");
+      if(champ&&a&&a.texte&&!champ.value)champ.value=a.texte;
+    }).catch(function(){});
+  }
+}
+
+/* PUBLIER. Deux barrieres avant l'ecriture, et elles ne servent pas la meme
+   chose. nameLooksAlcoholic attrape l'alcool : c'est la regle absolue de
+   l'application, et une annonce est lue par des mineurs comme par tout le
+   monde. Elle n'est pas une securite — un commercant determine ecrirait
+   directement dans la base — mais elle arrete l'erreur de bonne foi, et le
+   signalement plus l'effacement par l'administrateur couvrent le reste. */
+function annoncePublier(sid){
+  var champ=document.getElementById("ann-txt");
+  var t=champ?String(champ.value||"").trim():"";
+  if(!t){ toast("Écris d'abord ton annonce"); return; }
+  if(typeof nameLooksAlcoholic==="function"&&nameLooksAlcoholic(t,"")){
+    toast("Aucune boisson alcoolisée dans une annonce");
+    return;
+  }
+  if(!window.fbEcrireAnnonce){ toast("Indisponible hors ligne"); return; }
+  magoAttendre(window.fbEcrireAnnonce(sid,t,true)).then(function(){
+    toast("Annonce publiée");
+    try{ if(curStoreDetail)rendreAnnonce(curStoreDetail); }catch(e){}
+  }).catch(function(e){
+    console.warn("annonce:",e);
+    toast("Publication refusée");
+  });
+}
+function annonceRetirer(sid){
+  if(!window.fbEffacerAnnonce){ toast("Indisponible hors ligne"); return; }
+  magoAttendre(window.fbEffacerAnnonce(sid)).then(function(){
+    var champ=document.getElementById("ann-txt"); if(champ)champ.value="";
+    toast("Annonce retirée");
+    try{ if(curStoreDetail)rendreAnnonce(curStoreDetail); }catch(e){}
+  }).catch(function(e){
+    console.warn("annonce:",e);
+    toast("Retrait impossible");
+  });
 }
 function estProprietaire(st){
   try{
@@ -14834,7 +15336,7 @@ function osmAnalyze(){
         var k=s.id;if(seen[k])return false;seen[k]=1;return true;
       });
       status.textContent=found.length+" commerces trouv\u00E9s \u00B7 d\u00E9doublonnage\u2026";
-      var zone=window.fbQueryZone?window.fbQueryZone(cLat,cLng,km+0.5):Promise.resolve(STORES||[]);
+      var zone=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,km+0.5)):Promise.resolve(STORES||[]);
       return zone.then(function(existing){
         var news=found.filter(function(c){
           return !existing.some(function(s){
@@ -15003,7 +15505,7 @@ function autoImportZone(cLat,cLng){
       }).filter(Boolean).filter(function(s){var k=s.id;if(seen[k])return false;seen[k]=1;return true;});
       window._exploreDerniereRecherche={etat:"faite",quand:Date.now(),osm:found.length};
       if(!found.length){_relaisMonde(0);return;}
-      var zone=window.fbQueryZone?window.fbQueryZone(cLat,cLng,km+0.5):Promise.resolve(STORES||[]);
+      var zone=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,km+0.5)):Promise.resolve(STORES||[]);
       return zone.then(function(existing){
         var news=found.filter(function(c){
           return !existing.some(function(s){
@@ -16700,7 +17202,13 @@ function _pinRetirerMenu(){
 }
 function fermerMenuPin(){ _pinDetache(); _pinRetirerMenu(); }
 window.addEventListener("pagehide",fermerMenuPin);
-document.addEventListener("visibilitychange",function(){ if(document.hidden)fermerMenuPin(); });
+document.addEventListener("visibilitychange",function(){
+  if(document.hidden){ fermerMenuPin(); return; }
+  /* Au retour dans l'app : on recalcule le badge des chasses. Une chasse a pu
+     s'ouvrir ou se conclure pendant l'absence, et un badge qui ment sur la
+     barre de navigation est pire que pas de badge. */
+  try{ renderChasse(); }catch(e){}
+});
 /* GARDE PERMANENT. Les ecouteurs d'un geste peuvent etre arraches par un
    chemin qu'on n'avait pas prevu — et le menu reste alors colle a l'ecran, ce
    qui s'est deja produit deux fois. Celui-ci n'appartient a aucun geste : il
@@ -16970,7 +17478,7 @@ function exploreLoadStores(useCache){
   var _seq = (window._exploreSeq = (window._exploreSeq || 0) + 1);
   var q;
   if(useCache&&window._exploreRawList){q=Promise.resolve(window._exploreRawList);}
-  else{if(status)status.textContent="Chargement\u2026";q=window.fbQueryZone?window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12)):Promise.resolve(STORES||[]);}
+  else{if(status)status.textContent="Chargement\u2026";q=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12))):Promise.resolve(STORES||[]);}
   q.then(function(list){
     if(_seq!==window._exploreSeq)return;      // un mouvement plus recent a pris la main
     list=list||[];
@@ -17997,7 +18505,7 @@ function wipeTestHunts(){
       playSound("win");
       toast("✓ "+r.deleted+" chasse(s) effacée(s). Base propre !");
       try{var p=document.getElementById("notif-diag");if(p)p.remove();}catch(e){}
-      try{if(typeof renderHunts==="function")renderHunts();}catch(e){}
+      try{if(typeof renderChasse==="function")renderChasse();}catch(e){}
     }else{
       var why=String(r&&r.reason||"?");
       if(why.indexOf("permission")>=0||why.indexOf("PERMISSION")>=0)toast("Bloqué par les règles Firestore — dis-le-moi, je te donne la règle à ajouter");
@@ -18129,9 +18637,114 @@ function _chasseDistLabel(distKm){
   if(distKm<=12)return _tr("huntNear");
   return _tr("huntAbout").replace("{km}",Math.round(distKm));
 }
+/* Aider en discret. On ecrit d'abord en local pour que l'interrupteur reponde
+   tout de suite, puis on envoie au serveur — et on remet l'interrupteur dans
+   son etat d'origine si l'envoi echoue, plutot que de laisser croire a un
+   reglage qui n'a pas pris. */
+function peindreAideDiscrete(){
+  var t=document.getElementById("discret-toggle"),r=document.getElementById("discret-row");
+  var on=false;
+  try{ on=localStorage.getItem("magoAideDiscrete")==="1"; }catch(e){}
+  if(t)t.classList.toggle("on",on);
+  if(r)r.setAttribute("aria-checked",on?"true":"false");
+  return on;
+}
+function basculerAideDiscrete(){
+  var avant=peindreAideDiscrete();
+  var apres=!avant;
+  try{ localStorage.setItem("magoAideDiscrete",apres?"1":"0"); }catch(e){}
+  peindreAideDiscrete();
+  try{ playSound("pop"); }catch(e){}
+  if(!window.fbAideDiscrete)return;
+  window.fbAideDiscrete(apres).then(function(){
+    toast(apres?"Tu aides en discret" : "Ton nom apparaîtra à nouveau");
+  }).catch(function(){
+    try{ localStorage.setItem("magoAideDiscrete",avant?"1":"0"); }catch(e){}
+    peindreAideDiscrete();
+    toast("Réglage non enregistré, réessaie");
+  });
+}
+
+/* ══ « X t'a donne un coup de main » ══════════════════════════════════════
+   L'app faisait deja tout le travail : quand quelqu'un signale en rayon une
+   boisson que tu cherches, il recoit des points et tu recois une notification.
+   Mais tu ne savais pas QUI, et lui ne savait pas qu'il avait rendu service a
+   quelqu'un de reel.
+
+   Une ligne, un nom, une date. Un bouton « Merci » qui part une seule fois.
+   Et le merci remonte SANS ton nom : l'aidant lit « quelqu'un te remercie pour
+   Ramune Original ». La gratitude monte, l'identite ne redescend jamais —
+   c'est ce qui empeche cette ligne de devenir une conversation.
+   ══════════════════════════════════════════════════════════════════════════ */
+function renderCoupsDeMain(){
+  var host=document.getElementById("coups-card");
+  if(!host)return;
+  if(!window.fbCoupsDeMain){host.innerHTML="";return;}
+  window.fbCoupsDeMain().then(function(list){
+    list=(list||[]).filter(function(x){return x&&x.drinkId!=null;});
+    if(!list.length){host.innerHTML="";return;}
+    host.innerHTML='<div style="font-size:12px;font-weight:800;text-transform:uppercase;'+
+        'letter-spacing:1px;color:var(--s3);margin-bottom:10px">On t\'a aidé</div>'+
+      list.slice(0,6).map(function(x){
+        var d=(DRINKS||[]).find(function(y){return Number(y.id)===Number(x.drinkId);});
+        var st=(STORES||[]).find(function(y){return String(y.id)===String(x.storeId)||String(y.fbId)===String(x.storeId);});
+        var qui=x.aidantPseudo?sanitize(x.aidantPseudo):"Quelqu'un";
+        var bouts=[];
+        if(d)bouts.push(sanitize(d.name));
+        if(st)bouts.push(sanitize(st.name));
+        var quand=jourGrossier(x.at);
+        if(quand)bouts.push(sanitize(quand));
+        return '<div style="display:flex;align-items:center;gap:11px;padding:11px 12px;background:var(--bg2);'+
+            'border:1.5px solid var(--border);border-radius:14px;margin-bottom:8px">'+
+            (d?'<div style="width:36px;height:36px;border-radius:11px;overflow:hidden;flex-shrink:0;background:'+attr(d.light||"var(--bg3)")+';display:flex;align-items:center;justify-content:center">'+drinkIconHTML(d)+'</div>':'')+
+            '<div style="flex:1;min-width:0">'+
+              '<div style="font-size:13px;font-weight:800;color:var(--s1)">'+qui+' t\'a donné un coup de main</div>'+
+              '<div style="font-size:11.5px;color:var(--s2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+bouts.join(" · ")+'</div>'+
+            '</div>'+
+            (x.merci
+              ? '<span style="font-size:11px;font-weight:800;color:var(--s3);flex-shrink:0">Remercié</span>'
+              : '<button class="cdm-merci" data-cdm="'+attr(x.id)+'" type="button" style="flex-shrink:0;padding:8px 13px;border-radius:11px;border:none;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer">Merci</button>')+
+          '</div>';
+      }).join("");
+    Array.prototype.forEach.call(host.querySelectorAll(".cdm-merci"),function(b){
+      b.onclick=function(){
+        b.disabled=true; b.textContent="…";
+        window.fbDireMerci(b.getAttribute("data-cdm")).then(function(){
+          try{playSound("pop");}catch(e){}
+          renderCoupsDeMain();
+        }).catch(function(e){
+          b.disabled=false; b.textContent="Merci";
+          toast("Envoi impossible, réessaie");
+          console.warn(e);
+        });
+      };
+    });
+  }).catch(function(){ host.innerHTML=""; });
+}
+
+/* Le badge de l'onglet Decouvrir. Il remplace celui de la boule flottante,
+   avec une difference qui compte : il ne peut etre ni masque, ni deplace hors
+   de l'ecran, ni pose par-dessus la camera de scan. */
+function majBadgeChasse(n){
+  var b=document.getElementById("nt-disc-badge");
+  if(!b)return;
+  n=Math.max(0,Math.min(99,Math.floor(Number(n)||0)));
+  window._badgeChasse=n;
+  if(!n){ b.hidden=true; b.textContent=""; b.removeAttribute("aria-label"); return; }
+  if(b.textContent!==String(n)){
+    b.textContent=String(n);
+    /* On relance l'animation seulement quand le chiffre CHANGE : sinon elle
+       repart a chaque re-rendu et la barre clignote sans raison. */
+    b.style.animation="none"; void b.offsetWidth; b.style.animation="";
+  }
+  b.hidden=false;
+  b.setAttribute("aria-label",n+" chasse"+(n>1?"s":"")+" autour de toi");
+}
 function renderChasse(){
   _majCompteurValider();
   setChasseSeg(_chasseSegCourant());
+  try{ renderAlertsCard(); }catch(e){}
+  try{ renderCoupsDeMain(); }catch(e){}
   renderMesChasses();
   /* Tant que les magasins ne sont pas charges, TOUT parait introuvable. On se
      tait plutot que d'annoncer un manque qui n'existe pas. */
@@ -18192,6 +18805,13 @@ function _peindreChasse(demande){
     .slice(0,8);
   var autres=lignes.filter(function(x){return !x.moi;}).length;
   if(cnt)cnt.textContent=lignes.length?_tr("huntCount").replace("{n}",lignes.length):"";
+  /* LE BADGE DE L'ONGLET vient du MEME calcul que la liste, et pas du compteur
+     brut que portait la boule. La difference n'est pas cosmetique : ce chiffre
+     a deja ecarte les boissons qu'on trouve dans un magasin d'a cote, donc il
+     ne promet que des chasses reellement actionnables. Deux compteurs
+     differents pour le meme sujet, c'est exactement le bug qui existait entre
+     la boule et #disc-count. */
+  try{ majBadgeChasse(lignes.length); }catch(e){}
   if(!lignes.length){
     host.innerHTML=emptyStateHTML("spark",_tr("noHunt"),_tr("noHuntSub"));
     return;
@@ -18312,7 +18932,15 @@ function renderDiscoveries(){
       discFoundInHTML(d)+
       '<div style="font-size:11px;font-weight:600;margin-top:5px;color:'+(ready?(_discDark?"#4ade80":"#15803d"):(_discDark?"#e5a93a":"#8a5408"))+'">'+
       (ready?"Pr\u00EAte \u00E0 entrer au catalogue !":votes+"/"+ADMIN_VOTE_THRESHOLD+" votes \u00B7 encore "+missing+" pour le catalogue")+'</div></div>'+
-      (voted?'<span style="font-size:12px;font-weight:700;color:var(--txt2);flex-shrink:0">✓ Voté</span>':'<button class="vote-btn" style="background:var(--s1);color:var(--app-bg);min-height:44px" data-vote="'+attr(String(d.id))+'">'+T.vote+'</button>');
+      (voted?'<span style="font-size:12px;font-weight:700;color:var(--txt2);flex-shrink:0">✓ Voté</span>':'<button class="vote-btn" style="background:var(--s1);color:var(--app-bg);min-height:44px" data-vote="'+attr(String(d.id))+'">'+T.vote+'</button>')+
+      /* Une decouverte est un nom, une description et parfois une photo,
+         deposes par n'importe quel visiteur connecte. C'est le contenu le plus
+         exposé de l'app : il lui faut un moyen d'etre signale. Le nom et la
+         description sont copies dans l'apercu, pour que le signalement garde
+         un sens meme si la decouverte est effacee ensuite. */
+      '<div style="flex-basis:100%;text-align:right;margin-top:2px">'+
+        lienSignaler("decouverte",String(d.id||""),String(d.name||"")+" — "+String(desc||""),String(d.name||"Cette découverte"))+
+      '</div>';
     el.appendChild(div);
   });
   /* L'identifiant d'une decouverte est choisi par celui qui cree le document
@@ -18666,11 +19294,11 @@ function showRouteToStore(lat,lng,store){
 function incrementScan(id){scanCounts[id]=(scanCounts[id]||0)+1;localStorage.setItem("magoscans",JSON.stringify(scanCounts));if(!isAdmin&&window.fbIncrementScanCount)window.fbIncrementScanCount(id);}
 function renderTopScanned(){
   var el=document.getElementById("top-scanned");if(!el)return;
-  var sorted=DRINKS.slice().sort(function(a,b){return(scanCounts[b.id]||0)-(scanCounts[a.id]||0);}).slice(0,5);
-  if(!sorted.some(function(d){return scanCounts[d.id];})){el.innerHTML=emptyStateHTML("spark","Aucune tendance encore","Explore des boissons : les plus recherchées de ta zone apparaîtront ici.");return;}
-  el.innerHTML="";var max=scanCounts[sorted[0].id]||1;
+  var sorted=DRINKS.slice().sort(function(a,b){return(scanCountsGlobal[b.id]||0)-(scanCountsGlobal[a.id]||0);}).slice(0,5);
+  if(!sorted.some(function(d){return scanCountsGlobal[d.id];})){el.innerHTML=emptyStateHTML("spark","Aucune tendance encore","Explore des boissons : les plus recherchées de ta zone apparaîtront ici.");return;}
+  el.innerHTML="";var max=scanCountsGlobal[sorted[0].id]||1;
   sorted.forEach(function(d,i){
-    var count=scanCounts[d.id]||0;if(!count)return;var pct=Math.round(count/max*100);
+    var count=scanCountsGlobal[d.id]||0;if(!count)return;var pct=Math.round(count/max*100);
     var div=document.createElement("div");div.style.cssText="display:flex;align-items:center;gap:12px;margin-bottom:12px;cursor:pointer";
     div.innerHTML='<div style="width:24px;text-align:center;font-size:12px;font-weight:800;color:var(--s'+(i===0?"1":"2")+')">'+(i+1)+'</div>'+
       '<div style="width:34px;height:34px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">'+drinkIconHTML(d)+'</div>'+
@@ -19100,7 +19728,7 @@ function obFinish(){
   window._obFait=true;
   var ob=document.getElementById("onboarding");ob.classList.add("hidden");
   setTimeout(function(){ob.style.display="none";},400);
-  try{updateMissionFab();}catch(e){}
+  try{renderChasse();}catch(e){}
   // Premier atterrissage sur l'accueil : la bulle d'accueil prend le relais.
   setTimeout(function(){try{showCoach("home");}catch(e){}},700);
 }
@@ -19266,7 +19894,7 @@ function initSplash(){
     // La pastille chasse etait calculee PENDANT le splash (donc masquee par la
     // garde anti-intro) et rien ne la recalculait apres : elle n'apparaissait
     // qu'au premier changement d'onglet. On la reevalue des que le splash part.
-    try{updateMissionFab();}catch(e){}
+    try{renderChasse();}catch(e){}
   },1400);
 }
 
@@ -19363,6 +19991,7 @@ function renderAdmin(){
   renderPhotoSuggestions();
   try{ renderShopClaims(); }catch(e){ console.warn("shopClaims:",e); }
   renderFormatSuggestions();
+  try{ renderFichesSansCode(); }catch(e){ console.warn("sansCode:",e); }
   renderAdminHistory();
   try{ renderSecurite(); }catch(e){ console.warn("securite:",e); }
   var pending=DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected&&!nameLooksAlcoholic(d.name,d.brand);});
@@ -19435,6 +20064,232 @@ function renderAdmin(){
    examine ("cette photo est-elle meilleure ?") puis les traite. Pour
    appliquer une meilleure photo publiquement, l'outil de la fiche
    (fiche Open Food Facts) reste la voie officielle. */
+/* ── LES FICHES QU'AUCUN SCAN NE PEUT TROUVER ─────────────────────────────
+   Une fiche de catalogue sans code-barre n'est atteignable que par son nom.
+   Personne ne s'en rend compte : elle existe, elle s'affiche dans la recherche,
+   elle a sa photo — mais scanner le produit qu'elle decrit repond « pas encore
+   dans Magofeed », et la personne cree un doublon. C'est arrive au
+   « Golden Power Energy drink ».
+   ON NE LISTE QUE LES FICHES VENUES DE FIRESTORE, reconnaissables a leur
+   identifiant : promoteDiscovery pose Date.now(), soit 13 chiffres. Les 595
+   boissons du fichier de base qui n'ont pas de code-barre ne sont pas un
+   probleme a reparer — elles n'ont jamais pretendu en avoir, et les noyer dans
+   cette liste la rendrait inutilisable. */
+/* Les fiches orphelines, definies UNE fois. L'ecran d'administration et la
+   chasse doivent viser exactement le meme ensemble : deux definitions du mot
+   « orpheline » finiraient par diverger, et la chasse proposerait des boissons
+   que l'admin ne voit pas — ou l'inverse. */
+/* ═══ LA CHASSE AUX CODES-BARRES ═══════════════════════════════════════════
+   Ces fiches existent, s'affichent dans la recherche, ont parfois leur photo —
+   mais scanner le produit qu'elles decrivent ne les trouve pas. Plutot que de
+   laisser l'administrateur les rattraper une par une, on demande a ceux qui
+   font les courses : ils ont le produit en main, c'est le seul moment ou la
+   reponse est certaine.
+
+   POURQUOI ON NE COLLE PAS LE CODE AU PREMIER SCAN VENU.
+   Un code-barre faux est PIRE qu'un code absent : une fiche sans code ne
+   trouve rien, une fiche avec le mauvais code affirme une chose fausse, avec
+   assurance, a tout le monde. On ne pose donc jamais un lien sur la foi d'un
+   seul geste :
+     - le nom lu sur OpenFoodFacts doit ressembler a la boisson visee, et on
+       DEMANDE quand meme confirmation ;
+     - sans cette ressemblance (OFF ignore beaucoup de boissons exotiques —
+       precisement celles qui manquent ici), le lien attend une deuxieme
+       personne ;
+     - c'est la Cloud Function qui pose le code, jamais le telephone : les
+       regles interdisent au client d'ecrire dans le catalogue.
+   Les points suivent la meme logique : ils tombent quand le lien devient
+   officiel, pas quand il est propose. Payer le geste plutot que le resultat,
+   c'est installer une imprimante a points — la meme raison qui fait qu'on ne
+   paie pas l'arrivee d'un filleul. */
+function chasseVisible(){ return boissonsOrphelines().length>0; }
+function renderChasseCodes(){
+  var host=document.getElementById("chasse-card"); if(!host)return;
+  var liste=boissonsOrphelines();
+  if(!liste.length){ host.innerHTML=""; return; }
+  var apercu=liste.slice(0,3).map(function(d){return sanitize(d.name);}).join(" · ");
+  host.innerHTML=
+    '<div role="button" tabindex="0" aria-label="La chasse aux codes-barres" onclick="ouvrirChasseCodes()" onkeydown="if(event.key===\'Enter\'){ouvrirChasseCodes();}" '+
+      'style="display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:14px 16px;background:linear-gradient(135deg,#3b2a12,#1f1608);border:1.5px solid #6b4d1d;border-radius:16px;cursor:pointer">'+
+      '<span style="line-height:0;color:#f0b840;flex-shrink:0"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h4l1-2h8l1 2h4v12H3z"/><path d="M7 11v4M10 11v4M14 11v4M17 11v4"/></svg></span>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:13.5px;font-weight:800;color:#f7e3b8">'+liste.length+' boisson'+(liste.length>1?"s":"")+' cherche'+(liste.length>1?"nt leur":" son")+' code-barre</div>'+
+        '<div style="font-size:11.5px;font-weight:600;color:#c9ab74;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+apercu+(liste.length>3?" \u2026":"")+'</div>'+
+      '</div>'+
+      '<span style="font-size:16px;color:#c9ab74">\u203A</span>'+
+    '</div>';
+}
+function ouvrirChasseCodes(){
+  var liste=boissonsOrphelines();
+  if(!liste.length){toast("Aucune boisson en chasse \u2014 tout est \u00E0 jour !");return;}
+  var old=document.getElementById("chasse-ov"); if(old)old.remove();
+  var ov=document.createElement("div");
+  ov.id="chasse-ov"; ov.className="claim-ov";
+  ov.innerHTML=
+    '<div class="claim-card" role="dialog" aria-modal="true" aria-label="La chasse aux codes-barres">'+
+      '<div class="claim-grip"></div>'+
+      '<div class="claim-badge" style="background:#8a6414">Chasse</div>'+
+      '<div class="claim-title">Ces boissons sont introuvables au scan</div>'+
+      '<div class="claim-lead">Elles sont dans Magofeed, mais sans leur code-barre : scanner le produit ne les retrouve pas, et cr\u00E9e un doublon.</div>'+
+      '<div class="claim-honest">Si tu en croises une en rayon, <b>scanne-la</b> : l\u2019app reconna\u00EEtra qu\u2019il s\u2019agit d\u2019elle et te demandera de confirmer. Le code n\u2019est pos\u00E9 que quand c\u2019est s\u00FBr \u2014 un code faux serait pire que pas de code du tout.</div>'+
+      '<div id="chasse-liste" style="margin-top:12px"></div>'+
+      '<button class="claim-cancel" onclick="fermerChasseCodes()">Fermer</button>'+
+    '</div>';
+  ov.addEventListener("click",function(e){ if(e.target===ov)fermerChasseCodes(); });
+  document.body.appendChild(ov);
+  try{document.body.classList.add("sheet-open");}catch(e){}
+  requestAnimationFrame(function(){ov.classList.add("in");});
+  var el=document.getElementById("chasse-liste");
+  liste.forEach(function(d){
+    var row=document.createElement("div");
+    row.style.cssText="display:flex;align-items:center;gap:11px;padding:9px 0;border-top:1px solid var(--border)";
+    row.innerHTML='<div style="width:38px;height:38px;flex-shrink:0;border-radius:10px;overflow:hidden;font-size:24px">'+drinkIconHTML(d)+'</div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:13px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(d.name)+'</div>'+
+        '<div style="font-size:11px;font-weight:600;color:var(--s2)">'+sanitize(d.brand||"")+'</div></div>';
+    el.appendChild(row);
+  });
+  try{playSound("pop");}catch(e){}
+}
+function fermerChasseCodes(){
+  var ov=document.getElementById("chasse-ov"); if(!ov)return;
+  ov.classList.remove("in");
+  try{document.body.classList.remove("sheet-open");}catch(e){}
+  setTimeout(function(){ if(ov.parentNode)ov.remove(); },240);
+}
+/* Appele depuis le scan quand le code n'est rattache a rien. Renvoie true si
+   une boisson de la chasse a ete proposee — auquel cas le scan laisse la main
+   a cet ecran plutot que de proposer une nouvelle decouverte. */
+function proposerChasse(code,best,res){
+  var liste=boissonsOrphelines();
+  if(!liste.length||!res)return false;
+  var cible=null;
+  if(best&&best.name){
+    /* On reutilise le rapprochement de noms deja eprouve ailleurs dans l'app
+       plutot que d'en inventer un deuxieme. */
+    try{
+      var proche=trouverBoissonProche(best.name,best.brand);
+      if(proche&&proche.drink&&liste.indexOf(proche.drink)!==-1&&proche.distance<=1)cible=proche.drink;
+    }catch(e){}
+  }
+  if(!cible)return false;
+  var bloc=document.createElement("div");
+  bloc.className="scan-injected";
+  bloc.style.cssText="margin-top:10px;padding:11px 13px;border-radius:13px;background:rgba(240,184,64,.12);border:1.5px solid rgba(240,184,64,.45)";
+  bloc.innerHTML='<div style="font-size:12.5px;font-weight:800;color:var(--s1);margin-bottom:3px">Elle est dans la chasse !</div>'+
+    '<div style="font-size:11.5px;font-weight:600;color:var(--s2);line-height:1.45">\u00AB '+sanitize(cible.name)+' \u00BB est dans Magofeed mais sans code-barre. C\u2019est bien ce que tu as en main ?</div>';
+  var oui=document.createElement("div");
+  oui.setAttribute("role","button");oui.setAttribute("tabindex","0");
+  oui.style.cssText="margin-top:9px;text-align:center;padding:11px;border-radius:12px;background:#8a6414;color:#fff;font-size:12.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent";
+  oui.textContent="Oui, c\u2019est bien elle";
+  var envoyer=function(){
+    if(!window.fbProposerCodeChasse){toast("Indisponible hors ligne");playSound("err");return;}
+    oui.textContent="Envoi\u2026"; oui.onclick=null;
+    window.fbProposerCodeChasse(cible.id,cible.name,code).then(function(r){
+      /* Le lien vaut deja pour CET appareil : la personne qui vient de le
+         confirmer ne doit pas rescanner dans le vide en attendant la
+         deuxieme confirmation. */
+      try{linkBarcodeLocally(code,cible.id);}catch(e){}
+      if(!cible.barcodes)cible.barcodes=[];
+      if(cible.barcodes.indexOf(String(code))===-1)cible.barcodes.push(String(code));
+      bloc.innerHTML='<div style="font-size:12.5px;font-weight:800;color:#166534">Merci \u2014 c\u2019est not\u00E9</div>'+
+        '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:3px;line-height:1.45">'+
+        (r&&r.nb>=2
+          ? "Une deuxi\u00E8me personne l\u2019avait d\u00E9j\u00E0 vue : le code va \u00EAtre pos\u00E9 pour tout le monde."
+          : "Il manque encore une confirmation d\u2019une autre personne pour que le code compte pour tous. De ton c\u00F4t\u00E9, il marche d\u00E9j\u00E0.")+'</div>';
+      playSound("win");
+      try{renderChasseCodes();}catch(e){}
+    }).catch(function(e){
+      var msg=String((e&&e.message)||"");
+      if(/compte requis/.test(msg)){toast("Cr\u00E9e un compte pour participer \u00E0 la chasse");}
+      else toast("Envoi impossible");
+      playSound("err");
+      oui.textContent="Oui, c\u2019est bien elle"; oui.onclick=envoyer;
+    });
+  };
+  oui.onclick=envoyer;
+  oui.onkeydown=function(ev){if(ev.key==="Enter")envoyer();};
+  bloc.appendChild(oui);
+  var non=document.createElement("div");
+  non.setAttribute("role","button");non.setAttribute("tabindex","0");
+  non.style.cssText="margin-top:6px;text-align:center;padding:9px;font-size:11.5px;font-weight:700;color:var(--s2);cursor:pointer";
+  non.textContent="Non, c\u2019est autre chose";
+  non.onclick=function(){bloc.remove();};
+  non.onkeydown=function(ev){if(ev.key==="Enter")bloc.remove();};
+  bloc.appendChild(non);
+  res.appendChild(bloc);
+  return true;
+}
+function boissonsOrphelines(){
+  return (window.DRINKS||[]).filter(function(d){
+    return Number(d.id)>=1e12&&!(d.barcodes&&d.barcodes.length);
+  });
+}
+function renderFichesSansCode(){
+  var host=document.getElementById("admin-sans-code");
+  if(!host){
+    host=document.createElement("div");
+    host.id="admin-sans-code";
+    var list=document.getElementById("admin-list");
+    if(list&&list.parentNode)list.parentNode.insertBefore(host,list);
+  }
+  host.innerHTML="";
+  var orphelines=boissonsOrphelines();
+  if(!orphelines.length)return;
+  var hd=document.createElement("div");
+  hd.style.cssText="font-size:13px;font-weight:800;color:var(--s1);margin:4px 0 4px";
+  hd.textContent="Fiches sans code-barre ("+orphelines.length+")";
+  host.appendChild(hd);
+  var sub=document.createElement("div");
+  sub.style.cssText="font-size:11.5px;font-weight:600;color:var(--s2);line-height:1.45;margin:0 0 10px";
+  sub.textContent="Elles existent dans la recherche, mais scanner le produit ne les trouve pas \u2014 et cr\u00E9e un doublon. Scanne-le, ou colle son code.";
+  host.appendChild(sub);
+  orphelines.forEach(function(d){
+    var row=document.createElement("div");
+    row.style.cssText="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:13px;background:var(--bg2);border:1.5px solid var(--border);margin-bottom:7px";
+    row.innerHTML='<div style="flex:1;min-width:0">'+
+      '<div style="font-size:13px;font-weight:800;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(d.name||"")+'</div>'+
+      '<div style="font-size:11px;font-weight:600;color:var(--s2)">'+sanitize(d.brand||"")+'</div></div>';
+    var btn=document.createElement("span");
+    btn.setAttribute("role","button");btn.setAttribute("tabindex","0");
+    btn.style.cssText="flex-shrink:0;padding:9px 12px;border-radius:11px;background:var(--s1);color:var(--app-bg);font-size:11.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent";
+    btn.textContent="Coller le code";
+    var poser=function(){
+      var c=prompt("Code-barre de \u00AB "+String(d.name||"")+" \u00BB :\n\nCelui imprim\u00E9 sur le produit. V\u00E9rifie la variante \u2014 un code = UNE boisson pr\u00E9cise.","");
+      if(c===null)return;
+      c=String(c).replace(/[^0-9]/g,"");
+      if(c.length<6||!validGTIN(c)){toast("Code-barre invalide");playSound("err");return;}
+      /* Deja pris par une autre boisson ? Deux fiches portant le meme code, et
+         le scan devient un tirage au sort. */
+      var prise=(window.DRINKS||[]).find(function(x){
+        return x!==d&&x.barcodes&&x.barcodes.indexOf(c)!==-1;
+      });
+      if(prise){toast("Ce code est d\u00E9j\u00E0 sur \u00AB "+prise.name+" \u00BB");playSound("err");return;}
+      if(!d.barcodes)d.barcodes=[];
+      d.barcodes.push(c);
+      try{linkBarcodeLocally(c,d.id);}catch(e){}
+      if(window.fbSetCatalogBarcodes){
+        window.fbSetCatalogBarcodes(d.id,d.barcodes).then(function(){
+          toast("\u2713 "+d.name+" est maintenant trouvable au scan");playSound("win");
+          try{renderFichesSansCode();}catch(e){}
+        }).catch(function(e){
+          /* L'ecriture partagee a echoue : on ne ment pas en disant que c'est
+             regle. Le lien local, lui, tient pour cet appareil. */
+          console.warn("fbSetCatalogBarcodes:",e&&e.message);
+          toast("Enregistr\u00E9 sur cet appareil seulement (\u00E9criture catalogue refus\u00E9e)");
+          playSound("err");
+        });
+      }else{
+        toast("Enregistr\u00E9 sur cet appareil");playSound("pop");
+        try{renderFichesSansCode();}catch(e){}
+      }
+    };
+    btn.onclick=poser;
+    btn.onkeydown=function(ev){if(ev.key==="Enter")poser();};
+    row.appendChild(btn);
+    host.appendChild(row);
+  });
+}
 function renderFormatSuggestions(){
   var host=document.getElementById("admin-format-suggestions");
   if(!host){
@@ -20113,6 +20968,8 @@ function renderSecurite(){
     '<div id="sec-sauv" style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px;margin-bottom:10px">'+
       '<div style="font-size:12.5px;color:var(--s2)">Lecture de l\'\u00E9tat des sauvegardes\u2026</div></div>'+
     '<div id="sec-sante" style="display:none;background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px;margin-bottom:10px"></div>'+
+    '<div id="sec-abus" style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px;margin-bottom:10px">'+
+      '<div style="font-size:12.5px;color:var(--s2)">Lecture des signalements\u2026</div></div>'+
     '<div id="sec-journal"></div>';
 
   var bf=document.getElementById("sec-figer-go");
@@ -20227,6 +21084,63 @@ function renderSecurite(){
             'des Cloud Functions, le message y contient l\'adresse \u00E0 cliquer.</div>');
     }).catch(function(){});
   }
+
+  /* LES SIGNALEMENTS. C'est la moitie qui compte : un bouton « signaler »
+     sans ecran pour les lire ne sert a rien. Chaque ligne dit le motif, ce qui
+     est vise, et garde une COPIE du contenu — pour que la preuve survive a sa
+     suppression. Deux issues : « Rien a faire » ou « Traite ». Dans les deux
+     cas on marque, on n'efface pas : la trace de ce qui a ete decide, et
+     quand, est ce qui permet de repondre a une contestation. */
+  var abHost=document.getElementById("sec-abus");
+  var MOTIF_TXT={alcool:"Alcool",sexuel:"Sexuel",haine:"Haine",harcelement:"Harcelement",
+                 mineur:"Danger mineur",faux:"Faux",spam:"Spam",autre:"Autre"};
+  var peindreAbus=function(){
+    if(!abHost)return;
+    if(!window.fbLireSignalements){abHost.style.display="none";return;}
+    window.fbLireSignalements(30).then(function(list){
+      if(list===null){
+        abHost.innerHTML='<div style="font-size:12.5px;color:var(--s2)">Signalements illisibles \u2014 index manquant ou r\u00E8gles pas encore d\u00E9ploy\u00E9es</div>';
+        return;
+      }
+      if(!list.length){
+        abHost.innerHTML='<div style="display:flex;align-items:center;gap:10px">'+
+          '<div style="width:9px;height:9px;border-radius:50%;flex-shrink:0;background:#22c55e"></div>'+
+          '<div style="font-size:13px;font-weight:700;color:var(--s1)">Aucun signalement en attente</div></div>';
+        return;
+      }
+      abHost.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'+
+        '<div style="width:9px;height:9px;border-radius:50%;flex-shrink:0;background:#dc2626"></div>'+
+        '<div style="font-size:13px;font-weight:700;color:var(--s1)">'+list.length+' signalement'+(list.length>1?"s":"")+' \u00E0 regarder</div></div>'+
+        list.map(function(x){
+          return '<div style="padding:10px 12px;background:var(--app-bg);border:1.5px solid var(--border);border-radius:13px;margin-bottom:7px">'+
+            '<div style="font-size:12.5px;font-weight:800;color:#b91c1c">'+sanitize(MOTIF_TXT[x.motif]||x.motif)+
+              '<span style="color:var(--s2);font-weight:600"> \u00B7 '+sanitize(x.cibleType)+'</span></div>'+
+            (x.apercu?'<div style="font-size:11.5px;color:var(--s2);margin-top:3px;word-break:break-word">'+sanitize(x.apercu)+'</div>':'')+
+            '<div style="font-size:10.5px;color:var(--s3);margin-top:3px">'+sanitize(_dateCourte(x.quand)||"")+' \u00B7 '+sanitize(String(x.cibleId).slice(0,40))+'</div>'+
+            '<div style="display:flex;gap:7px;margin-top:8px">'+
+              '<button class="ab-ok" data-ab="'+attr(x.id)+'" type="button" style="flex:1;padding:8px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:11.5px;font-weight:700;cursor:pointer">Rien \u00E0 faire</button>'+
+              '<button class="ab-ko" data-ab="'+attr(x.id)+'" type="button" style="flex:1;padding:8px;border-radius:10px;border:none;background:#b91c1c;color:#fff;font-size:11.5px;font-weight:700;cursor:pointer">Trait\u00E9, retir\u00E9</button>'+
+            '</div></div>';
+        }).join("");
+      var fin=function(b,decision){
+        b.disabled=true; b.textContent="\u2026";
+        window.fbTraiterSignalement(b.getAttribute("data-ab"),decision).then(function(){
+          journaliserAction("Traiter un signalement",{etat:"terminee",compte:1});
+          peindreAbus();
+        }).catch(function(e){
+          b.disabled=false;
+          toast("\u00C9chec : "+String((e&&(e.code||e.message))||e).slice(0,60));
+        });
+      };
+      Array.prototype.forEach.call(abHost.querySelectorAll(".ab-ok"),function(b){
+        b.onclick=function(){fin(b,"rien-a-faire");};
+      });
+      Array.prototype.forEach.call(abHost.querySelectorAll(".ab-ko"),function(b){
+        b.onclick=function(){fin(b,"retire");};
+      });
+    }).catch(function(){ abHost.style.display="none"; });
+  };
+  peindreAbus();
 
   var jHost=document.getElementById("sec-journal");
   if(!window.fbLireJournalAdmin){ jHost.innerHTML=""; return; }
@@ -20525,6 +21439,33 @@ function promoteDiscovery(d){
   var cat=adminCatChoice[key]||d.cat||classifyDrink(d.name,d.brand);
   if(VALID_CATS.indexOf(cat)===-1){toast("Choisis d'abord une cat\u00E9gorie");playSound("err");return;}
   var def=CAT_DEFAULTS[cat];
+  /* LE CODE-BARRE NE DOIT PLUS SE PERDRE EN SILENCE.
+     Une proposition venue d'une PHOTO porte un identifiant synthetique
+     ("m1783615360754") : le test ci-dessous echoue, et la fiche arrivait au
+     catalogue avec barcodes:[] — donc INTROUVABLE AU SCAN, a vie. Six fiches
+     etaient deja dans ce cas, dont un « Golden Power Energy drink » que son
+     proprietaire a rescanne sans jamais le retrouver.
+     On ne bloque pas la promotion pour autant : sur une photo, l'admin n'a
+     souvent pas le produit en main. On DEMANDE, on explique ce qu'on perd, et
+     on laisse repartir sans — mais en le sachant, et avec un rattrapage
+     possible (« Fiches sans code-barre » plus bas dans cet ecran). */
+  var codeReel=(d.barcode&&/^[0-9]{6,}$/.test(String(d.barcode)))?String(d.barcode):"";
+  if(!codeReel){
+    var saisi=prompt(
+      "Code-barre de \u00AB "+String(d.name||"cette boisson")+" \u00BB ?\n\n"+
+      "Cette proposition n'en porte pas (elle vient d'une photo). Sans code, la "+
+      "fiche ne sera JAMAIS retrouvee par un scan \u2014 seulement par son nom.\n\n"+
+      "Laisse vide si tu ne l'as pas : tu pourras le coller plus tard depuis "+
+      "\u00AB Fiches sans code-barre \u00BB, en bas de l'administration.", "");
+    if(saisi===null)return;                       // Annuler : on ne promeut rien
+    saisi=String(saisi).replace(/[^0-9]/g,"");
+    if(saisi){
+      if(saisi.length<6||!validGTIN(saisi)){
+        toast("Code-barre invalide \u2014 rien n'a \u00E9t\u00E9 promu");playSound("err");return;
+      }
+      codeReel=saisi;
+    }
+  }
   var entry={
     id:Date.now(),
     name:String(d.name).slice(0,60),
@@ -20533,10 +21474,7 @@ function promoteDiscovery(d){
     emoji:def.emoji,color:def.color,light:def.light,
     tag:String(d.name).toUpperCase().slice(0,20),
     stars:4.0,
-    // N'inscrire que les VRAIS codes-barres (chiffres) : les propositions
-    // manuelles portent un id synthetique "m1699..." qui ne matchera jamais un
-    // scan et ne doit pas polluer le tableau barcodes de la fiche catalogue.
-    barcodes:(d.barcode&&/^[0-9]{6,}$/.test(String(d.barcode)))?[String(d.barcode)]:[]
+    barcodes:codeReel?[codeReel]:[]
   };
   d.promoted=true;
   mergeCatalog([entry]);
@@ -20546,7 +21484,12 @@ function promoteDiscovery(d){
     if(s){if(!s.drinks)s.drinks=[];s.drinks.push(entry.id);}
   });
   renderDiscoveries();renderAdmin();
-  playSound("win");toast("\u2713 \u00AB "+d.name+" \u00BB promue au catalogue !");
+  playSound("win");
+  /* Dire ce qui manque au moment ou ca se produit, pas trois mois plus tard
+     quand quelqu'un scanne le produit et ne le trouve pas. */
+  toast(codeReel
+    ? ("\u2713 \u00AB "+d.name+" \u00BB promue au catalogue !")
+    : ("\u00AB "+d.name+" \u00BB promue \u2014 SANS code-barre : introuvable au scan tant qu'on ne lui en colle pas un"));
   if(window.fbPromoteDiscovery){
     window.fbPromoteDiscovery(d,entry).catch(function(e){
       console.warn("Promotion Firestore error:",e);
@@ -20973,7 +21916,12 @@ function openUserProfile(u){
       }).join("")+'</div>';
   })()+
   '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px" data-i18n="hisFavs">Ses boissons pr\u00E9f\u00E9r\u00E9es</div>'+
-  (favs.length?'<div id="userprofile-favs" style="display:flex;flex-direction:column;gap:8px"></div>':'<div style="font-size:12.5px;color:var(--s3);padding:8px 0">Aucun favori partag\u00E9 pour l\'instant</div>');
+  (favs.length?'<div id="userprofile-favs" style="display:flex;flex-direction:column;gap:8px"></div>':'<div style="font-size:12.5px;color:var(--s3);padding:8px 0">Aucun favori partag\u00E9 pour l\'instant</div>')+
+  /* Un profil public porte un pseudo et un avatar deposes par la personne :
+     c'est du contenu utilisateur, il doit pouvoir etre signale. Le pseudo est
+     copie dans l'apercu pour que le signalement garde un sens si la personne
+     le change juste apres. */
+  '<div style="text-align:center;margin-top:14px">'+lienSignaler("profil",String(u.uid||u.id||""),"pseudo : "+String(u.pseudo||""),String(u.pseudo||"Ce profil"))+'</div>';
   if(favs.length){
     var box=body.querySelector("#userprofile-favs");
     favs.slice(0,8).forEach(function(d){
@@ -21099,7 +22047,14 @@ try{
   try{updateGreeting();}catch(e){}
   try{renderMissions();}catch(e){}
   try{checkWatches();renderAlertsCard();}catch(e){}
-  try{renderHunts();}catch(e){}
+  try{renderChasse();}catch(e){}
+  /* Le badge de l'onglet Decouvrir se calcule dans _peindreChasse, qui n'est
+     appelee que par renderChasse. Sans cet appel au demarrage, le badge ne
+     s'allumerait qu'apres etre alle voir l'onglet — donc jamais pour ce qu'il
+     doit annoncer. Les conteneurs de l'onglet existent dans le document meme
+     quand il n'est pas affiche, la peinture est donc sans effet visible. */
+  try{renderChasse();}catch(e){}
+  try{peindreAideDiscrete();}catch(e){}
   try{refreshBell();}catch(e){}
   renderLangGrid();renderDiscoveries();
   renderFavs();
@@ -21226,9 +22181,14 @@ try{
     renderDiscoveries();
   });
   window.addEventListener("fbScanCountsLoaded", function(e) {
-    var remote=e.detail||{};
-    Object.keys(remote).forEach(function(k){scanCounts[k]=remote[k];});
+    /* LA LIGNE QUI FAISAIT LE DEGAT. Elle deversait le compteur de la
+       communaute dans le compteur personnel : le profil d'un nouvel arrivant
+       affichait les 84 boissons scannees par tout le monde comme si c'etaient
+       les siennes, et son premier scan gravait la confusion dans son stockage
+       local. Les deux vivent desormais separement. */
+    scanCountsGlobal=e.detail||{};
     renderTopScanned();
+    try{ renderTrends(); }catch(err){}
   });
   window.addEventListener("fbDrinkRatingsLoaded", function(e) {
     var agg=e.detail||{};

@@ -41,6 +41,7 @@ une requête, le lien te la donnera.
 | `reports` | `by` + `counted` | le filleul est-il vraiment actif |
 | `reports` | `storeId` + `drinkId` + `type` + `createdAt` | l'anti-farm : les annonces contredites sur place |
 | `referrals` | `parrain` + `status` | les plafonds de parrainage |
+| `abus` | `etat` + `at` | la liste des signalements en attente, du plus récent au plus ancien |
 
 ### Celui que j'avais mis de trop
 

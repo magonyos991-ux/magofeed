@@ -28,7 +28,16 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
-const Anthropic = require("@anthropic-ai/sdk");
+/* CHARGEMENT PARESSEUX. Cette bibliotheque n'est pas necessaire pour DECRIRE
+   les fonctions, seulement pour les EXECUTER. Or « firebase deploy » commence
+   par charger tout le code dans un serveur de decouverte, avec dix secondes
+   pour repondre : chaque bibliotheque lourde chargee en tete de fichier compte
+   dans ce delai, sur une machine froide comme sur une machine chargee.
+   Un deploiement echouait ainsi par intermittence sur « User code failed to
+   load. Cannot determine backend specification. Timeout after 10000 » — un
+   message qui ne nomme ni fichier, ni ligne, ni bibliotheque. On la charge
+   donc au premier appel reel, et une seule fois grace au cache de require. */
+function chargerAnthropic() { return require("@anthropic-ai/sdk"); }
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
@@ -81,9 +90,38 @@ exports.identifyFridge = onCall(
       const storeId = String((req.data && req.data.storeId) || "");
       if (!/^[A-Za-z0-9_-]{1,80}$/.test(storeId))
         throw new HttpsError("permission-denied", "Reserve a l'administrateur et aux gerants certifies.");
-      const st = await db.collection("stores").doc(storeId).get();
-      if (!st.exists || st.data().owner !== uid)
-        throw new HttpsError("permission-denied", "Reserve a l'administrateur et aux gerants certifies.");
+      /* OU VIT LE LIEN GERANT-MAGASIN. Il vivait dans stores/{id}.owner, champ
+         public : n'importe qui reliait une boutique certifiee au profil
+         personnel de celui qui la tient. Il a ete deplace dans merchants/{uid},
+         lisible par son seul proprietaire — mais ce controle-ci n'a pas suivi.
+         Resultat : tout commercant certifie depuis ce changement se voyait
+         refuser le scan de son propre frigo. On lit donc merchants/{uid}
+         d'abord, et l'ancien champ seulement en secours, pour ne priver aucun
+         gerant certifie de l'ancienne epoque. */
+      const mer = await db.collection("merchants").doc(uid).get();
+      const dm = mer.exists ? (mer.data() || {}) : {};
+      const aLui = Array.isArray(dm.stores) && dm.stores.map(String).indexOf(storeId) !== -1;
+
+      /* LE PASS. Le lien ne suffit pas : le scan de frigo appelle un modele qui
+         coute de l'argent a chaque photo, et c'est la fonction que le pass a dix
+         euros vend. Le bouton est deja cache cote app pour qui n'a pas le pass,
+         mais du CSS n'a jamais protege personne — un appel direct passerait.
+
+         Les gerants certifies AVANT l'existence du pass n'ont pas de document
+         merchants : on les considere au niveau « frigo », ils avaient ce droit
+         et on ne le leur retire pas. */
+      let pass = "aucun";
+      if (aLui) {
+        pass = ["frigo", "complet"].indexOf(String(dm.pass || "")) !== -1 ? String(dm.pass) : "aucun";
+      } else {
+        const st = await db.collection("stores").doc(storeId).get();
+        if (!st.exists || st.data().owner !== uid)
+          throw new HttpsError("permission-denied", "Reserve a l'administrateur et aux gerants certifies.");
+        pass = "frigo";
+      }
+      if (pass === "aucun")
+        throw new HttpsError("permission-denied",
+          "Le scan de frigo demande le pass commercant. Ouvre la fiche de ton magasin pour l'activer.");
     }
 
     /* Plafond commun a toute l'app, en plus des 10 par personne : un compte
@@ -117,6 +155,7 @@ exports.identifyFridge = onCall(
     });
     if (quota.blocked) return { ok: false, reason: "quota" };
 
+    const Anthropic = chargerAnthropic();
     const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
     let resp;
     try {

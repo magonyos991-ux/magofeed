@@ -24,14 +24,17 @@ await ctx.route('**/cdnjs.cloudflare.com/**', r=>{
   if(!fs.existsSync(f))return r.fulfill({status:404,body:''});
   r.fulfill({status:200,contentType:n.endsWith('.css')?'text/css':'text/javascript',body:fs.readFileSync(f,'utf8')});
 });
-// Tuiles Carto : telechargees par curl (qui a le proxy), mises en cache disque
+/* Tuiles du fond de carte : telechargees par curl (qui a le proxy), mises en
+   cache disque. L'app est passee de CARTO a OpenStreetMap — CARTO barre
+   desormais ses tuiles d'un « API KEY REQUIRED » qui se serait retrouve en
+   travers des captures promotionnelles. */
 import { execFileSync } from 'child_process';
-await ctx.route('**/*.basemaps.cartocdn.com/**', r=>{
+await ctx.route('**/tile.openstreetmap.org/**', r=>{
   const u=new URL(r.request().url());
   const key=u.pathname.replace(/[^a-z0-9]/gi,'_');
   const f=SC+'tiles/'+key+'.png';
   try{
-    if(!fs.existsSync(f))execFileSync('curl',['-s','-o',f,'https://a.basemaps.cartocdn.com'+u.pathname],{timeout:15000});
+    if(!fs.existsSync(f))execFileSync('curl',['-s','-o',f,'-A','Magofeed/1.0 (+https://github.com/magonyos991-ux/magofeed)','https://tile.openstreetmap.org'+u.pathname],{timeout:15000});
     r.fulfill({status:200,contentType:'image/png',body:fs.readFileSync(f)});
   }catch(e){r.fulfill({status:200,contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==','base64')});}
 });

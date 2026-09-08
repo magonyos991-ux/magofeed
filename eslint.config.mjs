@@ -78,6 +78,14 @@ const BUG_RULES = {
   "no-dupe-args": "error",
   "no-duplicate-case": "error",
   "no-unreachable": "error",      // code derrière un return : mort sans le dire
+  /* UNE EXPRESSION QUI NE FAIT RIEN. Ajouté après avoir écrit exactement ce
+     bug : une ligne « +'<div>…' » collée APRÈS le point-virgule d'une
+     affectation innerHTML. C'est du JavaScript valide — un plus unaire sur une
+     chaîne — donc node --check passe, la page se charge, et le bloc HTML
+     n'apparaît simplement jamais. Aucune erreur, aucun symptôme, un lien de
+     signalement invisible. Les court-circuits (a && f()) et les ternaires
+     restent autorisés : le fichier s'en sert partout, légitimement. */
+  "no-unused-expressions": ["error", { allowShortCircuit: true, allowTernary: true }],
   "no-func-assign": "error",
   "no-cond-assign": "error",      // if (a = b) au lieu de ==
   "no-self-assign": "error",
@@ -94,7 +102,7 @@ const BUG_RULES = {
 };
 
 export default [
-  { ignores: ["node_modules/**", "f/**", "promo/**", "icons/**"] },
+  { ignores: ["node_modules/**", "f/**", "promo/**", "icons/**", "android/**", "ios/**", "www/**"] },
   {
     /* index.html : eslint-plugin-html extrait les blocs <script>.
        sourceType "module" pour que le bloc Firebase (import …) soit analysé
@@ -136,6 +144,30 @@ export default [
                  URLSearchParams: "readonly", crypto: "readonly",
                  window: "readonly", document: "readonly" }
     },
-    rules: BUG_RULES
+    rules: {
+      ...BUG_RULES,
+      /* L'ANCIENNE API NAMESPACEE DU SDK ADMIN, INTERDITE ICI.
+         Ajoute apres un deploiement rate le 6 septembre 2026. outils-admin.js
+         faisait `const admin = require("firebase-admin")` puis
+         `admin.firestore()`. Cette forme a ete retiree des versions recentes du
+         SDK : la propriete n'y est plus une fonction. Le module plantait donc
+         des sa premiere ligne utile, et comme firebase deploy charge le code
+         dans un serveur de decouverte, le seul message affiche etait
+         « User code failed to load. Cannot determine backend specification.
+         Timeout after 10000 ». Aucun nom de fichier, aucun numero de ligne :
+         une heure de recherche pour une ligne. La regle nomme le coupable en
+         une seconde. Trois fichiers etaient touches — outils-admin.js,
+         catalogue-ia.js et migration-geohash.js. */
+      "no-restricted-syntax": ["error",
+        {
+          selector: "MemberExpression[object.name='admin'][property.name=/^(firestore|messaging|storage|auth|database|credential|initializeApp|apps)$/]",
+          message: "API namespacee retiree du SDK admin. Utilise firebase-admin/firestore (getFirestore, FieldValue, FieldPath), firebase-admin/messaging (getMessaging) ou firebase-admin/app (initializeApp, cert)."
+        },
+        {
+          selector: "CallExpression[callee.name='require'][arguments.0.value='firebase-admin']",
+          message: "require(\"firebase-admin\") n'ouvre que l'ancienne API namespacee. Importe le sous-module precis : firebase-admin/app, firebase-admin/firestore, firebase-admin/messaging."
+        }
+      ]
+    }
   }
 ];

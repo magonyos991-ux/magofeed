@@ -47,6 +47,7 @@
  * Firebase Functions v2 (Node 18+).
  */
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { pushToUser } = require("./outils-admin");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
@@ -377,6 +378,81 @@ exports.crediterEntraide = onDocumentCreated(
     const verse = await crediter(aide.by, montant, "entraide");
     await db.doc(`reports/${aide.id}`).set(Object.assign(marque, { huntCreditedPts: verse }), { merge: true });
     await recalculerScore(aide.by);
+    await noterCoupDeMain(rep.by, aide);
+  }
+);
+
+/* ── LE CHAINON MANQUANT ─────────────────────────────────────────────────
+   Tout ce qui precede fonctionnait deja : l'aidant recoit ses points, le
+   chercheur recoit sa notification « trouvee pres de toi ». Deux personnes
+   s'entraidaient et ne se voyaient jamais.
+
+   On depose donc, chez le CHERCHEUR seul, une projection minimale de ce qui
+   vient de se passer. Trois precautions valent d'etre nommees :
+
+   Le pseudo est relu depuis users/{uid} et RECOUPE, jamais recopie du champ
+   byPseudo du rapport — celui-la est du texte libre ecrit par le client, et
+   il finirait affiche tel quel chez quelqu'un d'autre.
+
+   L'heure est arrondie a l'heure pleine, comme le fait deja seenAt cote
+   application. Dire « hier » suffit ; dire « a 19 h 43 » raconterait ou
+   quelqu'un se trouvait a la minute pres.
+
+   Et « aider en discret » est respecte ici, pas a l'affichage : si la
+   personne l'a coche, aucun nom n'est ecrit du tout. Un choix de
+   confidentialite qui ne tiendrait qu'a l'interface n'en est pas un. */
+async function noterCoupDeMain(uidChercheur, aide) {
+  try {
+    if (!uidChercheur || !aide || !aide.by) return;
+    let pseudo = null;
+    const ua = await db.doc(`users/${aide.by}`).get();
+    const da = ua.exists ? (ua.data() || {}) : {};
+    if (da.aideDiscrete !== true && typeof da.pseudo === "string") {
+      pseudo = da.pseudo.slice(0, 24);
+      if (pseudo === "Explorateur") pseudo = null;   // pseudo par defaut : pas un nom
+    }
+    const quand = aide.createdAt && aide.createdAt.toMillis
+      ? Math.floor(aide.createdAt.toMillis() / 3600000) * 3600000
+      : Math.floor(Date.now() / 3600000) * 3600000;
+    await db.doc(`coupsDeMain/${uidChercheur}/recus/${aide.id}`).set({
+      aidantUid: pseudo ? String(aide.by) : null,   // pas de nom, pas de lien vers le profil
+      aidantPseudo: pseudo,
+      drinkId: Number(aide.drinkId),
+      storeId: String(aide.storeId || ""),
+      at: quand,
+      merci: false
+    }, { merge: true });
+  } catch (e) {
+    /* Jamais bloquant : le credit des points a deja eu lieu et compte plus
+       que cette ligne d'affichage. */
+    console.warn("coup de main:", e && e.message);
+  }
+}
+
+/* Le merci remonte, l'identite ne redescend pas. L'aidant apprend qu'on le
+   remercie et pour quelle boisson — jamais par qui. C'est precisement ce qui
+   empeche ce chemin de devenir un canal de discussion a deux.
+   Les regles garantissent qu'on ne peut passer merci qu'une fois de false a
+   true : sans ca, une bascule en boucle ferait sonner le telephone de
+   quelqu'un a volonte. */
+exports.direMerci = onDocumentUpdated(
+  { document: "coupsDeMain/{uid}/recus/{id}", region: REGION },
+  async (event) => {
+    const av = event.data.before.data() || {};
+    const ap = event.data.after.data() || {};
+    if (av.merci === true || ap.merci !== true) return;
+    if (!ap.aidantUid) return;                     // aide en discret : rien a envoyer
+    let nom = "une boisson";
+    try {
+      const c = await db.doc(`catalog/${String(ap.drinkId)}`).get();
+      if (c.exists && (c.data() || {}).name) nom = String(c.data().name).slice(0, 40);
+    } catch (e) { /* le catalogue natif n'est pas dans Firestore : on reste vague */ }
+    await pushToUser(
+      String(ap.aidantUid),
+      "Quelqu'un te remercie",
+      "Ton coup de main pour " + nom + " a servi.",
+      { type: "merci" }
+    );
   }
 );
 
@@ -528,27 +604,52 @@ async function evaluerParrainage(uidFilleul) {
    marcher le classement), donc un identifiant partage est une cle de lecture
    permanente vers le profil. Un code, lui, se revoque. */
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+/* LE CODE NE VA PAS DANS LE PROFIL PUBLIC.
+   Il y allait : users/{uid} est en « allow read: if true » — c'est ce qui fait
+   marcher le classement — donc le code de parrainage de chacun s'y lisait sans
+   compte. refCodes/{code} est pourtant bien protege en lecture admin, mais
+   c'etait la table INVERSE, uid vers code, qui etait ouverte : lister users
+   suffisait a reconstituer tous les codes de tout le monde. Le commentaire
+   ci-dessus disait « un code, lui, se revoque » — vrai, mais seulement si
+   personne ne peut le lire avant.
+   Verifie en production le jour de la correction : aucun code n'existait
+   encore, la fonction venant d'etre deployee. Rien n'a donc fuite, et il n'y a
+   rien a revoquer — c'etait la derniere minute pour le corriger gratuitement.
+   Le code vit desormais dans refMine/{uid}, lisible par son seul proprietaire
+   et ecrit par le serveur uniquement. */
 exports.monCodeParrain = onCall({ region: REGION }, async (req) => {
   const uid = req.auth && req.auth.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi d'abord.");
+  /* UN CODE NE SE REND QUE S'IL EXISTE ENCORE DANS refCodes. Revoquer un code
+     se fait en supprimant refCodes/{code} ; sans cette relecture, le parrain
+     continuait de diffuser un code mort — refMine (ou, avant, le profil)
+     gardait l'ancienne valeur, elle etait renvoyee telle quelle, et le filleul
+     recevait « code inconnu » sans que personne comprenne pourquoi. Si le code
+     a disparu, on en fabrique un neuf : la revocation devient reelle. */
+  const encoreValide = async (c) => !!c && (await db.doc(`refCodes/${c}`).get()).exists;
+  const mien = await db.doc(`refMine/${uid}`).get();
+  const codeMien = mien.exists ? (mien.data() || {}).code : null;
+  if (await encoreValide(codeMien)) return { code: codeMien };
+  /* Repli pour les comptes qui auraient recu un code avant la correction : on
+     le recupere du profil public et on l'en RETIRE en le rangeant au bon
+     endroit. Rejouable, et ne perd le code de personne — sauf s'il a ete
+     revoque, auquel cas on le retire quand meme du profil et on en frappe un
+     neuf juste en dessous. */
   const u = await db.doc(`users/${uid}`).get();
-  const existant = u.exists ? (u.data() || {}).refCode : null;
-  /* On ne rend l'ancien code que s'il EXISTE ENCORE dans refCodes. Revoquer un
-     code se fait en supprimant refCodes/{code} ; sans cette relecture, le
-     parrain continuait de diffuser un code mort : users/{uid}.refCode gardait
-     l'ancienne valeur, elle etait renvoyee telle quelle, et le filleul recevait
-     "code inconnu" sans que personne comprenne pourquoi. Si le code a disparu,
-     on en fabrique un neuf juste en dessous — la revocation devient reelle. */
-  if (existant) {
-    const encore = await db.doc(`refCodes/${existant}`).get();
-    if (encore.exists) return { code: existant };
+  const ancien = u.exists ? (u.data() || {}).refCode : null;
+  if (ancien) {
+    await db.doc(`users/${uid}`).set({ refCode: FieldValue.delete() }, { merge: true });
+    if (await encoreValide(ancien)) {
+      await db.doc(`refMine/${uid}`).set({ code: ancien, createdAt: FieldValue.serverTimestamp() }, { merge: true });
+      return { code: ancien };
+    }
   }
   for (let essai = 0; essai < 12; essai++) {
     let code = "";
     for (let i = 0; i < 5; i++) code += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
     try {
       await db.doc(`refCodes/${code}`).create({ uid: uid, createdAt: FieldValue.serverTimestamp() });
-      await db.doc(`users/${uid}`).set({ refCode: code }, { merge: true });
+      await db.doc(`refMine/${uid}`).set({ code: code, createdAt: FieldValue.serverTimestamp() }, { merge: true });
       return { code: code };
     } catch (e) { /* deja pris : on retire */ }
   }
