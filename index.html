@@ -6663,7 +6663,7 @@ function renderAddStorePos(){
   var html="";
   if(addStorePos){
     html="Position : "+(addStorePos.src==="gps"?"ta position GPS actuelle \u2713"
-                       :addStorePos.src==="centre"?"le centre de la carte \u2014 <b>d\u00E9place la carte</b> pour l'ajuster"
+                       :addStorePos.src==="centre"?"la pointe du pin \u2014 <b>d\u00E9place la carte</b> pour l'ajuster"
                        :"choisie sur la carte \u2713");
     // Adresse + numero recuperes AUTOMATIQUEMENT (une seule fois par position).
     var addrInput=document.getElementById("add-store-address");
@@ -16493,15 +16493,25 @@ function exploreOuvrirAjout(){
   var sheet=document.createElement("div");
   sheet.id="explore-add-sheet";
   sheet.innerHTML='<div id="explore-add-grip"></div>'+
-    '<div id="explore-add-hint">D\u00E9place la carte : le pin reste au centre. Pour viser au m\u00E8tre pr\u00E8s, \u00AB Pointer sur la carte \u00BB puis tape.</div>'+
+    '<div id="explore-add-hint">D\u00E9place la carte sous le pin : sa pointe marque l\u2019endroit. Pour poser au doigt, \u00AB Pointer sur la carte \u00BB puis tape.</div>'+
     '<div id="explore-add-body"></div>';
   host.appendChild(sheet);
   // Couche dediee au pin provisoire, sur LA carte qu'on regarde.
   if(!window._addStoreLayer){window._addStoreLayer=L.layerGroup();}
   try{window._addStoreLayer.addTo(exploreMap);}catch(e){}
-  var c=exploreMap.getCenter();
+  /* LE PIN EST UN ELEMENT FIXE, AU MILIEU DE LA BANDE DE CARTE VISIBLE. Pas
+     au centre du conteneur : sa moitie basse est sous le tiroir, et un pin au
+     centre geometrique etait invisible — « on voit meme pas le point du
+     milieu ». Il ne bouge jamais, c'est la carte qui glisse dessous ; sa
+     pointe designe toujours l'endroit choisi, et un point net la marque. */
+  var cible=document.createElement("div"); cible.id="explore-add-cible";
+  cible.innerHTML='<div class="eac-pin"></div><div class="eac-point"></div>';
+  host.appendChild(cible);
+  _placerCible();
+  if(!window._exploreAddResizePose){ window._exploreAddResizePose=true;
+    window.addEventListener("resize",function(){ if(window._addStoreSurExplore)_placerCible(); }); }
+  var c=_latlngCible();
   openAddStoreForm(document.getElementById("explore-add-body"),{lat:c.lat,lng:c.lng,src:"centre"});
-  _poserBrouillonMagasin(c.lat,c.lng,null);
   // Chaque tap sur la carte deplace le pin. On n'utilise pas le "click" deja
   // pose (exploreHideCard) : le sien referme la bandelette, le notre place.
   if(!window._exploreAddClickPose){
@@ -16510,7 +16520,11 @@ function exploreOuvrirAjout(){
        tap le deplacait : impossible d'explorer, le moindre contact posait le
        pin la ou le doigt tombait. Ce qui est arrive : « je suis oblige d'etre
        d'abord sur le point, et ensuite j'appuie sur + Magasin ». */
-    exploreMap.on("click",function(e){ if(window._addStoreSurExplore&&addStorePlacing)onPickerMapClick(e.latlng); });
+    exploreMap.on("click",function(e){
+      if(!(window._addStoreSurExplore&&addStorePlacing))return;
+      onPickerMapClick(e.latlng);
+      var el=document.getElementById("explore-add-cible"); if(el)el.style.display="none";   // pose au doigt : le pin fixe s'efface
+    });
     /* Tant qu'il n'a pas ete pose au doigt, LE PIN SUIT LE CENTRE DE LA CARTE :
        on deplace la carte, le pin reste au milieu, l'adresse se met a jour.
        C'est le geste des applis de livraison — explorer, c'est choisir.
@@ -16518,26 +16532,55 @@ function exploreOuvrirAjout(){
        fin de glissement partait interroger Nominatim. */
     exploreMap.on("moveend",function(){
       if(!window._addStoreSurExplore||!addStorePos||addStorePos.src!=="centre")return;
-      var c=exploreMap.getCenter();
-      if(window._addStoreDraft){try{window._addStoreDraft.setLatLng([c.lat,c.lng]);}catch(e){}}
-      else _poserBrouillonMagasin(c.lat,c.lng,null);
       clearTimeout(window._addStoreSuitTimer);
       window._addStoreSuitTimer=setTimeout(function(){
         if(!window._addStoreSurExplore||!addStorePos||addStorePos.src!=="centre")return;
-        var c2=exploreMap.getCenter();
+        _placerCible();                                   // le tiroir a pu changer de hauteur
+        var c2=_latlngCible();
         addStorePos={lat:c2.lat,lng:c2.lng,src:"centre"};   // objet neuf : les geocodages en retard sont ignores
         renderAddStorePos();
       },700);
     });
   }
   requestAnimationFrame(function(){sheet.classList.add("in");});
-  setTimeout(function(){try{var n=document.getElementById("add-store-name");if(n)n.focus();}catch(e){}},380);
+  // Une fois le tiroir pose : on recale le pin et ce qu'il designe, au cas ou
+  // la hauteur finale differe (polices, clavier, encoche).
+  setTimeout(function(){
+    if(!window._addStoreSurExplore)return;
+    _placerCible();
+    if(addStorePos&&addStorePos.src==="centre"){var c3=_latlngCible();addStorePos={lat:c3.lat,lng:c3.lng,src:"centre"};renderAddStorePos();}
+  },400);
+  setTimeout(function(){try{var n=document.getElementById("add-store-name");if(n)n.focus();}catch(e){}},420);
   playSound("pop");
 }
+/* Milieu de la bande de carte VISIBLE (au-dessus du tiroir), en pixels du
+   conteneur de la carte. C'est de ce point que tout part : la position du pin
+   fixe a l'ecran, et la latitude/longitude qu'il designe. */
+function _pointCible(){
+  var m=document.getElementById("explore-map"), sh=document.getElementById("explore-add-sheet");
+  var rm=m.getBoundingClientRect(), taille=exploreMap.getSize();
+  /* offsetHeight, PAS getBoundingClientRect : le tiroir entre par une
+     animation de transform depuis le bas, et pendant ces 300 ms sa boite est
+     hors ecran. Mesuree a cet instant, elle donnait « pas de tiroir », donc
+     le centre du conteneur entier — sous le tiroir une fois pose. Sa hauteur
+     de mise en page, elle, est juste des le premier instant. */
+  var rh=document.getElementById("explore-map-host").getBoundingClientRect();
+  var bas=sh?Math.min(rh.bottom-sh.offsetHeight,rm.bottom):rm.bottom;
+  return {x:taille.x/2, y:Math.max(48,(bas-rm.top)/2)};
+}
+function _placerCible(){
+  var el=document.getElementById("explore-add-cible"); if(!el||!exploreMap)return;
+  var p=_pointCible(), rm=document.getElementById("explore-map").getBoundingClientRect();
+  var rh=document.getElementById("explore-map-host").getBoundingClientRect();
+  el.style.left=(rm.left-rh.left+p.x)+"px"; el.style.top=(rm.top-rh.top+p.y)+"px";
+}
+function _latlngCible(){ var p=_pointCible(); return exploreMap.containerPointToLatLng([p.x,p.y]); }
+window._latlngCible=_latlngCible;
 function exploreFermerAjout(){
   window._addStoreSurExplore=false;
   addStorePlacing=false;
   clearTimeout(window._addStoreSuitTimer);
+  var cible=document.getElementById("explore-add-cible"); if(cible)cible.remove();
   _retirerBrouillonMagasin();
   try{if(window._addStoreLayer&&exploreMap)exploreMap.removeLayer(window._addStoreLayer);}catch(e){}
   var sheet=document.getElementById("explore-add-sheet");
