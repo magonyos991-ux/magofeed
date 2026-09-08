@@ -80,11 +80,11 @@ Avant tout changement de règles, le banc d'essai doit passer :
 ```
 cd functions-a-deployer/tests-regles
 npm install          # une seule fois
-npm test             # doit afficher : 122/122 conformes
+npm test             # doit afficher : 148/148 conformes
 ```
 
 Il attaque une base jetable sur ta machine. Rien ne part en ligne. S'il
-n'affiche pas `122/122`, **ne déploie pas** : dis-le-moi.
+n'affiche pas `148/148`, **ne déploie pas** : dis-le-moi.
 
 ## 2. Les Cloud Functions de base — DÉJÀ FAIT
 
@@ -296,22 +296,27 @@ ne pose jamais « rayon vu sur place » (un fait constaté) ni « mis en avant �
 
 ## Trois décisions que je ne prends pas à ta place
 
-### a) Ouvrir le scan de frigo à tout le monde
+### a) Ouvrir le scan de frigo à tout le monde — DÉCIDÉ, à redéployer
 
-Aujourd'hui, « Scanner un frigo » n'apparaît que pour toi (administrateur) et
-pour un commerçant sur sa propre boutique. C'est de loin l'outil de
-contribution le plus puissant de l'app : une photo remplit un rayon entier en
-vingt secondes, là où il faut vingt scans un par un.
+Décidé le 8 septembre. Le scan de frigo s'ouvre aux **contributeurs** : un
+compte connecté (Google ou e-mail, pas la session anonyme) **et** au moins une
+contribution créditée — `pointsPreuves ≥ 1`, un champ que seul le serveur
+écrit. Le garde-fou est dans `scan-frigo.js`, côté serveur ; l'app ne fait
+qu'afficher ou non le bouton « Scanner le frigo » sur la fiche d'un magasin.
 
-Pourquoi je ne l'ouvre pas de moi-même : **chaque photo est un appel payant à
-l'IA**, sur ta carte bancaire. Le garde-fou existe déjà côté serveur (dix
-frigos par jour et par personne, l'alcool écarté), donc le pire cas est borné,
-mais c'est ta facture, pas la mienne. Avec quatre personnes actives sur
-quatorze jours, le coût serait aujourd'hui négligeable. Avec mille, non.
+Ce que ça coûte, au pire : les contributeurs ont leur **propre enveloppe
+globale** — 60 frigos par jour, environ 3 € — séparée de celle de l'admin et
+des gérants (120). Une poignée de comptes jetables ne peut donc plus vider le
+plafond des autres. Les compteurs sont désormais lus et incrémentés dans une
+transaction : deux appels simultanés ne comptent plus pour un.
 
-Dis-moi oui et je l'ouvre en dix minutes, avec une condition d'accès (par
-exemple : compte connecté et au moins une contribution déjà faite) pour
-qu'un compte créé à la minute ne puisse pas s'en servir.
+Conséquence assumée : un gérant sans pass qui a déjà contribué peut scanner
+son propre frigo par cette porte. Le pass garde la signature des boissons et
+l'annonce ; il n'est plus l'unique clé du frigo.
+
+**Tant que la commande de la section 0 bis n'a pas été relancée, le serveur
+en production applique encore l'ancienne règle** (admin et gérants seuls) :
+un contributeur qui touche le bouton lit alors la phrase de refus du serveur.
 
 ### b) La migration geohash — 43 % de lectures Firestore en moins
 

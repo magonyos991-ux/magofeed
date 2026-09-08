@@ -1,8 +1,8 @@
 /**
  * Magofeed — Scan de frigo par IA (une photo -> TOUTES les boissons visibles).
  *
- * CE QUE ÇA FAIT : l'admin (plus tard : le gérant vérifié) photographie le
- * frigo d'un magasin ; Claude regarde l'image et liste chaque boisson
+ * CE QUE ÇA FAIT : l'admin, un gérant avec pass, ou tout contributeur ayant
+ * déjà une contribution créditée, photographie le frigo d'un magasin ; Claude regarde l'image et liste chaque boisson
  * DISTINCTE qu'il reconnaît (nom, marque, catégorie, confiance). L'app fait
  * ensuite correspondre cette liste au catalogue et ajoute les boissons au
  * magasin en un geste — 30 boissons en une photo au lieu de 30 saisies.
@@ -27,7 +27,7 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp, getApps } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 /* CHARGEMENT PARESSEUX. Cette bibliotheque n'est pas necessaire pour DECRIRE
    les fonctions, seulement pour les EXECUTER. Or « firebase deploy » commence
    par charger tout le code dans un serveur de decouverte, avec dix secondes
@@ -88,72 +88,110 @@ exports.identifyFridge = onCall(
     const adm = await db.collection("admins").doc(uid).get();
     if (!adm.exists) {
       const storeId = String((req.data && req.data.storeId) || "");
-      if (!/^[A-Za-z0-9_-]{1,80}$/.test(storeId))
-        throw new HttpsError("permission-denied", "Reserve a l'administrateur et aux gerants certifies.");
-      /* OU VIT LE LIEN GERANT-MAGASIN. Il vivait dans stores/{id}.owner, champ
+      let autorise = false, motif = null, porte = null;
+      /* Les deux lectures qui ne dependent pas l'une de l'autre partent
+         ensemble : un contributeur ordinaire n'attend pas le tour des gerants. */
+      const [mer, u] = await Promise.all([
+        db.collection("merchants").doc(uid).get(),
+        db.collection("users").doc(uid).get()
+      ]);
+
+      /* PORTE 1 — LE GERANT, sur SON magasin, avec un pass.
+         OU VIT LE LIEN GERANT-MAGASIN. Il vivait dans stores/{id}.owner, champ
          public : n'importe qui reliait une boutique certifiee au profil
          personnel de celui qui la tient. Il a ete deplace dans merchants/{uid},
-         lisible par son seul proprietaire — mais ce controle-ci n'a pas suivi.
-         Resultat : tout commercant certifie depuis ce changement se voyait
-         refuser le scan de son propre frigo. On lit donc merchants/{uid}
-         d'abord, et l'ancien champ seulement en secours, pour ne priver aucun
-         gerant certifie de l'ancienne epoque. */
-      const mer = await db.collection("merchants").doc(uid).get();
-      const dm = mer.exists ? (mer.data() || {}) : {};
-      const aLui = Array.isArray(dm.stores) && dm.stores.map(String).indexOf(storeId) !== -1;
-
-      /* LE PASS. Le lien ne suffit pas : le scan de frigo appelle un modele qui
-         coute de l'argent a chaque photo, et c'est la fonction que le pass a dix
-         euros vend. Le bouton est deja cache cote app pour qui n'a pas le pass,
-         mais du CSS n'a jamais protege personne — un appel direct passerait.
-
-         Les gerants certifies AVANT l'existence du pass n'ont pas de document
-         merchants : on les considere au niveau « frigo », ils avaient ce droit
-         et on ne le leur retire pas. */
-      let pass = "aucun";
-      if (aLui) {
-        pass = ["frigo", "complet"].indexOf(String(dm.pass || "")) !== -1 ? String(dm.pass) : "aucun";
-      } else {
-        const st = await db.collection("stores").doc(storeId).get();
-        if (!st.exists || st.data().owner !== uid)
-          throw new HttpsError("permission-denied", "Reserve a l'administrateur et aux gerants certifies.");
-        pass = "frigo";
+         lisible par son seul proprietaire. On lit donc merchants/{uid} d'abord,
+         et l'ancien champ seulement en secours, pour ne priver aucun gerant
+         certifie de l'ancienne epoque — ceux-la n'ont pas de document
+         merchants, on leur reconnait le niveau « frigo ». */
+      if (/^[A-Za-z0-9_-]{1,80}$/.test(storeId)) {
+        const dm = mer.exists ? (mer.data() || {}) : {};
+        const aLui = Array.isArray(dm.stores) && dm.stores.map(String).indexOf(storeId) !== -1;
+        if (aLui) {
+          autorise = ["frigo", "complet"].indexOf(String(dm.pass || "")) !== -1;
+          if (autorise) porte = "gerant";
+          else motif = "Le scan de frigo demande le pass commercant. Ouvre la fiche de ton magasin pour l'activer.";
+        } else {
+          const st = await db.collection("stores").doc(storeId).get();
+          if (st.exists && st.data().owner === uid) { autorise = true; porte = "gerant"; }
+        }
       }
-      if (pass === "aucun")
-        throw new HttpsError("permission-denied",
-          "Le scan de frigo demande le pass commercant. Ouvre la fiche de ton magasin pour l'activer.");
-    }
 
-    /* Plafond commun a toute l'app, en plus des 10 par personne : un compte
-       s'obtient gratuitement, ce plafond-la est le seul que le nombre de
-       comptes ne contourne pas. */
-    const PLAFOND_JOUR_FRIGO = 120;
-    const jour = new Date().toISOString().slice(0, 10);
-    const gRef = db.collection("_meta").doc("aiQuotaGlobal");
-    const gSnap = await gRef.get();
-    const gd = gSnap.exists ? gSnap.data() : {};
-    if (gd.jour === jour && (gd.frigo || 0) >= PLAFOND_JOUR_FRIGO)
-      return { ok: false, reason: "quota-global" };
+      /* PORTE 2 — LE CONTRIBUTEUR, sur n'importe quel magasin.
+         C'est de loin l'outil de contribution le plus puissant de l'app : une
+         photo remplit un rayon entier en vingt secondes. Le reserver a
+         l'administrateur, c'etait garder la carte vide. Mais chaque photo est
+         un appel payant : on l'ouvre a qui a deja prouve quelque chose.
+         Deux conditions, toutes deux verifiees ICI et pas dans l'app :
+           - un compte connecte (Google ou e-mail), pas la session anonyme
+             qu'on obtient gratuitement en ouvrant la page ;
+           - au moins une contribution CREDITEE — pointsPreuves >= 1, un champ
+             que seul le serveur ecrit (les regles refusent le client). Les
+             compteurs signals/confirms du profil, eux, sont ecrits par l'app :
+             ils ne prouvent rien.
+         Le pire cas reste borne par les 10 frigos par jour et par personne et
+         le plafond global de 120, juste en dessous. */
+      if (!autorise) {
+        const prov = req.auth.token && req.auth.token.firebase && req.auth.token.firebase.sign_in_provider;
+        if (!prov || prov === "anonymous") {
+          if (!motif) motif = "Connecte-toi (Google ou e-mail) pour scanner un frigo.";
+        } else {
+          const preuves = u.exists ? (Number((u.data() || {}).pointsPreuves) || 0) : 0;
+          /* Un gerant sans pass qui a contribue passe par ici : c'est voulu.
+             Ouvrir le scan aux contributeurs et le refuser au gerant de ce
+             magasin-la n'aurait aucun sens. Le pass garde ce qu'il a en propre —
+             la signature des boissons, l'annonce — et n'est plus l'unique cle du
+             frigo. */
+          if (preuves >= 1) { autorise = true; porte = "contributeur"; }
+          else if (!motif) motif = "Le scan de frigo s'ouvre apres une premiere contribution : confirme un stock quelque part, puis reviens.";
+        }
+      }
+      if (!autorise) throw new HttpsError("permission-denied", motif || "Reserve aux contributeurs et aux gerants certifies.");
+      req._porteFrigo = porte;
+    }
 
     const dataUrl = String((req.data && req.data.image) || "");
     const m = dataUrl.match(/^data:image\/(jpeg|png);base64,([A-Za-z0-9+/=]+)$/);
     if (!m) throw new HttpsError("invalid-argument", "Image manquante ou format invalide.");
     if (m[2].length > 600000) throw new HttpsError("invalid-argument", "Image trop lourde.");
 
-    // Quota dédié : 10 frigos par jour et par utilisateur (champ séparé du
-    // quota photo-produit pour ne pas se marcher dessus).
-    const day = new Date().toISOString().slice(0, 10);
+    /* DEUX PLAFONDS GLOBAUX, PAS UN. Un compte s'obtient gratuitement : le
+       plafond par personne ne borne rien face a une poignee de comptes. Le
+       plafond global, lui, est la vraie limite de depense — mais s'il etait
+       COMMUN, une douzaine de comptes jetables l'epuisaient et l'admin comme
+       les gerants trouvaient porte close jusqu'a minuit. Les contributeurs ont
+       donc leur enveloppe a eux (60 frigos par jour, ~3 euros au pire) ;
+       l'admin et les gerants gardent la leur (120). L'une ne peut pas vider
+       l'autre.
+       LU ET INCREMENTE DANS LA TRANSACTION. Avant, le compteur etait lu avant
+       la transaction puis reecrit avec « valeur lue + 1 » : deux appels
+       simultanes lisaient 119, passaient tous les deux, et ecrivaient tous les
+       deux 120 — deux photos payees, une seule comptee. Avec trois instances
+       en parallele, la seule defense contre la depense sous-comptait. */
+    const PLAFOND_JOUR = { contributeur: 60, gerant: 120, admin: 120 };
+    const enveloppe = adm.exists ? "admin" : (req._porteFrigo || "contributeur");
+    const champGlobal = enveloppe === "contributeur" ? "frigoContrib" : "frigo";
+    const jour = new Date().toISOString().slice(0, 10);
+    const gRef = db.collection("_meta").doc("aiQuotaGlobal");
     const qRef = db.collection("aiQuota").doc(uid);
     const quota = await db.runTransaction(async (t) => {
-      const snap = await t.get(qRef);
-      const d = snap.exists ? snap.data() : {};
-      const count = d.fday === day ? (d.fcount || 0) : 0;
-      if (count >= 10) return { blocked: true };
-      t.set(qRef, { fday: day, fcount: count + 1 }, { merge: true });
-      t.set(gRef, { jour: jour, frigo: (gd.jour === jour ? (gd.frigo || 0) : 0) + 1 }, { merge: true });
-      return { blocked: false };
+      const [gSnap, qSnap] = await Promise.all([t.get(gRef), t.get(qRef)]);
+      const gd = gSnap.exists ? gSnap.data() : {};
+      const global = gd.jour === jour ? (gd[champGlobal] || 0) : 0;
+      if (global >= PLAFOND_JOUR[enveloppe]) return { blocked: "quota-global" };
+      const d = qSnap.exists ? qSnap.data() : {};
+      const count = d.fday === jour ? (d.fcount || 0) : 0;
+      if (count >= 10) return { blocked: "quota" };
+      t.set(qRef, { fday: jour, fcount: count + 1 }, { merge: true });
+      /* Nouveau jour : on repart de zero sur les deux enveloppes, sinon
+         l'increment s'ajouterait a hier. */
+      const patch = { jour: jour };
+      if (gd.jour !== jour) { patch.frigo = 0; patch.frigoContrib = 0; patch[champGlobal] = 1; }
+      else patch[champGlobal] = FieldValue.increment(1);
+      t.set(gRef, patch, { merge: true });
+      return { blocked: null };
     });
-    if (quota.blocked) return { ok: false, reason: "quota" };
+    if (quota.blocked) return { ok: false, reason: quota.blocked };
 
     const Anthropic = chargerAnthropic();
     const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });

@@ -993,6 +993,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <div class="t-section" style="flex-shrink:0;white-space:nowrap">Boissons</div>
         <div class="sec-count" id="sd-drink-count" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
         <div id="sd-add-drink" onclick="openAddDrinkToStore()" role="button" tabindex="0" aria-label="Ajouter une boisson à ce magasin" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openAddDrinkToStore();}" style="flex-shrink:0;display:inline-flex;align-items:center;gap:5px;padding:0 13px;height:34px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> Ajouter</div>
+        <div id="sd-frigo-contrib" onclick="scanFridgeStart()" role="button" tabindex="0" aria-label="Scanner le frigo de ce magasin" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();scanFridgeStart();}" style="display:none;flex-shrink:0;align-items:center;gap:5px;padding:0 13px;height:34px;border-radius:999px;background:var(--bg2);color:var(--s1);border:1.5px solid var(--border);font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2.5" width="14" height="19" rx="2.5"/><path d="M5 10h14M8.5 6.2v1.6M8.5 13.5v3"/></svg> Scanner le frigo</div>
       </div>
       <div id="sd-drink-list"></div>
       <div id="sd-admin-tools" style="display:none">
@@ -2546,7 +2547,28 @@ window.fbLoadLeaderboard = async function() {
 };
 
 // Ajouter un signalement dans Firebase
+/* Relit UNIQUEMENT pointsPreuves. Le score complet arrive par fbUserStatsLoaded
+   au demarrage ; ici on veut juste savoir, quelques secondes apres une
+   contribution, si le serveur l'a creditee — c'est ce qui ouvre le scan de
+   frigo, et la personne ne doit pas avoir a recharger la page pour le voir. */
+window.fbRafraichirPreuves = async function(essai) {
+  essai = essai || 0;
+  try {
+    var u = auth.currentUser; if (!u || u.isAnonymous) return;
+    var snap = await getDoc(userDocRef(u.uid));
+    var d = snap.exists() ? (snap.data() || {}) : {};
+    var preuves = Number(d.pointsPreuves) || 0;
+    if (window.userStats) window.userStats.pointsPreuves = preuves;
+    if (window.majBoutonFrigoContrib) window.majBoutonFrigoContrib();
+    /* Le declencheur serveur qui credite demarre parfois a froid : 5 a 10 s.
+       Si rien n'est encore credite, on revient voir — trois fois, puis on
+       laisse le prochain demarrage de l'app faire le reste. */
+    if (preuves < 1 && essai < 3) setTimeout(function(){ window.fbRafraichirPreuves(essai + 1); }, [7000, 12000, 20000][essai]);
+  } catch (e) {}
+};
 window.fbAddReport = async function(storeId, drinkId, type, plus) {
+  // Le credit est asynchrone (declencheur Firestore) : on relit dans 5 s, puis on insiste.
+  setTimeout(function(){ try { window.fbRafraichirPreuves(0); } catch (e) {} }, 5000);
   try {
     var uid = null;
     try { var u = await ensureAuthed(); uid = u && u.uid; } catch(e) {}
@@ -3676,8 +3698,15 @@ window.fbIdentifyFridge = async function(imageDataUrl, storeId) {
     return (res && res.data) || { ok: false, reason: "no-response" };
   } catch (e) {
     var code = String((e && e.code) || "");
-    if (/not-found|unimplemented|internal/.test(code)) return { ok: false, reason: "not-deployed" };
-    return { ok: false, reason: code || String((e && e.message) || e) };
+    /* « internal » etait range avec « pas deployee » : une panne de l'analyse
+       s'affichait comme « fonction pas encore deployee », alors que le
+       contributeur venait de consommer un scan. Seules not-found et
+       unimplemented signifient vraiment que la fonction n'existe pas. */
+    if (/not-found|unimplemented/.test(code)) return { ok: false, reason: "not-deployed" };
+    /* Le serveur dit POURQUOI il refuse (« connecte-toi », « fais d'abord une
+       contribution », « il faut le pass ») : on transmet sa phrase telle
+       quelle, l'app n'a pas a la deviner. */
+    return { ok: false, reason: code || String((e && e.message) || e), message: String((e && e.message) || "") };
   }
 };
 window.fbConfirmAiDrink = async function(discoveryId) {
@@ -13649,6 +13678,7 @@ function openStoreDetail(storeId){
   try{enrichStoreHours(s);}catch(e){}
   var admTools=document.getElementById("sd-admin-tools");
   if(admTools)admTools.style.display=isAdmin?"block":"none";
+  try{majBoutonFrigoContrib();}catch(e){}
   /* Le commerçant proprietaire (champ owner, pose a la certification) gere
      SON magasin : remplir le rayon, corriger ses horaires. Il n'a ni la
      certification ni la suppression — ces pouvoirs-la restent a l'admin.
@@ -13825,7 +13855,9 @@ function scanFridgeStart(){
       window.fbIdentifyFridge(data, (curStoreDetail&&(curStoreDetail.fbId||curStoreDetail.id))||"").then(function(res){
         if(!res||!res.ok){
           var msg=res&&res.reason==="quota"?"Quota du jour atteint (10 frigos)":
+                  res&&res.reason==="quota-global"?"L'app a atteint son quota de frigos pour aujourd'hui — reviens demain":
                   res&&res.reason==="not-deployed"?"Fonction identifyFridge pas encore déployée":
+                  res&&res.message?res.message:
                   "Analyse impossible — réessaie";
           toast(msg);playSound("err");return;
         }
@@ -14068,6 +14100,10 @@ function renderStoreMission(){
     prog;
 }
 function renderStoreDetail(){
+  // L'etat gerant (chargerMesMagasins) et l'etat admin peuvent arriver apres
+  // l'ouverture de la fiche : le bouton contributeur doit alors se retirer
+  // pour ne pas doubler celui du gerant ou de l'admin.
+  try{majBoutonFrigoContrib();}catch(e){}
   var s=curStoreDetail;if(!s)return;
   document.getElementById("sd-emoji").innerHTML=storeIconHTML(s);
   document.getElementById("sd-name").textContent=s.name;
@@ -14272,6 +14308,24 @@ function passOuvre(st,niveau){
   if(niveau==="complet")return p==="complet";
   return false;
 }
+/* LE SCAN DE FRIGO POUR LES CONTRIBUTEURS. Le bouton s'affiche a qui a un
+   compte connecte et au moins une contribution creditee — la meme regle que
+   le serveur applique, lui, pour de vrai (identifyFridge). Ceci n'est qu'un
+   confort d'affichage : un bouton qui echoue est pire qu'un bouton absent.
+   L'administrateur et le gerant avec pass ont deja le leur, on ne double pas. */
+function contributeurPeutScannerFrigo(){
+  try{
+    var u=window._fbUser;
+    if(!u||u.isAnonymous)return false;
+    return (Number(userStats.pointsPreuves)||0)>=1;
+  }catch(e){return false;}
+}
+function majBoutonFrigoContrib(){
+  var b=document.getElementById("sd-frigo-contrib"); if(!b)return;
+  var st=window.curStoreDetail||null;
+  var dejaUnBouton=(window.isAdmin===true)||(st&&passOuvre(st,"frigo"));
+  b.style.display=(!dejaUnBouton&&contributeurPeutScannerFrigo())?"inline-flex":"none";
+}
 /* L'ANNONCE, telle que la voit un VISITEUR.
    Elle porte toujours l'etiquette « Annonce du commercant ». Ce n'est pas une
    politesse : sans elle, une phrase ecrite par un gerant se lirait comme un
@@ -14332,7 +14386,9 @@ function rendrePass(st){
     suite="Le pass complet ajoute une annonce sur ta fiche. Il s'accorde à la main pour l'instant.";
   }else{
     titre="Aucun pass";
-    corps="Le scan de frigo demande le pass frigo.";
+    corps=(typeof contributeurPeutScannerFrigo==="function"&&contributeurPeutScannerFrigo())
+      ?"Tu peux d\u00E9j\u00E0 scanner les frigos comme contributeur. Le pass ajoute la signature de tes boissons."
+      :"Le scan de frigo s'ouvre avec le pass frigo, ou apr\u00E8s une premi\u00E8re contribution cr\u00E9dit\u00E9e.";
     suite="Ecris-nous depuis les reglages pour l'activer.";
   }
   hote.innerHTML=
@@ -22179,6 +22235,11 @@ try{
        interdisent au client de l'ecrire. On l'adopte tel quel (pas de max :
        une sanction peut etre levee par un admin, elle doit pouvoir baisser). */
     userStats.penalty=Number(d.penalty)||0;
+    /* pointsPreuves vient du serveur et de lui seul : c'est ce qui ouvre le
+       scan de frigo aux contributeurs. Le serveur retranche de toute facon ;
+       ici on ne decide que d'afficher ou non le bouton. */
+    userStats.pointsPreuves=Number(d.pointsPreuves)||0;
+    try{majBoutonFrigoContrib();}catch(e){}
     /* Le serveur a-t-il deja deduit la sanction du champ points ? Il l'a fait
        si le profil porte pointsHerites (ecrit une seule fois, a la bascule). */
     userStats.penaliteDejaDeduite=(d.pointsHerites!==undefined);
@@ -22326,6 +22387,7 @@ try{
   // ceci ne fait qu'afficher ou cacher le menu
   window.addEventListener("fbAdminChecked", function(e) {
     isAdmin=e.detail===true;
+    try{if(typeof majBoutonFrigoContrib==="function")majBoutonFrigoContrib();}catch(err){}
     var row=document.getElementById("admin-row");
     if(row)row.style.display=isAdmin?"flex":"none";
     var sec=document.getElementById("admin-section");
