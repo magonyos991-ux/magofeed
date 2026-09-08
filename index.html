@@ -6239,9 +6239,16 @@ function ensurePickerMap(cb){
    toute la communaute et immediatement selectionnable. */
 var addStorePos=null;
 var addStorePlacing=false;
-function openAddStoreForm(){
-  var el=document.getElementById("store-picker-list");if(!el)return;
-  addStorePos=userLat?{lat:userLat,lng:userLng,src:"gps"}:null;
+/* Le formulaire « Nouveau magasin ». Il vivait uniquement dans le panneau de
+   l'ancien selecteur (#store-picker-list) — or ce panneau n'est plus jamais
+   ouvert depuis la carte, si bien que « + Magasin » y ecrivait un formulaire
+   que personne ne voyait. Il accepte donc son conteneur, et la position de
+   depart : depuis la carte, c'est le CENTRE de ce qu'on regarde, pas le GPS.
+   Quelqu'un qui regarde Paris depuis Bruxelles veut ajouter un magasin a
+   Paris. */
+function openAddStoreForm(cible,posInitiale){
+  var el=cible||document.getElementById("store-picker-list");if(!el)return;
+  addStorePos=posInitiale||(userLat?{lat:userLat,lng:userLng,src:"gps"}:null);
   addStorePlacing=false;
   var q=(document.getElementById("store-picker-q")||{}).value||"";
   el.innerHTML='<div style="padding:4px 2px">'+
@@ -6270,21 +6277,42 @@ function openAddStoreForm(){
   });
   tEl.dataset.emoji=types[0][0];tEl.dataset.type=types[0][1];
   renderAddStorePos();
-  document.getElementById("add-store-cancel").onclick=function(){addStorePlacing=false;renderStorePicker();};
   document.getElementById("add-store-save").onclick=saveNewStore;
   var cancelBtn=document.getElementById("add-store-cancel");
   if(cancelBtn)cancelBtn.onclick=function(){
     addStorePos=null;addStorePlacing=false;
-    if(window._addStoreDraft&&window._pickerMarkers){try{window._pickerMarkers.removeLayer(window._addStoreDraft);}catch(e){}window._addStoreDraft=null;}
+    _retirerBrouillonMagasin();
+    playSound("pop");
+    if(window._addStoreSurExplore){exploreFermerAjout();return;}
     var q=document.getElementById("store-picker-q");if(q)q.value="";
-    renderStorePicker();playSound("pop");
+    renderStorePicker();
   };
+}
+/* Le pin provisoire vit sur la couche de la carte qui est ouverte : celle de
+   l'ancien selecteur, ou celle de la carte principale. */
+function _coucheBrouillon(){ return window._addStoreLayer||window._pickerMarkers||null; }
+function _retirerBrouillonMagasin(){
+  var c=_coucheBrouillon();
+  if(window._addStoreDraft&&c){try{c.removeLayer(window._addStoreDraft);}catch(e){}}
+  window._addStoreDraft=null;
+}
+function _poserBrouillonMagasin(lat,lng,message){
+  var c=_coucheBrouillon();
+  if(!c||!window.L)return;
+  _retirerBrouillonMagasin();
+  window._addStoreDraft=L.circleMarker([lat,lng],{radius:9,color:"#fff",weight:2,fillColor:"#c69a57",fillOpacity:1}).addTo(c);
+  // autoPan:false — sinon Leaflet DEPLACE la carte pour faire tenir la bulle,
+  // et le pin qu'on vient de poser glisse sous le doigt (~170 m mesures).
+  // On a tape ici : la carte reste ici.
+  if(message)window._addStoreDraft.bindPopup(message,{autoPan:false}).openPopup();
 }
 function renderAddStorePos(){
   var el=document.getElementById("add-store-pos");if(!el)return;
   var html="";
   if(addStorePos){
-    html="Position : "+(addStorePos.src==="gps"?"ta position GPS actuelle":"choisie sur la carte")+" \u2713";
+    html="Position : "+(addStorePos.src==="gps"?"ta position GPS actuelle \u2713"
+                       :addStorePos.src==="centre"?"le centre de la carte \u2014 <b>tape sur la carte</b> pour la d\u00E9placer"
+                       :"choisie sur la carte \u2713");
     // Adresse + numero recuperes AUTOMATIQUEMENT (une seule fois par position).
     var addrInput=document.getElementById("add-store-address");
     if(addStorePos.address){
@@ -6311,7 +6339,8 @@ function renderAddStorePos(){
   var pl=document.getElementById("add-store-place");
   if(pl)pl.onclick=function(){
     addStorePlacing=true;
-    if(!pickerMapOn)toggleStorePickerMap();
+    // Depuis la carte principale, la carte est deja la : rien a ouvrir.
+    if(!pickerMapOn&&!window._addStoreSurExplore)toggleStorePickerMap();
     renderAddStorePos();
     toast("Tape sur la carte \u00E0 l'emplacement exact du magasin");
   };
@@ -6323,11 +6352,7 @@ function onPickerMapClick(latlng){
   // doublons de magasins). Le pin definitif n'existe qu'apres "Creer".
   addStorePos={lat:latlng.lat,lng:latlng.lng,src:"map"};
   addStorePlacing=false;
-  if(window._pickerMarkers&&window.L){
-    if(window._addStoreDraft){try{window._pickerMarkers.removeLayer(window._addStoreDraft);}catch(e){}}
-    window._addStoreDraft=L.circleMarker([latlng.lat,latlng.lng],{radius:9,color:"#fff",weight:2,fillColor:"#c69a57",fillOpacity:1}).addTo(window._pickerMarkers);
-    window._addStoreDraft.bindPopup("Ici ? Re-tape ailleurs pour d\u00e9placer").openPopup();
-  }
+  _poserBrouillonMagasin(latlng.lat,latlng.lng,"Ici ? Re-tape ailleurs pour d\u00e9placer");
   renderAddStorePos();
   playSound("pop");
 }
@@ -6365,7 +6390,7 @@ function saveNewStore(){
   var createBtn=document.getElementById("add-store-save");
   if(createBtn){createBtn.disabled=true;createBtn.textContent="Enregistrement\u2026";}
   var finishOk=function(){
-    if(window._addStoreDraft&&window._pickerMarkers){try{window._pickerMarkers.removeLayer(window._addStoreDraft);}catch(e){}window._addStoreDraft=null;}
+    _retirerBrouillonMagasin();
     addStorePos=null;
     STORES.push(s);
     if(window.fbTouchCache)window.fbTouchCache();
@@ -6375,6 +6400,14 @@ function saveNewStore(){
     /* On laisse passer le message de creation avant d'ouvrir la fiche de
        relecture : toast() ne reinitialise pas sa minuterie, donc le message
        du rattachement serait masque en avance par celui de la creation. */
+    if(window._addStoreSurExplore){
+      /* Cree depuis la carte : on y reste, et le nouveau pin apparait a
+         l'endroit exact ou on l'a pose — c'est ca, la confirmation. */
+      exploreFermerAjout();
+      try{exploreLoadStores(true);}catch(e){}
+      if(lastScanContext){setTimeout(function(){tagScanToStore(s);},600);}
+      return;
+    }
     if(lastScanContext){closeStorePicker();setTimeout(function(){tagScanToStore(s);},600);}
     else{renderStorePicker();}
   };
@@ -15912,18 +15945,73 @@ function exploreCloseNearBar(){
   bar.classList.remove("in");
   setTimeout(function(){ if(bar.parentNode)bar.remove(); },200);
 }
+/* « + Magasin » depuis la carte. Ce que ca faisait : rappeler openStorePicker(),
+   qui ROUVRAIT la carte — donc la recentrait sur le GPS (quelqu'un qui regarde
+   Paris se retrouvait a Bruxelles) — puis ecrivait le formulaire dans le
+   panneau de l'ancien selecteur, qui est cache. La carte sautait, un bandeau
+   « touche le magasin » s'affichait, et aucun formulaire n'apparaissait.
+   Maintenant : la carte ne bouge pas. Un tiroir s'ouvre par-dessus, le pin
+   provisoire nait au CENTRE de ce qu'on regarde, chaque tap sur la carte le
+   deplace, et l'adresse se remplit toute seule depuis la position. */
 function exploreAddStore(){
-  if(exploreFilter&&typeof drinkLocate==="function"){drinkLocate();return;}
-  // Ancien bug : openAddStoreForm() écrivait dans le panneau du sélecteur qui
-  // n'était PAS ouvert depuis la carte -> le bouton "+ Magasin" ne faisait rien.
-  // On ouvre donc le sélecteur PUIS le formulaire d'ajout, tout de suite visible.
-  if(typeof openStorePicker==="function"&&typeof openAddStoreForm==="function"){
-    openStorePicker();
-    setTimeout(function(){try{openAddStoreForm();}catch(e){}},70);
+  if(exploreMap&&typeof openAddStoreForm==="function"){
+    // Carte ouverte pour une boisson precise : le magasin cree lui sera
+    // rattache juste apres, comme si on l'avait designe.
+    if(exploreFilter&&exploreFilter.drinkId!=null)lastScanContext={drinkId:exploreFilter.drinkId,from:"carte"};
+    exploreOuvrirAjout();
     return;
   }
   if(typeof openAddStoreForm==="function"){openAddStoreForm();return;}
   toast("Ajout indisponible pour le moment");
+}
+function exploreOuvrirAjout(){
+  var host=document.getElementById("explore-map-host");if(!host||!exploreMap)return;
+  if(document.getElementById("explore-add-sheet"))return;   // deja ouvert
+  window._addStoreSurExplore=true;
+  try{fermerMenuPin();}catch(e){}
+  try{exploreHideCard();}catch(e){}
+  // Ce qui encombrerait le tiroir : les boutons flottants, la liste des
+  // magasins, le bandeau du mode « designe un magasin ».
+  ["explore-add-fab","explore-recenter-fab","explore-sheet","choix-magasin-bandeau"].forEach(function(id){
+    var el=document.getElementById(id);if(!el)return;
+    el.dataset.affichageAvant=el.style.display||"";
+    el.style.display="none";
+  });
+  var sheet=document.createElement("div");
+  sheet.id="explore-add-sheet";
+  sheet.innerHTML='<div id="explore-add-grip"></div>'+
+    '<div id="explore-add-hint">Le pin est au centre de la carte \u2014 tape sur la carte pour le placer sur le magasin.</div>'+
+    '<div id="explore-add-body"></div>';
+  host.appendChild(sheet);
+  // Couche dediee au pin provisoire, sur LA carte qu'on regarde.
+  if(!window._addStoreLayer){window._addStoreLayer=L.layerGroup();}
+  try{window._addStoreLayer.addTo(exploreMap);}catch(e){}
+  var c=exploreMap.getCenter();
+  openAddStoreForm(document.getElementById("explore-add-body"),{lat:c.lat,lng:c.lng,src:"centre"});
+  _poserBrouillonMagasin(c.lat,c.lng,null);
+  // Chaque tap sur la carte deplace le pin. On n'utilise pas le "click" deja
+  // pose (exploreHideCard) : le sien referme la bandelette, le notre place.
+  if(!window._exploreAddClickPose){
+    window._exploreAddClickPose=true;
+    exploreMap.on("click",function(e){ if(window._addStoreSurExplore)onPickerMapClick(e.latlng); });
+  }
+  requestAnimationFrame(function(){sheet.classList.add("in");});
+  setTimeout(function(){try{var n=document.getElementById("add-store-name");if(n)n.focus();}catch(e){}},380);
+  playSound("pop");
+}
+function exploreFermerAjout(){
+  window._addStoreSurExplore=false;
+  addStorePlacing=false;
+  _retirerBrouillonMagasin();
+  try{if(window._addStoreLayer&&exploreMap)exploreMap.removeLayer(window._addStoreLayer);}catch(e){}
+  var sheet=document.getElementById("explore-add-sheet");
+  if(sheet){sheet.classList.remove("in");setTimeout(function(){if(sheet.parentNode)sheet.remove();},260);}
+  ["explore-add-fab","explore-recenter-fab","explore-sheet","choix-magasin-bandeau"].forEach(function(id){
+    var el=document.getElementById(id);if(!el)return;
+    el.style.display=el.dataset.affichageAvant||"";
+    delete el.dataset.affichageAvant;
+  });
+  try{_majBandeauChoix();}catch(e){}
 }
 function exploreToggleChip(name){
   window._exploreChips[name]=!window._exploreChips[name];
@@ -16506,6 +16594,7 @@ function exploreOpenSheetFull(){
   try{ setExploreSheet("max"); }catch(e){}
 }
 function closeExploreMap(){
+  if(window._addStoreSurExplore){ try{exploreFermerAjout();}catch(e){} addStorePos=null; }
   if(window._choixMagasin){ window._choixMagasin=false; try{_majBandeauChoix();}catch(e){} }
   clearRoute();
   // Les magasins bruts de la derniere zone visitee (jusqu'a ~2000 objets
@@ -20748,8 +20837,14 @@ function registerServiceWorker(){
     });
   }
   navigator.serviceWorker.register("sw.js").then(function(reg){
-    // Vérifie tout de suite s'il existe une version plus récente en ligne.
-    try{reg.update();}catch(e){}
+    /* Vérifie tout de suite s'il existe une version plus récente en ligne.
+       update() renvoie une PROMESSE : le try/catch n'attrapait pas son rejet.
+       Sur un réseau qui flanche pendant la seconde de démarrage — un magasin,
+       un sous-sol — la vérification échouait, la promesse était rejetée sans
+       gestionnaire, et l'écran de plantage « L'appli n'a pas réussi à
+       démarrer » recouvrait une app qui marchait très bien. Une mise à jour
+       qu'on ne peut pas vérifier maintenant se vérifiera la prochaine fois. */
+    try{var p=reg.update();if(p&&p.catch)p.catch(function(){});}catch(e){}
   }).catch(function(e){console.warn("SW registration failed:",e);});
   setTimeout(function(){try{handleDeepLink();}catch(e){}},400);
   /* Un lien de parrainage a pu amener ici : on retient le code et on le
