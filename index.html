@@ -6663,7 +6663,7 @@ function renderAddStorePos(){
   var html="";
   if(addStorePos){
     html="Position : "+(addStorePos.src==="gps"?"ta position GPS actuelle \u2713"
-                       :addStorePos.src==="centre"?"le centre de la carte \u2014 <b>tape sur la carte</b> pour la d\u00E9placer"
+                       :addStorePos.src==="centre"?"le centre de la carte \u2014 <b>d\u00E9place la carte</b> pour l'ajuster"
                        :"choisie sur la carte \u2713");
     // Adresse + numero recuperes AUTOMATIQUEMENT (une seule fois par position).
     var addrInput=document.getElementById("add-store-address");
@@ -6704,7 +6704,7 @@ function onPickerMapClick(latlng){
   // doublons de magasins). Le pin definitif n'existe qu'apres "Creer".
   addStorePos={lat:latlng.lat,lng:latlng.lng,src:"map"};
   addStorePlacing=false;
-  _poserBrouillonMagasin(latlng.lat,latlng.lng,"Ici ? Re-tape ailleurs pour d\u00e9placer");
+  _poserBrouillonMagasin(latlng.lat,latlng.lng,window._addStoreSurExplore?null:"Ici ? Re-tape ailleurs pour d\u00e9placer");
   renderAddStorePos();
   playSound("pop");
 }
@@ -16493,7 +16493,7 @@ function exploreOuvrirAjout(){
   var sheet=document.createElement("div");
   sheet.id="explore-add-sheet";
   sheet.innerHTML='<div id="explore-add-grip"></div>'+
-    '<div id="explore-add-hint">Le pin est au centre de la carte \u2014 tape sur la carte pour le placer sur le magasin.</div>'+
+    '<div id="explore-add-hint">D\u00E9place la carte : le pin reste au centre. Pour viser au m\u00E8tre pr\u00E8s, \u00AB Pointer sur la carte \u00BB puis tape.</div>'+
     '<div id="explore-add-body"></div>';
   host.appendChild(sheet);
   // Couche dediee au pin provisoire, sur LA carte qu'on regarde.
@@ -16506,7 +16506,29 @@ function exploreOuvrirAjout(){
   // pose (exploreHideCard) : le sien referme la bandelette, le notre place.
   if(!window._exploreAddClickPose){
     window._exploreAddClickPose=true;
-    exploreMap.on("click",function(e){ if(window._addStoreSurExplore)onPickerMapClick(e.latlng); });
+    /* Un tap ne place le pin QU'EN MODE « Pointer sur la carte ». Avant, chaque
+       tap le deplacait : impossible d'explorer, le moindre contact posait le
+       pin la ou le doigt tombait. Ce qui est arrive : « je suis oblige d'etre
+       d'abord sur le point, et ensuite j'appuie sur + Magasin ». */
+    exploreMap.on("click",function(e){ if(window._addStoreSurExplore&&addStorePlacing)onPickerMapClick(e.latlng); });
+    /* Tant qu'il n'a pas ete pose au doigt, LE PIN SUIT LE CENTRE DE LA CARTE :
+       on deplace la carte, le pin reste au milieu, l'adresse se met a jour.
+       C'est le geste des applis de livraison — explorer, c'est choisir.
+       L'adresse n'est redemandee qu'apres 700 ms de calme : sans ca, chaque
+       fin de glissement partait interroger Nominatim. */
+    exploreMap.on("moveend",function(){
+      if(!window._addStoreSurExplore||!addStorePos||addStorePos.src!=="centre")return;
+      var c=exploreMap.getCenter();
+      if(window._addStoreDraft){try{window._addStoreDraft.setLatLng([c.lat,c.lng]);}catch(e){}}
+      else _poserBrouillonMagasin(c.lat,c.lng,null);
+      clearTimeout(window._addStoreSuitTimer);
+      window._addStoreSuitTimer=setTimeout(function(){
+        if(!window._addStoreSurExplore||!addStorePos||addStorePos.src!=="centre")return;
+        var c2=exploreMap.getCenter();
+        addStorePos={lat:c2.lat,lng:c2.lng,src:"centre"};   // objet neuf : les geocodages en retard sont ignores
+        renderAddStorePos();
+      },700);
+    });
   }
   requestAnimationFrame(function(){sheet.classList.add("in");});
   setTimeout(function(){try{var n=document.getElementById("add-store-name");if(n)n.focus();}catch(e){}},380);
@@ -16515,6 +16537,7 @@ function exploreOuvrirAjout(){
 function exploreFermerAjout(){
   window._addStoreSurExplore=false;
   addStorePlacing=false;
+  clearTimeout(window._addStoreSuitTimer);
   _retirerBrouillonMagasin();
   try{if(window._addStoreLayer&&exploreMap)exploreMap.removeLayer(window._addStoreLayer);}catch(e){}
   var sheet=document.getElementById("explore-add-sheet");
