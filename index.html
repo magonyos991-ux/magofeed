@@ -1532,6 +1532,9 @@ onAuthStateChanged(auth, async function(user) {
          robot d'apercu ne produit jamais, on cree le compte. */
       if (magoRobotProbable()) {
         window._magoCompteEnAttente = user.uid;
+        /* Si la personne a deja touche l'ecran pendant que Firebase reflechissait,
+           on ne l'attend pas une seconde fois. */
+        try { window.magoTenterCompteEnAttente(); } catch (e) {}
       } else {
         await setDoc(userDocRef(user.uid), {
           pseudo: String(localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
@@ -3128,18 +3131,29 @@ function magoRobotProbable() {
 /* LE RATTRAPAGE. Un vrai doigt sur un vrai ecran : aucun robot d'apercu ne
    produit ca. On n'ecoute qu'une seule fois, et seulement si la creation du
    compte avait ete refusee — sinon on ne fait rien du tout. */
+/* DEUX ORDRES POSSIBLES, ET IL FAUT LES DEUX. Le geste peut arriver AVANT que
+   Firebase ait rendu son verdict d'identite — quelqu'un qui touche l'ecran dans
+   la premiere seconde. Une premiere version retirait l'ecouteur des le premier
+   geste : si l'identite n'etait pas encore prete, le rattrapage se desarmait
+   dans le vide et la personne restait invisible pour de bon. On retient donc
+   qu'un humain s'est manifeste, et c'est le second arrive des deux qui declenche
+   la creation. */
+window._magoGesteHumain = false;
+window.magoTenterCompteEnAttente = function () {
+  if (!window._magoGesteHumain) return;
+  var uid = window._magoCompteEnAttente;
+  if (!uid || !window.fbCreerCompteEnAttente) return;
+  window._magoCompteEnAttente = null;      // avant l'appel : jamais deux fois
+  window.fbCreerCompteEnAttente(uid);
+};
 (function ecouterPremierGesteHumain(){
-  var fait = false;
   function humain() {
-    if (fait) return;
-    fait = true;
+    if (window._magoGesteHumain) return;
+    window._magoGesteHumain = true;
     ["touchstart", "pointerdown"].forEach(function (t) {
       try { window.removeEventListener(t, humain, true); } catch (e) {}
     });
-    var uid = window._magoCompteEnAttente;
-    if (!uid || !window.fbCreerCompteEnAttente) return;
-    window._magoCompteEnAttente = null;
-    window.fbCreerCompteEnAttente(uid);
+    window.magoTenterCompteEnAttente();
   }
   ["touchstart", "pointerdown"].forEach(function (t) {
     try { window.addEventListener(t, humain, { capture: true, passive: true }); } catch (e) {}
