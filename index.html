@@ -6106,6 +6106,10 @@ function _haloChoix(s){
 }
 function _majBandeauChoix(){
   var b=document.getElementById("choix-magasin-bandeau");
+  // Le contexte peut etre remis a zero pendant que la carte est ouverte
+  // (renderWhereFound(null) le fait). Un mode « designe » sans rien a designer
+  // laisserait le bandeau affiche et les pins morts : on en sort ici.
+  if(window._choixMagasin&&!lastScanContext)window._choixMagasin=false;
   if(!window._choixMagasin){ if(b)b.remove(); return; }
   var host=document.getElementById("explore-map-host");
   if(!host)return;
@@ -6122,7 +6126,14 @@ function _majBandeauChoix(){
 }
 function openStorePicker(){
   /* On garde le nom de la fonction : quatre endroits l'appellent, et tous
-     attendent la meme chose — que la personne designe un magasin. */
+     attendent la meme chose — que la personne designe un magasin.
+     SANS RIEN A DESIGNER, LE MODE N'EXISTE PAS. Il s'ouvrait quand meme :
+     bandeau « touche le magasin ou tu as vu cette boisson » alors qu'aucune
+     boisson n'etait ouverte, et pins morts — le tap appelait tagScanToStore,
+     qui rendait false en silence faute de contexte, et court-circuitait
+     l'itineraire. C'est ce que montrait la capture. Sans contexte : la carte,
+     normale, et rien d'autre. */
+  if(!lastScanContext){ window._choixMagasin=false; try{_majBandeauChoix();}catch(e){} try{openExploreMap({});}catch(e){} return; }
   window._choixMagasin=true;
   try{ window._choixBoisson=(lastScanContext&&lastScanContext.drinkId!=null)
         ? DRINKS.find(function(d){return Number(d.id)===Number(lastScanContext.drinkId);}) : null; }catch(e){ window._choixBoisson=null; }
@@ -17183,7 +17194,12 @@ function exploreLoadStores(useCache){
         if(e&&e.originalEvent&&window.L&&L.DomEvent){try{L.DomEvent.stopPropagation(e.originalEvent);}catch(_e){}}
         if(window._pinMenuVientDeSOuvrir){window._pinMenuVientDeSOuvrir=false;return;} // l'appui long a deja agi
         // Mode « choisir un magasin » : toucher un pin le designe, point.
-        if(window._choixMagasin){ choisirCeMagasin(s); return; }
+        // Mais seulement s'il reste quelque chose a designer : sinon on sort
+        // du mode et le pin reprend son role normal, au lieu de ne rien faire.
+        if(window._choixMagasin){
+          if(lastScanContext){ choisirCeMagasin(s); return; }
+          window._choixMagasin=false; try{_majBandeauChoix();}catch(_e){}
+        }
         try{if(exploreMap.panTo)exploreMap.panTo([s.lat,s.lng]);}catch(_e){}
         // Clic sur un pin = tracer l'itineraire directement (le "traçage partout").
         showRouteToStore(s.lat,s.lng,s);
