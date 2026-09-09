@@ -96,6 +96,29 @@ async function exporter(motif) {
   return { dossier, operation: op.name };
 }
 
+/* « CALLER DOES NOT HAVE PERMISSION ». C'est le refus de Google Cloud, et il ne
+   dit ni QUI n'a pas le droit, ni SUR QUOI, ni comment le donner. Affiche tel
+   quel dans l'ecran d'administration, il ne servait a rien : la sauvegarde
+   etait rouge depuis des jours sans que personne puisse agir.
+
+   Exporter une base Firestore demande le role « Cloud Datastore Import Export
+   Admin » sur le compte de service qui execute la fonction. Les projets crees
+   depuis 2024 ne le donnent plus par defaut — le code etait juste, la
+   permission manquait, et rien ne le disait.
+
+   On traduit donc le refus en instruction. Un message d'erreur qui ne dit pas
+   quoi faire ne vaut guere mieux que pas de message du tout. */
+function expliquer(e) {
+  const brut = String((e && e.message) || e || "");
+  const refus = /permission|PERMISSION_DENIED|does not have|IAM/i.test(brut);
+  if (!refus) return brut.slice(0, 300);
+  const projet = PROJET || "le projet";
+  return "Permission manquante pour exporter la base. Donne le role « Cloud " +
+    "Datastore Import Export Admin » au compte de service des fonctions, dans " +
+    "la console Google Cloud du projet " + projet + " (IAM). Message d'origine : " +
+    brut.slice(0, 150);
+}
+
 /* Journal des sauvegardes, lisible depuis l'app par l'administrateur : sans
    trace visible, une sauvegarde qui echoue en silence donne un faux
    sentiment de securite — le pire des deux mondes. */
@@ -128,7 +151,7 @@ async function verifierPrecedente() {
     if (!op || !op.done) return;                    // encore en cours : on attend
     await db.collection("_meta").doc("sauvegardes").set({
       derniere: Object.assign({}, prec, op.error
-        ? { etat: "echec-confirme", erreur: String(op.error.message || "").slice(0, 300) }
+        ? { etat: "echec-confirme", erreur: expliquer(op.error) }
         : { etat: "reussie", finiLe: new Date().toISOString() })
     }, { merge: true });
     console.log("sauvegarde precedente :", op.error ? "ECHOUEE" : "reussie");
@@ -146,7 +169,7 @@ exports.sauvegardeQuotidienne = onSchedule(
                     etat: "lancee", motif: "automatique" });
     } catch (e) {
       console.error("SAUVEGARDE ECHOUEE:", e && e.message);
-      await noter({ quand: new Date().toISOString(), etat: "echec", erreur: String(e && e.message).slice(0, 300), motif: "automatique" });
+      await noter({ quand: new Date().toISOString(), etat: "echec", erreur: expliquer(e), motif: "automatique" });
       throw e;   // pour que la nouvelle tentative se declenche
     }
   }
@@ -162,7 +185,16 @@ exports.sauvegarderMaintenant = onCall(
     const adm = await db.collection("admins").doc(uid).get();
     if (!adm.exists) throw new HttpsError("permission-denied", "Réservé à l'administrateur.");
     await verifierPrecedente();
-    const r = await exporter("manuelle");
+    let r;
+    try {
+      r = await exporter("manuelle");
+    } catch (e) {
+      /* L'echec est note AVANT d'etre relance : sinon un clic rate ne laissait
+         aucune trace, et l'ecran continuait d'afficher l'etat d'avant. */
+      const dit = expliquer(e);
+      await noter({ quand: new Date().toISOString(), etat: "echec", erreur: dit, motif: "manuelle", par: uid });
+      throw new HttpsError("failed-precondition", dit);
+    }
     await noter({ quand: new Date().toISOString(), dossier: r.dossier, operation: r.operation,
                   etat: "lancee", motif: "manuelle", par: uid });
     return { dossier: r.dossier };
