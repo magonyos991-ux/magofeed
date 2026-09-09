@@ -1275,10 +1275,29 @@ window.fbSyncUserStats = function(stats) {
        rejete : le pseudo, l'avatar et les favoris cesseraient de se
        synchroniser avec lui. Le score officiel est calcule par le serveur a
        partir des contributions reellement enregistrees. */
+    /* Derniers gestes PUBLICS : cinq lignes, sans coordonnee — le nom de la
+       boisson et celui du magasin, rien de plus. C'est ce que le profil
+       public montre sous « Ses derniers gestes ». Le jour est celui du geste,
+       pas celui de la synchro. */
+    var recent = [];
+    try {
+      var typeMap = { stock: "confirm", rupture: "rupture", contrefacon: "rupture", nouveau: "disc", scan: "scan" };
+      var auj = new Date(), jourAuj = auj.getFullYear() + "-" + String(auj.getMonth() + 1).padStart(2, "0") + "-" + String(auj.getDate()).padStart(2, "0");
+      (stats.activity || []).slice(0, 5).forEach(function(a) {
+        if (!a || !typeMap[a.type]) return;
+        recent.push({
+          t: typeMap[a.type],
+          d: String((a.drink && a.drink.name) || "").slice(0, 40),
+          s: String((a.store && a.store.name) || "").slice(0, 40),
+          j: String(a.day || jourAuj).slice(0, 10)
+        });
+      });
+    } catch (e) { recent = []; }
     setDoc(userDocRef(user.uid), {
       pseudo: String(localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
       avatar: av,
       favs: favIds,
+      recent: recent,
       signals: stats.signals || 0,
       confirms: stats.confirms || 0,
       discAccepted: stats.discAccepted || 0,
@@ -1460,10 +1479,13 @@ window._fbAuthReady = new Promise(function(res) { _authReadyResolve = res; });
 onAuthStateChanged(auth, async function(user) {
   if (_authReadyResolve) { _authReadyResolve(); _authReadyResolve = null; }
   if (!user) {
+    // Deconnexion : l'ecouteur des conversations ne doit pas survivre au compte.
+    try { window.fbArreterMessagerie(); } catch (e) {}
     signInAnonymously(auth).catch(function(e) { console.warn("Firebase anonymous sign-in error (active le provider Anonyme dans la console Firebase) :", e); });
     return;
   }
   window._fbUser = user;
+  try { window.fbDemarrerMessagerie(); } catch (e) {}
   /* Mes boutiques certifiees : lecture unique, dans un document prive. Elle
      remplace l'ancien champ public 'owner'. Un compte anonyme n'en a jamais. */
   try { if (!user.isAnonymous && window.chargerMesMagasins) window.chargerMesMagasins(); } catch (e) {}
@@ -2369,6 +2391,263 @@ window.fbLoadUser = async function(uid) {
     var s = await getDoc(doc(db, "users", String(uid)));
     return s.exists() ? Object.assign({ uid: String(uid) }, s.data()) : null;
   } catch (e) { console.warn("Load user error:", e); return null; }
+};
+
+/* ============================================================================
+   MESSAGERIE — plan Spark, aucune fonction serveur.
+   ----------------------------------------------------------------------------
+   Tout ce que le client ecrit est contraint par les regles Firestore : deux
+   membres tries dans `members`, un identifiant de conversation derive des
+   deux uid (fbConvId), un seul message tant que la demande n'est pas
+   acceptee, et un rythme minimal entre deux envois. Ici on se contente
+   d'ecrire EXACTEMENT ce que les regles attendent — les horodatages sont
+   toujours serverTimestamp(), jamais l'heure du telephone.
+
+   AUCUNE ERREUR NE REMONTE A L'INTERFACE SOUS FORME D'EXCEPTION : chaque
+   fonction repond {ok:false, reason} et l'ecran explique. Le cas le plus
+   important est permission-denied : tant que les regles ne sont pas
+   deployees, la messagerie doit dire « pas encore activee », pas planter.
+   ============================================================================ */
+function _msgUid() { var u = auth.currentUser; return u ? u.uid : null; }
+function _msgErreur(e) {
+  var c = String((e && (e.code || e.message)) || e || "");
+  if (/permission-denied|PERMISSION_DENIED|Missing or insufficient/i.test(c)) return { ok: false, reason: "permission-denied" };
+  if (!navigator.onLine || /unavailable|network|offline|deadline/i.test(c)) return { ok: false, reason: "offline" };
+  if (/failed-precondition/i.test(c)) return { ok: false, reason: "index" };
+  console.warn("Messagerie :", c);
+  return { ok: false, reason: c.slice(0, 80) || "unknown" };
+}
+window.fbConvId = function(a, b) { return [String(a), String(b)].sort().join("_"); };
+
+/* Cache des conversations vues par l'ecouteur : evite une lecture par envoi
+   pour connaitre l'etat (request/open) et l'autre membre. */
+var _convCache = {};
+var _blocsCache = null;   // { list:[uid...] }
+
+window.fbMesBlocs = async function(force) {
+  var me = _msgUid();
+  if (!me) return [];
+  if (_blocsCache && !force) return _blocsCache.list.slice();
+  try {
+    var loc = JSON.parse(localStorage.getItem("magoBlocs") || "null");
+    if (loc && loc.uid === me && Array.isArray(loc.list) && !force) {
+      _blocsCache = { list: loc.list };
+      // Rafraichissement en arriere-plan : le cache sert tout de suite.
+      window.fbMesBlocs(true).catch(function() {});
+      return loc.list.slice();
+    }
+  } catch (e) {}
+  try {
+    var s = await getDoc(doc(db, "blocks", me));
+    var list = (s.exists() && Array.isArray(s.data().list)) ? s.data().list.map(String) : [];
+    _blocsCache = { list: list };
+    try { localStorage.setItem("magoBlocs", JSON.stringify({ uid: me, list: list })); } catch (e) {}
+    window.dispatchEvent(new CustomEvent("fbBlocsChanged", { detail: list.slice() }));
+    return list.slice();
+  } catch (e) {
+    // Regles absentes ou hors ligne : on ne bloque personne par erreur.
+    return (_blocsCache && _blocsCache.list.slice()) || [];
+  }
+};
+window.fbBloquer = async function(uid, oui) {
+  var me = _msgUid();
+  if (!me || !uid || String(uid) === me) return { ok: false, reason: "invalid" };
+  uid = String(uid);
+  try {
+    var list = await window.fbMesBlocs(true);
+    if (oui && list.length >= 200 && list.indexOf(uid) === -1) return { ok: false, reason: "full" };
+    await setDoc(doc(db, "blocks", me), {
+      list: oui ? arrayUnion(uid) : arrayRemove(uid),
+      at: serverTimestamp()
+    }, { merge: true });
+    list = list.filter(function(x) { return x !== uid; });
+    if (oui) list.push(uid);
+    _blocsCache = { list: list };
+    try { localStorage.setItem("magoBlocs", JSON.stringify({ uid: me, list: list })); } catch (e) {}
+    window.dispatchEvent(new CustomEvent("fbBlocsChanged", { detail: list.slice() }));
+    return { ok: true, list: list.slice() };
+  } catch (e) { return _msgErreur(e); }
+};
+
+/* Cree la conversation si elle n'existe pas encore. Etat initial impose par
+   les regles : une demande, portee par celui qui ecrit le premier. */
+window.fbOuvrirConversation = async function(otherUid) {
+  var me = _msgUid();
+  if (!me) return { ok: false, reason: "auth" };
+  otherUid = String(otherUid || "");
+  if (!otherUid || otherUid === me) return { ok: false, reason: "invalid" };
+  var cid = window.fbConvId(me, otherUid);
+  try {
+    if (_convCache[cid]) return { ok: true, cid: cid, conv: _convCache[cid] };
+    var ref = doc(db, "conversations", cid);
+    var s = await getDoc(ref);
+    if (s.exists()) { var c = Object.assign({ cid: cid }, s.data()); _convCache[cid] = c; return { ok: true, cid: cid, conv: c }; }
+    var unread = {}; unread[me] = 0; unread[otherUid] = 0;
+    var neuf = {
+      members: [me, otherUid].sort(),
+      createdBy: me,
+      createdAt: serverTimestamp(),
+      state: "request",
+      requestBy: me,
+      reqCount: 0,
+      lastAt: serverTimestamp(),
+      unread: unread
+    };
+    await setDoc(ref, neuf);
+    var conv = Object.assign({ cid: cid }, neuf, { createdAt: Timestamp.now(), lastAt: Timestamp.now() });
+    _convCache[cid] = conv;
+    return { ok: true, cid: cid, conv: conv, created: true };
+  } catch (e) { return _msgErreur(e); }
+};
+
+/* Envoi = UN lot : le message + la mise a jour de l'en-tete de conversation
+   (dernier message, horodatage, non-lus de l'autre +1, compteur de demande).
+   Les deux ecritures reussissent ou echouent ensemble : jamais un message
+   orphelin ni une conversation qui annonce un message qui n'existe pas. */
+window.fbEnvoyerMessage = async function(cid, msg) {
+  var me = _msgUid();
+  if (!me) return { ok: false, reason: "auth" };
+  if (!cid || !msg || !msg.type) return { ok: false, reason: "invalid" };
+  var membres = String(cid).split("_");
+  var autre = membres[0] === me ? membres[1] : membres[0];
+  if (!autre || membres.indexOf(me) === -1) return { ok: false, reason: "invalid" };
+  try {
+    var blocs = await window.fbMesBlocs();
+    if (blocs.indexOf(autre) !== -1) return { ok: false, reason: "blocked" };
+    var conv = _convCache[cid];
+    if (!conv) {
+      var s = await getDoc(doc(db, "conversations", cid));
+      if (!s.exists()) return { ok: false, reason: "not-found" };
+      conv = Object.assign({ cid: cid }, s.data()); _convCache[cid] = conv;
+    }
+    if (conv.state === "declined") return { ok: false, reason: "declined" };
+    if (conv.state === "request") {
+      if (conv.requestBy !== me) return { ok: false, reason: "pending" };
+      if ((conv.reqCount || 0) >= 1) return { ok: false, reason: "pending" };
+    }
+    var m = { by: me, at: serverTimestamp(), type: String(msg.type) };
+    var apercu = "";
+    if (msg.type === "text") {
+      var t = String(msg.text || "").slice(0, 2000);
+      if (!t.trim()) return { ok: false, reason: "empty" };
+      m.text = t; apercu = t;
+    } else if (msg.type === "image") {
+      var img = String(msg.img || "");
+      if (img.indexOf("data:image/jpeg;base64,") !== 0) return { ok: false, reason: "invalid" };
+      if (img.length > 220000) return { ok: false, reason: "too-big" };
+      m.img = img; apercu = "Photo";
+    } else if (msg.type === "pos") {
+      if (typeof msg.lat !== "number" || typeof msg.lng !== "number") return { ok: false, reason: "invalid" };
+      m.lat = Math.round(msg.lat * 1000) / 1000; m.lng = Math.round(msg.lng * 1000) / 1000;
+      apercu = "Position";
+    } else if (msg.type === "spot") {
+      m.storeId = String(msg.storeId || "").slice(0, 80);
+      m.storeName = String(msg.storeName || "").slice(0, 60);
+      m.drinkId = (msg.drinkId == null) ? null : (typeof msg.drinkId === "number" ? msg.drinkId : String(msg.drinkId).slice(0, 40));
+      m.drinkName = String(msg.drinkName || "").slice(0, 60);
+      if (!m.storeId || !m.storeName || !m.drinkName) return { ok: false, reason: "invalid" };
+      apercu = m.drinkName + " chez " + m.storeName;
+    } else return { ok: false, reason: "invalid" };
+    var batch = writeBatch(db);
+    var mref = doc(collection(db, "conversations", cid, "messages"));
+    batch.set(mref, m);
+    var maj = {
+      lastAt: serverTimestamp(),
+      lastMsg: { by: me, type: m.type, text: apercu.slice(0, 80), at: serverTimestamp() }
+    };
+    maj["unread." + autre] = increment(1);
+    if (conv.state === "request") maj.reqCount = 1;
+    batch.update(doc(db, "conversations", cid), maj);
+    await batch.commit();
+    if (conv.state === "request") conv.reqCount = 1;
+    return { ok: true, mid: mref.id };
+  } catch (e) { return _msgErreur(e); }
+};
+window.fbMarquerLu = async function(cid) {
+  var me = _msgUid();
+  if (!me || !cid) return { ok: false, reason: "invalid" };
+  try {
+    var conv = _convCache[cid];
+    if (conv && conv.unread && !(conv.unread[me] > 0)) return { ok: true, skipped: true };
+    var maj = {}; maj["unread." + me] = 0;
+    await updateDoc(doc(db, "conversations", cid), maj);
+    if (conv && conv.unread) conv.unread[me] = 0;
+    return { ok: true };
+  } catch (e) { return _msgErreur(e); }
+};
+window.fbAccepterConversation = async function(cid, oui) {
+  var me = _msgUid();
+  if (!me || !cid) return { ok: false, reason: "invalid" };
+  try {
+    await updateDoc(doc(db, "conversations", cid), { state: oui ? "open" : "declined" });
+    if (_convCache[cid]) _convCache[cid].state = oui ? "open" : "declined";
+    return { ok: true };
+  } catch (e) { return _msgErreur(e); }
+};
+window.fbSupprimerMessage = async function(cid, mid) {
+  if (!cid || !mid) return { ok: false, reason: "invalid" };
+  try { await deleteDoc(doc(db, "conversations", cid, "messages", mid)); return { ok: true }; }
+  catch (e) { return _msgErreur(e); }
+};
+/* Mes conversations, en direct. cb(rows) a chaque changement ; cb(null, reason)
+   si la lecture est refusee. Renvoie la fonction d'arret. */
+window.fbMesConversations = function(cb) {
+  var me = _msgUid();
+  if (!me) { cb(null, "auth"); return function() {}; }
+  var q1 = query(collection(db, "conversations"), where("members", "array-contains", me), orderBy("lastAt", "desc"), limit(50));
+  return onSnapshot(q1, function(snap) {
+    var rows = [];
+    snap.forEach(function(d) {
+      var x = Object.assign({ cid: d.id }, d.data({ serverTimestamps: "estimate" }));
+      _convCache[d.id] = x;
+      rows.push(x);
+    });
+    cb(rows);
+  }, function(e) { cb(null, _msgErreur(e).reason); });
+};
+/* Le fil d'une conversation : les `limite` derniers messages, rendus dans
+   l'ordre chronologique. Les envois locaux apparaissent aussitot (horodatage
+   estime) sans attendre l'aller-retour serveur. */
+window.fbMessages = function(cid, cb, limite) {
+  if (!cid) { cb(null, "invalid"); return function() {}; }
+  var q1 = query(collection(db, "conversations", cid, "messages"), orderBy("at", "desc"), limit(limite || 60));
+  return onSnapshot(q1, function(snap) {
+    var rows = [];
+    snap.forEach(function(d) { rows.push(Object.assign({ mid: d.id, pending: d.metadata.hasPendingWrites }, d.data({ serverTimestamps: "estimate" }))); });
+    rows.reverse();
+    cb(rows);
+  }, function(e) { cb(null, _msgErreur(e).reason); });
+};
+
+/* L'ecouteur global des non-lus : demarre des que l'identite est connue et
+   que la personne a un pseudo, s'arrete a la deconnexion. L'etat est publie
+   au script classique par l'evenement fbConversations. */
+var _convUnsub = null, _convUid = null;
+window.fbMessagerie = { rows: null, err: null, unread: 0 };
+window.fbDemarrerMessagerie = function() {
+  var me = _msgUid();
+  if (!me) return;
+  if (_convUid === me && _convUnsub) return;
+  window.fbArreterMessagerie();
+  if (!localStorage.getItem("magopseudo")) return;
+  _convUid = me;
+  try {
+    _convUnsub = window.fbMesConversations(function(rows, err) {
+      var unread = 0;
+      (rows || []).forEach(function(r) { unread += (r.unread && r.unread[me] > 0) ? r.unread[me] : 0; });
+      window.fbMessagerie = { rows: rows, err: err || null, unread: unread, uid: me };
+      window.dispatchEvent(new CustomEvent("fbConversations", { detail: window.fbMessagerie }));
+    });
+  } catch (e) {
+    window.fbMessagerie = { rows: null, err: _msgErreur(e).reason, unread: 0, uid: me };
+    window.dispatchEvent(new CustomEvent("fbConversations", { detail: window.fbMessagerie }));
+  }
+  window.fbMesBlocs().catch(function() {});
+};
+window.fbArreterMessagerie = function() {
+  if (_convUnsub) { try { _convUnsub(); } catch (e) {} }
+  _convUnsub = null; _convUid = null; _convCache = {}; _blocsCache = null;
+  window.fbMessagerie = { rows: null, err: null, unread: 0 };
 };
 
 /* Avis des utilisateurs (note /5 + texte) : nourrit l'amélioration de l'app.
@@ -5061,7 +5340,7 @@ function report(type){
   userStats.pts+=pts[type];
   flyPts(pts[type]);
   bumpDaily(type==="scan"?"scans":"signals");
-  userStats.activity.unshift({type:type,drink:d,store:s,time:time,pts:pts[type]});
+  userStats.activity.unshift({type:type,drink:d,store:s,time:time,pts:pts[type],day:todayKey()});
   trackStoreContribution(s.fbId||s.id);
   // Firebase sync
   if(window.fbAddReport) window.fbAddReport(s.fbId||s.id, d.id, type, {note:_provenance("fiche",s)});
