@@ -2423,6 +2423,7 @@ window.fbConvId = function(a, b) { return [String(a), String(b)].sort().join("_"
    pour connaitre l'etat (request/open) et l'autre membre. */
 var _convCache = {};
 var _blocsCache = null;   // { list:[uid...] }
+var _dernierEnvoi = 0;
 
 window.fbMesBlocs = async function(force) {
   var me = _msgUid();
@@ -2543,11 +2544,17 @@ window.fbEnvoyerMessage = async function(cid, msg) {
     } else if (msg.type === "spot") {
       m.storeId = String(msg.storeId || "").slice(0, 80);
       m.storeName = String(msg.storeName || "").slice(0, 60);
-      m.drinkId = (msg.drinkId == null) ? null : (typeof msg.drinkId === "number" ? msg.drinkId : String(msg.drinkId).slice(0, 40));
+      // Une cle absente plutot que nulle : les regles n'acceptent que les
+      // types documentes, et null n'en fait pas partie.
+      if (msg.drinkId != null) m.drinkId = (typeof msg.drinkId === "number") ? msg.drinkId : String(msg.drinkId).slice(0, 40);
       m.drinkName = String(msg.drinkName || "").slice(0, 60);
       if (!m.storeId || !m.storeName || !m.drinkName) return { ok: false, reason: "invalid" };
       apercu = m.drinkName + " chez " + m.storeName;
     } else return { ok: false, reason: "invalid" };
+    /* Rythme impose par les regles : 700 ms entre deux messages. On attend
+       ici plutot que de laisser le serveur refuser un double tap. */
+    var attente = 800 - (Date.now() - _dernierEnvoi);
+    if (attente > 0) await new Promise(function(r) { setTimeout(r, attente); });
     var batch = writeBatch(db);
     var mref = doc(collection(db, "conversations", cid, "messages"));
     batch.set(mref, m);
@@ -2559,9 +2566,17 @@ window.fbEnvoyerMessage = async function(cid, msg) {
     if (conv.state === "request") maj.reqCount = 1;
     batch.update(doc(db, "conversations", cid), maj);
     await batch.commit();
+    _dernierEnvoi = Date.now();
     if (conv.state === "request") conv.reqCount = 1;
     return { ok: true, mid: mref.id };
-  } catch (e) { return _msgErreur(e); }
+  } catch (e) {
+    var err = _msgErreur(e);
+    /* Les regles refusent AUSSI le message d'un bloque par permission-denied.
+       Si la lecture des conversations marche, ce n'est pas l'absence de
+       regles : c'est un blocage (ou le rythme). On le dit tel quel. */
+    if (err.reason === "permission-denied" && window.fbMessagerie && window.fbMessagerie.rows) err = { ok: false, reason: "blocked" };
+    return err;
+  }
 };
 window.fbMarquerLu = async function(cid) {
   var me = _msgUid();
