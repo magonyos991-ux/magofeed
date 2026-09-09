@@ -76,6 +76,24 @@ service cloud.firestore {
               'points','pointsHerites','pointsPreuves','pointsJour','pointsJourTotal','pointsMaj',
               'refPoints','refCount','refAt','refCode'];
     }
+    /* Le langage des regles ne sait pas boucler : on verifie chaque case a la
+       main, ce qui plafonne de fait la liste a cinq gestes. */
+    function gesteValide(g) {
+      return g is map
+        && g.keys().hasOnly(['t','d','s','j'])
+        && g.t in ['confirm','rupture','scan','disc']
+        && (!('d' in g) || (g.d is string && g.d.size() <= 40))
+        && (!('s' in g) || (g.s is string && g.s.size() <= 40))
+        && (!('j' in g) || (g.j is string && g.j.size() <= 10));
+    }
+    function recentValide(r) {
+      return r is list && r.size() <= 5
+        && (r.size() < 1 || gesteValide(r[0]))
+        && (r.size() < 2 || gesteValide(r[1]))
+        && (r.size() < 3 || gesteValide(r[2]))
+        && (r.size() < 4 || gesteValide(r[3]))
+        && (r.size() < 5 || gesteValide(r[4]));
+    }
     function profilValide() {
       let d = request.resource.data;
       return (!('pseudo' in d) || (d.pseudo is string && d.pseudo.size() <= 24))
@@ -90,6 +108,13 @@ service cloud.firestore {
            l'ecrit elle-meme — et c'est un booleen, rien de plus. */
         && (!('aideDiscrete' in d) || d.aideDiscrete is bool)
         && (!('favs' in d) || (d.favs is list && d.favs.size() <= 10))
+        /* « Ses derniers gestes » : cinq lignes affichees sur le profil public.
+           Chaque geste est un type ferme, deux libelles courts et une date au
+           format AAAA-MM-JJ — rien d'autre, et surtout AUCUNE coordonnee : le
+           profil est public, une position dedans dirait ou la personne fait
+           ses courses. Sans borne, cette liste etait aussi un moyen de faire
+           grossir un document lu par tout le monde. */
+        && (!('recent' in d) || recentValide(d.recent))
         && (!('avatar' in d) || d.avatar == null
             || (d.avatar is map
                 && d.avatar.keys().hasOnly(['type','v'])
@@ -270,6 +295,223 @@ service cloud.firestore {
       allow update: if isSignedIn() && resource.data.to == request.auth.uid
                     && changed().hasOnly(['read']);
       allow delete: if isAdmin();
+    }
+
+    /* ══ LA MESSAGERIE ═══════════════════════════════════════════════════
+       Deux personnes, un fil. Il n'y a aucune Cloud Function derriere (plan
+       Spark) : TOUT ce qui protege les gens ici est ecrit dans ces regles, et
+       le client est presume hostile — on ne fait confiance a rien de ce qu'il
+       pretend. Trois choses a garantir :
+       - personne ne lit un fil dont il n'est pas membre ;
+       - on ne peut pas ecrire a quelqu'un qui vous a bloque, ni harceler une
+         personne qui n'a pas repondu (UN message tant qu'elle n'a pas accepte) ;
+       - le rythme est borne, et les compteurs de non-lus ne sont pas
+         falsifiables dans le sens qui derange (gonfler ceux de l'autre).
+
+       LA LISTE DE BLOCAGE. Un document par personne, lisible et modifiable par
+       elle seule : elle est consultee par les regles des messages (get()), pas
+       par les autres utilisateurs — savoir qui vous a bloque est deja une
+       forme de harcelement. Bornee a 200 : un document lu a chaque envoi ne
+       doit pas pouvoir grossir sans fin. Le langage des regles ne sait pas
+       boucler, donc le TYPE des elements n'est pas verifie ; ce n'est pas
+       grave : un element qui n'est pas un uid ne bloque personne. */
+    match /blocks/{uid} {
+      allow read: if isSelf(uid);
+      allow create, update: if isSelf(uid)
+        && request.resource.data.keys().hasOnly(['list','at'])
+        && request.resource.data.list is list
+        && request.resource.data.list.size() <= 200;
+      allow delete: if isSelf(uid);
+    }
+
+    /* LA CONVERSATION. Son identifiant est « a_b », les deux uid tries : il ne
+       peut donc exister qu'un seul fil entre deux personnes, par construction,
+       et le trouver ne demande aucune requete. Les membres sont figes a la
+       creation : sans cette ligne, on ouvrait un fil avec soi-meme, puis on y
+       inscrivait quelqu'un d'autre — qui recevait alors des messages sans
+       jamais avoir pu refuser.
+
+       LA DEMANDE. Un fil nait en etat « request » : la personne qui ecrit la
+       premiere (requestBy) a droit a UN message (reqCount 0 vers 1), puis plus
+       rien tant que l'autre n'a pas accepte. Seul le destinataire peut ouvrir
+       ou refuser ; le demandeur ne peut pas s'accepter lui-meme, et on ne
+       revient jamais a l'etat « request » (ce serait s'offrir un nouveau
+       message de demande a chaque fois).
+
+       LES NON-LUS. unread[moi] : je peux le remettre a zero, jamais le
+       gonfler. unread[autre] : je ne peux que l'augmenter de un, et seulement
+       en envoyant un message (lastMsg change dans la meme ecriture) — sinon il
+       suffisait d'une boucle pour faire clignoter la pastille de quelqu'un. */
+    function lastMsgValide() {
+      let lm = request.resource.data.lastMsg;
+      return lm is map
+        && lm.keys().hasOnly(['by','type','text','at'])
+        && lm.by == request.auth.uid
+        && lm.type in ['text','image','pos','spot']
+        && (!('text' in lm) || (lm.text is string && lm.text.size() <= 80));
+    }
+    match /conversations/{cid} {
+      function estMembre() {
+        return isSignedIn() && request.auth.uid in resource.data.members;
+      }
+      function apres() { return request.resource.data; }
+      function avant() { return resource.data; }
+      function autreMembre() {
+        return avant().members[0] == request.auth.uid
+          ? avant().members[1] : avant().members[0];
+      }
+      /* Les transitions d'etat : uniquement depuis « request », uniquement par
+         le membre qui n'a pas fait la demande. Tout le reste est fige. */
+      function etatHonnete() {
+        return !changed().hasAny(['state'])
+          || (avant().state == 'request'
+              && apres().state in ['open','declined']
+              && request.auth.uid != avant().requestBy);
+      }
+      /* reqCount ne fait qu'un seul pas, 0 vers 1, par le demandeur, tant que
+         la demande n'est pas tranchee. C'est ce compteur que la regle des
+         messages relit pour refuser le deuxieme message de demande. */
+      function reqCountHonnete() {
+        return !changed().hasAny(['reqCount'])
+          || (avant().reqCount == 0 && apres().reqCount == 1
+              && request.auth.uid == avant().requestBy
+              && avant().state == 'request');
+      }
+      function unreadHonnete() {
+        let moi = request.auth.uid;
+        let autre = autreMembre();
+        return !changed().hasAny(['unread'])
+          || (apres().unread is map
+              && apres().unread.keys().hasOnly(avant().members)
+              && apres().unread.keys().hasAll(avant().members)
+              && (apres().unread[moi] == avant().unread[moi] || apres().unread[moi] == 0)
+              && (apres().unread[autre] == avant().unread[autre]
+                  || (changed().hasAny(['lastMsg'])
+                      && apres().unread[autre] == avant().unread[autre] + 1)));
+      }
+      /* L'apercu du dernier message est signe par celui qui ecrit, et date par
+         le serveur : c'est lastAt qui trie la boite de reception de l'autre,
+         il ne doit pas etre antidatable ni postdatable. */
+      function lastMsgHonnete() {
+        return !changed().hasAny(['lastMsg'])
+          || (apres().lastAt == request.time && lastMsgValide());
+      }
+      allow read: if estMembre();
+      allow create: if isSignedIn()
+        && apres().keys().hasOnly(['members','createdBy','createdAt','state',
+                                   'requestBy','reqCount','lastAt','lastMsg','unread'])
+        && apres().members is list
+        && apres().members.size() == 2
+        && apres().members[0] is string
+        && apres().members[1] is string
+        && apres().members[0] < apres().members[1]
+        && request.auth.uid in apres().members
+        && cid == apres().members[0] + '_' + apres().members[1]
+        && apres().state == 'request'
+        && apres().requestBy == request.auth.uid
+        && apres().createdBy == request.auth.uid
+        && apres().reqCount == 0
+        && apres().unread is map
+        && apres().unread.keys().hasOnly(apres().members)
+        && apres().unread[apres().members[0]] == 0
+        && apres().unread[apres().members[1]] == 0
+        && apres().lastAt == request.time
+        && (!('lastMsg' in apres()) || lastMsgValide());
+      allow update: if estMembre()
+        && changed().hasOnly(['state','reqCount','lastAt','lastMsg','unread'])
+        && etatHonnete()
+        && reqCountHonnete()
+        && unreadHonnete()
+        && lastMsgHonnete();
+      /* On n'efface pas un fil : l'autre membre en perdrait sa moitie, et un
+         harceleur effacerait ses traces avant d'etre signale. L'administrateur
+         garde la main pour purger. */
+      allow delete: if isAdmin();
+
+      /* LE MESSAGE. Immuable : un message modifie apres coup permet de faire
+         dire a quelqu'un ce qu'il n'a pas dit dans un fil deja lu ; on efface,
+         on ne corrige pas. Effacable par son auteur (et l'administrateur).
+
+         LE LOT ATOMIQUE. L'app envoie en un seul lot le message ET la mise a
+         jour de la conversation (lastAt, lastMsg, non-lus, reqCount). Les
+         regles voient les DEUX etats : get() lit la conversation d'AVANT le
+         lot (c'est elle qui porte le dernier lastAt et le reqCount a tester),
+         getAfter() celle d'APRES. On EXIGE que lastAt d'apres soit l'heure de
+         l'envoi : un message ecrit seul, sans toucher a la conversation, est
+         refuse. Sans cette ligne, le rythme et la limite d'un message de
+         demande etaient de simples conventions — il suffisait de ne pas mettre
+         la conversation a jour pour ecrire sans fin a quelqu'un qui n'a pas
+         repondu. Verifie a l'emulateur : le lot legitime passe, le message
+         isole est refuse. */
+      match /messages/{mid} {
+        function fil() {
+          return get(/databases/$(database)/documents/conversations/$(cid)).data;
+        }
+        function filApres() {
+          return getAfter(/databases/$(database)/documents/conversations/$(cid)).data;
+        }
+        function membreDuFil() {
+          return isSignedIn() && request.auth.uid in fil().members;
+        }
+        function destinataire() {
+          return fil().members[0] == request.auth.uid ? fil().members[1] : fil().members[0];
+        }
+        /* La liste de blocage du DESTINATAIRE est relue a chaque envoi : un
+           blocage prend effet immediatement, meme au milieu d'un fil ouvert.
+           Elle est absente pour la plupart des gens, d'ou le exists() d'abord. */
+        function bloque() {
+          return exists(/databases/$(database)/documents/blocks/$(destinataire()))
+            && request.auth.uid in
+               get(/databases/$(database)/documents/blocks/$(destinataire())).data.get('list', []);
+        }
+        /* Fil ouvert : tout le monde ecrit. Demande en attente : le demandeur
+           seul, une fois. Refuse : personne. */
+        function porteOuverte() {
+          return fil().state == 'open'
+            || (fil().state == 'request'
+                && request.auth.uid == fil().requestBy
+                && fil().reqCount == 0);
+        }
+        /* 700 ms entre deux messages du meme fil : assez court pour ne jamais
+           gener une vraie conversation, assez long pour qu'une boucle ne
+           puisse pas deposer mille lignes chez quelqu'un en une seconde. */
+        function rythme() {
+          return !('lastAt' in fil())
+            || request.time.toMillis() - fil().lastAt.toMillis() >= 700;
+        }
+        function filMisAJour() {
+          return filApres().lastAt == request.time
+            && (fil().state != 'request' || filApres().reqCount == 1);
+        }
+        /* Les bornes de taille : une image est un JPEG compresse par l'app
+           (~200 Ko) ; un texte, deux mille caracteres. Sans elles, un seul
+           message d'un mega-octet suffisait a rendre le fil impossible a
+           charger chez l'autre. La position est numerique, pas du texte. */
+        function messageValide() {
+          let d = request.resource.data;
+          return d.keys().hasOnly(['by','at','type','text','img','lat','lng',
+                                   'storeId','storeName','drinkId','drinkName'])
+            && d.by == request.auth.uid
+            && d.at == request.time
+            && d.type in ['text','image','pos','spot']
+            && (!('text' in d) || (d.text is string && d.text.size() <= 2000))
+            && (!('img' in d) || (d.img is string && d.img.size() <= 220000))
+            && (!('storeName' in d) || (d.storeName is string && d.storeName.size() <= 60))
+            && (!('drinkName' in d) || (d.drinkName is string && d.drinkName.size() <= 60))
+            && (!('lat' in d) || d.lat is number)
+            && (!('lng' in d) || d.lng is number);
+        }
+        allow read: if membreDuFil();
+        allow create: if membreDuFil()
+          && messageValide()
+          && !bloque()
+          && porteOuverte()
+          && rythme()
+          && filMisAJour();
+        allow update: if false;
+        allow delete: if isAdmin()
+          || (isSignedIn() && resource.data.by == request.auth.uid);
+      }
     }
 
     // ── Catalogue : public en lecture, écrit par l'admin uniquement.
