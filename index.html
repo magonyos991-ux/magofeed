@@ -21317,7 +21317,17 @@ function renderSecurite(){
       window.fbSauvegarderMaintenant()
         .then(function(){ playSound("win"); toast("Sauvegarde lanc\u00E9e"); renderSecurite(); })
         .catch(function(e){ playSound("err"); b.disabled=false; b.textContent="Sauvegarder maintenant";
-                            toast("Sauvegarde impossible : "+((e&&(e.code||e.message))||e)); });
+          /* LE MESSAGE D'ABORD, LE CODE EN DERNIER RECOURS. On affichait
+             e.code en priorite : le serveur renvoyait « Permission manquante
+             pour exporter la base, donne le role... » et l'ecran montrait
+             « functions/failed-precondition ». Tout le travail fait cote
+             serveur pour expliquer la panne etait jete a la derniere ligne. */
+          var dit=(e&&e.message)||(e&&e.code)||String(e);
+          toast("Sauvegarde impossible : "+dit);
+          /* Et on rafraichit meme en cas d'echec : le panneau ne se remettait a
+             jour qu'apres une reussite, donc il continuait d'afficher l'etat
+             d'avant alors que le serveur venait d'enregistrer le nouvel echec. */
+          try{ renderSecurite(); }catch(err){} });
     };
   };
   if(window.fbLireSauvegardes){
