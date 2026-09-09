@@ -7331,7 +7331,7 @@ var MOTIFS_SIGNALEMENT=[
   ["spam","Publicite, spam"],
   ["autre","Autre"]
 ];
-/* cibleType : "decouverte" | "photo" | "profil" | "commentaire".
+/* cibleType : "decouverte" | "photo" | "profil" | "commentaire" | "conversation".
    apercu : ce qu'on voit du contenu, copie tel quel pour survivre a son
    effacement (nom du produit, pseudo, description...). */
 function ouvrirSignalement(cibleType,cibleId,apercu,nomLisible){
@@ -22341,36 +22341,47 @@ function timeAgoShort(ts){
 function openUserProfile(u){
   var ppBadges=publicBadges(u);
   var body=document.getElementById("userprofile-body");if(!body)return;
+  window._ppCourant=u;
   var av=avatarHTML(u.avatar,76)||'<span style="font-size:30px;font-weight:800;color:#fff">'+sanitize((u.pseudo||"?").charAt(0).toUpperCase())+'</span>';
   var seen=timeAgoShort(u.updatedAt);
   var favs=(u.favs||[]).map(function(id){return DRINKS.find(function(d){return Number(d.id)===Number(id);});}).filter(Boolean);
-  var statCell=function(v,label){return '<div style="flex:1;background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:13px 8px;text-align:center"><div style="font-size:19px;font-weight:800;color:var(--s1)">'+v+'</div><div style="font-size:10.5px;font-weight:600;color:var(--s2);margin-top:2px">'+label+'</div></div>';};
-  body.innerHTML='<div style="text-align:center;margin-bottom:18px">'+
+  /* Chaque case est un bouton : taper dessus raconte ce que le chiffre veut
+     dire, au nom du joueur regarde (feuille narrative, meme gabarit que la
+     fiche d'un badge). */
+  var statCell=function(v,label,key){return '<div class="pp-cell" data-pp="'+key+'" role="button" tabindex="0" aria-label="'+attr(_tr("ppSeeStats").replace("{l}",label))+'" style="flex:1;background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:13px 8px;text-align:center"><div style="font-size:19px;font-weight:800;color:var(--s1)">'+v+'</div><div style="font-size:10.5px;font-weight:600;color:var(--s2);margin-top:2px">'+label+'</div></div>';};
+  body.innerHTML='<div style="text-align:center;margin-bottom:14px">'+
     '<div style="width:76px;height:76px;border-radius:50%;background:var(--s1);display:flex;align-items:center;justify-content:center;overflow:hidden;margin:0 auto 10px">'+av+'</div>'+
     '<div style="font-size:18px;font-weight:800;color:var(--s1)">'+sanitize(u.pseudo||"Explorateur")+'</div>'+
-    (seen?'<div style="font-size:11.5px;font-weight:600;color:var(--s3);margin-top:3px">Derni\u00E8re activit\u00E9 : '+seen+'</div>':"")+
+    (seen?'<div style="font-size:11.5px;font-weight:600;color:var(--s3);margin-top:3px">Dernière activité : '+seen+'</div>':"")+
+    '<div class="pp-btns" id="pp-btns"></div>'+
   '</div>'+
   '<div style="display:flex;gap:8px;margin-bottom:10px">'+
-    statCell(nbSur(u.points),"points")+
-    statCell(nbSur(u.streak),"s\u00E9rie")+
-    statCell(nbSur(u.bestStreak),"record")+
+    statCell(nbSur(u.points),"points","points")+
+    statCell(nbSur(u.streak),"série","streak")+
+    statCell(nbSur(u.bestStreak),"record","best")+
   '</div>'+
   '<div style="display:flex;gap:8px;margin-bottom:18px">'+
-    statCell(nbSur(u.confirms),"confirmations")+
-    statCell(nbSur(u.signals),"signalements")+
+    statCell(nbSur(u.confirms),"confirmations","confirms")+
+    statCell(nbSur(u.signals),"signalements","signals")+
   '</div>'+
   (function(){
-    if(!ppBadges.length)return "";
+    /* Une ligne de resume avant les pastilles : combien, et le plus haut.
+       Un profil sans badge le dit aussi, plutot que de laisser un vide. */
+    var h='<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:8px">Ses badges</div>';
+    if(!ppBadges.length)return h+'<div class="pp-sum" style="margin-bottom:18px">'+_tr("ppNoBadge")+'</div>';
+    var top=ppBadges.reduce(function(a,b){return b.tier>a.tier?b:a;},ppBadges[0]);
+    h+='<div class="pp-sum">'+_tr("ppBadgesSum").replace("{n}",ppBadges.length).replace("{b}",top.name+(TIER_NAMES?' '+TIER_NAMES[top.tier-1]:''))+'</div>';
     /* Chaque badge est un BOUTON : taper dessus ouvre la meme fiche que sur
        son propre profil (paliers, progression), au nom du joueur regarde. */
-    return '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px">Ses badges</div>'+
-      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px">'+ppBadges.map(function(b,i){
+    return h+'<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px">'+ppBadges.map(function(b,i){
         var ring=(TIER_COLORS&&TIER_COLORS[b.tier-1])||"var(--border)";
         return '<button data-pb="'+i+'" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--bg2);border:1.5px solid '+ring+';cursor:pointer;font:inherit" aria-label="Badge '+b.name+', voir le detail"><span style="display:flex;color:'+ring+'">'+badgeIcon(b.key,16,ring)+'</span><span style="font-size:11.5px;font-weight:800;color:var(--s1)">'+b.name+(TIER_NAMES&&b.tier>1?' '+TIER_NAMES[b.tier-1]:'')+'</span></button>';
       }).join("")+'</div>';
   })()+
-  '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px" data-i18n="hisFavs">Ses boissons pr\u00E9f\u00E9r\u00E9es</div>'+
-  (favs.length?'<div id="userprofile-favs" style="display:flex;flex-direction:column;gap:8px"></div>':'<div style="font-size:12.5px;color:var(--s3);padding:8px 0">Aucun favori partag\u00E9 pour l\'instant</div>')+
+  '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:8px" data-i18n="ppGestes">'+_tr("ppGestes")+'</div>'+
+  '<div id="userprofile-recent" style="margin-bottom:18px">'+ppGestesHTML(u)+'</div>'+
+  '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px" data-i18n="hisFavs">Ses boissons préférées</div>'+
+  (favs.length?'<div id="userprofile-favs" style="display:flex;flex-direction:column;gap:8px"></div>':'<div style="font-size:12.5px;color:var(--s3);padding:8px 0">Aucun favori partagé pour l\'instant</div>')+
   /* Un profil public porte un pseudo et un avatar deposes par la personne :
      c'est du contenu utilisateur, il doit pouvoir etre signale. Le pseudo est
      copie dans l'apercu pour que le signalement garde un sens si la personne
@@ -22383,7 +22394,7 @@ function openUserProfile(u){
       row.style.cssText="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;cursor:pointer";
       row.innerHTML='<div style="width:38px;height:38px;border-radius:11px;overflow:hidden;background:'+d.light+';display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0">'+drinkIconHTML(d)+'</div>'+
         '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:700;color:var(--s1)">'+sanitize(d.name)+'</div><div style="font-size:11px;color:var(--s2)">'+sanitize(d.brand||"")+'</div></div>'+
-        '<span style="font-size:13px;color:var(--s3)">\u203A</span>';
+        '<span style="font-size:13px;color:var(--s3)">›</span>';
       row.onclick=function(){pick(d);playSound("pop");};
       a11yCard(row,"Voir "+d.name);
       box.appendChild(row);
@@ -22398,8 +22409,102 @@ function openUserProfile(u){
         showBadgeInfo({key:b.key,name:b.name,tiers:b.tiers,value:b.value},b.tier,u.pseudo||"Ce joueur");
       };
     });
+    body.querySelectorAll("[data-pp]").forEach(function(c){
+      var go=function(){ppFeuilleStat(c.getAttribute("data-pp"),u);};
+      c.onclick=go;
+      c.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();go();}};
+    });
   }catch(e){}
+  ppMajBoutons(u);
   show("userprofile");
+}
+/* Les deux boutons sous le pseudo : ecrire, bloquer. Sur mon propre profil il
+   n'y a rien a faire, on ne les montre pas. Re-peints quand la liste des
+   blocages change (evenement fbBlocsChanged). */
+function ppMajBoutons(u){
+  var box=document.getElementById("pp-btns");if(!box||!u)return;
+  var uid=String(u.uid||u.id||""),me=msgMe();
+  if(!uid||uid===me){box.innerHTML="";box.style.display="none";return;}
+  box.style.display="";
+  var bloque=MSG.blocs.indexOf(uid)!==-1;
+  box.innerHTML='<button class="msg-bp" id="pp-write"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7.5 8.5 6 8.5-6"/></svg>'+_tr("msgWrite")+'</button>'+
+    '<button class="msg-bs" id="pp-block">'+(bloque?_tr("msgUnblock"):_tr("msgBlock"))+'</button>';
+  var w=document.getElementById("pp-write"),b=document.getElementById("pp-block");
+  if(w)w.onclick=function(){
+    if(bloque){msgErreurToast("blocked");return;}
+    msgEcrire(uid,u);
+  };
+  if(b)b.onclick=function(){
+    if(bloque){msgBloquer(uid,false);return;}
+    var ov=msgFeuille("pp-bloc-confirm",'<div class="claim-title" style="font-size:16px">'+_tr("ppBlockConfirm").replace("{p}",sanitize(u.pseudo||_tr("msgSomeone")))+'</div>'+
+      '<div class="claim-lead">'+_tr("msgBlockedSub")+'</div><button class="msg-bp" id="pp-bloc-go" style="width:100%;min-height:46px;margin-top:6px">'+_tr("msgBlock")+'</button>');
+    if(!ov)return;
+    var g=document.getElementById("pp-bloc-go");
+    if(g)g.onclick=function(){ov.fermer();msgBloquer(uid,true);};
+  };
+}
+/* « Ses derniers gestes » : users.recent, cinq lignes au plus, l'icone de
+   la boisson si on la connait au catalogue, une phrase par type, une date
+   arrondie. Aucune coordonnee n'existe dans ces donnees. */
+function ppGestesHTML(u){
+  var recent=Array.isArray(u.recent)?u.recent.slice(0,5):[];
+  if(!recent.length)return '<div style="font-size:12.5px;color:var(--s3);padding:6px 0">'+_tr("ppNoGeste")+'</div>';
+  var nom=sanitize(u.pseudo||_tr("msgSomeone"));
+  var cles={confirm:"ppGConfirm",rupture:"ppGRupture",scan:"ppGScan",disc:"ppGDisc"};
+  return '<div style="background:var(--bg2);border-radius:16px;padding:4px 14px">'+recent.map(function(g){
+    if(!g||!cles[g.t])return "";
+    var dn=String(g.d||"").slice(0,40),sn=String(g.s||"").slice(0,40);
+    var d=dn?(DRINKS||[]).find(function(x){return String(x.name||"").toLowerCase()===dn.toLowerCase();}):null;
+    var phrase=_tr(cles[g.t]).replace("{d}",'<b>'+sanitize(dn||"?")+'</b>');
+    phrase=sn?phrase.replace("{s}",sanitize(sn)):phrase.replace(/\s\S+\s\{s\}/,"");
+    var quand="";
+    try{var p=String(g.j||"").split("-");if(p.length===3){quand=msgDepuis(new Date(Number(p[0]),Number(p[1])-1,Number(p[2])).getTime());}}catch(e){}
+    var ico=d?'<span class="pp-geste-i" style="background:'+attr(d.light||"var(--bg2)")+'">'+drinkIconHTML(d)+'</span>':
+      '<span class="pp-geste-i" style="color:var(--s2)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+
+      (g.t==="confirm"?'<path d="M20 6 9 17l-5-5"/>':g.t==="rupture"?'<circle cx="12" cy="12" r="9"/><path d="M8 12h8"/>':g.t==="disc"?'<path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 15.4l-4.8 2.5.9-5.4-3.9-3.8 5.4-.8z"/>':'<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M4 12h16"/>')+'</svg></span>';
+    return '<div class="pp-geste">'+ico+'<div style="flex:1;min-width:0"><div class="pp-geste-t">'+nom+' '+phrase+'</div>'+(quand?'<div class="pp-geste-d">'+quand+'</div>':'')+'</div></div>';
+  }).join("")+'</div>';
+}
+/* La feuille narrative d'une case de stats : une phrase qui dit ce que le
+   chiffre mesure, au nom du joueur. Meme gabarit et meme identifiant que la
+   fiche d'un badge, pour qu'une seule feuille existe a la fois. */
+function ppFeuilleStat(key,u){
+  if(document.getElementById("badge-info"))return;
+  var p=sanitize(u.pseudo||_tr("msgSomeone"));
+  var n=nbSur(u.streak),b=nbSur(u.bestStreak);
+  /* Une serie ne vit que si la personne a contribue hier ou aujourd'hui.
+     On ne connait que sa derniere activite : au-dela de deux jours, on parle
+     de sa DERNIERE serie plutot que d'en affirmer une en cours. */
+  var perimee=!u.updatedAt||(Date.now()-msgMs(u.updatedAt)>2*86400000);
+  var T={
+    points:{t:_tr("ppPtsT"),s:_tr("ppPts").replace("{p}",p).replace("{n}",nbSur(u.points))},
+    streak:{t:_tr("ppStreakT"),s:_tr(perimee?"ppStreakOld":"ppStreak").replace("{p}",p).replace("{n}",n).replace("{b}",b)},
+    best:{t:_tr("ppBestT"),s:_tr("ppBest").replace("{p}",p).replace("{b}",b)},
+    confirms:{t:_tr("ppConfT"),s:_tr("ppConf").replace("{p}",p).replace("{n}",nbSur(u.confirms))},
+    signals:{t:_tr("ppSigT"),s:_tr("ppSig").replace("{p}",p).replace("{n}",nbSur(u.signals))}
+  }[key];
+  if(!T)return;
+  var ico={points:'<path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 15.4l-4.8 2.5.9-5.4-3.9-3.8 5.4-.8z"/>',streak:'<path d="M12 3c1 3 4 4.5 4 8.5a4 4 0 0 1-8 0c0-1.5.5-2.5 1.5-3.5.2 1.2.8 2 1.8 2.5C11 8 11.5 5.5 12 3z"/>',best:'<path d="M6 4h12v3a6 6 0 0 1-12 0z"/><path d="M6 6H4.5A1.5 1.5 0 0 0 6 8.5M18 6h1.5A1.5 1.5 0 0 1 18 8.5"/><path d="M9 15.5h6M10 19h4M12 13.5V15"/>',confirms:'<path d="M20 6 9 17l-5-5"/>',signals:'<path d="M4 21V4h12l-1 4 1 4H4"/>'}[key];
+  var ov=document.createElement("div");
+  ov.id="badge-info";ov.setAttribute("role","dialog");ov.setAttribute("aria-modal","true");ov.setAttribute("aria-label",T.t);
+  ov.style.cssText="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;opacity:0;transition:opacity .22s ease";
+  ov.innerHTML='<div id="badge-info-card" style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:22px;max-width:360px;width:100%;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.45);transform:scale(.6);opacity:0;transition:transform .36s cubic-bezier(.34,1.56,.4,1),opacity .22s ease">'+
+    '<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">'+
+      '<span style="width:58px;height:58px;border-radius:17px;background:var(--bg2);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--s1)"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'+ico+'</svg></span>'+
+      '<div style="min-width:0"><div style="font-size:20px;font-weight:850;color:var(--s1)">'+T.t+'</div>'+
+      '<div style="font-size:11.5px;font-weight:800;color:var(--s3);text-transform:uppercase;letter-spacing:.5px">'+p+'</div></div>'+
+    '</div>'+
+    '<div style="font-size:14px;color:var(--s1);line-height:1.6">'+T.s+'</div>'+
+    '<button id="badge-info-close" style="width:100%;margin-top:18px;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">'+_tr("ppClose")+'</button>'+
+  '</div>';
+  document.body.appendChild(ov);
+  var _bc=document.getElementById("badge-info-card");
+  requestAnimationFrame(function(){ov.style.opacity="1";if(_bc){_bc.style.transform="scale(1)";_bc.style.opacity="1";}});
+  var close=function(){ov.style.opacity="0";if(_bc){_bc.style.transform="scale(.88)";_bc.style.opacity="0";}setTimeout(function(){if(ov.parentNode)ov.remove();},200);};
+  var cb=document.getElementById("badge-info-close");if(cb){cb.onclick=close;setTimeout(function(){try{cb.focus();}catch(e){}},60);}
+  ov.addEventListener("click",function(e){if(e.target===ov)close();});
+  ov.addEventListener("keydown",function(e){if(e.key==="Escape")close();});
+  try{playSound("pop");}catch(e){}
 }
 /* ============================================================================
    MESSAGERIE — les ecrans.
