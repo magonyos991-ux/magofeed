@@ -43,12 +43,12 @@ ART["ciao"]=function(d){
         +'<rect x="146" y="60" width="1.2" height="262" fill="#000" opacity="0.1"/>';
   // Wordmark CIAO en chemins (hauteur de capitale 100, ligne de base y=0)
   var C='M90.5,-20.6 A50,50 0 1 1 90.5,-79.4 L66.2,-61.8 A20,20 0 1 0 66.2,-38.2 Z';    // C ouvert a droite
-  var I='M3,1 C-9,-42 18,-96 64,-106 C58,-58 40,-22 3,1 Z';                                // I = feuille
-  var A='M0,0 L0,-52 A48,48 0 0 1 96,-52 L96,0 L67,0 L67,-52 Q48,-84 29,-52 L29,0 Z';       // A en arche sans barre
+  var I='M6,0 L6,-72 L34,-72 L34,0 Z M20,-76 C8,-88 10,-106 30,-112 C42,-98 38,-82 20,-76 Z';   // I : fut droit, feuille en guise de point
+  var A='M0,0 L34,-100 L62,-100 L96,0 L70,0 L61,-26 L35,-26 L26,0 Z M40,-48 L48,-74 L56,-48 Z'; // A : deux jambes, barre, contre-poincon triangulaire
   var O='M50,-100 A50,50 0 1 0 50.1,-100 Z M18,-24 C28,-54 52,-76 84,-78 C74,-48 50,-26 18,-24 Z'; // O a l'eclat en feuille
   var word='<g fill="url(#'+uid+'w)">'
     +'<path d="'+C+'"/>'
-    +'<path d="'+I+'" transform="translate(96,0)"/>'
+    +'<path d="'+I+'" transform="translate(100,0)" fill-rule="evenodd"/>'
     +'<path d="'+A+'" transform="translate(152,0)" fill-rule="evenodd"/>'
     +'<path d="'+O+'" transform="translate(256,0)" fill-rule="evenodd"/>'
     +'</g>';
