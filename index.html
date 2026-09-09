@@ -3581,6 +3581,27 @@ window.fbLireAlertesAdmin = async function(n) {
     });
   } catch (e) { return { erreur: String((e && (e.code || e.message)) || e) }; }
 };
+/* LES SOUTIENS RECUS. Ils n'etaient visibles nulle part dans l'app : pour
+   savoir si un don etait arrive, il fallait ouvrir la console Firebase. Quand
+   la notification manque — et elle peut manquer — c'est la seule facon de
+   trancher entre « l'argent n'est jamais arrive » et « il est arrive, seule
+   l'alerte s'est perdue ». Deux problemes tres differents, qui se ressemblaient
+   trop longtemps. */
+window.fbLireDons = async function(n) {
+  try {
+    var snap = await getDocs(query(collection(db, "dons"),
+      orderBy("quand", "desc"), limit(Math.min(Number(n) || 20, 50))));
+    return snap.docs.map(function(d) {
+      var x = d.data() || {};
+      return {
+        nom: String(x.nom || "Quelqu'un"), message: String(x.message || ""),
+        montant: String(x.montant || ""), devise: String(x.devise || ""),
+        abonnement: x.abonnement === true, source: String(x.source || ""),
+        quand: (x.quand && x.quand.toMillis) ? x.quand.toMillis() : null
+      };
+    });
+  } catch (e) { return { erreur: String((e && (e.code || e.message)) || e) }; }
+};
 window.fbGetMyPushDoc = async function() {
   try {
     var user = await ensureAuthed();
@@ -20136,6 +20157,7 @@ function renderAdmin(){
   renderFormatSuggestions();
   try{ renderFichesSansCode(); }catch(e){ console.warn("sansCode:",e); }
   renderAdminHistory();
+  try{ renderDons(); }catch(e){ console.warn("dons:",e); }
   try{ renderAlertes(); }catch(e){ console.warn("alertes:",e); }
   try{ renderSecurite(); }catch(e){ console.warn("securite:",e); }
   var pending=DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected&&!nameLooksAlcoholic(d.name,d.brand);});
@@ -21092,6 +21114,58 @@ function _dateCourte(v){
      poussees > 0             l'envoi est parti : le probleme est cote telephone
    Sans ces chiffres, on ne pouvait que deviner, et le doute portait sur toute
    la chaine a la fois. */
+/* LES SOUTIENS, EN HAUT DE L'ADMINISTRATION. Un don est la seule chose qui
+   arrive de l'exterieur sans qu'on la provoque : elle merite d'etre visible
+   sans aller la chercher. Et un tableau vide est une reponse, pas un manque —
+   il dit que Ko-fi n'a jamais appele. */
+function renderDons(){
+  if(!isAdmin)return;
+  var host=document.getElementById("admin-dons");
+  if(!host){
+    host=document.createElement("div");
+    host.id="admin-dons";
+    var list=document.getElementById("admin-list");
+    if(list&&list.parentNode)list.parentNode.appendChild(host);
+  }
+  var titre='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:18px 0 10px">Soutiens reçus</div>';
+  host.innerHTML=titre+'<div class="c2" style="font-size:12px">Lecture…</div>';
+  if(!window.fbLireDons)return;
+  window.fbLireDons(20).then(function(rows){
+    if(!rows||rows.erreur){
+      host.innerHTML=titre+'<div class="c2" style="font-size:12px">Lecture impossible'+
+        (rows&&rows.erreur?' ('+sanitize(rows.erreur)+')':'')+'</div>';
+      return;
+    }
+    if(!rows.length){
+      host.innerHTML=titre+
+        '<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px">'+
+          '<div style="font-size:12.5px;font-weight:700;color:var(--s1)">Aucun soutien enregistré</div>'+
+          '<div class="c2" style="font-size:11.5px;margin-top:4px;line-height:1.5">'+
+            'Si quelqu\'un t\'a bien envoyé un don, c\'est que Ko-fi n\'a jamais appelé ton application : '+
+            'l\'adresse du webhook n\'est pas enregistrée chez Ko-fi, ou le jeton de vérification n\'y '+
+            'correspond pas. L\'argent est chez Ko-fi, il n\'est pas perdu.</div>'+
+        '</div>';
+      return;
+    }
+    var t=titre+'<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;overflow:hidden">';
+    rows.forEach(function(d,i){
+      var somme=d.montant?(d.montant+" "+(d.devise||"")).trim():"";
+      t+='<div style="padding:12px 14px'+(i?';border-top:1px solid var(--border)':'')+'">'+
+        '<div style="display:flex;align-items:baseline;gap:8px">'+
+          '<div style="font-size:13px;font-weight:800;color:var(--s1)">'+sanitize(somme||"Soutien")+'</div>'+
+          (d.abonnement?'<div class="c3" style="font-size:10.5px;font-weight:700">mensuel</div>':'')+
+        '</div>'+
+        '<div class="c2" style="font-size:11.5px;margin-top:2px">'+sanitize(d.nom)+'</div>'+
+        (d.message?'<div style="font-size:12px;margin-top:3px;line-height:1.4">« '+sanitize(d.message)+' »</div>':'')+
+        (d.quand?'<div class="c3" style="font-size:10.5px;margin-top:3px">'+sanitize(new Date(d.quand).toLocaleString("fr-BE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))+'</div>':'')+
+      '</div>';
+    });
+    host.innerHTML=t+'</div>';
+  }).catch(function(e){
+    host.innerHTML=titre+'<div class="c2" style="font-size:12px">Lecture impossible</div>';
+    console.warn("dons:",e);
+  });
+}
 function renderAlertes(){
   if(!isAdmin)return;
   var host=document.getElementById("admin-alertes");
