@@ -122,8 +122,30 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
     </svg>
     <div class="splash-logo">Mago<span style="color:#c69a57">feed</span></div>
     <div class="splash-sub">Trouve ta boisson</div>
-    <div class="splash-dot"></div>
+    <div id="splash-onde"></div>
   </div>
+  <script>
+  /* ── L'ONDE QUI SE PROPAGE — le SEUL generateur du motif de chargement ──
+     Une grille carree de points ; chaque point recoit, en style, un retard
+     d'animation proportionnel a sa distance (euclidienne) au centre : l'onde
+     part du point central, dore, vers les bords. Le mouvement est en CSS pur
+     (.onde dans app.css) — ici aucun chronometre, seulement du balisage.
+     Definie ICI, avant tout le reste, parce que le splash s'en sert au tout
+     premier rendu, bien avant que le gros script du bas n'ait ete lu.
+       taille : 7 (splash, plein ecran) · 5 (cartes, etats vides) · 3 (en
+       ligne, a cote d'un texte). Jamais plus de 49 points.
+     Le pas entre deux anneaux grandit quand la grille retrecit : avec trois
+     anneaux, un pas de 0,16 s ferait clignoter le tout d'un bloc. */
+  function ondeHTML(taille){
+    var n=(taille===3||taille===5)?taille:7, c=(n-1)/2, pas=(n===7?.16:(n===5?.2:.3)), html="";
+    for(var i=0;i<n*n;i++){
+      var d=Math.sqrt(Math.pow(i%n-c,2)+Math.pow(Math.floor(i/n)-c,2));
+      html+=d?'<i style="animation-delay:'+(Math.round(d*pas*100)/100)+'s"></i>':'<i class="c"></i>';
+    }
+    return '<div class="onde onde-'+n+'" aria-hidden="true">'+html+'</div>';
+  }
+  document.getElementById("splash-onde").innerHTML=ondeHTML(7);
+  </script>
 
   <!-- TUTORIAL -->
   <div id="tuto-overlay">
@@ -4560,6 +4582,7 @@ try{
 <script src="data/ui.js"></script>
 <script src="data/i18n.js"></script>
 <script>
+/* global ondeHTML */
 /* ================================
    DATA — Boissons (reste local, immuable)
 ================================ */
@@ -7082,7 +7105,7 @@ function renderStorePicker(){
        requete tourne, on le dit — annoncer le vide avant d'avoir regarde,
        c'est le mensonge qui a fait perdre du temps a tout le monde. */
     if(window._pickerZoneEnCours){
-      el.insertAdjacentHTML("beforeend",'<div style="text-align:center;padding:16px;font-size:13px;color:var(--s3)">Recherche des magasins autour de toi\u2026</div>');
+      el.insertAdjacentHTML("beforeend",'<div style="text-align:center;padding:16px">'+magoLoader(true,"Recherche des magasins autour de toi\u2026")+'</div>');
       return;
     }
     pickerFetchZone();
@@ -8397,7 +8420,9 @@ function onBarcodeDetected(r){
   }
 }
 /* ── CHARGEMENT : deux formes, un seul vocabulaire ────────────────────────
-   magoLoader() : la goutte et l'onde, quand l'ecran est VIDE et qu'on attend.
+   magoLoader() : l'onde qui se propage (ondeHTML, definie sous le splash),
+   quand l'ecran est VIDE et qu'on attend — moyenne seule, ou petite EN LIGNE
+   a cote de son texte (petit=true).
    magoCharge() : la barre fine du haut, quand l'ecran est DEJA rempli et
    qu'on actualise — elle ne cache rien et ne pousse rien.
 
@@ -8406,9 +8431,9 @@ function onBarcodeDetected(r){
    premiere finit. Et un plancher de 320 ms l'empeche de clignoter sur une
    reponse instantanee — un eclair est plus derangeant qu'une attente. */
 function magoLoader(petit,texte){
-  return '<div style="display:flex;flex-direction:column;align-items:center;gap:10px">'+
-    '<div class="mago-load'+(petit?" sm":"")+'" role="status" aria-label="Chargement"><i></i><i></i><i></i><b></b></div>'+
-    (texte?'<div style="font-size:12px;font-weight:600;color:var(--s2)">'+sanitize(texte)+'</div>':'')+
+  return '<div class="mago-load'+(petit?" sm":"")+'" role="status" aria-label="Chargement">'+
+    ondeHTML(petit?3:5)+
+    (texte?'<span class="mago-load-txt">'+sanitize(texte)+'</span>':'')+
   '</div>';
 }
 var _magoChargeN=0,_magoChargeT=0,_magoChargeFin=null;
@@ -9540,7 +9565,8 @@ function renderNearby(){
   // \u2500\u2500 ETAT B : position OK mais zone quasi vide \u2014 l'auto-import OSM la remplit.
   if(near.length<3){
     var b=document.createElement("div");
-    b.innerHTML='<div style="font-size:13.5px;font-weight:700;color:var(--s1);line-height:1.35;margin-bottom:4px">On explore ta zone\u2026</div>'+
+    b.innerHTML=magoLoader(false)+   // l'onde : la zone se remplit, on attend vraiment
+      '<div style="font-size:13.5px;font-weight:700;color:var(--s1);line-height:1.35;margin-bottom:4px">On explore ta zone\u2026</div>'+
       '<div style="font-size:12px;color:var(--s2);line-height:1.4;margin-bottom:12px">Magofeed recense les magasins autour de toi. Reviens dans un instant \u2014 ou pars explorer la carte.</div>';
     var eb=document.createElement("div");
     eb.setAttribute("role","button");eb.setAttribute("tabindex","0");eb.setAttribute("aria-label","Explorer la carte des magasins");
@@ -14779,7 +14805,7 @@ function renderStoreAudience(s){
 
 function renderMerchantBoard(s){
   var host=merchantBoardHost(); if(!host||!s)return;
-  host.innerHTML='<div class="mb-card"><div class="mb-load">Lecture de la demande du quartier…</div></div>';
+  host.innerHTML='<div class="mb-card"><div class="mb-load">'+magoLoader(true,"Lecture de la demande du quartier…")+'</div></div>';
   var rayon=(s.drinks||[]).map(Number);
   var lat=(typeof s.lat==="number")?s.lat:userLat;
   var lng=(typeof s.lng==="number")?s.lng:userLng;
@@ -15502,7 +15528,7 @@ function osmSearchCity(){
   var q=((document.getElementById("osm-city-q")||{}).value||"").trim();
   var box=document.getElementById("osm-city-results");
   if(!q||!box)return;
-  box.innerHTML='<div style="font-size:12px;color:var(--s3);padding:6px 2px">Recherche\u2026</div>';
+  box.innerHTML='<div style="padding:6px 2px">'+magoLoader(true,"Recherche\u2026")+'</div>';
   fetchWithTimeout("https://nominatim.openstreetmap.org/search?format=json&limit=4&q="+encodeURIComponent(q),15000)
     .then(function(r){return r.json();})
     .then(function(rows){
@@ -17234,7 +17260,7 @@ function openExploreMap(opts){
       '<div id="explore-add-fab" onclick="exploreAddStore()" role="button" tabindex="0" aria-label="Ajouter un magasin" onkeydown="if(event.key===\'Enter\'){exploreAddStore()}" style="position:absolute;right:14px;bottom:calc(150px + env(safe-area-inset-bottom));z-index:1150;display:flex;align-items:center;gap:7px;padding:11px 15px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;box-shadow:0 6px 18px rgba(0,0,0,.28);cursor:pointer;transition:opacity .2s,transform .2s">+ Magasin</div>'+
       '<div id="explore-recenter-fab" onclick="exploreCenterUser()" role="button" tabindex="0" aria-label="Recentrer sur ma position" onkeydown="if(event.key===\'Enter\'){exploreCenterUser()}" style="position:absolute;right:14px;bottom:calc(202px + env(safe-area-inset-bottom));z-index:1150;width:46px;height:46px;border-radius:50%;background:var(--app-bg);border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,.24);cursor:pointer;transition:opacity .2s,transform .2s"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.4" stroke="var(--s1)" stroke-width="2"/><path d="M12 2v3.6M12 18.4V22M2 12h3.6M18.4 12H22" stroke="var(--s1)" stroke-width="2" stroke-linecap="round"/></svg></div>'+
       '<div id="explore-store-card" role="button" tabindex="0" style="display:none;position:absolute;bottom:calc(88px + env(safe-area-inset-bottom));left:14px;right:14px;background:var(--app-bg);border:1.5px solid var(--border);border-radius:18px;padding:12px 14px;align-items:center;gap:12px;box-shadow:0 8px 24px rgba(0,0,0,.22);cursor:pointer;z-index:1200"></div>'+
-      '<div id="explore-status" style="position:absolute;bottom:calc(92px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--app-bg);border:1.5px solid var(--border);border-radius:999px;padding:8px 16px;font-size:12px;font-weight:700;color:var(--s1);box-shadow:0 4px 14px rgba(0,0,0,.18);white-space:nowrap;z-index:1100">Chargement\u2026</div>'+
+      '<div id="explore-status" style="position:absolute;bottom:calc(92px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--app-bg);border:1.5px solid var(--border);border-radius:999px;padding:8px 16px;font-size:12px;font-weight:700;color:var(--s1);box-shadow:0 4px 14px rgba(0,0,0,.18);white-space:nowrap;z-index:1100">'+ondeHTML(3)+'<span style="margin-left:8px">Chargement\u2026</span></div>'+
       '<div id="explore-sheet"><div id="explore-sheet-head" role="button" tabindex="0" aria-label="Glisser pour ouvrir ou fermer la liste des magasins" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();exploreToggleSheet();}"><div id="explore-sheet-grip"></div><div style="display:flex;align-items:center;justify-content:space-between"><div id="explore-sheet-title" style="font-size:13.5px;font-weight:800;color:var(--s1)">Magasins autour de toi</div><div id="explore-sheet-chev" style="font-size:12px;font-weight:700;color:var(--s2);white-space:nowrap">Voir la liste \u25b2</div></div></div><div id="explore-sheet-list"></div></div>';
     document.body.appendChild(host);
     /* Le bouton loupe et la touche Entree cherchent d'abord un MAGASIN — c'est
@@ -17790,7 +17816,7 @@ function exploreLoadStores(useCache){
   var _seq = (window._exploreSeq = (window._exploreSeq || 0) + 1);
   var q;
   if(useCache&&window._exploreRawList){q=Promise.resolve(window._exploreRawList);}
-  else{if(status)status.textContent="Chargement\u2026";q=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12))):Promise.resolve(STORES||[]);}
+  else{if(status)status.innerHTML=ondeHTML(3)+'<span style="margin-left:8px">Chargement\u2026</span>';q=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12))):Promise.resolve(STORES||[]);}
   q.then(function(list){
     if(_seq!==window._exploreSeq)return;      // un mouvement plus recent a pris la main
     list=list||[];
@@ -18232,7 +18258,7 @@ function exploreGoCity(auto){
   if(!auto)clearTimeout(window._cityTimer);
   if(!q){exploreCitySuggest();return;}
   var seq=(window._citySeq=(window._citySeq||0)+1);
-  if(!auto)box.innerHTML=_cityBoxCard("Recherche de \u00AB "+sanitize(q)+" \u00BB\u2026");
+  if(!auto)box.innerHTML=_cityBoxCard(ondeHTML(3)+'<span style="margin-left:8px">Recherche de \u00AB '+sanitize(q)+' \u00BB\u2026</span>');
   /* addressdetails=1 : sans lui, le PAYS n'est pas renvoye separement et on ne
      pouvait que decouper display_name a l'aveugle — ce qui donnait « Oujda ·
      Pachalik d'Oujda, Prefecture d'Oujda-Angad », des noms administratifs que
@@ -19964,7 +19990,7 @@ function initPullToRefresh(){
     var dy=e.changedTouches[0].clientY-startY;
     if(dy>60){
       var icon=document.getElementById("ptr-icon"),l=document.getElementById("ptr-label");
-      if(icon){icon.style.transform="rotate(0deg)";icon.style.animation="spin .7s linear infinite";icon.textContent="";}
+      if(icon){icon.style.transform="";icon.innerHTML=ondeHTML(3);}   // la fleche cede la place a l'onde
       if(l)l.textContent="Actualisation…";
       var lat=userLat||50.8503,lng=userLng||4.3517;
       var refresh=window.fbLoadNearbyStores?window.fbLoadNearbyStores(lat,lng,10,{skipCache:true}):Promise.resolve();
@@ -19973,7 +19999,7 @@ function initPullToRefresh(){
         if(curSel)renderStoreList();
         ind.style.height="0";
         toast("Actualisé !");playSound("win");
-        if(icon){icon.style.animation="";icon.textContent="↓";}
+        if(icon)icon.textContent="↓";
       });
     } else {
       ind.style.height="0";
@@ -20703,7 +20729,7 @@ function renderNewcomers(){
     else return;
   }
   host.innerHTML = '<div style="font-size:13px;font-weight:800;color:var(--s1);margin:2px 0 10px">Qui vient d\'arriver</div>' +
-    '<div id="nc-list" style="font-size:12.5px;color:var(--s2);padding:10px 0">Chargement…</div>';
+    '<div id="nc-list" style="font-size:12.5px;color:var(--s2);padding:10px 0">'+magoLoader(true,"Chargement…")+'</div>';
   if (!window.fbRecentUsers) return;
   Promise.all([window.fbRecentUsers(15), window.fbPresenceAll ? window.fbPresenceAll() : {}])
     .then(async function(r){
@@ -22267,7 +22293,7 @@ function renderUserSearchList(){
     el.innerHTML='<div style="text-align:center;padding:30px;font-size:13px;color:var(--s3)">'+((LANGS[curLang]||LANGS.fr).userSearchHint)+'</div>';
     return;
   }
-  el.innerHTML='<div style="text-align:center;padding:26px;font-size:13px;color:var(--s3)">Recherche\u2026</div>';
+  el.innerHTML='<div style="text-align:center;padding:26px">'+magoLoader(true,"Recherche\u2026")+'</div>';
   clearTimeout(_userSearchTimer);
   _userSearchTimer=setTimeout(function(){
     if(!window.fbSearchUsers){el.innerHTML="";return;}

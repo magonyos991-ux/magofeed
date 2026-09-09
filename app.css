@@ -965,26 +965,34 @@ body.dark .leaflet-control-zoom a{background:rgba(42,42,42,.85)!important;color:
 .store-card:active{transform:scale(.98)}
 .searchbox:active{transform:scale(.985)}
 
-/* ══ CHARGEMENT ══════════════════════════════════════════════════════════
-   Une goutte, puis l'onde qui s'ecarte. C'est la seule image qui dise
-   « boisson » sans dessiner une bouteille, et elle reste calme : un ecran qui
-   attend ne doit pas s'agiter. Trois anneaux decales d'un demi-battement,
-   dessines en CSS pur — aucune image, aucun octet a telecharger.
-   Rendue et regardee en clair, en sombre et en 34 px avant d'etre posee. ══ */
-.mago-load{position:relative;width:58px;height:58px;flex-shrink:0;margin:10px auto}
-.mago-load i{position:absolute;inset:0;border-radius:50%;border:2.2px solid var(--s1);opacity:0;
-  animation:magoOnde 2s cubic-bezier(.15,.62,.28,1) infinite}
-.mago-load i:nth-child(2){animation-delay:.5s}
-.mago-load i:nth-child(3){animation-delay:1s}
-.mago-load b{position:absolute;left:50%;top:50%;width:11px;height:11px;margin:-5.5px 0 0 -5.5px;
-  border-radius:50%;background:var(--cta-bg);
-  animation:magoGoutte 2s cubic-bezier(.15,.62,.28,1) infinite}
-.mago-load.sm{width:34px;height:34px;margin:0}
-.mago-load.sm b{width:7px;height:7px;margin:-3.5px 0 0 -3.5px}
-.mago-load.sm i{border-width:1.8px}
-@keyframes magoOnde{0%{transform:scale(.2);opacity:0}14%{opacity:.85}70%{opacity:.28}100%{transform:scale(1);opacity:0}}
-@keyframes magoGoutte{0%{transform:scale(.55);opacity:.5}10%{transform:scale(1.15);opacity:1}30%{transform:scale(.85);opacity:.9}100%{transform:scale(.55);opacity:.5}}
-body.dark .mago-load i{border-color:#f6f1e9}
+/* ══ CHARGEMENT — L'ONDE QUI SE PROPAGE ═══════════════════════════════════
+   Une grille carree de points ronds. Chaque point bat (echelle + opacite)
+   avec un retard proportionnel a sa distance au centre : l'onde part du
+   point central, dore, et gagne les bords. C'est le geste de la marque — le
+   symbole qui se propage — sans dessiner une bouteille, et il reste calme :
+   un ecran qui attend ne doit pas s'agiter.
+   CSS pur, transform + opacite seulement, aucun chronometre JS. Le balisage
+   (et le retard de chaque point) sort d'UNE fonction : ondeHTML(taille) dans
+   index.html. Trois tailles, jamais plus de 49 points :
+     .onde-7   9 px, pas 11 px   splash, attentes plein ecran
+     .onde-5   7 px, pas  8 px   cartes, etats vides
+     .onde-3   6 px, pas  5 px   en ligne, a cote d'un texte (« Actualisation… »)
+   Regardee en clair, en sombre et en mouvement reduit avant d'etre posee. ══ */
+.onde{display:grid;grid-template-columns:repeat(7,9px);gap:11px;width:max-content;margin:0 auto;flex-shrink:0}
+.onde i{display:block;width:9px;height:9px;border-radius:50%;background:var(--s1);
+  opacity:.18;transform:scale(.55);animation:magoOnde 2s ease-in-out infinite}
+.onde i.c{background:var(--gold-bg)}
+.onde-5{grid-template-columns:repeat(5,7px);gap:8px}
+.onde-5 i{width:7px;height:7px}
+.onde-3{display:inline-grid;grid-template-columns:repeat(3,6px);gap:5px;margin:0;vertical-align:middle}
+.onde-3 i{width:6px;height:6px}
+@keyframes magoOnde{0%{transform:scale(.55);opacity:.18}40%{transform:scale(1.35);opacity:1}100%{transform:scale(.55);opacity:.18}}
+
+/* Le composant d'attente : l'onde moyenne (ou petite avec .sm, en ligne a
+   cote de son texte). role="status" est porte par ce conteneur. */
+.mago-load{display:flex;flex-direction:column;align-items:center;gap:12px;width:max-content;max-width:100%;margin:10px auto}
+.mago-load.sm{display:inline-flex;flex-direction:row;gap:9px;margin:0;vertical-align:middle}
+.mago-load-txt{font-size:12px;font-weight:600;color:var(--s2);line-height:1.3}
 
 /* La barre fine du haut : pour une ACTUALISATION, quand l'ecran est deja
    rempli et qu'on ne veut rien cacher. Elle ne prend aucune place. */
@@ -1004,9 +1012,8 @@ body.dark .mago-load i{border-color:#f6f1e9}
 
 /* Mouvement reduit : on garde l'information, on retire l'agitation. */
 @media (prefers-reduced-motion:reduce){
-  .mago-load i,.mago-load b,#mago-barre i,.mago-skel{animation:none}
-  .mago-load i:first-child{opacity:.45;transform:scale(1)}
-  .mago-load b{opacity:1;transform:scale(1)}
+  .onde i,#mago-barre i,.mago-skel{animation:none}
+  .onde i{opacity:.5;transform:none}
   #mago-barre i{left:0;width:100%}
 }
 
@@ -1128,9 +1135,12 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
 #splash.hidden{opacity:0;pointer-events:none}
 .splash-logo{font-size:48px;font-weight:800;letter-spacing:-2px;color:#fff;animation:splashIn .6s cubic-bezier(.16,1,.3,1) both;}
 .splash-sub{font-size:14px;font-weight:500;color:rgba(255,255,255,.45);letter-spacing:.5px;animation:splashIn .6s .15s cubic-bezier(.16,1,.3,1) both;}
-.splash-dot{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.3);margin-top:32px;animation:splashPulse 1s .4s ease-in-out infinite alternate;}
+/* L'onde du splash : toujours sur le fond sombre #1a1714, quel que soit le
+   theme — d'ou les couleurs posees en dur (points creme, centre dore en FOND). */
+#splash-onde{margin-top:26px;animation:splashIn .6s .3s cubic-bezier(.16,1,.3,1) both}
+#splash .onde i{background:#f4f2ee}
+#splash .onde i.c{background:#e5a93a}
 @keyframes splashIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
-@keyframes splashPulse{from{opacity:.3}to{opacity:.8}}
 
 /* ── Respecte la préférence système "réduire les animations" ── */
 @media (prefers-reduced-motion:reduce){
