@@ -110,6 +110,21 @@ async function exporter(motif) {
    quoi faire ne vaut guere mieux que pas de message du tout. */
 function expliquer(e) {
   const brut = String((e && e.message) || e || "");
+
+  /* LE COFFRE N'EXISTE PAS. Deuxieme panne rencontree, et elle ne ressemble en
+     rien a la premiere : le droit d'exporter etait enfin accorde, mais l'espace
+     de stockage vers lequel ecrire n'avait jamais ete cree. Firebase annonce un
+     seau par defaut dans la configuration du projet AVANT que Storage soit
+     active — le nom existe, le coffre non. On visait donc une adresse valide et
+     vide, et Google repondait NOT_FOUND, ce qui se lit comme un bug de code
+     alors que c'est un service a activer en deux clics. */
+  if (/bucket does not exist|NOT_FOUND/i.test(brut)) {
+    return "L'espace de stockage des sauvegardes n'existe pas encore. Ouvre la " +
+      "console Firebase, section Storage, et clique sur Commencer pour le creer " +
+      "(choisis une region en Europe, ce choix est definitif). Message d'origine : " +
+      brut.slice(0, 150);
+  }
+
   const refus = /permission|PERMISSION_DENIED|does not have|IAM/i.test(brut);
   if (!refus) return brut.slice(0, 300);
   const projet = PROJET || "le projet";
