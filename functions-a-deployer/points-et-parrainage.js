@@ -161,10 +161,50 @@ async function crediter(uid, montant, motif) {
 /* Le score officiel : heritage du solde d'avant la bascule, plus les preuves,
    plus le parrainage, moins les sanctions. On l'ecrit dans `points` pour que
    le classement n'ait rien a changer. */
+/* LA SANCTION NE VIT PAS DANS LE PROFIL — elle y est seulement recopiee.
+   `users/{uid}.penalty` est effacable : la regle Firestore autorise chacun a
+   supprimer son propre document, et un document neuf n'a pas de champ penalty.
+   Il suffisait donc d'effacer son profil pour effacer sa sanction.
+   La source de verite est la collection `penalties`, ecrite par l'anti-farm
+   (anti-farm.js), un document par incident, clef uid__magasin__boisson. Elle
+   n'est pas supprimable par le client (firestore.rules) et survit donc a la
+   suppression du profil. On la relit ici, et on recopie le total dans le
+   profil pour que l'affichage reste juste.
+   Requete a champ unique : Firestore l'indexe tout seul, aucun index composite
+   a creer. Les sanctions sont rares, la lecture est donc quasi toujours vide. */
+const PENALITES_MAX = 2000;
+async function sanctionReelle(uid, tx) {
+  try {
+    const q = db.collection("penalties").where("uid", "==", String(uid)).limit(PENALITES_MAX);
+    // Lue DANS la transaction quand on en a une : sans cela, une sanction qui
+    // tombe entre la lecture et l'ecriture etait ecrasee par un total perime.
+    const snap = tx ? await tx.get(q) : await q.get();
+    if (snap.size >= PENALITES_MAX) {
+      /* Tronque : mieux vaut garder la valeur du profil que d'ecrire un total
+         SOUS-ESTIME, qui allegerait la sanction de quelqu'un sans que rien ne
+         le signale. A ce nombre de sanctions, le compte releve de toute facon
+         d'une decision humaine. */
+      console.warn("sanctionReelle : plus de " + PENALITES_MAX + " sanctions pour " + uid + ", total non fiable");
+      return null;
+    }
+    let total = 0;
+    snap.forEach((doc) => { total += Number((doc.data() || {}).points) || 0; });
+    return total;
+  } catch (e) {
+    /* Lecture impossible : on ne renvoie PAS zero, ce qui effacerait la
+       sanction de quelqu'un a cause d'une panne. On rend null, et l'appelant
+       garde la valeur deja inscrite au profil. */
+    console.warn("sanctionReelle :", e && e.message);
+    return null;
+  }
+}
 async function recalculerScore(uid) {
   if (!uid) return;
   const ref = db.doc(`users/${uid}`);
   await db.runTransaction(async (tx) => {
+    /* Les LECTURES d'abord, ecritures ensuite : Firestore l'impose. La requete
+       sur `penalties` en fait partie — l'Admin SDK accepte tx.get(query). */
+    const sanction = await sanctionReelle(uid, tx);
     const snap = await tx.get(ref);
     if (!snap.exists) return;
     const d = snap.data() || {};
@@ -184,10 +224,14 @@ async function recalculerScore(uid) {
     const herite = premierPassage
       ? Math.max(0, Number(d.points) || 0)
       : (Number(d.pointsHerites) || 0);
+    const penalite = (sanction === null) ? (Number(d.penalty) || 0) : sanction;
     const total = Math.max(0,
-      herite + (d.pointsPreuves || 0) + (d.refPoints || 0) - (d.penalty || 0));
-    if (!premierPassage && d.points === total) return;
+      herite + (d.pointsPreuves || 0) + (d.refPoints || 0) - penalite);
+    if (!premierPassage && d.points === total && (Number(d.penalty) || 0) === penalite) return;
     const patch = { points: total };
+    // On recopie la sanction dans le profil : l'app l'affiche depuis la, et
+    // apres une suppression-recreation le champ y manquerait.
+    if ((Number(d.penalty) || 0) !== penalite) patch.penalty = penalite;
     if (premierPassage) {
       patch.pointsHerites = herite;
       patch.pointsPreuves = d.pointsPreuves || 0;
@@ -576,17 +620,29 @@ const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 exports.monCodeParrain = onCall({ region: REGION }, async (req) => {
   const uid = req.auth && req.auth.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi d'abord.");
+  /* UN CODE NE SE REND QUE S'IL EXISTE ENCORE DANS refCodes. Revoquer un code
+     se fait en supprimant refCodes/{code} ; sans cette relecture, le parrain
+     continuait de diffuser un code mort — refMine (ou, avant, le profil)
+     gardait l'ancienne valeur, elle etait renvoyee telle quelle, et le filleul
+     recevait « code inconnu » sans que personne comprenne pourquoi. Si le code
+     a disparu, on en fabrique un neuf : la revocation devient reelle. */
+  const encoreValide = async (c) => !!c && (await db.doc(`refCodes/${c}`).get()).exists;
   const mien = await db.doc(`refMine/${uid}`).get();
-  if (mien.exists && (mien.data() || {}).code) return { code: mien.data().code };
+  const codeMien = mien.exists ? (mien.data() || {}).code : null;
+  if (await encoreValide(codeMien)) return { code: codeMien };
   /* Repli pour les comptes qui auraient recu un code avant la correction : on
      le recupere du profil public et on l'en RETIRE en le rangeant au bon
-     endroit. Rejouable, et ne perd le code de personne. */
+     endroit. Rejouable, et ne perd le code de personne — sauf s'il a ete
+     revoque, auquel cas on le retire quand meme du profil et on en frappe un
+     neuf juste en dessous. */
   const u = await db.doc(`users/${uid}`).get();
   const ancien = u.exists ? (u.data() || {}).refCode : null;
   if (ancien) {
-    await db.doc(`refMine/${uid}`).set({ code: ancien, createdAt: FieldValue.serverTimestamp() }, { merge: true });
     await db.doc(`users/${uid}`).set({ refCode: FieldValue.delete() }, { merge: true });
-    return { code: ancien };
+    if (await encoreValide(ancien)) {
+      await db.doc(`refMine/${uid}`).set({ code: ancien, createdAt: FieldValue.serverTimestamp() }, { merge: true });
+      return { code: ancien };
+    }
   }
   for (let essai = 0; essai < 12; essai++) {
     let code = "";

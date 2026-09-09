@@ -71,6 +71,12 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
 <!-- PWA -->
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1a1714">
+<!-- L'accueil existe sous deux adresses : /magofeed/ et /magofeed/index.html.
+     Sans canonical, Google choisit lui-meme laquelle indexer et repartit la
+     valeur des liens entre les deux. Le sitemap declare la forme courte :
+     on la designe explicitement ici. C'est la seule page du site qui puisse
+     reellement se positionner, autant qu'elle le fasse sous une seule URL. -->
+<link rel="canonical" href="https://magonyos991-ux.github.io/magofeed/">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -987,6 +993,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <div class="t-section" style="flex-shrink:0;white-space:nowrap">Boissons</div>
         <div class="sec-count" id="sd-drink-count" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
         <div id="sd-add-drink" onclick="openAddDrinkToStore()" role="button" tabindex="0" aria-label="Ajouter une boisson à ce magasin" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openAddDrinkToStore();}" style="flex-shrink:0;display:inline-flex;align-items:center;gap:5px;padding:0 13px;height:34px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> Ajouter</div>
+        <div id="sd-frigo-contrib" onclick="scanFridgeStart()" role="button" tabindex="0" aria-label="Scanner le frigo de ce magasin" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();scanFridgeStart();}" style="display:none;flex-shrink:0;align-items:center;gap:5px;padding:0 13px;height:34px;border-radius:999px;background:var(--bg2);color:var(--s1);border:1.5px solid var(--border);font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2.5" width="14" height="19" rx="2.5"/><path d="M5 10h14M8.5 6.2v1.6M8.5 13.5v3"/></svg> Scanner le frigo</div>
       </div>
       <div id="sd-drink-list"></div>
       <div id="sd-admin-tools" style="display:none">
@@ -1529,7 +1536,15 @@ onAuthStateChanged(auth, async function(user) {
          encore. Celui-la n'existait nulle part : aucun document, donc aucune
          notification « nouvel utilisateur », donc un arrivant invisible.
          On garde donc la porte ouverte : au premier geste tactile reel, qu'un
-         robot d'apercu ne produit jamais, on cree le compte. */
+         robot d'apercu ne produit jamais, on cree le compte.
+
+         `points` n'est PAS ecrit ici, meme a zero. Le score appartient au
+         serveur, et la regle Firestore refuse desormais le champ AUSSI a la
+         creation — pas seulement a la modification, sinon il suffisait
+         d'effacer son profil pour le recreer avec 999 999. Envoyer « points: 0 »
+         ferait rejeter le document ENTIER : pas de pseudo, et surtout pas de
+         createdAt, dont depend le garde-fou anti-sybil du parrainage. Un compte
+         neuf part de toute facon a zero. */
       if (magoRobotProbable()) {
         window._magoCompteEnAttente = user.uid;
         /* Si la personne a deja touche l'ecran pendant que Firebase reflechissait,
@@ -1538,7 +1553,7 @@ onAuthStateChanged(auth, async function(user) {
       } else {
         await setDoc(userDocRef(user.uid), {
           pseudo: String(localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
-          points: 0, signals: 0, confirms: 0,
+          signals: 0, confirms: 0,
           createdAt: serverTimestamp()
         }, { merge: true });
       }
@@ -1728,11 +1743,31 @@ function geohashQueryBounds(lat, lng, radiusMeters) {
 }
 window.geohashQueryBounds = geohashQueryBounds;
 
+/* Une plage de geohash, lue JUSQU'AU BOUT. Le plafond de 2000 etait pose sans
+   pagination : au-dela, Firestore rendait les 2000 premiers et les suivants
+   disparaissaient SANS ERREUR — une carte incomplete, silencieusement. Mesure
+   sur une ville simulee a densite reelle et le rayon de 40 km que la carte
+   emploie : a 10 000 magasins on en perdait deja 620, a 31 000 on en perdait
+   6 163. La bande de latitude, elle, paginait deja ; la voie geohash devait
+   faire pareil avant qu'on la mette en service. Meme garde-fou de 20 pages
+   qu'ailleurs : au-dela, c'est une requete qu'il ne faut de toute facon pas
+   servir depuis un telephone. */
+async function _plageGeohash(b) {
+  var out = [], cur = null;
+  for (var p = 0; p < 20; p++) {
+    var q = cur
+      ? query(collection(db, "stores"), orderBy("geohash"), startAfter(cur), endAt(b[1]), limit(2000))
+      : query(collection(db, "stores"), orderBy("geohash"), startAt(b[0]), endAt(b[1]), limit(2000));
+    var snap = await getDocs(q);
+    snap.forEach(function(d) { out.push(d); });
+    if (snap.size < 2000) break;
+    cur = snap.docs[snap.docs.length - 1];
+  }
+  return out;
+}
 async function queryNearbyStoresByGeohash(lat, lng, radiusKm) {
   var bounds = geohashQueryBounds(lat, lng, radiusKm * 1000);
-  var snaps = await Promise.all(bounds.map(function(b) {
-    return getDocs(query(collection(db, "stores"), orderBy("geohash"), startAt(b[0]), endAt(b[1]), limit(2000)));
-  }));
+  var snaps = await Promise.all(bounds.map(_plageGeohash));
   var out = [], seen = {};
   snaps.forEach(function(snap) {
     snap.forEach(function(docSnap) {
@@ -1751,13 +1786,12 @@ async function queryNearbyStoresByGeohash(lat, lng, radiusKm) {
 /* Fusions de fiches : ancien id -> id conserve. Applique au chargement de chaque
    magasin : les references Firestore aux anciens ids restent valides sans migration.
    Les fusions decidees par l'admin sont dans meta/drinkMerges et chargees au boot. */
-window.DRINK_MERGES = { 11286: 3301, 11287: 3300,
-  11433: 10068, 11434: 11224,   // Hawai -> Hawaï (Tropical, Ananas)
-  11235: 14,     11055: 3500,   // Mecca-Cola -> Mecca Cola ; Club-Mate -> Club Mate
-  11037: 10060,  11288: 10066,  // Sprite Zero -> Sprite Zéro ; Canada Dry (doublon)
-  11306: 10112,  11460: 11016,  // Uludag -> Uludağ ; Nalu Exotic (doublon)
-  11302: 11088,  11303: 11089   // Binggrae Banana / Strawberry (doublons)
-};
+/* La table statique est declaree plus bas, dans un script ORDINAIRE, juste
+   avant le chargement du catalogue : ce module-ci est differe et depend du CDN
+   Firebase, si bien que les fusions connues d'avance n'existaient pas tant que
+   le reseau n'avait pas repondu — et les doublons restaient visibles. Ici on
+   garantit seulement l'objet ; fbLoadDrinkMerges y ajoute celles du serveur. */
+window.DRINK_MERGES = window.DRINK_MERGES || {};
 function remapDrinkId(x) { return window.DRINK_MERGES[Number(x)] || Number(x); }
 function applyMergesToStore(data) {
   if (data.drinks && data.drinks.length) {
@@ -2513,7 +2547,28 @@ window.fbLoadLeaderboard = async function() {
 };
 
 // Ajouter un signalement dans Firebase
+/* Relit UNIQUEMENT pointsPreuves. Le score complet arrive par fbUserStatsLoaded
+   au demarrage ; ici on veut juste savoir, quelques secondes apres une
+   contribution, si le serveur l'a creditee — c'est ce qui ouvre le scan de
+   frigo, et la personne ne doit pas avoir a recharger la page pour le voir. */
+window.fbRafraichirPreuves = async function(essai) {
+  essai = essai || 0;
+  try {
+    var u = auth.currentUser; if (!u || u.isAnonymous) return;
+    var snap = await getDoc(userDocRef(u.uid));
+    var d = snap.exists() ? (snap.data() || {}) : {};
+    var preuves = Number(d.pointsPreuves) || 0;
+    if (window.userStats) window.userStats.pointsPreuves = preuves;
+    if (window.majBoutonFrigoContrib) window.majBoutonFrigoContrib();
+    /* Le declencheur serveur qui credite demarre parfois a froid : 5 a 10 s.
+       Si rien n'est encore credite, on revient voir — trois fois, puis on
+       laisse le prochain demarrage de l'app faire le reste. */
+    if (preuves < 1 && essai < 3) setTimeout(function(){ window.fbRafraichirPreuves(essai + 1); }, [7000, 12000, 20000][essai]);
+  } catch (e) {}
+};
 window.fbAddReport = async function(storeId, drinkId, type, plus) {
+  // Le credit est asynchrone (declencheur Firestore) : on relit dans 5 s, puis on insiste.
+  setTimeout(function(){ try { window.fbRafraichirPreuves(0); } catch (e) {} }, 5000);
   try {
     var uid = null;
     try { var u = await ensureAuthed(); uid = u && u.uid; } catch(e) {}
@@ -3165,9 +3220,11 @@ window.fbCreerCompteEnAttente = async function (uid) {
     if (!user || user.uid !== uid) return;
     var snap = await getDoc(userDocRef(uid));
     if (snap.exists()) return;                 // deja cree entre-temps
+    // Pas de `points: 0` : la regle refuse le champ a la creation, et le
+    // document ENTIER serait rejete — cet arrivant n'aurait jamais de compte.
     await setDoc(userDocRef(uid), {
       pseudo: String(localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
-      points: 0, signals: 0, confirms: 0,
+      signals: 0, confirms: 0,
       createdAt: serverTimestamp()
     }, { merge: true });
   } catch (e) { console.warn("creation differee:", e && e.message); }
@@ -3662,8 +3719,15 @@ window.fbIdentifyFridge = async function(imageDataUrl, storeId) {
     return (res && res.data) || { ok: false, reason: "no-response" };
   } catch (e) {
     var code = String((e && e.code) || "");
-    if (/not-found|unimplemented|internal/.test(code)) return { ok: false, reason: "not-deployed" };
-    return { ok: false, reason: code || String((e && e.message) || e) };
+    /* « internal » etait range avec « pas deployee » : une panne de l'analyse
+       s'affichait comme « fonction pas encore deployee », alors que le
+       contributeur venait de consommer un scan. Seules not-found et
+       unimplemented signifient vraiment que la fonction n'existe pas. */
+    if (/not-found|unimplemented/.test(code)) return { ok: false, reason: "not-deployed" };
+    /* Le serveur dit POURQUOI il refuse (« connecte-toi », « fais d'abord une
+       contribution », « il faut le pass ») : on transmet sa phrase telle
+       quelle, l'app n'a pas a la deviner. */
+    return { ok: false, reason: code || String((e && e.message) || e), message: String((e && e.message) || "") };
   }
 };
 window.fbConfirmAiDrink = async function(discoveryId) {
@@ -4418,7 +4482,39 @@ window.fbLoadCommunityData();
      d'exécution n'a aucune importance ici. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js" integrity="sha512-bCsBoYoW6zE0aja5xcIyoCDPfT27+cGr7AOCqelttLVRGay6EKGQbR6wm6SUcUGOMGXJpj+jrIpMS6i80+kZPw==" crossorigin="anonymous" async></script>
 
+<script>
+/* Fusions de fiches connues d'avance : ancien id -> id conserve. Declarees ici,
+   dans un script ordinaire execute pendant l'analyse du document, et non dans
+   le module Firebase qui est differe : un doublon doit disparaitre au
+   chargement du catalogue, pas a la reponse du reseau. */
+window.DRINK_MERGES = { 11286: 3301, 11287: 3300,
+  11433: 10068, 11434: 11224,   // Hawai -> Hawaï (Tropical, Ananas)
+  11235: 14,     11055: 3500,   // Mecca-Cola -> Mecca Cola ; Club-Mate -> Club Mate
+  11037: 10060,  11288: 10066,  // Sprite Zero -> Sprite Zéro ; Canada Dry (doublon)
+  11306: 10112,  11460: 11016,  // Uludag -> Uludağ ; Nalu Exotic (doublon)
+  11302: 11088,  11303: 11089,  // Binggrae Banana / Strawberry (doublons)
+  // Doublons trouves en verifiant les codes-barres (septembre 2026) : deux
+  // fiches pour un meme produit, ecrites differemment. On garde la plus
+  // ancienne, sauf pour Camlica ou l'on conserve l'orthographe turque exacte,
+  // comme deja fait pour Uludag -> Uludag.
+  11126: 10049,  // Rauch Happy Day Orange -> Happy Day Orange (meme photo OFF)
+  11110: 10079,  // Selecto -> Hamoud Boualem Selecto
+  11061: 2401,   // Jarritos Tamarindo -> la fiche 2401, renommee Tamarindo
+  11324: 11238,  // Camlica Gazoz -> Camlica Gazoz (orthographe turque)
+  13088: 11347   // Mogu Mogu Bubble Gum -> Mogu Mogu Bubblegum
+};
+</script>
 <script src="data/drinks.js"></script>
+<script>
+/* Les fusions ci-dessus sont connues des maintenant : on les applique tout de
+   suite. Celles decidees par l'admin arrivent plus tard et restent traitees
+   par l'ecouteur "fbMergesLoaded". */
+try{
+  if(window.DRINKS&&window.DRINK_MERGES){
+    window.DRINKS=window.DRINKS.filter(function(d){return !window.DRINK_MERGES[Number(d.id)];});
+  }
+}catch(e){}
+</script>
 <script src="data/alcool.js"></script>
 <script src="data/drinkart.js"></script>
 <script src="data/state.js"></script>
@@ -6401,6 +6497,10 @@ function _haloChoix(s){
 }
 function _majBandeauChoix(){
   var b=document.getElementById("choix-magasin-bandeau");
+  // Le contexte peut etre remis a zero pendant que la carte est ouverte
+  // (renderWhereFound(null) le fait). Un mode « designe » sans rien a designer
+  // laisserait le bandeau affiche et les pins morts : on en sort ici.
+  if(window._choixMagasin&&!lastScanContext)window._choixMagasin=false;
   if(!window._choixMagasin){ if(b)b.remove(); return; }
   var host=document.getElementById("explore-map-host");
   if(!host)return;
@@ -6417,7 +6517,14 @@ function _majBandeauChoix(){
 }
 function openStorePicker(){
   /* On garde le nom de la fonction : quatre endroits l'appellent, et tous
-     attendent la meme chose — que la personne designe un magasin. */
+     attendent la meme chose — que la personne designe un magasin.
+     SANS RIEN A DESIGNER, LE MODE N'EXISTE PAS. Il s'ouvrait quand meme :
+     bandeau « touche le magasin ou tu as vu cette boisson » alors qu'aucune
+     boisson n'etait ouverte, et pins morts — le tap appelait tagScanToStore,
+     qui rendait false en silence faute de contexte, et court-circuitait
+     l'itineraire. C'est ce que montrait la capture. Sans contexte : la carte,
+     normale, et rien d'autre. */
+  if(!lastScanContext){ window._choixMagasin=false; try{_majBandeauChoix();}catch(e){} try{openExploreMap({});}catch(e){} return; }
   window._choixMagasin=true;
   try{ window._choixBoisson=(lastScanContext&&lastScanContext.drinkId!=null)
         ? DRINKS.find(function(d){return Number(d.id)===Number(lastScanContext.drinkId);}) : null; }catch(e){ window._choixBoisson=null; }
@@ -6534,9 +6641,16 @@ function ensurePickerMap(cb){
    toute la communaute et immediatement selectionnable. */
 var addStorePos=null;
 var addStorePlacing=false;
-function openAddStoreForm(){
-  var el=document.getElementById("store-picker-list");if(!el)return;
-  addStorePos=userLat?{lat:userLat,lng:userLng,src:"gps"}:null;
+/* Le formulaire « Nouveau magasin ». Il vivait uniquement dans le panneau de
+   l'ancien selecteur (#store-picker-list) — or ce panneau n'est plus jamais
+   ouvert depuis la carte, si bien que « + Magasin » y ecrivait un formulaire
+   que personne ne voyait. Il accepte donc son conteneur, et la position de
+   depart : depuis la carte, c'est le CENTRE de ce qu'on regarde, pas le GPS.
+   Quelqu'un qui regarde Paris depuis Bruxelles veut ajouter un magasin a
+   Paris. */
+function openAddStoreForm(cible,posInitiale){
+  var el=cible||document.getElementById("store-picker-list");if(!el)return;
+  addStorePos=posInitiale||(userLat?{lat:userLat,lng:userLng,src:"gps"}:null);
   addStorePlacing=false;
   var q=(document.getElementById("store-picker-q")||{}).value||"";
   el.innerHTML='<div style="padding:4px 2px">'+
@@ -6565,21 +6679,42 @@ function openAddStoreForm(){
   });
   tEl.dataset.emoji=types[0][0];tEl.dataset.type=types[0][1];
   renderAddStorePos();
-  document.getElementById("add-store-cancel").onclick=function(){addStorePlacing=false;renderStorePicker();};
   document.getElementById("add-store-save").onclick=saveNewStore;
   var cancelBtn=document.getElementById("add-store-cancel");
   if(cancelBtn)cancelBtn.onclick=function(){
     addStorePos=null;addStorePlacing=false;
-    if(window._addStoreDraft&&window._pickerMarkers){try{window._pickerMarkers.removeLayer(window._addStoreDraft);}catch(e){}window._addStoreDraft=null;}
+    _retirerBrouillonMagasin();
+    playSound("pop");
+    if(window._addStoreSurExplore){exploreFermerAjout();return;}
     var q=document.getElementById("store-picker-q");if(q)q.value="";
-    renderStorePicker();playSound("pop");
+    renderStorePicker();
   };
+}
+/* Le pin provisoire vit sur la couche de la carte qui est ouverte : celle de
+   l'ancien selecteur, ou celle de la carte principale. */
+function _coucheBrouillon(){ return window._addStoreLayer||window._pickerMarkers||null; }
+function _retirerBrouillonMagasin(){
+  var c=_coucheBrouillon();
+  if(window._addStoreDraft&&c){try{c.removeLayer(window._addStoreDraft);}catch(e){}}
+  window._addStoreDraft=null;
+}
+function _poserBrouillonMagasin(lat,lng,message){
+  var c=_coucheBrouillon();
+  if(!c||!window.L)return;
+  _retirerBrouillonMagasin();
+  window._addStoreDraft=L.circleMarker([lat,lng],{radius:9,color:"#fff",weight:2,fillColor:"#c69a57",fillOpacity:1}).addTo(c);
+  // autoPan:false — sinon Leaflet DEPLACE la carte pour faire tenir la bulle,
+  // et le pin qu'on vient de poser glisse sous le doigt (~170 m mesures).
+  // On a tape ici : la carte reste ici.
+  if(message)window._addStoreDraft.bindPopup(message,{autoPan:false}).openPopup();
 }
 function renderAddStorePos(){
   var el=document.getElementById("add-store-pos");if(!el)return;
   var html="";
   if(addStorePos){
-    html="Position : "+(addStorePos.src==="gps"?"ta position GPS actuelle":"choisie sur la carte")+" \u2713";
+    html="Position : "+(addStorePos.src==="gps"?"ta position GPS actuelle \u2713"
+                       :addStorePos.src==="centre"?"la pointe du pin \u2014 <b>d\u00E9place la carte</b> pour l'ajuster"
+                       :"choisie sur la carte \u2713");
     // Adresse + numero recuperes AUTOMATIQUEMENT (une seule fois par position).
     var addrInput=document.getElementById("add-store-address");
     if(addStorePos.address){
@@ -6606,7 +6741,8 @@ function renderAddStorePos(){
   var pl=document.getElementById("add-store-place");
   if(pl)pl.onclick=function(){
     addStorePlacing=true;
-    if(!pickerMapOn)toggleStorePickerMap();
+    // Depuis la carte principale, la carte est deja la : rien a ouvrir.
+    if(!pickerMapOn&&!window._addStoreSurExplore)toggleStorePickerMap();
     renderAddStorePos();
     toast("Tape sur la carte \u00E0 l'emplacement exact du magasin");
   };
@@ -6618,11 +6754,7 @@ function onPickerMapClick(latlng){
   // doublons de magasins). Le pin definitif n'existe qu'apres "Creer".
   addStorePos={lat:latlng.lat,lng:latlng.lng,src:"map"};
   addStorePlacing=false;
-  if(window._pickerMarkers&&window.L){
-    if(window._addStoreDraft){try{window._pickerMarkers.removeLayer(window._addStoreDraft);}catch(e){}}
-    window._addStoreDraft=L.circleMarker([latlng.lat,latlng.lng],{radius:9,color:"#fff",weight:2,fillColor:"#c69a57",fillOpacity:1}).addTo(window._pickerMarkers);
-    window._addStoreDraft.bindPopup("Ici ? Re-tape ailleurs pour d\u00e9placer").openPopup();
-  }
+  _poserBrouillonMagasin(latlng.lat,latlng.lng,window._addStoreSurExplore?null:"Ici ? Re-tape ailleurs pour d\u00e9placer");
   renderAddStorePos();
   playSound("pop");
 }
@@ -6660,7 +6792,7 @@ function saveNewStore(){
   var createBtn=document.getElementById("add-store-save");
   if(createBtn){createBtn.disabled=true;createBtn.textContent="Enregistrement\u2026";}
   var finishOk=function(){
-    if(window._addStoreDraft&&window._pickerMarkers){try{window._pickerMarkers.removeLayer(window._addStoreDraft);}catch(e){}window._addStoreDraft=null;}
+    _retirerBrouillonMagasin();
     addStorePos=null;
     STORES.push(s);
     if(window.fbTouchCache)window.fbTouchCache();
@@ -6670,6 +6802,14 @@ function saveNewStore(){
     /* On laisse passer le message de creation avant d'ouvrir la fiche de
        relecture : toast() ne reinitialise pas sa minuterie, donc le message
        du rattachement serait masque en avance par celui de la creation. */
+    if(window._addStoreSurExplore){
+      /* Cree depuis la carte : on y reste, et le nouveau pin apparait a
+         l'endroit exact ou on l'a pose — c'est ca, la confirmation. */
+      exploreFermerAjout();
+      try{exploreLoadStores(true);}catch(e){}
+      if(lastScanContext){setTimeout(function(){tagScanToStore(s);},600);}
+      return;
+    }
     if(lastScanContext){closeStorePicker();setTimeout(function(){tagScanToStore(s);},600);}
     else{renderStorePicker();}
   };
@@ -7271,7 +7411,7 @@ function confirmFamilyFormat(family,barcode,fmt){
   // Localement : le code-barre rejoint la famille tout de suite
   // (le prochain scan du meme code sera reconnu sans OFF)
   if(!family.barcodes)family.barcodes=[];
-  if(family.barcodes.indexOf(String(barcode))===-1)family.barcodes.push(String(barcode));
+  if(indexCode(family.barcodes,barcode)===-1)family.barcodes.push(String(barcode));
   /* ET SUR LE DISQUE. Le tableau ci-dessus vit en memoire : il repart a chaque
      rechargement, et la personne se retrouvait devant la meme question apres
      avoir deja repondu. */
@@ -7414,7 +7554,7 @@ function dateCourte(ts){
    ne fait plus dire « au catalogue »). */
 function findStatus(e){
   var code=String(e.code||"");
-  var drink=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(code)!==-1&&!barcodeDisavowed(code,x.id);});
+  var drink=DRINKS.find(function(x){return porteCode(x.barcodes,code)&&!barcodeDisavowed(code,x.id);});
   if(!drink&&e.drinkId!=null)drink=DRINKS.find(function(x){return Number(x.id)===Number(e.drinkId);})||null;
   // Entrees d'avant : reconnues au catalogue au moment du scan (src catalog /
   // format) mais sans identifiant memorise — on retrouve la boisson par son nom.
@@ -7608,9 +7748,28 @@ var _scanVotes={code:null,count:0};
 function badLinks(){
   try{ return JSON.parse(localStorage.getItem("magoBadLinks")||"{}")||{}; }catch(e){ return {}; }
 }
+/* Un meme article se lit sous plusieurs longueurs : EAN-8 (8 chiffres), UPC-A
+   (12) et EAN-13 (13) designent le meme produit, les formes courtes n'etant
+   que la longue privee de ses zeros de tete. Selon le decodeur, le lecteur du
+   telephone rend tantot l'une, tantot l'autre — et jusqu'ici on comparait les
+   chaines telles quelles : un produit enregistre en 13 chiffres ne repondait
+   jamais a son propre scan en 12. On compare desormais la forme sans zeros. */
+function codeNu(c){ return String(c==null?"":c).replace(/\D/g,"").replace(/^0+/,""); }
+function indexCode(liste,code){
+  var x=codeNu(code);
+  if(!liste||!liste.length||!x)return -1;
+  for(var i=0;i<liste.length;i++) if(codeNu(liste[i])===x) return i;
+  return -1;
+}
+function porteCode(liste,code){ return indexCode(liste,code)!==-1; }
 function barcodeDisavowed(code,drinkId){
-  var l=badLinks()[String(code)];
-  return !!l && l.indexOf(Number(drinkId))!==-1;
+  var all=badLinks(), x=codeNu(code);
+  for(var k in all){
+    if(!Object.prototype.hasOwnProperty.call(all,k))continue;
+    if(codeNu(k)!==x)continue;
+    if(all[k] && all[k].indexOf(Number(drinkId))!==-1) return true;
+  }
+  return false;
 }
 /* ── LES LIENS CODE-BARRE ↔ BOISSON POSES PAR LA PERSONNE ELLE-MEME ───────
    Quand quelqu'un dit « ce code, c'est cette boisson-la », confirmFamilyFormat
@@ -7626,8 +7785,25 @@ function barcodeDisavowed(code,drinkId){
 function ownLinks(){
   try{ return JSON.parse(localStorage.getItem("magoLiensCode")||"{}")||{}; }catch(e){ return {}; }
 }
+/* Retrouve la clef d'un dictionnaire indexe par code-barre, quelle que soit la
+   longueur sous laquelle le code a ete enregistre. Le catalogue compare deja
+   les codes par leur forme sans zeros de tete (codeNu) ; ces dictionnaires
+   locaux, eux, etaient encore interroges par clef exacte. Un lien pose le jour
+   ou le lecteur rendait 12 chiffres restait donc introuvable le jour ou il en
+   rendait 13 — et l'app reposait la question a laquelle la personne avait
+   deja repondu. */
+function cleCode(obj,code){
+  var x=codeNu(code);
+  if(!obj||!x)return null;
+  if(Object.prototype.hasOwnProperty.call(obj,String(code)))return String(code);
+  for(var k in obj) if(Object.prototype.hasOwnProperty.call(obj,k)&&codeNu(k)===x)return k;
+  return null;
+}
 function linkBarcodeLocally(code,drinkId){
-  var all=ownLinks();
+  var all=ownLinks(), k=cleCode(all,code);
+  // On reecrit sur la clef existante s'il y en a une, pour ne pas garder deux
+  // entrees (12 et 13 chiffres) qui designent le meme article.
+  if(k!=null&&k!==String(code))delete all[k];
   all[String(code)]=Number(drinkId);
   try{ localStorage.setItem("magoLiensCode",JSON.stringify(all)); }catch(e){}
 }
@@ -7637,24 +7813,25 @@ function linkBarcodeLocally(code,drinkId){
    plus fort que dire « oui ». */
 function drinkForBarcode(code){
   var c=String(code);
-  var d=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(c)!==-1&&!barcodeDisavowed(c,x.id);});
+  var d=DRINKS.find(function(x){return porteCode(x.barcodes,c)&&!barcodeDisavowed(c,x.id);});
   if(d)return d;
-  var id=ownLinks()[c];
+  var liens=ownLinks(), k=cleCode(liens,c);
+  var id=k==null?null:liens[k];
   if(id==null||barcodeDisavowed(c,id))return undefined;
   var perso=DRINKS.find(function(x){return Number(x.id)===Number(id);});
   /* Le lien remis dans le tableau en memoire : tout le reste de l'app
      (« nouveau format detecte », renderWhereFound, l'historique) continue de
      lire drink.barcodes sans rien savoir de ce stockage. */
-  if(perso){ if(!perso.barcodes)perso.barcodes=[]; if(perso.barcodes.indexOf(c)===-1)perso.barcodes.push(c); }
+  if(perso){ if(!perso.barcodes)perso.barcodes=[]; if(indexCode(perso.barcodes,c)===-1)perso.barcodes.push(c); }
   return perso;
 }
 function disavowBarcode(code,drinkId){
   /* Desavouer efface le lien inverse : sans ca, drinkForBarcode le remettrait
      aussitot dans barcodes et le desaveu ne tiendrait pas un rechargement. */
   try{
-    var l=ownLinks();
-    if(l[String(code)]!=null&&Number(l[String(code)])===Number(drinkId)){
-      delete l[String(code)];
+    var l=ownLinks(), cle=cleCode(l,code);
+    if(cle!=null&&Number(l[cle])===Number(drinkId)){
+      delete l[cle];
       localStorage.setItem("magoLiensCode",JSON.stringify(l));
     }
   }catch(e){}
@@ -7667,7 +7844,7 @@ function disavowBarcode(code,drinkId){
   try{
     var d=DRINKS.find(function(x){return Number(x.id)===Number(drinkId);});
     if(d&&d.barcodes){
-      var i=d.barcodes.indexOf(String(code));
+      var i=indexCode(d.barcodes,code);
       if(i!==-1)d.barcodes.splice(i,1);
     }
   }catch(e){}
@@ -13522,6 +13699,7 @@ function openStoreDetail(storeId){
   try{enrichStoreHours(s);}catch(e){}
   var admTools=document.getElementById("sd-admin-tools");
   if(admTools)admTools.style.display=isAdmin?"block":"none";
+  try{majBoutonFrigoContrib();}catch(e){}
   /* Le commerçant proprietaire (champ owner, pose a la certification) gere
      SON magasin : remplir le rayon, corriger ses horaires. Il n'a ni la
      certification ni la suppression — ces pouvoirs-la restent a l'admin.
@@ -13698,7 +13876,9 @@ function scanFridgeStart(){
       window.fbIdentifyFridge(data, (curStoreDetail&&(curStoreDetail.fbId||curStoreDetail.id))||"").then(function(res){
         if(!res||!res.ok){
           var msg=res&&res.reason==="quota"?"Quota du jour atteint (10 frigos)":
+                  res&&res.reason==="quota-global"?"L'app a atteint son quota de frigos pour aujourd'hui — reviens demain":
                   res&&res.reason==="not-deployed"?"Fonction identifyFridge pas encore déployée":
+                  res&&res.message?res.message:
                   "Analyse impossible — réessaie";
           toast(msg);playSound("err");return;
         }
@@ -13941,6 +14121,10 @@ function renderStoreMission(){
     prog;
 }
 function renderStoreDetail(){
+  // L'etat gerant (chargerMesMagasins) et l'etat admin peuvent arriver apres
+  // l'ouverture de la fiche : le bouton contributeur doit alors se retirer
+  // pour ne pas doubler celui du gerant ou de l'admin.
+  try{majBoutonFrigoContrib();}catch(e){}
   var s=curStoreDetail;if(!s)return;
   document.getElementById("sd-emoji").innerHTML=storeIconHTML(s);
   document.getElementById("sd-name").textContent=s.name;
@@ -14145,6 +14329,24 @@ function passOuvre(st,niveau){
   if(niveau==="complet")return p==="complet";
   return false;
 }
+/* LE SCAN DE FRIGO POUR LES CONTRIBUTEURS. Le bouton s'affiche a qui a un
+   compte connecte et au moins une contribution creditee — la meme regle que
+   le serveur applique, lui, pour de vrai (identifyFridge). Ceci n'est qu'un
+   confort d'affichage : un bouton qui echoue est pire qu'un bouton absent.
+   L'administrateur et le gerant avec pass ont deja le leur, on ne double pas. */
+function contributeurPeutScannerFrigo(){
+  try{
+    var u=window._fbUser;
+    if(!u||u.isAnonymous)return false;
+    return (Number(userStats.pointsPreuves)||0)>=1;
+  }catch(e){return false;}
+}
+function majBoutonFrigoContrib(){
+  var b=document.getElementById("sd-frigo-contrib"); if(!b)return;
+  var st=window.curStoreDetail||null;
+  var dejaUnBouton=(window.isAdmin===true)||(st&&passOuvre(st,"frigo"));
+  b.style.display=(!dejaUnBouton&&contributeurPeutScannerFrigo())?"inline-flex":"none";
+}
 /* L'ANNONCE, telle que la voit un VISITEUR.
    Elle porte toujours l'etiquette « Annonce du commercant ». Ce n'est pas une
    politesse : sans elle, une phrase ecrite par un gerant se lirait comme un
@@ -14205,7 +14407,9 @@ function rendrePass(st){
     suite="Le pass complet ajoute une annonce sur ta fiche. Il s'accorde à la main pour l'instant.";
   }else{
     titre="Aucun pass";
-    corps="Le scan de frigo demande le pass frigo.";
+    corps=(typeof contributeurPeutScannerFrigo==="function"&&contributeurPeutScannerFrigo())
+      ?"Tu peux d\u00E9j\u00E0 scanner les frigos comme contributeur. Le pass ajoute la signature de tes boissons."
+      :"Le scan de frigo s'ouvre avec le pass frigo, ou apr\u00E8s une premi\u00E8re contribution cr\u00E9dit\u00E9e.";
     suite="Ecris-nous depuis les reglages pour l'activer.";
   }
   hote.innerHTML=
@@ -14714,7 +14918,7 @@ function rafaleAddCode(code){
   // Anti-rebond : le même code tenu en main déclenche plusieurs lectures.
   if(window._rafaleLast&&window._rafaleLast.code===code&&(now-window._rafaleLast.ts)<3000){window._rafaleLast.ts=now;return;}
   window._rafaleLast={code:code,ts:now};
-  var d=DRINKS.find(function(x){return x.barcodes&&x.barcodes.indexOf(code)!==-1&&!barcodeDisavowed(code,x.id);});
+  var d=DRINKS.find(function(x){return porteCode(x.barcodes,code)&&!barcodeDisavowed(code,x.id);});
   if(!d){
     rafaleFlash("#f59e0b");playSound("err");rafaleNote("Pas au catalogue — au suivant","#fbbf24");
     if(navigator.vibrate)try{navigator.vibrate(30);}catch(e){}
@@ -16331,18 +16535,139 @@ function exploreCloseNearBar(){
   bar.classList.remove("in");
   setTimeout(function(){ if(bar.parentNode)bar.remove(); },200);
 }
+/* « + Magasin » depuis la carte. Ce que ca faisait : rappeler openStorePicker(),
+   qui ROUVRAIT la carte — donc la recentrait sur le GPS (quelqu'un qui regarde
+   Paris se retrouvait a Bruxelles) — puis ecrivait le formulaire dans le
+   panneau de l'ancien selecteur, qui est cache. La carte sautait, un bandeau
+   « touche le magasin » s'affichait, et aucun formulaire n'apparaissait.
+   Maintenant : la carte ne bouge pas. Un tiroir s'ouvre par-dessus, le pin
+   provisoire nait au CENTRE de ce qu'on regarde, chaque tap sur la carte le
+   deplace, et l'adresse se remplit toute seule depuis la position. */
 function exploreAddStore(){
-  if(exploreFilter&&typeof drinkLocate==="function"){drinkLocate();return;}
-  // Ancien bug : openAddStoreForm() écrivait dans le panneau du sélecteur qui
-  // n'était PAS ouvert depuis la carte -> le bouton "+ Magasin" ne faisait rien.
-  // On ouvre donc le sélecteur PUIS le formulaire d'ajout, tout de suite visible.
-  if(typeof openStorePicker==="function"&&typeof openAddStoreForm==="function"){
-    openStorePicker();
-    setTimeout(function(){try{openAddStoreForm();}catch(e){}},70);
+  if(exploreMap&&typeof openAddStoreForm==="function"){
+    // Carte ouverte pour une boisson precise : le magasin cree lui sera
+    // rattache juste apres, comme si on l'avait designe.
+    if(exploreFilter&&exploreFilter.drinkId!=null)lastScanContext={drinkId:exploreFilter.drinkId,from:"carte"};
+    exploreOuvrirAjout();
     return;
   }
   if(typeof openAddStoreForm==="function"){openAddStoreForm();return;}
   toast("Ajout indisponible pour le moment");
+}
+function exploreOuvrirAjout(){
+  var host=document.getElementById("explore-map-host");if(!host||!exploreMap)return;
+  if(document.getElementById("explore-add-sheet"))return;   // deja ouvert
+  window._addStoreSurExplore=true;
+  try{fermerMenuPin();}catch(e){}
+  try{exploreHideCard();}catch(e){}
+  // Ce qui encombrerait le tiroir : les boutons flottants, la liste des
+  // magasins, le bandeau du mode « designe un magasin ».
+  ["explore-add-fab","explore-recenter-fab","explore-sheet","choix-magasin-bandeau"].forEach(function(id){
+    var el=document.getElementById(id);if(!el)return;
+    el.dataset.affichageAvant=el.style.display||"";
+    el.style.display="none";
+  });
+  var sheet=document.createElement("div");
+  sheet.id="explore-add-sheet";
+  sheet.innerHTML='<div id="explore-add-grip"></div>'+
+    '<div id="explore-add-hint">D\u00E9place la carte sous le pin : sa pointe marque l\u2019endroit. Pour poser au doigt, \u00AB Pointer sur la carte \u00BB puis tape.</div>'+
+    '<div id="explore-add-body"></div>';
+  host.appendChild(sheet);
+  // Couche dediee au pin provisoire, sur LA carte qu'on regarde.
+  if(!window._addStoreLayer){window._addStoreLayer=L.layerGroup();}
+  try{window._addStoreLayer.addTo(exploreMap);}catch(e){}
+  /* LE PIN EST UN ELEMENT FIXE, AU MILIEU DE LA BANDE DE CARTE VISIBLE. Pas
+     au centre du conteneur : sa moitie basse est sous le tiroir, et un pin au
+     centre geometrique etait invisible — « on voit meme pas le point du
+     milieu ». Il ne bouge jamais, c'est la carte qui glisse dessous ; sa
+     pointe designe toujours l'endroit choisi, et un point net la marque. */
+  var cible=document.createElement("div"); cible.id="explore-add-cible";
+  cible.innerHTML='<div class="eac-pin"></div><div class="eac-point"></div>';
+  host.appendChild(cible);
+  _placerCible();
+  if(!window._exploreAddResizePose){ window._exploreAddResizePose=true;
+    window.addEventListener("resize",function(){ if(window._addStoreSurExplore)_placerCible(); }); }
+  var c=_latlngCible();
+  openAddStoreForm(document.getElementById("explore-add-body"),{lat:c.lat,lng:c.lng,src:"centre"});
+  // Chaque tap sur la carte deplace le pin. On n'utilise pas le "click" deja
+  // pose (exploreHideCard) : le sien referme la bandelette, le notre place.
+  if(!window._exploreAddClickPose){
+    window._exploreAddClickPose=true;
+    /* Un tap ne place le pin QU'EN MODE « Pointer sur la carte ». Avant, chaque
+       tap le deplacait : impossible d'explorer, le moindre contact posait le
+       pin la ou le doigt tombait. Ce qui est arrive : « je suis oblige d'etre
+       d'abord sur le point, et ensuite j'appuie sur + Magasin ». */
+    exploreMap.on("click",function(e){
+      if(!(window._addStoreSurExplore&&addStorePlacing))return;
+      onPickerMapClick(e.latlng);
+      var el=document.getElementById("explore-add-cible"); if(el)el.style.display="none";   // pose au doigt : le pin fixe s'efface
+    });
+    /* Tant qu'il n'a pas ete pose au doigt, LE PIN SUIT LE CENTRE DE LA CARTE :
+       on deplace la carte, le pin reste au milieu, l'adresse se met a jour.
+       C'est le geste des applis de livraison — explorer, c'est choisir.
+       L'adresse n'est redemandee qu'apres 700 ms de calme : sans ca, chaque
+       fin de glissement partait interroger Nominatim. */
+    exploreMap.on("moveend",function(){
+      if(!window._addStoreSurExplore||!addStorePos||addStorePos.src!=="centre")return;
+      clearTimeout(window._addStoreSuitTimer);
+      window._addStoreSuitTimer=setTimeout(function(){
+        if(!window._addStoreSurExplore||!addStorePos||addStorePos.src!=="centre")return;
+        _placerCible();                                   // le tiroir a pu changer de hauteur
+        var c2=_latlngCible();
+        addStorePos={lat:c2.lat,lng:c2.lng,src:"centre"};   // objet neuf : les geocodages en retard sont ignores
+        renderAddStorePos();
+      },700);
+    });
+  }
+  requestAnimationFrame(function(){sheet.classList.add("in");});
+  // Une fois le tiroir pose : on recale le pin et ce qu'il designe, au cas ou
+  // la hauteur finale differe (polices, clavier, encoche).
+  setTimeout(function(){
+    if(!window._addStoreSurExplore)return;
+    _placerCible();
+    if(addStorePos&&addStorePos.src==="centre"){var c3=_latlngCible();addStorePos={lat:c3.lat,lng:c3.lng,src:"centre"};renderAddStorePos();}
+  },400);
+  setTimeout(function(){try{var n=document.getElementById("add-store-name");if(n)n.focus();}catch(e){}},420);
+  playSound("pop");
+}
+/* Milieu de la bande de carte VISIBLE (au-dessus du tiroir), en pixels du
+   conteneur de la carte. C'est de ce point que tout part : la position du pin
+   fixe a l'ecran, et la latitude/longitude qu'il designe. */
+function _pointCible(){
+  var m=document.getElementById("explore-map"), sh=document.getElementById("explore-add-sheet");
+  var rm=m.getBoundingClientRect(), taille=exploreMap.getSize();
+  /* offsetHeight, PAS getBoundingClientRect : le tiroir entre par une
+     animation de transform depuis le bas, et pendant ces 300 ms sa boite est
+     hors ecran. Mesuree a cet instant, elle donnait « pas de tiroir », donc
+     le centre du conteneur entier — sous le tiroir une fois pose. Sa hauteur
+     de mise en page, elle, est juste des le premier instant. */
+  var rh=document.getElementById("explore-map-host").getBoundingClientRect();
+  var bas=sh?Math.min(rh.bottom-sh.offsetHeight,rm.bottom):rm.bottom;
+  return {x:taille.x/2, y:Math.max(48,(bas-rm.top)/2)};
+}
+function _placerCible(){
+  var el=document.getElementById("explore-add-cible"); if(!el||!exploreMap)return;
+  var p=_pointCible(), rm=document.getElementById("explore-map").getBoundingClientRect();
+  var rh=document.getElementById("explore-map-host").getBoundingClientRect();
+  el.style.left=(rm.left-rh.left+p.x)+"px"; el.style.top=(rm.top-rh.top+p.y)+"px";
+}
+function _latlngCible(){ var p=_pointCible(); return exploreMap.containerPointToLatLng([p.x,p.y]); }
+window._latlngCible=_latlngCible;
+function exploreFermerAjout(){
+  window._addStoreSurExplore=false;
+  addStorePlacing=false;
+  clearTimeout(window._addStoreSuitTimer);
+  var cible=document.getElementById("explore-add-cible"); if(cible)cible.remove();
+  _retirerBrouillonMagasin();
+  try{if(window._addStoreLayer&&exploreMap)exploreMap.removeLayer(window._addStoreLayer);}catch(e){}
+  var sheet=document.getElementById("explore-add-sheet");
+  if(sheet){sheet.classList.remove("in");setTimeout(function(){if(sheet.parentNode)sheet.remove();},260);}
+  ["explore-add-fab","explore-recenter-fab","explore-sheet","choix-magasin-bandeau"].forEach(function(id){
+    var el=document.getElementById(id);if(!el)return;
+    el.style.display=el.dataset.affichageAvant||"";
+    delete el.dataset.affichageAvant;
+  });
+  try{_majBandeauChoix();}catch(e){}
 }
 function exploreToggleChip(name){
   window._exploreChips[name]=!window._exploreChips[name];
@@ -16925,6 +17250,7 @@ function exploreOpenSheetFull(){
   try{ setExploreSheet("max"); }catch(e){}
 }
 function closeExploreMap(){
+  if(window._addStoreSurExplore){ try{exploreFermerAjout();}catch(e){} addStorePos=null; }
   if(window._choixMagasin){ window._choixMagasin=false; try{_majBandeauChoix();}catch(e){} }
   clearRoute();
   // Les magasins bruts de la derniere zone visitee (jusqu'a ~2000 objets
@@ -17519,7 +17845,12 @@ function exploreLoadStores(useCache){
         if(e&&e.originalEvent&&window.L&&L.DomEvent){try{L.DomEvent.stopPropagation(e.originalEvent);}catch(_e){}}
         if(window._pinMenuVientDeSOuvrir){window._pinMenuVientDeSOuvrir=false;return;} // l'appui long a deja agi
         // Mode « choisir un magasin » : toucher un pin le designe, point.
-        if(window._choixMagasin){ choisirCeMagasin(s); return; }
+        // Mais seulement s'il reste quelque chose a designer : sinon on sort
+        // du mode et le pin reprend son role normal, au lieu de ne rien faire.
+        if(window._choixMagasin){
+          if(lastScanContext){ choisirCeMagasin(s); return; }
+          window._choixMagasin=false; try{_majBandeauChoix();}catch(_e){}
+        }
         try{if(exploreMap.panTo)exploreMap.panTo([s.lat,s.lng]);}catch(_e){}
         // Clic sur un pin = tracer l'itineraire directement (le "traçage partout").
         showRouteToStore(s.lat,s.lng,s);
@@ -20131,7 +20462,7 @@ function renderFormatSuggestions(){
       card.querySelector(".fs-ok").onclick=function(){
         if(d){
           if(!d.barcodes)d.barcodes=[];
-          if(d.barcodes.indexOf(String(r.barcode))===-1)d.barcodes.push(String(r.barcode));
+          if(indexCode(d.barcodes,r.barcode)===-1)d.barcodes.push(String(r.barcode));
           if(r.type){if(!d.formats)d.formats=[];
             if(!d.formats.some(function(f){return f.type===r.type&&Number(f.cl)===Number(r.cl);}))d.formats.push(r.cl?{type:r.type,cl:r.cl}:{type:r.type});}
         }
@@ -20556,7 +20887,7 @@ function renderContribFeed(){
             fix.textContent="\u2713 Retire";fix.style.background="#16a34a";
             try{
               var dd=DRINKS.find(function(x){return String(x.id)===String(_did);});
-              if(dd&&dd.barcodes){var i=dd.barcodes.indexOf(String(_code));if(i!==-1)dd.barcodes.splice(i,1);}
+              if(dd&&dd.barcodes){var i=indexCode(dd.barcodes,_code);if(i!==-1)dd.barcodes.splice(i,1);}
             }catch(e){}
           }).catch(function(){ fix.textContent="\u00C9chec \u2014 r\u00E9essaie";fix.style.background="#dc2626"; });
         };
@@ -21663,8 +21994,14 @@ function registerServiceWorker(){
     });
   }
   navigator.serviceWorker.register("sw.js").then(function(reg){
-    // Vérifie tout de suite s'il existe une version plus récente en ligne.
-    try{reg.update();}catch(e){}
+    /* Vérifie tout de suite s'il existe une version plus récente en ligne.
+       update() renvoie une PROMESSE : le try/catch n'attrapait pas son rejet.
+       Sur un réseau qui flanche pendant la seconde de démarrage — un magasin,
+       un sous-sol — la vérification échouait, la promesse était rejetée sans
+       gestionnaire, et l'écran de plantage « L'appli n'a pas réussi à
+       démarrer » recouvrait une app qui marchait très bien. Une mise à jour
+       qu'on ne peut pas vérifier maintenant se vérifiera la prochaine fois. */
+    try{var p=reg.update();if(p&&p.catch)p.catch(function(){});}catch(e){}
   }).catch(function(e){console.warn("SW registration failed:",e);});
   setTimeout(function(){try{handleDeepLink();}catch(e){}},400);
   /* Un lien de parrainage a pu amener ici : on retient le code et on le
@@ -21974,6 +22311,11 @@ try{
        interdisent au client de l'ecrire. On l'adopte tel quel (pas de max :
        une sanction peut etre levee par un admin, elle doit pouvoir baisser). */
     userStats.penalty=Number(d.penalty)||0;
+    /* pointsPreuves vient du serveur et de lui seul : c'est ce qui ouvre le
+       scan de frigo aux contributeurs. Le serveur retranche de toute facon ;
+       ici on ne decide que d'afficher ou non le bouton. */
+    userStats.pointsPreuves=Number(d.pointsPreuves)||0;
+    try{majBoutonFrigoContrib();}catch(e){}
     /* Le serveur a-t-il deja deduit la sanction du champ points ? Il l'a fait
        si le profil porte pointsHerites (ecrit une seule fois, a la bascule). */
     userStats.penaliteDejaDeduite=(d.pointsHerites!==undefined);
@@ -22121,6 +22463,7 @@ try{
   // ceci ne fait qu'afficher ou cacher le menu
   window.addEventListener("fbAdminChecked", function(e) {
     isAdmin=e.detail===true;
+    try{if(typeof majBoutonFrigoContrib==="function")majBoutonFrigoContrib();}catch(err){}
     var row=document.getElementById("admin-row");
     if(row)row.style.display=isAdmin?"flex":"none";
     var sec=document.getElementById("admin-section");
