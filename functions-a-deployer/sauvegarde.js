@@ -134,6 +134,52 @@ function expliquer(e) {
     brut.slice(0, 150);
 }
 
+/* LA PURGE, QUI N'EXISTAIT PAS. L'en-tete de ce fichier promettait que « les
+   sauvegardes de plus de 30 jours sont supprimees automatiquement ». La
+   constante JOURS_GARDES etait bien la, et aucune ligne ne s'en servait. Les
+   exports se seraient accumules sans fin, et la facture avec eux — une promesse
+   fausse dans un commentaire est pire qu'un silence, parce qu'on cesse d'y
+   penser.
+
+   ON EFFACE PEU ET ON EFFACE SUR : trois garde-fous, parce qu'une suppression
+   ne se rattrape pas.
+     1. Seuls les chemins de la forme sauvegardes/AAAA-MM-JJ/ sont touches. Tout
+        autre fichier du seau est ignore, quoi qu'il arrive.
+     2. On garde TOUJOURS les trois dossiers les plus recents, meme vieux. Si la
+        sauvegarde automatique tombe en panne deux mois, la purge ne doit pas
+        emporter les dernieres copies existantes le jour ou elle repart.
+     3. La purge ne s'execute qu'apres un export REUSSI. On ne jette jamais
+        l'ancien avant d'avoir le nouveau. */
+async function purger() {
+  try {
+    const seau = getStorage().bucket();
+    const [fichiers] = await seau.getFiles({ prefix: "sauvegardes/" });
+    if (!fichiers.length) return 0;
+
+    /* Le nom du dossier EST la date : rien a lire ailleurs, rien a deviner. */
+    const parJour = new Map();
+    for (const f of fichiers) {
+      const m = /^sauvegardes\/(\d{4}-\d{2}-\d{2})\//.exec(f.name);
+      if (!m) continue;                       // garde-fou 1
+      if (!parJour.has(m[1])) parJour.set(m[1], []);
+      parJour.get(m[1]).push(f);
+    }
+    const jours = [...parJour.keys()].sort();          // du plus ancien au plus recent
+    const limite = new Date(Date.now() - JOURS_GARDES * 86400000).toISOString().slice(0, 10);
+    const proteges = new Set(jours.slice(-3));         // garde-fou 2
+
+    let efface = 0;
+    for (const j of jours) {
+      if (proteges.has(j) || j >= limite) continue;
+      for (const f of parJour.get(j)) {
+        try { await f.delete(); efface++; } catch (e) { console.warn("purge:", f.name, e && e.message); }
+      }
+      console.log("purge : dossier " + j + " supprime");
+    }
+    return efface;
+  } catch (e) { console.warn("purge impossible:", e && e.message); return 0; }
+}
+
 /* Journal des sauvegardes, lisible depuis l'app par l'administrateur : sans
    trace visible, une sauvegarde qui echoue en silence donne un faux
    sentiment de securite — le pire des deux mondes. */
@@ -170,6 +216,11 @@ async function verifierPrecedente() {
         : { etat: "reussie", finiLe: new Date().toISOString() })
     }, { merge: true });
     console.log("sauvegarde precedente :", op.error ? "ECHOUEE" : "reussie");
+    /* Garde-fou 3 : on ne purge qu'apres avoir CONFIRME une reussite. */
+    if (!op.error) {
+      const n = await purger();
+      if (n) console.log("purge : " + n + " fichier(s) de plus de " + JOURS_GARDES + " jours supprime(s)");
+    }
   } catch (e) { console.warn("verification precedente impossible:", e && e.message); }
 }
 
