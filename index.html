@@ -3503,6 +3503,27 @@ window.fbRepositionMyHunts = async function(lat, lng, watches) {
 };
 /* Diagnostic : lit le document push de l'utilisateur (jeton + position enregistrée)
    pour montrer, dans l'app, ce que le serveur voit réellement. */
+/* LE JOURNAL DES ALERTES. Chaque evenement qui devait te reveiller y a laisse
+   une ligne, avec le resultat de l'envoi : combien de jetons trouves, combien
+   de poussees parties, courriel de secours ou non. Ecrit par le serveur seul.
+   C'est la reponse a « est-ce que l'evenement a seulement eu lieu ? », question
+   qu'aucune notification manquante ne permettait de trancher. */
+window.fbLireAlertesAdmin = async function(n) {
+  try {
+    var snap = await getDocs(query(collection(db, "alertesAdmin"),
+      orderBy("at", "desc"), limit(Math.min(Number(n) || 20, 50))));
+    return snap.docs.map(function(d) {
+      var x = d.data() || {};
+      return {
+        titre: String(x.titre || ""), corps: String(x.corps || ""),
+        at: (x.at && x.at.toMillis) ? x.at.toMillis() : null,
+        poussees: Number(x.pousseesEnvoyees) || 0,
+        jetons: Number(x.jetonsTrouves) || 0,
+        courriel: x.courrielEnvoye === true
+      };
+    });
+  } catch (e) { return { erreur: String((e && (e.code || e.message)) || e) }; }
+};
 window.fbGetMyPushDoc = async function() {
   try {
     var user = await ensureAuthed();
@@ -19784,6 +19805,7 @@ function renderAdmin(){
   renderFormatSuggestions();
   try{ renderFichesSansCode(); }catch(e){ console.warn("sansCode:",e); }
   renderAdminHistory();
+  try{ renderAlertes(); }catch(e){ console.warn("alertes:",e); }
   try{ renderSecurite(); }catch(e){ console.warn("securite:",e); }
   var pending=DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected&&!nameLooksAlcoholic(d.name,d.brand);});
   if(!pending.length){
@@ -20730,6 +20752,60 @@ function _dateCourte(v){
     if(!ms||isNaN(ms))return null;
     return new Date(ms).toLocaleString("fr-BE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
   }catch(e){ return null; }
+}
+/* CE QUE MONTRE CE PANNEAU, ET POURQUOI. Trois chiffres par alerte, parce que
+   trois pannes differentes donnent le meme silence cote telephone :
+     jetons 0    aucun appareil enregistre — le canal est mort, il faut le
+                 reactiver dans Reglages puis « Verifier mes notifications »
+     jetons > 0, poussees 0   l'appareil existe mais Google a refuse l'envoi
+     poussees > 0             l'envoi est parti : le probleme est cote telephone
+   Sans ces chiffres, on ne pouvait que deviner, et le doute portait sur toute
+   la chaine a la fois. */
+function renderAlertes(){
+  if(!isAdmin)return;
+  var host=document.getElementById("admin-alertes");
+  if(!host){
+    host=document.createElement("div");
+    host.id="admin-alertes";
+    var list=document.getElementById("admin-list");
+    if(list&&list.parentNode)list.parentNode.appendChild(host);
+  }
+  host.innerHTML='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:18px 0 10px">'+
+    'Journal des alertes</div><div class="c2" style="font-size:12px">Lecture…</div>';
+  if(!window.fbLireAlertesAdmin)return;
+  window.fbLireAlertesAdmin(20).then(function(rows){
+    var t='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:18px 0 10px">Journal des alertes</div>';
+    if(!rows||rows.erreur){
+      host.innerHTML=t+'<div class="c2" style="font-size:12px">Lecture impossible'+
+        (rows&&rows.erreur?' ('+sanitize(rows.erreur)+')':'')+'</div>';
+      return;
+    }
+    if(!rows.length){
+      host.innerHTML=t+'<div class="c2" style="font-size:12px;line-height:1.5">'+
+        'Aucune alerte enregistrée. Le journal ne retient que les événements '+
+        'survenus depuis sa mise en place.</div>';
+      return;
+    }
+    t+='<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;overflow:hidden">';
+    rows.forEach(function(a,i){
+      var etat,coul;
+      if(a.poussees>0){ etat="notification envoyée"; coul="var(--s2)"; }
+      else if(a.jetons>0){ etat="envoi refusé par Google"; coul="#b45309"; }
+      else { etat="aucun appareil enregistré"; coul="#b42318"; }
+      if(a.courriel)etat+=" · e-mail de secours envoyé";
+      t+='<div style="padding:12px 14px'+(i?';border-top:1px solid var(--border)':'')+'">'+
+        '<div style="font-size:12.5px;font-weight:700;color:var(--s1)">'+sanitize(a.titre)+'</div>'+
+        (a.corps?'<div class="c2" style="font-size:11.5px;margin-top:2px;line-height:1.4">'+sanitize(a.corps)+'</div>':'')+
+        '<div style="font-size:11px;margin-top:4px;color:'+coul+';font-weight:600">'+etat+'</div>'+
+        (a.at?'<div class="c3" style="font-size:10.5px;margin-top:2px">'+sanitize(new Date(a.at).toLocaleString("fr-BE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))+'</div>':'')+
+      '</div>';
+    });
+    host.innerHTML=t+'</div>';
+  }).catch(function(e){
+    host.innerHTML='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:18px 0 10px">Journal des alertes</div>'+
+      '<div class="c2" style="font-size:12px">Lecture impossible</div>';
+    console.warn("alertes:",e);
+  });
 }
 function renderSecurite(){
   if(!isAdmin)return;

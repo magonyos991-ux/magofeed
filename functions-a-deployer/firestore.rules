@@ -824,6 +824,25 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    /* LE JOURNAL DES ALERTES. Chaque evenement qui merite de reveiller le
+       fondateur — nouvel arrivant, don recu — y laisse une ligne AVANT toute
+       tentative d'envoi, avec le resultat inscrit juste apres : combien de
+       jetons trouves, combien de poussees parties, courriel de secours ou non.
+
+       POURQUOI. Une notification poussee qui echoue ne laissait aucune trace.
+       Un euro recu et zero signe : impossible de savoir si l'evenement avait eu
+       lieu, si l'envoi avait ete tente, ou pourquoi il avait echoue. Le doute
+       portait sur toute la chaine a la fois. Maintenant la question se tranche
+       en une lecture.
+
+       Ecrit par les Cloud Functions seules (Admin SDK, qui contourne ces
+       regles). Si le client pouvait ecrire ici, ce journal ne prouverait plus
+       rien — un journal falsifiable ne vaut pas mieux qu'aucun journal. */
+    match /alertesAdmin/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     /* LA CHASSE AUX CODES-BARRES.
        Une fiche de catalogue nee d'une proposition PHOTO arrive sans code : elle
        existe dans la recherche mais aucun scan ne la trouve. On demande donc a

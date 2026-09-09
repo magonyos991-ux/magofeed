@@ -15,12 +15,18 @@
  * envoyer la moindre notification.
  */
 const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+/* BREVO_API_KEY : le secours par courriel de sendToAdmins. Un secret n'arrive
+   dans process.env que si la fonction qui s'en sert le DECLARE. Sans cette
+   ligne, le secours resterait muet — et muet exactement le jour ou la poussee
+   echoue, c'est-a-dire le seul jour ou il sert. */
+const { defineSecret } = require("firebase-functions/params");
+const BREVO_API_KEY = defineSecret("BREVO_API_KEY");
 const { sendToAdmins } = require("./outils-admin");
 
 const REGION = "europe-west1";
 
 exports.notifyAdminNewUser = onDocumentWritten(
-  { document: "users/{uid}", region: REGION },
+  { document: "users/{uid}", region: REGION, secrets: [BREVO_API_KEY] },
   async (event) => {
     const before = event.data.before.exists ? event.data.before.data() : null;
     const after = event.data.after.exists ? event.data.after.data() : null;
