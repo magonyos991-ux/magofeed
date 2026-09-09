@@ -2546,6 +2546,66 @@ window.fbLoadLeaderboard = async function() {
   }
 };
 
+/* « TON RANG ». Le classement n'affiche que le haut du tableau : avec un
+   millier de comptes, presque tout le monde en est absent et ne sait pas ou
+   il en est. Deux comptages agreges (getCountFromServer, ~1 lecture par
+   tranche de 1000) donnent le rang et le total sans lire la collection ; deux
+   petites requetes bornees donnent les voisins immediats pour le panneau
+   « Autour de toi ». Un seul champ filtre ET trie (points) : aucun index
+   composite a deployer, et users/{uid} est en lecture publique, donc aucune
+   regle a toucher. Le resultat est garde 2 minutes : rouvrir l'onglet ne
+   recompte pas. En cas d'erreur on rend null et l'interface n'affiche rien. */
+window._rangCache = null;
+window.fbMonRang = async function(myPoints) {
+  try {
+    var pts = Math.max(0, Number(myPoints) || 0);
+    var c = window._rangCache;
+    if (c && c.pts === pts && (Date.now() - c.at) < 120000) return c.data;
+    var users = collection(db, "users");
+    var moi = auth.currentUser ? auth.currentUser.uid : null;
+    var res = await Promise.all([
+      getCountFromServer(query(users, where("points", ">", pts))),
+      getCountFromServer(query(users, where("points", ">", 0))),
+      getDocs(query(users, where("points", ">", pts), orderBy("points", "asc"), limit(3))),
+      getDocs(query(users, where("points", "<", pts), orderBy("points", "desc"), limit(3)))
+    ]);
+    /* Meme lecture d'une fiche que fbLoadLeaderboard : points nets (la
+       sanction est deja deduite pour un profil bascule, reconnaissable a
+       pointsHerites), un seul joueur par pseudo, uniquement des contributeurs.
+       Ma propre fiche est ecartee : elle est la ligne « Toi ». */
+    function lignes(snap) {
+      var vus = {}, out = [];
+      snap.forEach(function(d) {
+        if (d.id === moi) return;
+        var data = d.data() || {};
+        var pseudo = String(data.pseudo || "").trim();
+        if (!pseudo) return;
+        var cle = pseudo.toLowerCase();
+        if (vus[cle]) return;
+        var dejaDeduite = (data.pointsHerites !== undefined);
+        var p = Math.max(0, (data.points || 0) - (dejaDeduite ? 0 : (data.penalty || 0)));
+        var contributions = (Number(data.confirms) || 0) + (Number(data.signals) || 0)
+                          + (Number(data.discAccepted) || 0);
+        if (contributions <= 0) return;
+        vus[cle] = true;
+        out.push({ uid: d.id, pseudo: pseudo, points: p, streak: data.streak || 0 });
+      });
+      return out;
+    }
+    var data = {
+      rang: 1 + (Number(res[0].data().count) || 0),
+      total: Number(res[1].data().count) || 0,
+      dessus: lignes(res[2]).reverse(),   // du plus fort au plus proche de moi (ordre d'affichage)
+      dessous: lignes(res[3])             // du plus proche de moi au plus faible
+    };
+    window._rangCache = { at: Date.now(), pts: pts, data: data };
+    return data;
+  } catch (e) {
+    console.warn("fbMonRang:", e);
+    return null;
+  }
+};
+
 // Ajouter un signalement dans Firebase
 /* Relit UNIQUEMENT pointsPreuves. Le score complet arrive par fbUserStatsLoaded
    au demarrage ; ici on veut juste savoir, quelques secondes apres une
@@ -5441,7 +5501,8 @@ function showBadgeInfo(def,tier,qui){
   ov.addEventListener("click",function(e){if(e.target===ov)close();});
   try{playSound("pop");}catch(e){}
 }
-/* Classement des contributeurs : top 10 par points (collection users de Firestore).
+/* Classement des contributeurs : haut du tableau par points (collection users
+   de Firestore), puis la ligne « Ton rang » pour qui n'y figure pas.
    Les pseudos viennent de la communaute, donc toujours passes par sanitize(). */
 function renderLeaderboard(){
   var el=document.getElementById("leaderboard-list");if(!el)return;
@@ -5477,6 +5538,122 @@ function renderLeaderboard(){
     wrap.appendChild(row);
   });
   el.appendChild(wrap);
+  renderMonRang(el);
+}
+/* « TON RANG » — la ligne epinglee sous le haut du classement. Le tableau ne
+   montre que ses premieres lignes : quelqu'un a la 752e place n'y apparait
+   jamais et ne sait pas ou il en est. S'il n'est pas dans le tableau, on lui
+   donne son rang, la personne juste devant, et sur un tap ses voisins
+   immediats (« Autour de toi »). Rien ne s'affiche si le serveur ne repond
+   pas : pas d'interface cassee. */
+var _monRangSeq=0;
+/* 752 + petit « e » (fr/nl), 752 + « nd » (en). Retourne du HTML. */
+function ordinalRang(n){
+  n=Number(n)||0;
+  var suf="e";
+  if(curLang==="en"){
+    var r10=n%10,r100=n%100;
+    suf=(r10===1&&r100!==11)?"st":(r10===2&&r100!==12)?"nd":(r10===3&&r100!==13)?"rd":"th";
+  }else if(n===1&&curLang!=="nl")suf="er";
+  return n+'<span style="font-size:.7em;font-weight:800;vertical-align:.25em">'+suf+'</span>';
+}
+function badgeRangOr(n){
+  return '<div style="min-width:26px;height:26px;padding:0 7px;border-radius:9px;background:var(--gold-bg);color:var(--gold-on);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;flex-shrink:0;white-space:nowrap">'+ordinalRang(n)+'</div>';
+}
+function renderMonRang(host){
+  var seq=++_monRangSeq;
+  if(myLeaderboardRank()!==null)return;   // deja dans le tableau : rien a ajouter
+  if(!window._fbUser)return;               // pas de compte : pas de rang
+  var pts=(typeof ptsNets==="function")?ptsNets():Math.max(0,userStats.pts||0);
+  var box=document.createElement("div");
+  box.id="mon-rang";
+  box.style.cssText="margin-top:10px";
+  host.appendChild(box);
+  if(pts<=0){
+    box.innerHTML='<div style="font-size:12px;font-weight:600;color:var(--txt2);text-align:center;padding:4px 0">'+_tr("rankFirstContrib")+'</div>';
+    return;
+  }
+  if(!window.fbMonRang)return;
+  // Squelette le temps des comptages : meme motif que le haut du classement.
+  box.innerHTML='<div style="display:flex;align-items:center;gap:10px;padding:6px 0"><div class="skel skel-circle" style="width:30px;height:30px;border-radius:10px"></div><div class="skel skel-line" style="flex:1"></div></div>';
+  window.fbMonRang(pts).then(function(r){
+    if(seq!==_monRangSeq||!box.isConnected)return;   // un rendu plus recent a pris la main
+    if(!r||!r.rang){box.innerHTML="";return;}
+    peindreMonRang(box,r,pts);
+  }).catch(function(){if(box.isConnected)box.innerHTML="";});
+}
+function peindreMonRang(box,r,pts){
+  var dessus=r.dessus||[],dessous=r.dessous||[];
+  var devant=dessus.length?dessus[dessus.length-1]:null;   // la personne juste au-dessus
+  var sous=devant
+    ?_tr("rankToBeat").replace("{n}",Math.max(1,(devant.points||0)-pts+1)).replace("{p}",sanitize(devant.pseudo))
+    :_tr("rankKeepGoing");
+  box.innerHTML='<div id="mon-rang-row" role="button" tabindex="0" aria-expanded="false" aria-controls="mon-rang-autour" style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--gold-chip-bg);border:1.5px solid var(--gold-bg);border-radius:16px;cursor:pointer">'+
+      badgeRangOr(r.rang)+
+      '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:800;color:var(--s1)">'+_tr("rankYou")+' \u00B7 '+nbSur(pts)+' pts</div>'+
+      '<div style="font-size:11.5px;font-weight:600;color:var(--gold-txt);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sous+'</div></div>'+
+      '<span id="mon-rang-chev" style="font-size:13px;color:var(--s3);flex-shrink:0;transition:transform .2s">\u203A</span>'+
+    '</div>'+
+    '<div id="mon-rang-autour" style="display:none;margin-top:8px;background:var(--bg2);border-radius:16px;padding:6px 14px"></div>'+
+    '<div style="font-size:11px;font-weight:600;color:var(--txt2);margin-top:6px;padding:0 4px">'+_tr("rankOf").replace("{n}",nbSur(r.total).toLocaleString("fr-BE"))+'</div>';
+  var row=box.querySelector("#mon-rang-row"),panel=box.querySelector("#mon-rang-autour"),chev=box.querySelector("#mon-rang-chev");
+  var ouvert=false;
+  function toggle(){
+    ouvert=!ouvert;
+    if(ouvert&&!panel.childNodes.length)remplirAutour(panel,r,pts,toggle);
+    panel.style.display=ouvert?"":"none";
+    row.setAttribute("aria-expanded",ouvert?"true":"false");
+    if(chev)chev.style.transform=ouvert?"rotate(90deg)":"";
+    try{if(typeof playSound==="function")playSound("pop");}catch(e){}
+  }
+  row.onclick=toggle;
+  row.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();toggle();}};
+}
+/* Le panneau « Autour de toi » : les voisins au-dessus (rangs rang-3, rang-2,
+   rang-1), ma ligne doree, les voisins en dessous (rang+1…). Chaque voisin
+   ouvre son profil public, comme dans le haut du classement. */
+function remplirAutour(panel,r,pts,fermer){
+  var dessus=r.dessus||[],dessous=r.dessous||[];
+  var lignes=[];
+  dessus.forEach(function(x,i){lignes.push({rang:r.rang-dessus.length+i,row:x});});
+  lignes.push({rang:r.rang,moi:true});
+  dessous.forEach(function(x,i){lignes.push({rang:r.rang+1+i,row:x});});
+  panel.setAttribute("role","list");
+  panel.setAttribute("aria-label",_tr("rankAround"));
+  panel.innerHTML='<div style="font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--txt2);padding:8px 0 2px">'+_tr("rankAround")+'</div>';
+  lignes.forEach(function(L,i){
+    var div=document.createElement("div");
+    var sep=(i<lignes.length-1)?";border-bottom:1px solid var(--border)":"";
+    if(L.moi){
+      div.setAttribute("role","listitem");
+      div.style.cssText="display:flex;align-items:center;gap:12px;padding:9px 0"+sep;
+      div.innerHTML=badgeRangOr(L.rang)+
+        '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:800;color:var(--s1)">'+_tr("rankYou")+'</div>'+
+        '<div style="font-size:12.5px;font-weight:800;color:var(--s1);flex-shrink:0">'+nbSur(pts)+' pts</div>';
+    }else{
+      var x=L.row,rlv=levelInfo(x.points||0),rcol=levelPseudoColor(rlv.idx);
+      div.setAttribute("role","button");div.setAttribute("tabindex","0");
+      div.setAttribute("aria-label","Voir le profil de "+x.pseudo);
+      div.style.cssText="display:flex;align-items:center;gap:12px;padding:9px 0;cursor:pointer"+sep;
+      div.innerHTML=rankBadge(L.rang-1)+
+        '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:600;color:'+(rcol||"var(--s1)")+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(x.pseudo)+'</div>'+
+        '<div style="font-size:12.5px;font-weight:700;color:var(--s1);flex-shrink:0">'+nbSur(x.points)+' pts</div>'+
+        '<span style="font-size:13px;color:var(--s3);flex-shrink:0">\u203A</span>';
+      div.onclick=function(){openPlayerProfile(x);};
+      div.onkeydown=function(ev){if(ev.key==="Enter")openPlayerProfile(x);};
+    }
+    panel.appendChild(div);
+  });
+  var chip=document.createElement("button");
+  chip.type="button";
+  chip.textContent=_tr("rankSeeTop");
+  chip.style.cssText="margin:8px 0 6px;min-height:36px;padding:0 12px;border-radius:999px;border:1px solid var(--border);background:var(--gold-chip-bg);display:inline-flex;align-items:center;font-size:12px;font-weight:800;color:var(--gold-txt);font-family:inherit;cursor:pointer;white-space:nowrap";
+  chip.onclick=function(ev){
+    ev.stopPropagation();fermer();
+    var t=document.getElementById("t-leaderboard");
+    if(t&&t.scrollIntoView)try{t.scrollIntoView({behavior:"smooth",block:"start"});}catch(e){}
+  };
+  panel.appendChild(chip);
 }
 /* Ouvre le profil public d'un joueur du classement. On n'a que {uid,pseudo,
    points,streak} dans la ligne : on charge sa fiche compl\u00E8te (favoris, badges)
@@ -5844,11 +6021,24 @@ function renderRewards(){
       '<b style="color:var(--s2)">La règle :</b> annoncer une boisson en stock rapporte des points. Si plusieurs personnes passent ensuite sur place et la signalent absente, ces points repartent. Inventer des stocks ne fait donc jamais monter : ça fait redescendre.'+
     '</div>'+
   '</div>';
-  // 4) Classement (#3)
+  // 4) Classement (#3). Hors du haut du tableau, on donne quand meme le
+  //    rang (« Tu es 752e ») des qu'on le connait, au lieu d'un « top 10 »
+  //    qui ne parle qu'a dix personnes.
+  var rc=(!rank&&window._rangCache&&window._rangCache.data&&window._rangCache.data.rang)?window._rangCache.data:null;
+  if(!rank&&!rc&&pts>0&&window._fbUser&&window.fbMonRang){
+    window.fbMonRang(pts).then(function(r){
+      var s=document.getElementById("s-rewards");
+      if(r&&r.rang&&s&&s.classList.contains("on"))renderRewards();
+    }).catch(function(){});
+  }
+  var titreRang=rank?('Tu es '+(rank===1?'1er':rank+'e')+' au classement !')
+    :(rc?('Tu es '+ordinalRang(rc.rang)+' au classement'):'Grimpe dans le classement des contributeurs');
+  var sousRang=rank?'Continue à contribuer pour garder ta place.'
+    :(rc?('Sur '+nbSur(rc.total).toLocaleString("fr-BE")+' contributeurs. Chaque contribution te fait grimper.'):'Chaque contribution te fait grimper.');
   h+='<div class="t-section" style="padding:6px 0 10px">Classement</div>';
   h+='<div onclick="show(\'profile\')" role="button" tabindex="0" style="background:var(--bg2);border-radius:16px;padding:15px;margin-bottom:16px;cursor:pointer">'+
-    '<div style="font-size:13.5px;font-weight:800;color:var(--s1)">'+(rank?('Tu es '+(rank===1?'1er':rank+'e')+' au classement !'):'Grimpe dans le classement des contributeurs')+'</div>'+
-    '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:3px">'+(rank?'Continue à contribuer pour garder ta place.':'Contribue pour entrer dans le top 10.')+' Bientôt : classements mensuels et par ville. ›</div>'+
+    '<div style="font-size:13.5px;font-weight:800;color:var(--s1)">'+titreRang+'</div>'+
+    '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:3px">'+sousRang+' Bientôt : classements mensuels et par ville. ›</div>'+
   '</div>';
   // 5) Recompenses partenaires — ROADMAP HONNETE (#4)
   h+='<div class="t-section" style="padding:6px 0 10px">Bientôt : récompenses</div>';
