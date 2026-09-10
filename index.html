@@ -2667,7 +2667,6 @@ window.fbMarquerLu = async function(cid) {
   if (!me || !cid) return { ok: false, reason: "invalid" };
   try {
     var conv = _convCache[cid];
-    if (conv && conv.unread && !(conv.unread[me] > 0)) return { ok: true, skipped: true };
     var maj = {}; maj["unread." + me] = 0;
     await updateDoc(doc(db, "conversations", cid), maj);
     if (conv && conv.unread) conv.unread[me] = 0;
@@ -23389,9 +23388,16 @@ function msgMarquerLuSiOuvert(){
   if(c.state!=="open")return; // une demande non acceptee ne signale rien a l'autre
   if(!nbSur(c.unread&&c.unread[me]))return;
   if(document.visibilityState!=="visible")return;
-  c.unread[me]=0;
-  window.fbMarquerLu(c.cid).catch(function(){});
+  /* L'ECRITURE D'ABORD, la mise a zero locale ensuite. L'objet de conversation
+     est PARTAGE avec le cache du module : en le remettant a zero avant
+     d'appeler le serveur, fbMarquerLu croyait qu'il n'y avait rien a faire et
+     n'ecrivait jamais. La pastille « 1 non lu » revenait a chaque ouverture. */
+  window.fbMarquerLu(c.cid).then(function(){c.unread[me]=0;msgRafraichirPastilles();}).catch(function(){});
 }
+/* Retour au premier plan avec un fil ouvert : ce qu'on a sous les yeux est lu. */
+document.addEventListener("visibilitychange",function(){
+  if(document.visibilityState==="visible"&&msgEcranOn("thread")){try{msgMarquerLuSiOuvert();}catch(e){}}
+});
 function threadRetour(){if(!navBack())openMessages();try{playSound("pop");}catch(e){}}
 function renderThreadHead(){
   var el=document.getElementById("th-hd");if(!el)return;
