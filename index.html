@@ -23618,7 +23618,7 @@ function msgTrouvailles(){
   try{hist=JSON.parse(localStorage.getItem("magoScanHist")||"[]")||[];}catch(e){}
   return hist.filter(function(e){return e&&(e.storeFbId||e.storeId!=null)&&e.storeName;}).slice(0,6).map(function(e){
     var d=(e.drinkId!=null)?(DRINKS||[]).find(function(x){return String(x.id)===String(e.drinkId);}):null;
-    return {drinkId:d?d.id:(e.drinkId!=null?e.drinkId:null),drinkName:String((d&&d.name)||e.name||"").slice(0,60),storeId:String(e.storeFbId||e.storeId),storeName:String(e.storeName).slice(0,60),d:d};
+    return {drinkId:d?d.id:(e.drinkId!=null?e.drinkId:null),drinkName:_desanit(String((d&&d.name)||e.name||"")).slice(0,60),storeId:String(e.storeFbId||e.storeId),storeName:_desanit(String(e.storeName)).slice(0,60),d:d};
   }).filter(function(x){return x.drinkName;});
 }
 function msgOptSpotHTML(x,i,cls){
@@ -23628,54 +23628,154 @@ function msgOptSpotHTML(x,i,cls){
     '<span style="flex:1;min-width:0"><span class="msg-opt-t" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(x.drinkName)+'</span><span class="msg-opt-s" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(x.storeName)+'</span></span>'+
     '<span class="msg-chk" aria-hidden="true">'+(sel?'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>':'')+'</span></button>';
 }
+/* Les entites HTML deja echappees dans un vieux journal de scans (« &amp; »)
+   ne doivent pas etre echappees une deuxieme fois a l'affichage. */
+function _desanit(str){var t=document.createElement("textarea");t.innerHTML=String(str||"");return t.value;}
+/* Les magasins que la personne a deja frequentes (journal de scans), les plus
+   recents d'abord, sans doublon : c'est souvent la qu'elle a vu la boisson. */
+function msgMagasinsRecents(){
+  var hist=[];try{hist=JSON.parse(localStorage.getItem("magoScanHist")||"[]")||[];}catch(e){}
+  var vus={},out=[];
+  hist.forEach(function(e){
+    if(!e||!(e.storeFbId||e.storeId!=null)||!e.storeName)return;
+    var id=String(e.storeFbId||e.storeId);if(vus[id])return;vus[id]=true;
+    var s=(typeof STORES!=="undefined"?STORES:[]).find(function(x){return String(x.fbId||x.id)===id;})||null;
+    out.push({id:id,name:_desanit(String(e.storeName)).slice(0,60),s:s,dist:s&&typeof s.dist==="number"?s.dist:null});
+  });
+  return out.slice(0,4);
+}
+/* Noter l'emplacement pour tout le monde : la meme ecriture que « Je l'ai vue
+   en rayon » (fiche, chasse), avec la provenance « message ». Un seul credit
+   par jour, magasin et boisson, comme partout ailleurs. */
+function msgNoterEmplacement(sid,did){
+  var s=(typeof STORES!=="undefined"?STORES:[]).find(function(x){return String(x.fbId||x.id)===String(sid);});
+  var d=(DRINKS||[]).find(function(x){return String(x.id)===String(did);});
+  if(!s||!d)return false;
+  if(!awardOnce("rep:stock:"+(s.fbId||s.id)+":"+d.id,24))return false;
+  try{
+    if(!s.drinks)s.drinks=[];
+    var deja=s.drinks.some(function(x){return String(x)===String(d.id);});
+    if(!deja){s.drinks.push(d.id);if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||s.id,d.id).catch(function(e){console.warn(e);});}
+    else if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||s.id,d.id,1);
+    if(!s.confirmations)s.confirmations={};if(!s.confirmations[d.id])s.confirmations[d.id]=0;s.confirmations[d.id]++;
+    try{_noterObservation(s,d.id,true);}catch(e){}
+    userStats.confirms++;
+    var now=new Date();
+    userStats.activity.unshift({type:"stock",drink:d,store:s,time:now.getHours()+":"+String(now.getMinutes()).padStart(2,"0"),pts:0,day:todayKey()});
+    trackStoreContribution(s.fbId||s.id);
+    if(window.fbAddReport)window.fbAddReport(s.fbId||s.id,d.id,"stock",{note:_provenance("message",s)});
+    if(window.fbTouchCache)window.fbTouchCache();
+    try{updateProfileStats();}catch(e){}
+    try{maybeRewardHuntHelp(d.id,s);}catch(e){}
+  }catch(e){console.warn("noter emplacement:",e);}
+  return true;
+}
+/* L'emplacement d'une boisson, en deux temps : QUELLE boisson (une trouvaille
+   recente, ou n'importe laquelle du catalogue), puis OU (un magasin qui l'a
+   deja, un magasin recent, un magasin autour de toi, ou par son nom). Le
+   magasin n'a pas besoin d'avoir deja la boisson : c'est justement le cas
+   utile — « je sais ou elle est, et personne ne l'a encore dit ». Dans ce cas
+   on propose de la noter pour la carte, coche par defaut. */
 function msgOuvrirSpot(){
   MSG.sel=null;
-  var ov=msgFeuille("msg-spot",
-    '<div class="claim-title">'+_tr("msgSpotT")+'</div><div class="claim-lead">'+_tr("msgSpotLead")+'</div>'+
-    '<div class="spot-lab">'+_tr("msgSpotRecent")+'</div><div id="spot-recent" role="radiogroup" aria-label="'+attr(_tr("msgSpotRecent"))+'"></div>'+
-    '<div class="spot-lab">'+_tr("msgSpotSearch")+'</div><input id="spot-q" class="spot-in" type="search" autocomplete="off" placeholder="'+attr(_tr("msgSpotSearchPh"))+'" aria-label="'+attr(_tr("msgSpotSearch"))+'">'+
-    '<div id="spot-res" class="spot-list" role="radiogroup" aria-label="'+attr(_tr("msgSpotSearch"))+'"></div>'+
-    '<button id="spot-send" class="msg-bp" style="width:100%;min-height:48px;margin-top:14px" disabled>'+_tr("msgSpotSend")+'</button>');
+  var etat={d:null,sid:null,sname:null,deja:false,noter:true};
+  var ov=msgFeuille("msg-spot",'<div id="spot-body"></div>');
   if(!ov)return;
-  var recents=msgTrouvailles();
-  var peindre=function(){
-    var r=document.getElementById("spot-recent");
-    if(r)r.innerHTML=recents.length?recents.map(function(x,i){return msgOptSpotHTML(x,"r"+i);}).join(""):'<div class="msg-vide">'+_tr("msgSpotNoRecent")+'</div>';
-    var b=document.getElementById("spot-send");if(b)b.disabled=!MSG.sel;
+  var chk='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  var optBoisson=function(d,i){
+    return '<button class="msg-opt" data-d="'+i+'" role="option"><span class="msg-opt-i" style="background:'+attr(d.light||"var(--bg2)")+'">'+drinkIconHTML(d)+'</span>'+
+      '<span style="flex:1;min-width:0"><span class="msg-opt-t" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(d.name)+'</span><span class="msg-opt-s" style="display:block">'+sanitize(d.brand||"")+'</span></span>'+
+      '<span style="font-size:13px;color:var(--s3)">\u203A</span></button>';
   };
-  peindre();
-  var resultats=[];
-  var chercher=function(){
-    var q=String((document.getElementById("spot-q")||{}).value||"").trim().toLowerCase();
-    var box=document.getElementById("spot-res");if(!box)return;
-    if(q.length<2){box.innerHTML="";return;}
-    var ds=(DRINKS||[]).filter(function(d){return (String(d.name||"")+" "+String(d.brand||"")).toLowerCase().indexOf(q)!==-1;}).slice(0,5);
-    resultats=[];
-    ds.forEach(function(d){
-      /* Un magasin qui a deja cette boisson pres d'ici ; sinon la boisson
-         seule, et la personne dira le magasin dans son message. */
-      var stores=(typeof STORES!=="undefined"?STORES:[]).filter(function(s){return (s.drinks||[]).some(function(id){return String(id)===String(d.id);});})
-        .sort(function(a,b){return (a.dist||0)-(b.dist||0);}).slice(0,3);
-      stores.forEach(function(s){resultats.push({drinkId:d.id,drinkName:d.name,storeId:String(s.fbId||s.id),storeName:String(s.name||"").slice(0,60),d:d});});
+  var optMagasin=function(m,i){
+    var sel=etat.sid===m.id;
+    return '<button class="msg-opt'+(sel?" sel":"")+'" data-m="'+i+'" role="radio" aria-checked="'+(!!sel)+'">'+
+      '<span class="msg-opt-i" style="background:var(--bg2)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--cta-bg)"><path d="M12 21s-6-5.7-6-10a6 6 0 0 1 12 0c0 4.3-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg></span>'+
+      '<span style="flex:1;min-width:0"><span class="msg-opt-t" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(m.name)+'</span><span class="msg-opt-s" style="display:block">'+(m.dist!=null?fmtDist(m.dist):"")+(m.deja?(m.dist!=null?" \u00B7 ":"")+'<span style="color:var(--ok-txt);font-weight:800">'+_tr("msgSpotHas")+'</span>':"")+'</span></span>'+
+      '<span class="msg-chk" aria-hidden="true">'+(sel?chk:"")+'</span></button>';
+  };
+  var recents=msgTrouvailles(),boissons=[],magasins=[];
+  var peindre1=function(){
+    var body=document.getElementById("spot-body");if(!body)return;
+    body.innerHTML='<div class="claim-title">'+_tr("msgSpotT")+'</div><div class="claim-lead">'+_tr("msgSpotLead")+'</div>'+
+      '<div class="spot-lab">'+_tr("msgSpotRecent")+'</div><div id="spot-recent" role="listbox">'+(recents.length?recents.map(function(x,i){return msgOptSpotHTML(x,"r"+i);}).join(""):'<div class="msg-vide">'+_tr("msgSpotNoRecent")+'</div>')+'</div>'+
+      '<div class="spot-lab">'+_tr("msgSpotSearch")+'</div><input id="spot-q" class="spot-in" type="search" autocomplete="off" placeholder="'+attr(_tr("msgSpotSearchPh"))+'" aria-label="'+attr(_tr("msgSpotSearch"))+'">'+
+      '<div id="spot-res" class="spot-list" role="listbox"></div>';
+    var qi=document.getElementById("spot-q");
+    if(qi)qi.addEventListener("input",function(){
+      var q=String(qi.value||"").trim().toLowerCase(),box=document.getElementById("spot-res");if(!box)return;
+      if(q.length<2){box.innerHTML="";return;}
+      boissons=(DRINKS||[]).filter(function(d){return (String(d.name||"")+" "+String(d.brand||"")).toLowerCase().indexOf(q)!==-1;}).slice(0,6);
+      box.innerHTML=boissons.length?boissons.map(optBoisson).join(""):'<div class="msg-vide">'+_tr("msgSpotNoDrink")+'</div>';
     });
-    box.innerHTML=resultats.length?resultats.map(function(x,i){return msgOptSpotHTML(x,"s"+i);}).join(""):'<div class="msg-vide">'+_tr("msgSpotNoStore")+'</div>';
   };
-  var qi=document.getElementById("spot-q");if(qi)qi.addEventListener("input",chercher);
+  var listeMagasins=function(q){
+    var d=etat.d,tous=(typeof STORES!=="undefined"?STORES:[]),out=[],vus={};
+    var pousser=function(m){if(!m||vus[m.id])return;vus[m.id]=true;out.push(m);};
+    var deM=function(s){return {id:String(s.fbId||s.id),name:String(s.name||"").slice(0,60),dist:typeof s.dist==="number"?s.dist:null,deja:!!(d&&(s.drinks||[]).some(function(x){return String(x)===String(d.id);}))};};
+    var filtre=function(m){return !q||m.name.toLowerCase().indexOf(q)!==-1;};
+    // 1) ceux qui l'ont deja, les plus proches d'abord
+    tous.filter(function(s){return d&&(s.drinks||[]).some(function(x){return String(x)===String(d.id);});})
+      .sort(function(a,b){return (a.dist||1e9)-(b.dist||1e9);}).slice(0,3).map(deM).filter(filtre).forEach(pousser);
+    // 2) les magasins recents de la personne
+    msgMagasinsRecents().map(function(r){return r.s?deM(r.s):{id:r.id,name:r.name,dist:null,deja:false};}).filter(filtre).forEach(pousser);
+    // 3) autour de toi, par distance
+    tous.filter(function(s){return typeof s.lat==="number";}).sort(function(a,b){return (a.dist||1e9)-(b.dist||1e9);}).slice(0,q?40:8).map(deM).filter(filtre).forEach(pousser);
+    return out.slice(0,q?12:10);
+  };
+  var peindre2=function(){
+    var body=document.getElementById("spot-body");if(!body)return;
+    var d=etat.d;
+    body.innerHTML='<div class="claim-title">'+_tr("msgSpotWhere")+'</div>'+
+      '<button class="msg-opt" data-spot-back="1" style="margin-bottom:10px"><span class="msg-opt-i" style="background:'+attr(d.light||"var(--bg2)")+'">'+drinkIconHTML(d)+'</span><span style="flex:1;min-width:0"><span class="msg-opt-t" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(d.name)+'</span><span class="msg-opt-s" style="display:block">'+_tr("msgSpotBack")+'</span></span></button>'+
+      '<input id="spot-sq" class="spot-in" type="search" autocomplete="off" placeholder="'+attr(_tr("msgSpotStorePh"))+'" aria-label="'+attr(_tr("msgSpotStorePh"))+'">'+
+      '<div id="spot-stores" class="spot-list" role="radiogroup" aria-label="'+attr(_tr("msgSpotWhere"))+'"></div>'+
+      '<label id="spot-note" style="display:none;align-items:flex-start;gap:10px;margin-top:12px;font-size:12.5px;font-weight:600;color:var(--txt2);line-height:1.4;cursor:pointer"><input id="spot-note-cb" type="checkbox" checked style="width:18px;height:18px;margin:1px 0 0;accent-color:var(--cta-bg)"><span>'+_tr("msgSpotNote")+'</span></label>'+
+      '<button id="spot-send" class="msg-bp" style="width:100%;min-height:48px;margin-top:14px" disabled>'+_tr("msgSpotSend")+'</button>';
+    var rendreListe=function(){
+      var q=String((document.getElementById("spot-sq")||{}).value||"").trim().toLowerCase();
+      magasins=listeMagasins(q);
+      var box=document.getElementById("spot-stores");if(!box)return;
+      box.innerHTML=magasins.length?magasins.map(optMagasin).join(""):'<div class="msg-vide">'+_tr(q?"msgSpotNoStoreQ":"msgSpotNoStores")+'</div>';
+    };
+    rendreListe();
+    var sq=document.getElementById("spot-sq");if(sq)sq.addEventListener("input",rendreListe);
+    var cb=document.getElementById("spot-note-cb");if(cb)cb.onchange=function(){etat.noter=!!cb.checked;};
+  };
+  peindre1();
   ov.addEventListener("click",function(e){
-    var b=e.target.closest?e.target.closest(".msg-opt[data-i]"):null;if(!b)return;
-    var i=b.getAttribute("data-i");var x=i.charAt(0)==="r"?recents[Number(i.slice(1))]:resultats[Number(i.slice(1))];
-    if(!x)return;
-    MSG.sel={drinkId:x.drinkId,drinkName:x.drinkName,storeId:x.storeId,storeName:x.storeName};
-    ov.querySelectorAll(".msg-opt[data-i]").forEach(function(o){var on=o===b;o.classList.toggle("sel",on);o.setAttribute("aria-checked",on?"true":"false");o.querySelector(".msg-chk").innerHTML=on?'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>':"";});
-    var sb=document.getElementById("spot-send");if(sb)sb.disabled=false;
-    try{playSound("pop");}catch(err){}
+    var t=e.target;if(!t||!t.closest)return;
+    if(t.closest("[data-spot-back]")){etat.sid=null;etat.sname=null;peindre1();return;}
+    var br=t.closest(".msg-opt[data-i]");
+    if(br){ // une trouvaille recente : boisson ET magasin connus, on va direct a l'envoi
+      var x=recents[Number(String(br.getAttribute("data-i")).slice(1))];if(!x)return;
+      etat.d=x.d||{id:x.drinkId,name:x.drinkName,light:"var(--bg2)"};etat.sid=x.storeId;etat.sname=x.storeName;etat.deja=true;
+      try{playSound("pop");}catch(err){}
+      peindre2();
+      var b=document.getElementById("spot-send");if(b)b.disabled=false;
+      return;
+    }
+    var bd=t.closest(".msg-opt[data-d]");
+    if(bd){etat.d=boissons[Number(bd.getAttribute("data-d"))];if(!etat.d)return;etat.sid=null;try{playSound("pop");}catch(err){}peindre2();return;}
+    var bm=t.closest(".msg-opt[data-m]");
+    if(bm){
+      var m=magasins[Number(bm.getAttribute("data-m"))];if(!m)return;
+      etat.sid=m.id;etat.sname=m.name;etat.deja=!!m.deja;
+      ov.querySelectorAll(".msg-opt[data-m]").forEach(function(o){var on=o===bm;o.classList.toggle("sel",on);o.setAttribute("aria-checked",on?"true":"false");var c=o.querySelector(".msg-chk");if(c)c.innerHTML=on?chk:"";});
+      var note=document.getElementById("spot-note");if(note)note.style.display=m.deja?"none":"flex";
+      var sb=document.getElementById("spot-send");if(sb)sb.disabled=false;
+      try{playSound("pop");}catch(err){}
+      return;
+    }
+    if(t.closest("#spot-send")){
+      if(!etat.d||!etat.sid)return;
+      var d=etat.d,sid=etat.sid,sname=etat.sname,noter=etat.noter&&!etat.deja;
+      ov.fermer();
+      msgEnvoyer({type:"spot",storeId:sid,storeName:String(sname||"").slice(0,60),drinkId:d.id,drinkName:String(d.name||"").slice(0,60)}).then(function(ok){
+        if(ok&&noter&&msgNoterEmplacement(sid,d.id))toast(_tr("msgSpotNoted").replace("{s}",sname));
+      });
+    }
   });
-  var send=document.getElementById("spot-send");
-  if(send)send.onclick=function(){
-    if(!MSG.sel)return;
-    var sel=MSG.sel;ov.fermer();
-    msgEnvoyer({type:"spot",storeId:sel.storeId,storeName:sel.storeName,drinkId:sel.drinkId,drinkName:sel.drinkName});
-  };
 }
 /* ── Menu ⋯ du fil ── */
 function msgMenuThread(){
