@@ -2633,21 +2633,26 @@ window.fbEnvoyerMessage = async function(cid, msg) {
       (conv.lastAt && typeof conv.lastAt.toMillis === "function") ? conv.lastAt.toMillis() : 0);
     var attente = 900 - (Date.now() - repere);
     if (attente > 0) await new Promise(function(r) { setTimeout(r, attente); });
-    var batch = writeBatch(db);
     var mref = doc(collection(db, "conversations", cid, "messages"));
-    batch.set(mref, m);
-    var maj = {
-      lastAt: serverTimestamp(),
-      lastMsg: { by: me, type: m.type, text: apercu.slice(0, 80), at: serverTimestamp() }
+    /* Un lot ne sert qu'une fois : le SDK refuse de re-commiter un lot deja
+       envoye. Pour retenter, on en reconstruit un. */
+    var construireLot = function() {
+      var batch = writeBatch(db);
+      batch.set(mref, m);
+      var maj = {
+        lastAt: serverTimestamp(),
+        lastMsg: { by: me, type: m.type, text: apercu.slice(0, 80), at: serverTimestamp() }
+      };
+      maj["unread." + autre] = increment(1);
+      if (conv.state === "request") maj.reqCount = 1;
+      batch.update(doc(db, "conversations", cid), maj);
+      return batch;
     };
-    maj["unread." + autre] = increment(1);
-    if (conv.state === "request") maj.reqCount = 1;
-    batch.update(doc(db, "conversations", cid), maj);
-    try { await batch.commit(); }
+    try { await construireLot().commit(); }
     catch (e1) {
       if (_msgErreur(e1).reason !== "permission-denied") throw e1;
       await new Promise(function(r) { setTimeout(r, 1200); });
-      await batch.commit();
+      await construireLot().commit();
     }
     _dernierEnvoi = Date.now();
     conv.lastAt = Timestamp.now();
@@ -2677,8 +2682,12 @@ window.fbAccepterConversation = async function(cid, oui) {
   var me = _msgUid();
   if (!me || !cid) return { ok: false, reason: "invalid" };
   try {
-    await updateDoc(doc(db, "conversations", cid), { state: oui ? "open" : "declined" });
-    if (_convCache[cid]) _convCache[cid].state = oui ? "open" : "declined";
+    var maj = { state: oui ? "open" : "declined" };
+    /* Refuser, c'est aussi avoir lu : sinon la demande refusee comptait
+       « 1 non lu » pour toujours, invisible et impossible a effacer. */
+    if (!oui) maj["unread." + me] = 0;
+    await updateDoc(doc(db, "conversations", cid), maj);
+    if (_convCache[cid]) { _convCache[cid].state = oui ? "open" : "declined"; if (!oui && _convCache[cid].unread) _convCache[cid].unread[me] = 0; }
     return { ok: true };
   } catch (e) { return _msgErreur(e); }
 };
@@ -2732,7 +2741,7 @@ window.fbDemarrerMessagerie = function() {
   try {
     _convUnsub = window.fbMesConversations(function(rows, err, detail) {
       var unread = 0;
-      (rows || []).forEach(function(r) { unread += (r.unread && r.unread[me] > 0) ? r.unread[me] : 0; });
+      (rows || []).forEach(function(r) { if (r.state === "declined") return; unread += (r.unread && r.unread[me] > 0) ? r.unread[me] : 0; });
       /* detail : le message brut de Firestore, affiche en petit sous l'etat
          « pas encore active » — c'est ce qui permet de distinguer, depuis un
          telephone, des regles pas deployees d'un index qui se construit. */
@@ -18977,9 +18986,10 @@ function handleDeepLink(){
     var goTh=function(n){
       var me=(window._fbUser&&window._fbUser.uid)||null;
       if(me&&typeof openThread==="function"){try{openThread(cidTh);}catch(e){}}
-      else if(n<25){setTimeout(function(){goTh(n+1);},400);}
+      else if(n<150){setTimeout(function(){goTh(n+1);},400);}   // jusqu'a une minute : une session lente se restaure quand meme
     };
-    goTh(0);
+    if(window._fbAuthReady&&window._fbAuthReady.then)window._fbAuthReady.then(function(){goTh(0);},function(){goTh(0);});
+    else goTh(0);
     return;
   }
   var m=(location.hash||"").match(/#drink=(\d+)/);
@@ -23080,7 +23090,7 @@ function ppFeuilleStat(key,u){
    ============================================================================ */
 var MSG={rows:null,err:null,unread:0,tab:"msgs",users:{},blocs:[],cid:null,other:null,conv:null,unsub:null,msgs:null,msgErr:null,sel:null,sending:false};
 try{var _mu=JSON.parse(localStorage.getItem("magoMsgUsers")||"{}");if(_mu&&typeof _mu==="object")MSG.users=_mu;}catch(e){}
-try{var _mb=JSON.parse(localStorage.getItem("magoBlocs")||"null");if(_mb&&Array.isArray(_mb.list))MSG.blocs=_mb.list.map(String);}catch(e){}
+try{var _mb=JSON.parse(localStorage.getItem("magoBlocs")||"null");if(_mb&&Array.isArray(_mb.list)&&(!window._fbUser||_mb.uid===window._fbUser.uid))MSG.blocs=_mb.list.map(String);}catch(e){}
 function msgMe(){return window._fbUser?window._fbUser.uid:null;}
 function msgAutreDe(conv){var me=msgMe();return ((conv&&conv.members)||[]).filter(function(x){return x!==me;})[0]||null;}
 function msgEcranOn(id){var el=document.getElementById("s-"+id);return !!(el&&el.classList.contains("on"));}
@@ -23168,9 +23178,14 @@ window.addEventListener("fbConversations",function(e){
   MSG.rows=d.rows||null;MSG.err=d.err||null;MSG.errDetail=d.errDetail||null;MSG.unread=nbSur(d.unread);
   try{msgDetecterNouveaux(avant,MSG.rows);}catch(err){}
   msgRafraichirPastilles();
+  if(d.uid&&MSG.uid&&d.uid!==MSG.uid){threadQuitter();MSG.cid=null;MSG.conv=null;MSG.blocs=[];}   // autre compte : on repart de zero
+  MSG.uid=d.uid||MSG.uid;
   if(MSG.cid){
     var c=(MSG.rows||[]).find(function(x){return x.cid===MSG.cid;});
     if(c){MSG.conv=c;}
+    /* Le fil a ete ouvert avant que la boite n'arrive (lien de notification,
+       « Ecrire » dans la premiere seconde) : on branche l'ecouteur maintenant. */
+    if(c&&!MSG.unsub&&msgEcranOn("thread")){try{threadReprendre();}catch(err){}}
   }
   msgRerendre();
   /* Le fil est ouvert et vient de passer « open » (l'autre a accepte) : la
@@ -23303,7 +23318,7 @@ function msgCarteDemande(c){
     neuf=(Date.now()-u.createdAt<7*86400000)&&contribs===0;
   }
   var quote=c.lastMsg?msgApercu(c):"";
-  return '<div class="req-card" data-cid="'+attr(c.cid)+'">'+
+  return '<div class="req-card" data-cid="'+attr(c.cid)+'" role="button" tabindex="0" aria-label="'+attr(_tr("msgOpenRequest"))+'" onclick="if(!event.target.closest(\'button\'))openThread(\''+attr(c.cid)+'\',\''+attr(o)+'\')" onkeydown="if(event.key===\'Enter\'){openThread(\''+attr(c.cid)+'\',\''+attr(o)+'\');}">'+
     '<div class="req-top">'+msgAvatar(u,"lg")+'<div style="flex:1;min-width:0"><div class="msg-name">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</div><div class="req-meta">'+meta+'</div>'+
     (neuf?'<span class="req-warn"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 8v5M12 16.5h.01"/><circle cx="12" cy="12" r="9"/></svg>'+_tr("msgNewAccount")+'</span>':'')+'</div></div>'+
     (quote?'<div class="req-quote">« '+sanitize(quote)+' »</div>':'<div class="req-quote" style="color:var(--s3)">'+_tr("msgNoText")+'</div>')+
@@ -23465,7 +23480,7 @@ function msgBulleHTML(m,mine,ms,nom){
     return '<div class="th-card '+side+'"><div class="th-spot-top"><div class="th-spot-ico" style="'+(d?'background:'+attr(d.light||"var(--bg2)"):'')+'">'+(d?drinkIconHTML(d):'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--s2)" stroke-width="2" stroke-linecap="round"><path d="M8 3h8l-1 4H9z"/><path d="M9 7l-1.5 13h9L15 7"/></svg>')+'</div>'+
       '<div style="flex:1;min-width:0"><div class="th-spot-name">'+sanitize(d?d.name:m.drinkName||"")+'</div><div class="th-spot-sub">'+sanitize(d?[d.brand,d.format||d.size].filter(Boolean).join(" · "):"")+'</div></div></div>'+
       '<div class="th-spot-where"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px"><path d="M12 21s-6-5.2-6-10a6 6 0 0 1 12 0c0 4.8-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg><div style="flex:1;min-width:0">'+sanitize(m.storeName||"")+'<small>'+sub+'</small></div></div>'+
-      '<div class="th-spot-btns"><button class="th-cta" data-act="go" data-store="'+attr(m.storeId)+'"'+(s?'':' data-lat="'+attr(s&&s.lat)+'"')+'>'+_tr("msgGo")+'</button>'+(d?'<button class="th-sec" data-act="fiche" data-drink="'+attr(d.id)+'">'+_tr("msgSheet")+'</button>':'')+'</div>'+t+'</div>';
+      '<div class="th-spot-btns"><button class="th-cta" data-act="go" data-store="'+attr(m.storeId)+'">'+_tr("msgGo")+'</button>'+(d?'<button class="th-sec" data-act="fiche" data-drink="'+attr(d.id)+'">'+_tr("msgSheet")+'</button>':'')+'</div>'+t+'</div>';
   }
   return '<div class="th-b '+side+(m.pending?" pend":"")+'">'+sanitize(String(m.text||""))+t+'</div>';
 }
@@ -23518,23 +23533,35 @@ function msgErrDetailHTML(){
 }
 function renderThreadFoot(){
   var el=document.getElementById("th-foot");if(!el)return;
+  /* Le composeur est reconstruit a chaque evenement (message entrant, accuse
+     de mon propre envoi, fiche joueur chargee) : sans ca, ce que la personne
+     etait en train de taper disparaissait et le clavier se fermait. On garde
+     le brouillon, le curseur et le focus, et on les remet apres. */
+  var _ta=document.getElementById("th-in"),_brouillon=_ta?_ta.value:"",_focus=!!(_ta&&document.activeElement===_ta),_pos=_ta?_ta.selectionStart:0;
+  var _rendre=function(html){
+    el.innerHTML=html;
+    var ta=document.getElementById("th-in");
+    if(ta&&_brouillon){ta.value=_brouillon;try{ta.setSelectionRange(_pos,_pos);}catch(e){}}
+    if(ta&&_focus){try{ta.focus({preventScroll:true});}catch(e){}}
+    if(ta&&_brouillon){try{ta.style.height="auto";ta.style.height=Math.min(120,ta.scrollHeight)+"px";}catch(e){}}
+  };
   var me=msgMe(),c=MSG.conv,u=MSG.users[MSG.other]||{},nom=sanitize(u.pseudo||_tr("msgSomeone"));
   var bloque=MSG.blocs.indexOf(String(MSG.other))!==-1;
-  if(MSG.err==="permission-denied"||MSG.msgErr==="permission-denied"){el.innerHTML='<div class="th-band">'+_tr("msgNotEnabledSub")+msgErrDetailHTML()+'</div>';return;}
+  if(MSG.err==="permission-denied"||MSG.msgErr==="permission-denied"){_rendre('<div class="th-band">'+_tr("msgNotEnabledSub")+msgErrDetailHTML()+'</div>');return;}
   if(bloque){
-    el.innerHTML='<div class="th-band"><b>'+_tr("msgYouBlocked").replace("{p}",nom)+'</b> · '+_tr("msgBlockedSub")+
-      '<div class="req-actions"><button class="msg-bs" onclick="msgBloquer(\''+attr(MSG.other)+'\',false)">'+_tr("msgUnblock")+'</button></div></div>';
+    _rendre('<div class="th-band"><b>'+_tr("msgYouBlocked").replace("{p}",nom)+'</b> · '+_tr("msgBlockedSub")+
+      '<div class="req-actions"><button class="msg-bs" onclick="msgBloquer(\''+attr(MSG.other)+'\',false)">'+_tr("msgUnblock")+'</button></div></div>');
     return;
   }
   if(c&&c.state==="declined"){
-    el.innerHTML='<div class="th-band">'+(c.requestBy===me?_tr("msgTheyDeclined").replace("{p}",nom):_tr("msgYouDeclined"))+'</div>';
+    _rendre('<div class="th-band">'+(c.requestBy===me?_tr("msgTheyDeclined").replace("{p}",nom):_tr("msgYouDeclined"))+'</div>');
     return;
   }
   if(c&&c.state==="request"&&c.requestBy!==me){
-    el.innerHTML='<div class="th-band"><b>'+_tr("msgWantsToWrite").replace("{p}",nom)+'</b> '+_tr("msgReqIntroShort")+
+    _rendre('<div class="th-band"><b>'+_tr("msgWantsToWrite").replace("{p}",nom)+'</b> '+_tr("msgReqIntroShort")+
       '<div class="req-actions"><button class="msg-bp" onclick="msgRepondre(\''+attr(c.cid)+'\',true)">'+_tr("msgAccept")+'</button>'+
       '<button class="msg-bs" onclick="msgRepondre(\''+attr(c.cid)+'\',false)">'+_tr("msgDecline")+'</button>'+
-      '<button class="msg-bd" aria-label="'+attr(_tr("msgBlock"))+'" onclick="msgBloquerDepuisDemande(\''+attr(c.cid)+'\',\''+attr(MSG.other)+'\')">'+msgIcoBloc(18)+'</button></div></div>';
+      '<button class="msg-bd" aria-label="'+attr(_tr("msgBlock"))+'" onclick="msgBloquerDepuisDemande(\''+attr(c.cid)+'\',\''+attr(MSG.other)+'\')">'+msgIcoBloc(18)+'</button></div></div>');
     return;
   }
   var attente=c&&c.state==="request"&&c.requestBy===me&&nbSur(c.reqCount)>=1;
@@ -23543,11 +23570,11 @@ function renderThreadFoot(){
   var ph=attente?_tr("msgWaiting"):(c&&c.state==="open")?_tr("msgWriteTo").replace("{p}",u.pseudo||""):_tr("msgFirstOnly").replace("{p}",u.pseudo||"");
   var bande=attente?'<div class="th-band" style="margin-bottom:8px"><b>'+_tr("msgWaiting")+'</b> · '+_tr("msgWaitingSub").replace("{p}",nom)+'</div>':
     horsLigne?'<div class="th-band warn" style="margin-bottom:8px">'+_tr("msgOfflineSub")+'</div>':'';
-  el.innerHTML=bande+'<div class="th-comp">'+
+  _rendre(bande+'<div class="th-comp">'+
     '<button class="th-plus" aria-label="'+attr(_tr("msgAttach"))+'" onclick="msgOuvrirPlus()"'+(off?' disabled':'')+'><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>'+
     '<textarea id="th-in" class="th-in" rows="1" maxlength="2000" placeholder="'+attr(ph)+'" aria-label="'+attr(_tr("msgYourMessage"))+'"'+(off?' disabled':'')+'></textarea>'+
     '<button id="th-send" class="th-send" aria-label="'+attr(_tr("msgSend"))+'" onclick="msgEnvoyerTexte()" disabled><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg></button></div>'+
-    '<input id="th-photo" type="file" accept="image/*" style="display:none" onchange="msgPhotoChoisie(this)">';
+    '<input id="th-photo" type="file" accept="image/*" style="display:none" onchange="msgPhotoChoisie(this)">');
   var ta=document.getElementById("th-in"),sb=document.getElementById("th-send");
   if(ta&&!off){
     ta.addEventListener("input",function(){
@@ -23674,7 +23701,7 @@ function msgNoterEmplacement(sid,did){
   var s=(typeof STORES!=="undefined"?STORES:[]).find(function(x){return String(x.fbId||x.id)===String(sid);});
   var d=(DRINKS||[]).find(function(x){return String(x.id)===String(did);});
   if(!s||!d)return false;
-  if(!awardOnce("rep:stock:"+(s.fbId||s.id)+":"+d.id,24))return false;
+  if(!awardOnce("conf:"+(s.fbId||s.id)+":"+d.id,24))return false;
   try{
     if(!s.drinks)s.drinks=[];
     var deja=s.drinks.some(function(x){return String(x)===String(d.id);});
