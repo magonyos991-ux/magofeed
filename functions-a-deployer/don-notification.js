@@ -127,7 +127,13 @@ exports.kofiWebhook = onRequest(
        n'importe qui pourrait t'envoyer de faux dons et faire sonner ton
        telephone toute la nuit. Le jeton vient de Ko-fi et ne transite jamais
        par le navigateur. */
-    if (String(don.verification_token || "") !== String(KOFI_JETON.value())) {
+    /* ON COMPARE SANS LES BLANCS AUTOUR. Coller un jeton dans une invite
+       masquee de terminal emporte tres souvent un espace ou un retour a la
+       ligne avec lui — invisible, et il suffit a faire echouer la comparaison.
+       Le rogner n'affaiblit rien : un jeton ne commence ni ne finit jamais par
+       un blanc, et deux jetons differents le restent apres rognage. Cela evite
+       en revanche des heures passees a chercher une faute qui n'existe pas. */
+    if (String(don.verification_token || "").trim() !== String(KOFI_JETON.value()).trim()) {
       console.warn("jeton de verification invalide");
       await noterAppel("jeton-refuse", don);
       res.status(401).send("jeton invalide");
