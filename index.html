@@ -18934,6 +18934,22 @@ function handleDeepLink(){
     goTab(0);
     return;
   }
+  /* Le tap sur une notification de message ouvre le fil (#thread=<cid>). On
+     attend que l'identite soit la : openThread refuse sans compte. */
+  var mth=(location.hash||"").match(/#thread=([A-Za-z0-9_%-]+)/);
+  if(mth){
+    if(_deepLinkSealed())return;
+    _deepLinkSeal();
+    var cidTh=decodeURIComponent(mth[1]);
+    try{history.replaceState(null,"",location.pathname);}catch(e){}
+    var goTh=function(n){
+      var me=(window._fbUser&&window._fbUser.uid)||null;
+      if(me&&typeof openThread==="function"){try{openThread(cidTh);}catch(e){}}
+      else if(n<25){setTimeout(function(){goTh(n+1);},400);}
+    };
+    goTh(0);
+    return;
+  }
   var m=(location.hash||"").match(/#drink=(\d+)/);
   if(m){
     if(_deepLinkSealed())return;
