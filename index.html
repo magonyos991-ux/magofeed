@@ -1350,6 +1350,10 @@ window.fbSyncUserStats = function(stats) {
     } catch (e) { recent = []; }
     setDoc(userDocRef(user.uid), {
       pseudo: String(localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
+      /* Le pseudo en minuscules, pour que la recherche de joueurs ignore la
+         casse : « zdoudex » doit trouver Zdoudex. Firestore compare au
+         caractere pres, on lui donne donc une copie normalisee. */
+      pseudoLower: String(localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24).toLowerCase(),
       avatar: av,
       favs: favIds,
       recent: recent,
@@ -4660,13 +4664,33 @@ window.fbDeletePhotoSuggestion = async function(docId) {
 
 /* Recherche d'utilisateurs par prefixe de pseudo (Firestore ne fait pas de
    recherche libre : orderBy + startAt/endAt = le pattern officiel). */
+/* Recherche d'un joueur par le debut de son pseudo, SANS tenir compte de la
+   casse : « zdoudex » trouvait rien, seul « Z » marchait, parce que Firestore
+   compare au caractere pres. On interroge donc pseudoLower (les profils
+   synchronises depuis cette version) ET, pour les profils plus anciens, les
+   graphies les plus probables du pseudo : tel quel, minuscules, Initiale. */
 window.fbSearchUsers = async function(prefix) {
+  var p = String(prefix || "").trim();
+  if (!p) return [];
+  var low = p.toLowerCase(), cap = low.charAt(0).toUpperCase() + low.slice(1);
+  var variantes = [p, low, cap, p.toUpperCase()].filter(function(v, i, a) { return a.indexOf(v) === i; });
+  var users = collection(db, "users");
+  var requetes = [query(users, orderBy("pseudoLower"), startAt(low), endAt(low + "\uf8ff"), limit(12))]
+    .concat(variantes.map(function(v) { return query(users, orderBy("pseudo"), startAt(v), endAt(v + "\uf8ff"), limit(12)); }));
   try {
-    var q1 = query(collection(db, "users"), orderBy("pseudo"), startAt(prefix), endAt(prefix + "\uf8ff"), limit(12));
-    var snap = await getDocs(q1);
-    var rows = [];
-    snap.forEach(function(d) { var x = d.data(); x.uid = d.id; rows.push(x); });
-    return rows;
+    var snaps = await Promise.all(requetes.map(function(q) { return getDocs(q).catch(function() { return null; }); }));
+    var vus = {}, rows = [];
+    snaps.forEach(function(snap) {
+      if (!snap) return;
+      snap.forEach(function(d) {
+        if (vus[d.id]) return;
+        var x = d.data(); x.uid = d.id;
+        if (String(x.pseudo || "").toLowerCase().indexOf(low) !== 0) return;
+        vus[d.id] = true; rows.push(x);
+      });
+    });
+    rows.sort(function(a, b) { return String(a.pseudo || "").localeCompare(String(b.pseudo || ""), "fr"); });
+    return rows.slice(0, 12);
   } catch (e) { console.warn("User search error:", e); return []; }
 };
 
