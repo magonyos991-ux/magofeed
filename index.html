@@ -2535,9 +2535,15 @@ window.fbOuvrirConversation = async function(otherUid) {
   var cid = window.fbConvId(me, otherUid);
   try {
     if (_convCache[cid]) return { ok: true, cid: cid, conv: _convCache[cid] };
+    /* Si l'ecouteur de la boite connait deja ce fil, inutile de le relire. */
+    var rows = (window.fbMessagerie && window.fbMessagerie.rows) || [];
+    var connu = rows.find(function(r) { return r.cid === cid; });
+    if (connu) { _convCache[cid] = connu; return { ok: true, cid: cid, conv: connu }; }
     var ref = doc(db, "conversations", cid);
-    var s = await getDoc(ref);
-    if (s.exists()) { var c = Object.assign({ cid: cid }, s.data()); _convCache[cid] = c; return { ok: true, cid: cid, conv: c }; }
+    /* On CREE d'abord, on ne lit pas avant : les regles refusent la lecture
+       d'une conversation qui n'existe pas (aucun membre a verifier), et c'est
+       ce refus qui bloquait le tout premier message. Si la creation est
+       refusee, c'est que le fil existe deja (cree par l'autre) : on le lit. */
     var unread = {}; unread[me] = 0; unread[otherUid] = 0;
     var neuf = {
       members: [me, otherUid].sort(),
@@ -2549,7 +2555,13 @@ window.fbOuvrirConversation = async function(otherUid) {
       lastAt: serverTimestamp(),
       unread: unread
     };
-    await setDoc(ref, neuf);
+    try { await setDoc(ref, neuf); }
+    catch (e0) {
+      if (_msgErreur(e0).reason !== "permission-denied") throw e0;
+      var s = await getDoc(ref);
+      if (s.exists()) { var c = Object.assign({ cid: cid }, s.data()); _convCache[cid] = c; return { ok: true, cid: cid, conv: c }; }
+      throw e0;
+    }
     /* _creeA : la creation pose lastAt = maintenant, et les regles exigent
        700 ms entre deux ecritures dans le fil. Le premier message doit donc
        attendre un peu — c'est ce qui refusait « Ton premier message a … ». */
