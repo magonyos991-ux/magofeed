@@ -2545,7 +2545,10 @@ window.fbOuvrirConversation = async function(otherUid) {
       unread: unread
     };
     await setDoc(ref, neuf);
-    var conv = Object.assign({ cid: cid }, neuf, { createdAt: Timestamp.now(), lastAt: Timestamp.now() });
+    /* _creeA : la creation pose lastAt = maintenant, et les regles exigent
+       700 ms entre deux ecritures dans le fil. Le premier message doit donc
+       attendre un peu — c'est ce qui refusait « Ton premier message a … ». */
+    var conv = Object.assign({ cid: cid }, neuf, { createdAt: Timestamp.now(), lastAt: Timestamp.now(), _creeA: Date.now() });
     _convCache[cid] = conv;
     return { ok: true, cid: cid, conv: conv, created: true };
   } catch (e) { return _msgErreur(e); }
@@ -2601,9 +2604,13 @@ window.fbEnvoyerMessage = async function(cid, msg) {
       if (!m.storeId || !m.storeName || !m.drinkName) return { ok: false, reason: "invalid" };
       apercu = m.drinkName + " chez " + m.storeName;
     } else return { ok: false, reason: "invalid" };
-    /* Rythme impose par les regles : 700 ms entre deux messages. On attend
-       ici plutot que de laisser le serveur refuser un double tap. */
-    var attente = 800 - (Date.now() - _dernierEnvoi);
+    /* Rythme impose par les regles : 700 ms entre deux ecritures dans le fil,
+       creation comprise et messages de l'autre compris. On attend ici plutot
+       que de laisser le serveur refuser — et, si l'horloge du telephone est
+       en avance sur celle du serveur, on retente une fois apres une pause. */
+    var repere = Math.max(_dernierEnvoi, conv._creeA || 0,
+      (conv.lastAt && typeof conv.lastAt.toMillis === "function") ? conv.lastAt.toMillis() : 0);
+    var attente = 900 - (Date.now() - repere);
     if (attente > 0) await new Promise(function(r) { setTimeout(r, attente); });
     var batch = writeBatch(db);
     var mref = doc(collection(db, "conversations", cid, "messages"));
@@ -2615,8 +2622,14 @@ window.fbEnvoyerMessage = async function(cid, msg) {
     maj["unread." + autre] = increment(1);
     if (conv.state === "request") maj.reqCount = 1;
     batch.update(doc(db, "conversations", cid), maj);
-    await batch.commit();
+    try { await batch.commit(); }
+    catch (e1) {
+      if (_msgErreur(e1).reason !== "permission-denied") throw e1;
+      await new Promise(function(r) { setTimeout(r, 1200); });
+      await batch.commit();
+    }
     _dernierEnvoi = Date.now();
+    conv.lastAt = Timestamp.now();
     if (conv.state === "request") conv.reqCount = 1;
     return { ok: true, mid: mref.id };
   } catch (e) {
