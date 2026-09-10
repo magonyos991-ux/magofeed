@@ -122,8 +122,30 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
     </svg>
     <div class="splash-logo">Mago<span style="color:#c69a57">feed</span></div>
     <div class="splash-sub">Trouve ta boisson</div>
-    <div class="splash-dot"></div>
+    <div id="splash-onde"></div>
   </div>
+  <script>
+  /* ── L'ONDE QUI SE PROPAGE — le SEUL generateur du motif de chargement ──
+     Une grille carree de points ; chaque point recoit, en style, un retard
+     d'animation proportionnel a sa distance (euclidienne) au centre : l'onde
+     part du point central, dore, vers les bords. Le mouvement est en CSS pur
+     (.onde dans app.css) — ici aucun chronometre, seulement du balisage.
+     Definie ICI, avant tout le reste, parce que le splash s'en sert au tout
+     premier rendu, bien avant que le gros script du bas n'ait ete lu.
+       taille : 7 (splash, plein ecran) · 5 (cartes, etats vides) · 3 (en
+       ligne, a cote d'un texte). Jamais plus de 49 points.
+     Le pas entre deux anneaux grandit quand la grille retrecit : avec trois
+     anneaux, un pas de 0,16 s ferait clignoter le tout d'un bloc. */
+  function ondeHTML(taille){
+    var n=(taille===3||taille===5)?taille:7, c=(n-1)/2, pas=(n===7?.16:(n===5?.2:.3)), html="";
+    for(var i=0;i<n*n;i++){
+      var d=Math.sqrt(Math.pow(i%n-c,2)+Math.pow(Math.floor(i/n)-c,2));
+      html+=d?'<i style="animation-delay:'+(Math.round(d*pas*100)/100)+'s"></i>':'<i class="c"></i>';
+    }
+    return '<div class="onde onde-'+n+'" aria-hidden="true">'+html+'</div>';
+  }
+  document.getElementById("splash-onde").innerHTML=ondeHTML(7);
+  </script>
 
   <!-- TUTORIAL -->
   <div id="tuto-overlay">
@@ -256,6 +278,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <div id="theme-ico" style="font-size:20px;cursor:pointer;color:var(--s1)" onclick="cycleTheme()" role="button" tabindex="0" aria-label="Changer de thème" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();cycleTheme();}"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg></div>
+          <div id="msg-btn" onclick="openMessages()" style="position:relative;font-size:20px;cursor:pointer;color:var(--s1)" role="button" tabindex="0" aria-label="Messages" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openMessages();}"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7.5 8.5 6 8.5-6"/></svg><span id="msg-badge" class="hd-badge" aria-hidden="true"></span></div>
           <div id="bell-btn" onclick="openActivity()" style="position:relative;font-size:20px;cursor:pointer;color:var(--s1)" role="button" tabindex="0" aria-label="Mes activités" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openActivity();}"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span id="bell-badge" style="display:none;position:absolute;top:-6px;right:-6px;min-width:16px;height:16px;padding:0 3px;box-sizing:border-box;border-radius:8px;background:#c8321a;color:#fff;font-size:10px;font-weight:800;align-items:center;justify-content:center;line-height:1;border:2px solid var(--app-bg)"></span></div>
           <div class="avatar" onclick="show('profile')" role="button" tabindex="0" aria-label="Voir mon profil" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();show('profile');}"></div>
         </div>
@@ -522,6 +545,15 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       </div>
       <div id="pending-line" role="button" tabindex="0" onkeydown="if(event.key==='Enter')this.click()" style="display:none;align-items:center;justify-content:space-between;gap:8px;margin:0 20px 8px;padding:11px 14px;background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;cursor:pointer"></div>
       <div id="streak-pill" style="display:flex;align-items:center;justify-content:center;gap:7px;margin:0 20px 6px;padding:10px 14px;background:var(--bg2);border-radius:14px"></div>
+      <div onclick="openMessages()" role="button" tabindex="0" aria-label="Messages" onkeydown="if(event.key==='Enter'){openMessages();}" style="display:flex;align-items:center;gap:12px;margin:6px 20px;padding:13px 16px;background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;cursor:pointer">
+        <span style="display:flex;color:var(--s1)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7.5 8.5 6 8.5-6"/></svg></span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px;font-weight:800;color:var(--s1)" data-i18n="msgMessages">Messages</div>
+          <div id="profile-msg-sub" style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:1px" data-i18n="msgRowSub">Tes conversations avec les autres joueurs</div>
+        </div>
+        <span id="profile-msg-count" class="msg-count" style="display:none" aria-hidden="true"></span>
+        <span style="font-size:16px;color:var(--txt2)">›</span>
+      </div>
       <div onclick="inviteFriend()" role="button" tabindex="0" aria-label="Inviter un ami" onkeydown="if(event.key==='Enter'){inviteFriend();}" style="display:flex;align-items:center;gap:12px;margin:6px 20px;padding:14px 16px;background:linear-gradient(135deg,#0e7a4d,#14532d);border-radius:16px;cursor:pointer">
         <span style="display:flex;color:#fff"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></span>
         <div style="flex:1;min-width:0">
@@ -838,6 +870,23 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
     </div>
     </div>
   </div>
+  <!-- MESSAGERIE : la boite -->
+  <div id="s-messages" class="screen">
+    <div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch">
+      <div class="msg-hd">
+        <div class="th-ico" onclick="if(!navBack())show('home')" role="button" tabindex="0" aria-label="Retour" onkeydown="if(event.key==='Enter'){if(!navBack())show('home');}">←</div>
+        <span class="t-section" style="margin:0" data-i18n="msgTitle">Messages</span>
+      </div>
+      <div id="msg-seg" class="msg-seg" role="tablist" aria-label="Messages ou demandes"></div>
+      <div id="msg-body" style="padding-bottom:20px"></div>
+    </div>
+  </div>
+  <!-- MESSAGERIE : le fil, plein ecran (la barre d'onglets se retire) -->
+  <div id="s-thread" class="screen">
+    <div id="th-hd" class="th-hd"></div>
+    <div id="th-fil" class="th-fil" role="log" aria-live="polite" aria-label="Messages de la conversation"></div>
+    <div id="th-foot" class="th-foot"></div>
+  </div>
   <div id="s-privacy" class="screen">
     <div class="scroll">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
@@ -1093,6 +1142,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
     <div class="ntab" data-screen="profile" onclick="navTo('profile')" role="button" tabindex="0" aria-label="Profil" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();navTo('profile');}">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 12a4 4 0 100-8 4 4 0 000 8zM5 20c0-3.5 3-6 7-6s7 2.5 7 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       <span class="ntab-lbl" id="nt-profile">Profil</span>
+      <span class="ntab-badge" id="nt-profile-badge" hidden aria-hidden="true"></span>
     </div>
   </nav>
 
@@ -1275,10 +1325,29 @@ window.fbSyncUserStats = function(stats) {
        rejete : le pseudo, l'avatar et les favoris cesseraient de se
        synchroniser avec lui. Le score officiel est calcule par le serveur a
        partir des contributions reellement enregistrees. */
+    /* Derniers gestes PUBLICS : cinq lignes, sans coordonnee — le nom de la
+       boisson et celui du magasin, rien de plus. C'est ce que le profil
+       public montre sous « Ses derniers gestes ». Le jour est celui du geste,
+       pas celui de la synchro. */
+    var recent = [];
+    try {
+      var typeMap = { stock: "confirm", rupture: "rupture", contrefacon: "rupture", nouveau: "disc", scan: "scan" };
+      var auj = new Date(), jourAuj = auj.getFullYear() + "-" + String(auj.getMonth() + 1).padStart(2, "0") + "-" + String(auj.getDate()).padStart(2, "0");
+      (stats.activity || []).slice(0, 5).forEach(function(a) {
+        if (!a || !typeMap[a.type]) return;
+        recent.push({
+          t: typeMap[a.type],
+          d: String((a.drink && a.drink.name) || "").slice(0, 40),
+          s: String((a.store && a.store.name) || "").slice(0, 40),
+          j: String(a.day || jourAuj).slice(0, 10)
+        });
+      });
+    } catch (e) { recent = []; }
     setDoc(userDocRef(user.uid), {
       pseudo: String(localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24),
       avatar: av,
       favs: favIds,
+      recent: recent,
       signals: stats.signals || 0,
       confirms: stats.confirms || 0,
       discAccepted: stats.discAccepted || 0,
@@ -1460,10 +1529,13 @@ window._fbAuthReady = new Promise(function(res) { _authReadyResolve = res; });
 onAuthStateChanged(auth, async function(user) {
   if (_authReadyResolve) { _authReadyResolve(); _authReadyResolve = null; }
   if (!user) {
+    // Deconnexion : l'ecouteur des conversations ne doit pas survivre au compte.
+    try { window.fbArreterMessagerie(); } catch (e) {}
     signInAnonymously(auth).catch(function(e) { console.warn("Firebase anonymous sign-in error (active le provider Anonyme dans la console Firebase) :", e); });
     return;
   }
   window._fbUser = user;
+  try { window.fbDemarrerMessagerie(); } catch (e) {}
   /* Mes boutiques certifiees : lecture unique, dans un document prive. Elle
      remplace l'ancien champ public 'owner'. Un compte anonyme n'en a jamais. */
   try { if (!user.isAnonymous && window.chargerMesMagasins) window.chargerMesMagasins(); } catch (e) {}
@@ -2371,6 +2443,278 @@ window.fbLoadUser = async function(uid) {
   } catch (e) { console.warn("Load user error:", e); return null; }
 };
 
+/* ============================================================================
+   MESSAGERIE — plan Spark, aucune fonction serveur.
+   ----------------------------------------------------------------------------
+   Tout ce que le client ecrit est contraint par les regles Firestore : deux
+   membres tries dans `members`, un identifiant de conversation derive des
+   deux uid (fbConvId), un seul message tant que la demande n'est pas
+   acceptee, et un rythme minimal entre deux envois. Ici on se contente
+   d'ecrire EXACTEMENT ce que les regles attendent — les horodatages sont
+   toujours serverTimestamp(), jamais l'heure du telephone.
+
+   AUCUNE ERREUR NE REMONTE A L'INTERFACE SOUS FORME D'EXCEPTION : chaque
+   fonction repond {ok:false, reason} et l'ecran explique. Le cas le plus
+   important est permission-denied : tant que les regles ne sont pas
+   deployees, la messagerie doit dire « pas encore activee », pas planter.
+   ============================================================================ */
+function _msgUid() { var u = auth.currentUser; return u ? u.uid : null; }
+function _msgErreur(e) {
+  var c = String((e && (e.code || e.message)) || e || "");
+  if (/permission-denied|PERMISSION_DENIED|Missing or insufficient/i.test(c)) return { ok: false, reason: "permission-denied" };
+  if (!navigator.onLine || /unavailable|network|offline|deadline/i.test(c)) return { ok: false, reason: "offline" };
+  if (/failed-precondition/i.test(c)) return { ok: false, reason: "index" };
+  console.warn("Messagerie :", c);
+  return { ok: false, reason: c.slice(0, 80) || "unknown" };
+}
+window.fbConvId = function(a, b) { return [String(a), String(b)].sort().join("_"); };
+
+/* Cache des conversations vues par l'ecouteur : evite une lecture par envoi
+   pour connaitre l'etat (request/open) et l'autre membre. */
+var _convCache = {};
+var _blocsCache = null;   // { list:[uid...] }
+var _dernierEnvoi = 0;
+
+window.fbMesBlocs = async function(force) {
+  var me = _msgUid();
+  if (!me) return [];
+  if (_blocsCache && !force) return _blocsCache.list.slice();
+  try {
+    var loc = JSON.parse(localStorage.getItem("magoBlocs") || "null");
+    if (loc && loc.uid === me && Array.isArray(loc.list) && !force) {
+      _blocsCache = { list: loc.list };
+      // Rafraichissement en arriere-plan : le cache sert tout de suite.
+      window.fbMesBlocs(true).catch(function() {});
+      return loc.list.slice();
+    }
+  } catch (e) {}
+  try {
+    var s = await getDoc(doc(db, "blocks", me));
+    var list = (s.exists() && Array.isArray(s.data().list)) ? s.data().list.map(String) : [];
+    _blocsCache = { list: list };
+    try { localStorage.setItem("magoBlocs", JSON.stringify({ uid: me, list: list })); } catch (e) {}
+    window.dispatchEvent(new CustomEvent("fbBlocsChanged", { detail: list.slice() }));
+    return list.slice();
+  } catch (e) {
+    // Regles absentes ou hors ligne : on ne bloque personne par erreur.
+    return (_blocsCache && _blocsCache.list.slice()) || [];
+  }
+};
+window.fbBloquer = async function(uid, oui) {
+  var me = _msgUid();
+  if (!me || !uid || String(uid) === me) return { ok: false, reason: "invalid" };
+  uid = String(uid);
+  try {
+    var list = await window.fbMesBlocs(true);
+    if (oui && list.length >= 200 && list.indexOf(uid) === -1) return { ok: false, reason: "full" };
+    await setDoc(doc(db, "blocks", me), {
+      list: oui ? arrayUnion(uid) : arrayRemove(uid),
+      at: serverTimestamp()
+    }, { merge: true });
+    list = list.filter(function(x) { return x !== uid; });
+    if (oui) list.push(uid);
+    _blocsCache = { list: list };
+    try { localStorage.setItem("magoBlocs", JSON.stringify({ uid: me, list: list })); } catch (e) {}
+    window.dispatchEvent(new CustomEvent("fbBlocsChanged", { detail: list.slice() }));
+    return { ok: true, list: list.slice() };
+  } catch (e) { return _msgErreur(e); }
+};
+
+/* Cree la conversation si elle n'existe pas encore. Etat initial impose par
+   les regles : une demande, portee par celui qui ecrit le premier. */
+window.fbOuvrirConversation = async function(otherUid) {
+  var me = _msgUid();
+  if (!me) return { ok: false, reason: "auth" };
+  otherUid = String(otherUid || "");
+  if (!otherUid || otherUid === me) return { ok: false, reason: "invalid" };
+  var cid = window.fbConvId(me, otherUid);
+  try {
+    if (_convCache[cid]) return { ok: true, cid: cid, conv: _convCache[cid] };
+    var ref = doc(db, "conversations", cid);
+    var s = await getDoc(ref);
+    if (s.exists()) { var c = Object.assign({ cid: cid }, s.data()); _convCache[cid] = c; return { ok: true, cid: cid, conv: c }; }
+    var unread = {}; unread[me] = 0; unread[otherUid] = 0;
+    var neuf = {
+      members: [me, otherUid].sort(),
+      createdBy: me,
+      createdAt: serverTimestamp(),
+      state: "request",
+      requestBy: me,
+      reqCount: 0,
+      lastAt: serverTimestamp(),
+      unread: unread
+    };
+    await setDoc(ref, neuf);
+    var conv = Object.assign({ cid: cid }, neuf, { createdAt: Timestamp.now(), lastAt: Timestamp.now() });
+    _convCache[cid] = conv;
+    return { ok: true, cid: cid, conv: conv, created: true };
+  } catch (e) { return _msgErreur(e); }
+};
+
+/* Envoi = UN lot : le message + la mise a jour de l'en-tete de conversation
+   (dernier message, horodatage, non-lus de l'autre +1, compteur de demande).
+   Les deux ecritures reussissent ou echouent ensemble : jamais un message
+   orphelin ni une conversation qui annonce un message qui n'existe pas. */
+window.fbEnvoyerMessage = async function(cid, msg) {
+  var me = _msgUid();
+  if (!me) return { ok: false, reason: "auth" };
+  if (!cid || !msg || !msg.type) return { ok: false, reason: "invalid" };
+  var membres = String(cid).split("_");
+  var autre = membres[0] === me ? membres[1] : membres[0];
+  if (!autre || membres.indexOf(me) === -1) return { ok: false, reason: "invalid" };
+  try {
+    var blocs = await window.fbMesBlocs();
+    if (blocs.indexOf(autre) !== -1) return { ok: false, reason: "blocked" };
+    var conv = _convCache[cid];
+    if (!conv) {
+      var s = await getDoc(doc(db, "conversations", cid));
+      if (!s.exists()) return { ok: false, reason: "not-found" };
+      conv = Object.assign({ cid: cid }, s.data()); _convCache[cid] = conv;
+    }
+    if (conv.state === "declined") return { ok: false, reason: "declined" };
+    if (conv.state === "request") {
+      if (conv.requestBy !== me) return { ok: false, reason: "pending" };
+      if ((conv.reqCount || 0) >= 1) return { ok: false, reason: "pending" };
+    }
+    var m = { by: me, at: serverTimestamp(), type: String(msg.type) };
+    var apercu = "";
+    if (msg.type === "text") {
+      var t = String(msg.text || "").slice(0, 2000);
+      if (!t.trim()) return { ok: false, reason: "empty" };
+      m.text = t; apercu = t;
+    } else if (msg.type === "image") {
+      var img = String(msg.img || "");
+      if (img.indexOf("data:image/jpeg;base64,") !== 0) return { ok: false, reason: "invalid" };
+      if (img.length > 220000) return { ok: false, reason: "too-big" };
+      m.img = img; apercu = "Photo";
+    } else if (msg.type === "pos") {
+      if (typeof msg.lat !== "number" || typeof msg.lng !== "number") return { ok: false, reason: "invalid" };
+      m.lat = Math.round(msg.lat * 1000) / 1000; m.lng = Math.round(msg.lng * 1000) / 1000;
+      apercu = "Position";
+    } else if (msg.type === "spot") {
+      m.storeId = String(msg.storeId || "").slice(0, 80);
+      m.storeName = String(msg.storeName || "").slice(0, 60);
+      // Une cle absente plutot que nulle : les regles n'acceptent que les
+      // types documentes, et null n'en fait pas partie.
+      if (msg.drinkId != null) m.drinkId = (typeof msg.drinkId === "number") ? msg.drinkId : String(msg.drinkId).slice(0, 40);
+      m.drinkName = String(msg.drinkName || "").slice(0, 60);
+      if (!m.storeId || !m.storeName || !m.drinkName) return { ok: false, reason: "invalid" };
+      apercu = m.drinkName + " chez " + m.storeName;
+    } else return { ok: false, reason: "invalid" };
+    /* Rythme impose par les regles : 700 ms entre deux messages. On attend
+       ici plutot que de laisser le serveur refuser un double tap. */
+    var attente = 800 - (Date.now() - _dernierEnvoi);
+    if (attente > 0) await new Promise(function(r) { setTimeout(r, attente); });
+    var batch = writeBatch(db);
+    var mref = doc(collection(db, "conversations", cid, "messages"));
+    batch.set(mref, m);
+    var maj = {
+      lastAt: serverTimestamp(),
+      lastMsg: { by: me, type: m.type, text: apercu.slice(0, 80), at: serverTimestamp() }
+    };
+    maj["unread." + autre] = increment(1);
+    if (conv.state === "request") maj.reqCount = 1;
+    batch.update(doc(db, "conversations", cid), maj);
+    await batch.commit();
+    _dernierEnvoi = Date.now();
+    if (conv.state === "request") conv.reqCount = 1;
+    return { ok: true, mid: mref.id };
+  } catch (e) {
+    var err = _msgErreur(e);
+    /* Les regles refusent AUSSI le message d'un bloque par permission-denied.
+       Si la lecture des conversations marche, ce n'est pas l'absence de
+       regles : c'est un blocage (ou le rythme). On le dit tel quel. */
+    if (err.reason === "permission-denied" && window.fbMessagerie && window.fbMessagerie.rows) err = { ok: false, reason: "blocked" };
+    return err;
+  }
+};
+window.fbMarquerLu = async function(cid) {
+  var me = _msgUid();
+  if (!me || !cid) return { ok: false, reason: "invalid" };
+  try {
+    var conv = _convCache[cid];
+    if (conv && conv.unread && !(conv.unread[me] > 0)) return { ok: true, skipped: true };
+    var maj = {}; maj["unread." + me] = 0;
+    await updateDoc(doc(db, "conversations", cid), maj);
+    if (conv && conv.unread) conv.unread[me] = 0;
+    return { ok: true };
+  } catch (e) { return _msgErreur(e); }
+};
+window.fbAccepterConversation = async function(cid, oui) {
+  var me = _msgUid();
+  if (!me || !cid) return { ok: false, reason: "invalid" };
+  try {
+    await updateDoc(doc(db, "conversations", cid), { state: oui ? "open" : "declined" });
+    if (_convCache[cid]) _convCache[cid].state = oui ? "open" : "declined";
+    return { ok: true };
+  } catch (e) { return _msgErreur(e); }
+};
+window.fbSupprimerMessage = async function(cid, mid) {
+  if (!cid || !mid) return { ok: false, reason: "invalid" };
+  try { await deleteDoc(doc(db, "conversations", cid, "messages", mid)); return { ok: true }; }
+  catch (e) { return _msgErreur(e); }
+};
+/* Mes conversations, en direct. cb(rows) a chaque changement ; cb(null, reason)
+   si la lecture est refusee. Renvoie la fonction d'arret. */
+window.fbMesConversations = function(cb) {
+  var me = _msgUid();
+  if (!me) { cb(null, "auth"); return function() {}; }
+  var q1 = query(collection(db, "conversations"), where("members", "array-contains", me), orderBy("lastAt", "desc"), limit(50));
+  return onSnapshot(q1, function(snap) {
+    var rows = [];
+    snap.forEach(function(d) {
+      var x = Object.assign({ cid: d.id }, d.data({ serverTimestamps: "estimate" }));
+      _convCache[d.id] = x;
+      rows.push(x);
+    });
+    cb(rows);
+  }, function(e) { cb(null, _msgErreur(e).reason); });
+};
+/* Le fil d'une conversation : les `limite` derniers messages, rendus dans
+   l'ordre chronologique. Les envois locaux apparaissent aussitot (horodatage
+   estime) sans attendre l'aller-retour serveur. */
+window.fbMessages = function(cid, cb, limite) {
+  if (!cid) { cb(null, "invalid"); return function() {}; }
+  var q1 = query(collection(db, "conversations", cid, "messages"), orderBy("at", "desc"), limit(limite || 60));
+  return onSnapshot(q1, function(snap) {
+    var rows = [];
+    snap.forEach(function(d) { rows.push(Object.assign({ mid: d.id, pending: d.metadata.hasPendingWrites }, d.data({ serverTimestamps: "estimate" }))); });
+    rows.reverse();
+    cb(rows);
+  }, function(e) { cb(null, _msgErreur(e).reason); });
+};
+
+/* L'ecouteur global des non-lus : demarre des que l'identite est connue et
+   que la personne a un pseudo, s'arrete a la deconnexion. L'etat est publie
+   au script classique par l'evenement fbConversations. */
+var _convUnsub = null, _convUid = null;
+window.fbMessagerie = { rows: null, err: null, unread: 0 };
+window.fbDemarrerMessagerie = function() {
+  var me = _msgUid();
+  if (!me) return;
+  if (_convUid === me && _convUnsub) return;
+  window.fbArreterMessagerie();
+  if (!localStorage.getItem("magopseudo")) return;
+  _convUid = me;
+  try {
+    _convUnsub = window.fbMesConversations(function(rows, err) {
+      var unread = 0;
+      (rows || []).forEach(function(r) { unread += (r.unread && r.unread[me] > 0) ? r.unread[me] : 0; });
+      window.fbMessagerie = { rows: rows, err: err || null, unread: unread, uid: me };
+      window.dispatchEvent(new CustomEvent("fbConversations", { detail: window.fbMessagerie }));
+    });
+  } catch (e) {
+    window.fbMessagerie = { rows: null, err: _msgErreur(e).reason, unread: 0, uid: me };
+    window.dispatchEvent(new CustomEvent("fbConversations", { detail: window.fbMessagerie }));
+  }
+  window.fbMesBlocs().catch(function() {});
+};
+window.fbArreterMessagerie = function() {
+  if (_convUnsub) { try { _convUnsub(); } catch (e) {} }
+  _convUnsub = null; _convUid = null; _convCache = {}; _blocsCache = null;
+  window.fbMessagerie = { rows: null, err: null, unread: 0 };
+};
+
 /* Avis des utilisateurs (note /5 + texte) : nourrit l'amélioration de l'app.
    Créé par tout connecté, lu par l'admin (règles). */
 window.fbSubmitFeedback = async function(rating, text) {
@@ -2543,6 +2887,66 @@ window.fbLoadLeaderboard = async function() {
     console.warn("Firestore leaderboard error:", e);
     window.dispatchEvent(new CustomEvent("fbLeaderboardLoaded", { detail: [] }));
     return [];
+  }
+};
+
+/* « TON RANG ». Le classement n'affiche que le haut du tableau : avec un
+   millier de comptes, presque tout le monde en est absent et ne sait pas ou
+   il en est. Deux comptages agreges (getCountFromServer, ~1 lecture par
+   tranche de 1000) donnent le rang et le total sans lire la collection ; deux
+   petites requetes bornees donnent les voisins immediats pour le panneau
+   « Autour de toi ». Un seul champ filtre ET trie (points) : aucun index
+   composite a deployer, et users/{uid} est en lecture publique, donc aucune
+   regle a toucher. Le resultat est garde 2 minutes : rouvrir l'onglet ne
+   recompte pas. En cas d'erreur on rend null et l'interface n'affiche rien. */
+window._rangCache = null;
+window.fbMonRang = async function(myPoints) {
+  try {
+    var pts = Math.max(0, Number(myPoints) || 0);
+    var c = window._rangCache;
+    if (c && c.pts === pts && (Date.now() - c.at) < 120000) return c.data;
+    var users = collection(db, "users");
+    var moi = auth.currentUser ? auth.currentUser.uid : null;
+    var res = await Promise.all([
+      getCountFromServer(query(users, where("points", ">", pts))),
+      getCountFromServer(query(users, where("points", ">", 0))),
+      getDocs(query(users, where("points", ">", pts), orderBy("points", "asc"), limit(3))),
+      getDocs(query(users, where("points", "<", pts), orderBy("points", "desc"), limit(3)))
+    ]);
+    /* Meme lecture d'une fiche que fbLoadLeaderboard : points nets (la
+       sanction est deja deduite pour un profil bascule, reconnaissable a
+       pointsHerites), un seul joueur par pseudo, uniquement des contributeurs.
+       Ma propre fiche est ecartee : elle est la ligne « Toi ». */
+    function lignes(snap) {
+      var vus = {}, out = [];
+      snap.forEach(function(d) {
+        if (d.id === moi) return;
+        var data = d.data() || {};
+        var pseudo = String(data.pseudo || "").trim();
+        if (!pseudo) return;
+        var cle = pseudo.toLowerCase();
+        if (vus[cle]) return;
+        var dejaDeduite = (data.pointsHerites !== undefined);
+        var p = Math.max(0, (data.points || 0) - (dejaDeduite ? 0 : (data.penalty || 0)));
+        var contributions = (Number(data.confirms) || 0) + (Number(data.signals) || 0)
+                          + (Number(data.discAccepted) || 0);
+        if (contributions <= 0) return;
+        vus[cle] = true;
+        out.push({ uid: d.id, pseudo: pseudo, points: p, streak: data.streak || 0 });
+      });
+      return out;
+    }
+    var data = {
+      rang: 1 + (Number(res[0].data().count) || 0),
+      total: Number(res[1].data().count) || 0,
+      dessus: lignes(res[2]).reverse(),   // du plus fort au plus proche de moi (ordre d'affichage)
+      dessous: lignes(res[3])             // du plus proche de moi au plus faible
+    };
+    window._rangCache = { at: Date.now(), pts: pts, data: data };
+    return data;
+  } catch (e) {
+    console.warn("fbMonRang:", e);
+    return null;
   }
 };
 
@@ -4557,6 +4961,7 @@ try{
 <script src="data/ui.js"></script>
 <script src="data/i18n.js"></script>
 <script>
+/* global ondeHTML */
 /* ================================
    DATA — Boissons (reste local, immuable)
 ================================ */
@@ -4594,6 +4999,7 @@ function setLang(l){
   try{renderScanHistory();}catch(e){}
   try{if(typeof renderLeaderboard==="function")renderLeaderboard();}catch(e){}
   try{if(searchMode)setSearchMode(searchMode);}catch(e){}
+  try{msgRafraichirPastilles();msgRerendre();}catch(e){}
   var sh=document.getElementById("scan-hint");
   if(sh&&!scanActive)sh.textContent=T.camWaiting;
   var ids={
@@ -4914,7 +5320,7 @@ function refreshLocation(cb,opts){
 /* ================================
    NAVIGATION
 ================================ */
-var NAV_SCREENS=["home","search","results","scan","discover","profile","rewards","settings","privacy","terms","storedetail","admin","userprofile"];
+var NAV_SCREENS=["home","search","results","scan","discover","profile","rewards","settings","privacy","terms","storedetail","admin","userprofile","messages","thread"];
 /* ================================
    NAVIGATION "COMME LES APPS PRO"
    - Les 5 onglets (barre du bas) sont des racines : y aller vide la pile.
@@ -5016,6 +5422,13 @@ function show(s){
   _showRaw(s);
 }
 function _showRaw(s){
+  /* Le fil de messagerie est plein ecran : la barre d'onglets se retire et
+     le composeur prend sa place. Quitter le fil coupe son ecouteur Firestore ;
+     y revenir (retour depuis un profil ouvert par le menu) le rebranche. */
+  try{document.body.classList.toggle("th-on",s==="thread");}catch(e){}
+  if(s!=="thread"){try{threadQuitter();}catch(e){}}
+  else{try{threadReprendre();}catch(e){}}
+  if(s==="messages"){try{renderMessages();}catch(e){}}
   if(s==="profile"){try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}try{renderDonCard();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
   if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}}
@@ -5046,7 +5459,7 @@ function _showRaw(s){
     target.classList.add("on");
   }
   var navScreens=["home","search","scan","discover","profile"];
-  var activeTab=navScreens.includes(s)?s:(["settings","privacy","terms"].includes(s)?"profile":null);
+  var activeTab=navScreens.includes(s)?s:(["settings","privacy","terms","messages"].includes(s)?"profile":null);
   var prevOnTab=document.querySelector(".ntab.on");
   document.querySelectorAll(".ntab").forEach(function(tab){tab.classList.remove("on");});
   if(activeTab){
@@ -5118,7 +5531,7 @@ function report(type){
   userStats.pts+=pts[type];
   flyPts(pts[type]);
   bumpDaily(type==="scan"?"scans":"signals");
-  userStats.activity.unshift({type:type,drink:d,store:s,time:time,pts:pts[type]});
+  userStats.activity.unshift({type:type,drink:d,store:s,time:time,pts:pts[type],day:todayKey()});
   trackStoreContribution(s.fbId||s.id);
   // Firebase sync
   if(window.fbAddReport) window.fbAddReport(s.fbId||s.id, d.id, type, {note:_provenance("fiche",s)});
@@ -5498,7 +5911,8 @@ function showBadgeInfo(def,tier,qui){
   ov.addEventListener("click",function(e){if(e.target===ov)close();});
   try{playSound("pop");}catch(e){}
 }
-/* Classement des contributeurs : top 10 par points (collection users de Firestore).
+/* Classement des contributeurs : haut du tableau par points (collection users
+   de Firestore), puis la ligne « Ton rang » pour qui n'y figure pas.
    Les pseudos viennent de la communaute, donc toujours passes par sanitize(). */
 function renderLeaderboard(){
   var el=document.getElementById("leaderboard-list");if(!el)return;
@@ -5534,6 +5948,122 @@ function renderLeaderboard(){
     wrap.appendChild(row);
   });
   el.appendChild(wrap);
+  renderMonRang(el);
+}
+/* « TON RANG » — la ligne epinglee sous le haut du classement. Le tableau ne
+   montre que ses premieres lignes : quelqu'un a la 752e place n'y apparait
+   jamais et ne sait pas ou il en est. S'il n'est pas dans le tableau, on lui
+   donne son rang, la personne juste devant, et sur un tap ses voisins
+   immediats (« Autour de toi »). Rien ne s'affiche si le serveur ne repond
+   pas : pas d'interface cassee. */
+var _monRangSeq=0;
+/* 752 + petit « e » (fr/nl), 752 + « nd » (en). Retourne du HTML. */
+function ordinalRang(n){
+  n=Number(n)||0;
+  var suf="e";
+  if(curLang==="en"){
+    var r10=n%10,r100=n%100;
+    suf=(r10===1&&r100!==11)?"st":(r10===2&&r100!==12)?"nd":(r10===3&&r100!==13)?"rd":"th";
+  }else if(n===1&&curLang!=="nl")suf="er";
+  return n+'<span style="font-size:.7em;font-weight:800;vertical-align:.25em">'+suf+'</span>';
+}
+function badgeRangOr(n){
+  return '<div style="min-width:26px;height:26px;padding:0 7px;border-radius:9px;background:var(--gold-bg);color:var(--gold-on);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;flex-shrink:0;white-space:nowrap">'+ordinalRang(n)+'</div>';
+}
+function renderMonRang(host){
+  var seq=++_monRangSeq;
+  if(myLeaderboardRank()!==null)return;   // deja dans le tableau : rien a ajouter
+  if(!window._fbUser)return;               // pas de compte : pas de rang
+  var pts=(typeof ptsNets==="function")?ptsNets():Math.max(0,userStats.pts||0);
+  var box=document.createElement("div");
+  box.id="mon-rang";
+  box.style.cssText="margin-top:10px";
+  host.appendChild(box);
+  if(pts<=0){
+    box.innerHTML='<div style="font-size:12px;font-weight:600;color:var(--txt2);text-align:center;padding:4px 0">'+_tr("rankFirstContrib")+'</div>';
+    return;
+  }
+  if(!window.fbMonRang)return;
+  // Squelette le temps des comptages : meme motif que le haut du classement.
+  box.innerHTML='<div style="display:flex;align-items:center;gap:10px;padding:6px 0"><div class="skel skel-circle" style="width:30px;height:30px;border-radius:10px"></div><div class="skel skel-line" style="flex:1"></div></div>';
+  window.fbMonRang(pts).then(function(r){
+    if(seq!==_monRangSeq||!box.isConnected)return;   // un rendu plus recent a pris la main
+    if(!r||!r.rang){box.innerHTML="";return;}
+    peindreMonRang(box,r,pts);
+  }).catch(function(){if(box.isConnected)box.innerHTML="";});
+}
+function peindreMonRang(box,r,pts){
+  var dessus=r.dessus||[],dessous=r.dessous||[];
+  var devant=dessus.length?dessus[dessus.length-1]:null;   // la personne juste au-dessus
+  var sous=devant
+    ?_tr("rankToBeat").replace("{n}",Math.max(1,(devant.points||0)-pts+1)).replace("{p}",sanitize(devant.pseudo))
+    :_tr("rankKeepGoing");
+  box.innerHTML='<div id="mon-rang-row" role="button" tabindex="0" aria-expanded="false" aria-controls="mon-rang-autour" style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--gold-chip-bg);border:1.5px solid var(--gold-bg);border-radius:16px;cursor:pointer">'+
+      badgeRangOr(r.rang)+
+      '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:800;color:var(--s1)">'+_tr("rankYou")+' \u00B7 '+nbSur(pts)+' pts</div>'+
+      '<div style="font-size:11.5px;font-weight:600;color:var(--gold-txt);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sous+'</div></div>'+
+      '<span id="mon-rang-chev" style="font-size:13px;color:var(--s3);flex-shrink:0;transition:transform .2s">\u203A</span>'+
+    '</div>'+
+    '<div id="mon-rang-autour" style="display:none;margin-top:8px;background:var(--bg2);border-radius:16px;padding:6px 14px"></div>'+
+    '<div style="font-size:11px;font-weight:600;color:var(--txt2);margin-top:6px;padding:0 4px">'+_tr("rankOf").replace("{n}",nbSur(r.total).toLocaleString("fr-BE"))+'</div>';
+  var row=box.querySelector("#mon-rang-row"),panel=box.querySelector("#mon-rang-autour"),chev=box.querySelector("#mon-rang-chev");
+  var ouvert=false;
+  function toggle(){
+    ouvert=!ouvert;
+    if(ouvert&&!panel.childNodes.length)remplirAutour(panel,r,pts,toggle);
+    panel.style.display=ouvert?"":"none";
+    row.setAttribute("aria-expanded",ouvert?"true":"false");
+    if(chev)chev.style.transform=ouvert?"rotate(90deg)":"";
+    try{if(typeof playSound==="function")playSound("pop");}catch(e){}
+  }
+  row.onclick=toggle;
+  row.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();toggle();}};
+}
+/* Le panneau « Autour de toi » : les voisins au-dessus (rangs rang-3, rang-2,
+   rang-1), ma ligne doree, les voisins en dessous (rang+1…). Chaque voisin
+   ouvre son profil public, comme dans le haut du classement. */
+function remplirAutour(panel,r,pts,fermer){
+  var dessus=r.dessus||[],dessous=r.dessous||[];
+  var lignes=[];
+  dessus.forEach(function(x,i){lignes.push({rang:r.rang-dessus.length+i,row:x});});
+  lignes.push({rang:r.rang,moi:true});
+  dessous.forEach(function(x,i){lignes.push({rang:r.rang+1+i,row:x});});
+  panel.setAttribute("role","list");
+  panel.setAttribute("aria-label",_tr("rankAround"));
+  panel.innerHTML='<div style="font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--txt2);padding:8px 0 2px">'+_tr("rankAround")+'</div>';
+  lignes.forEach(function(L,i){
+    var div=document.createElement("div");
+    var sep=(i<lignes.length-1)?";border-bottom:1px solid var(--border)":"";
+    if(L.moi){
+      div.setAttribute("role","listitem");
+      div.style.cssText="display:flex;align-items:center;gap:12px;padding:9px 0"+sep;
+      div.innerHTML=badgeRangOr(L.rang)+
+        '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:800;color:var(--s1)">'+_tr("rankYou")+'</div>'+
+        '<div style="font-size:12.5px;font-weight:800;color:var(--s1);flex-shrink:0">'+nbSur(pts)+' pts</div>';
+    }else{
+      var x=L.row,rlv=levelInfo(x.points||0),rcol=levelPseudoColor(rlv.idx);
+      div.setAttribute("role","button");div.setAttribute("tabindex","0");
+      div.setAttribute("aria-label","Voir le profil de "+x.pseudo);
+      div.style.cssText="display:flex;align-items:center;gap:12px;padding:9px 0;cursor:pointer"+sep;
+      div.innerHTML=rankBadge(L.rang-1)+
+        '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:600;color:'+(rcol||"var(--s1)")+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(x.pseudo)+'</div>'+
+        '<div style="font-size:12.5px;font-weight:700;color:var(--s1);flex-shrink:0">'+nbSur(x.points)+' pts</div>'+
+        '<span style="font-size:13px;color:var(--s3);flex-shrink:0">\u203A</span>';
+      div.onclick=function(){openPlayerProfile(x);};
+      div.onkeydown=function(ev){if(ev.key==="Enter")openPlayerProfile(x);};
+    }
+    panel.appendChild(div);
+  });
+  var chip=document.createElement("button");
+  chip.type="button";
+  chip.textContent=_tr("rankSeeTop");
+  chip.style.cssText="margin:8px 0 6px;min-height:36px;padding:0 12px;border-radius:999px;border:1px solid var(--border);background:var(--gold-chip-bg);display:inline-flex;align-items:center;font-size:12px;font-weight:800;color:var(--gold-txt);font-family:inherit;cursor:pointer;white-space:nowrap";
+  chip.onclick=function(ev){
+    ev.stopPropagation();fermer();
+    var t=document.getElementById("t-leaderboard");
+    if(t&&t.scrollIntoView)try{t.scrollIntoView({behavior:"smooth",block:"start"});}catch(e){}
+  };
+  panel.appendChild(chip);
 }
 /* Ouvre le profil public d'un joueur du classement. On n'a que {uid,pseudo,
    points,streak} dans la ligne : on charge sa fiche compl\u00E8te (favoris, badges)
@@ -5901,11 +6431,24 @@ function renderRewards(){
       '<b style="color:var(--s2)">La règle :</b> annoncer une boisson en stock rapporte des points. Si plusieurs personnes passent ensuite sur place et la signalent absente, ces points repartent. Inventer des stocks ne fait donc jamais monter : ça fait redescendre.'+
     '</div>'+
   '</div>';
-  // 4) Classement (#3)
+  // 4) Classement (#3). Hors du haut du tableau, on donne quand meme le
+  //    rang (« Tu es 752e ») des qu'on le connait, au lieu d'un « top 10 »
+  //    qui ne parle qu'a dix personnes.
+  var rc=(!rank&&window._rangCache&&window._rangCache.data&&window._rangCache.data.rang)?window._rangCache.data:null;
+  if(!rank&&!rc&&pts>0&&window._fbUser&&window.fbMonRang){
+    window.fbMonRang(pts).then(function(r){
+      var s=document.getElementById("s-rewards");
+      if(r&&r.rang&&s&&s.classList.contains("on"))renderRewards();
+    }).catch(function(){});
+  }
+  var titreRang=rank?('Tu es '+(rank===1?'1er':rank+'e')+' au classement !')
+    :(rc?('Tu es '+ordinalRang(rc.rang)+' au classement'):'Grimpe dans le classement des contributeurs');
+  var sousRang=rank?'Continue à contribuer pour garder ta place.'
+    :(rc?('Sur '+nbSur(rc.total).toLocaleString("fr-BE")+' contributeurs. Chaque contribution te fait grimper.'):'Chaque contribution te fait grimper.');
   h+='<div class="t-section" style="padding:6px 0 10px">Classement</div>';
   h+='<div onclick="show(\'profile\')" role="button" tabindex="0" style="background:var(--bg2);border-radius:16px;padding:15px;margin-bottom:16px;cursor:pointer">'+
-    '<div style="font-size:13.5px;font-weight:800;color:var(--s1)">'+(rank?('Tu es '+(rank===1?'1er':rank+'e')+' au classement !'):'Grimpe dans le classement des contributeurs')+'</div>'+
-    '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:3px">'+(rank?'Continue à contribuer pour garder ta place.':'Contribue pour entrer dans le top 10.')+' Bientôt : classements mensuels et par ville. ›</div>'+
+    '<div style="font-size:13.5px;font-weight:800;color:var(--s1)">'+titreRang+'</div>'+
+    '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:3px">'+sousRang+' Bientôt : classements mensuels et par ville. ›</div>'+
   '</div>';
   // 5) Recompenses partenaires — ROADMAP HONNETE (#4)
   h+='<div class="t-section" style="padding:6px 0 10px">Bientôt : récompenses</div>';
@@ -6949,7 +7492,7 @@ function renderStorePicker(){
        requete tourne, on le dit — annoncer le vide avant d'avoir regarde,
        c'est le mensonge qui a fait perdre du temps a tout le monde. */
     if(window._pickerZoneEnCours){
-      el.insertAdjacentHTML("beforeend",'<div style="text-align:center;padding:16px;font-size:13px;color:var(--s3)">Recherche des magasins autour de toi\u2026</div>');
+      el.insertAdjacentHTML("beforeend",'<div style="text-align:center;padding:16px">'+magoLoader(true,"Recherche des magasins autour de toi\u2026")+'</div>');
       return;
     }
     pickerFetchZone();
@@ -7059,7 +7602,7 @@ var MOTIFS_SIGNALEMENT=[
   ["spam","Publicite, spam"],
   ["autre","Autre"]
 ];
-/* cibleType : "decouverte" | "photo" | "profil" | "commentaire".
+/* cibleType : "decouverte" | "photo" | "profil" | "commentaire" | "conversation".
    apercu : ce qu'on voit du contenu, copie tel quel pour survivre a son
    effacement (nom du produit, pseudo, description...). */
 function ouvrirSignalement(cibleType,cibleId,apercu,nomLisible){
@@ -7143,7 +7686,7 @@ function lienSignaler(cibleType,cibleId,apercu,nomLisible){
     ' data-sig-id="'+attr(cibleId)+'"'+
     ' data-sig-apercu="'+attr(String(apercu==null?"":apercu).slice(0,400))+'"'+
     ' data-sig-nom="'+attr(String(nomLisible==null?"":nomLisible).slice(0,120))+'"'+
-    ' style="font-size:10.5px;font-weight:700;color:var(--s3);cursor:pointer;padding:4px 6px;'+
+    ' style="font-size:10.5px;font-weight:700;color:var(--txt2);cursor:pointer;padding:4px 6px;'+
     'text-decoration:underline;text-underline-offset:2px">Signaler</span>';
 }
 /* Un seul ecouteur pour toute l'application : les liens peuvent etre crees et
@@ -8264,7 +8807,9 @@ function onBarcodeDetected(r){
   }
 }
 /* ── CHARGEMENT : deux formes, un seul vocabulaire ────────────────────────
-   magoLoader() : la goutte et l'onde, quand l'ecran est VIDE et qu'on attend.
+   magoLoader() : l'onde qui se propage (ondeHTML, definie sous le splash),
+   quand l'ecran est VIDE et qu'on attend — moyenne seule, ou petite EN LIGNE
+   a cote de son texte (petit=true).
    magoCharge() : la barre fine du haut, quand l'ecran est DEJA rempli et
    qu'on actualise — elle ne cache rien et ne pousse rien.
 
@@ -8273,9 +8818,9 @@ function onBarcodeDetected(r){
    premiere finit. Et un plancher de 320 ms l'empeche de clignoter sur une
    reponse instantanee — un eclair est plus derangeant qu'une attente. */
 function magoLoader(petit,texte){
-  return '<div style="display:flex;flex-direction:column;align-items:center;gap:10px">'+
-    '<div class="mago-load'+(petit?" sm":"")+'" role="status" aria-label="Chargement"><i></i><i></i><i></i><b></b></div>'+
-    (texte?'<div style="font-size:12px;font-weight:600;color:var(--s2)">'+sanitize(texte)+'</div>':'')+
+  return '<div class="mago-load'+(petit?" sm":"")+'" role="status" aria-label="Chargement">'+
+    ondeHTML(petit?3:5)+
+    (texte?'<span class="mago-load-txt">'+sanitize(texte)+'</span>':'')+
   '</div>';
 }
 var _magoChargeN=0,_magoChargeT=0,_magoChargeFin=null;
@@ -9407,7 +9952,8 @@ function renderNearby(){
   // \u2500\u2500 ETAT B : position OK mais zone quasi vide \u2014 l'auto-import OSM la remplit.
   if(near.length<3){
     var b=document.createElement("div");
-    b.innerHTML='<div style="font-size:13.5px;font-weight:700;color:var(--s1);line-height:1.35;margin-bottom:4px">On explore ta zone\u2026</div>'+
+    b.innerHTML=magoLoader(false)+   // l'onde : la zone se remplit, on attend vraiment
+      '<div style="font-size:13.5px;font-weight:700;color:var(--s1);line-height:1.35;margin-bottom:4px">On explore ta zone\u2026</div>'+
       '<div style="font-size:12px;color:var(--s2);line-height:1.4;margin-bottom:12px">Magofeed recense les magasins autour de toi. Reviens dans un instant \u2014 ou pars explorer la carte.</div>';
     var eb=document.createElement("div");
     eb.setAttribute("role","button");eb.setAttribute("tabindex","0");eb.setAttribute("aria-label","Explorer la carte des magasins");
@@ -12217,7 +12763,8 @@ var ACT_META={
   tip:          {label:"On t'a dit où", col:"#e67e22"},
   tipOk:        {label:"Confirmée",   col:"#16a34a"},
   tipKo:        {label:"Pas trouvée", col:"#dc2626"},
-  penalty:      {label:"Points retirés", col:"#dc2626"}
+  penalty:      {label:"Points retirés", col:"#dc2626"},
+  msg:          {label:"Message",      col:"var(--s1)"}
 };
 function _actMeta(type){ return ACT_META[type]||{label:"Info",col:"var(--s2)"}; }
 /* Vignette : la VRAIE photo du produit quand on connait la boisson, sinon le
@@ -12244,6 +12791,7 @@ function _activityIcon(type){
   else if(type==="photoRejected")p='<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="3"/>';
   // Sanction : une etoile barree. Le meme trait que le reste, aucun emoji.
   else if(type==="penalty")p='<path d="M12 3.6l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 16l-4.8 2.5.9-5.4-3.9-3.8 5.4-.8L12 3.6z"/><path d="M4 20 20 4"/>';
+  else if(type==="msg")p='<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7.5 8.5 6 8.5-6"/>';
   else p='<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>';
   return '<span style="width:34px;height:34px;border-radius:11px;background:color-mix(in srgb,'+col+' 14%,transparent);display:flex;align-items:center;justify-content:center;color:'+col+'"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+p+'</svg></span>';
 }
@@ -12261,6 +12809,7 @@ function _runActivityAction(act){
   if(act.kind==="store"&&act.storeId!=null){try{openWatchStore(String(act.storeId),act.drinkId);}catch(e){}return;}
   if(act.kind==="storeMap"&&act.lat!=null){try{showStoreOnMap(Number(act.lat),Number(act.lng));}catch(e){}return;}
   if(act.kind==="drink"&&act.drinkId!=null){var d=DRINKS.find(function(x){return Number(x.id)===Number(act.drinkId);});if(d){try{pick(d);}catch(e){}}return;}
+  if(act.kind==="conv"&&act.cid){try{openThread(String(act.cid),act.uid?String(act.uid):null);}catch(e){}return;}
   if(act.kind==="hunts"){
     /* Ce lien faisait defiler l'accueil vers #hunts-card, un conteneur qui
        n'existe plus : il ne se passait donc rien du tout. Les chasses vivent
@@ -12874,7 +13423,7 @@ function renderAlertsCard(){
     var last=(i===drinkWatches.length-1);
     var found=!!w.triggered;
     var pill=found
-      ?'<span style="display:inline-flex;align-items:center;gap:5px;max-width:100%;font-size:11px;font-weight:800;color:#15803d;background:rgba(21,128,61,.11);padding:3px 9px;border-radius:999px;overflow:hidden"><span style="width:6px;height:6px;border-radius:50%;background:#16a34a;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(w.verdict==="ok"?_tr("confirmedByYou"):"Trouvée")+(w.storeName?" · "+sanitize(w.storeName):"")+(w.dist!=null?" · "+fmtDist(w.dist):"")+(w.triggeredAt?" · "+jourGrossier(w.triggeredAt):"")+(w.by&&w.verdict!=="ok"?" · "+_tr("saidBy").replace("{p}",sanitize(w.by)):"")+'</span></span>'
+      ?'<span style="display:inline-flex;align-items:center;gap:5px;max-width:100%;font-size:11px;font-weight:800;color:var(--ok-txt);background:var(--ok-bg);padding:3px 9px;border-radius:999px;overflow:hidden"><span style="width:6px;height:6px;border-radius:50%;background:#16a34a;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(w.verdict==="ok"?_tr("confirmedByYou"):"Trouvée")+(w.storeName?" · "+sanitize(w.storeName):"")+(w.dist!=null?" · "+fmtDist(w.dist):"")+(w.triggeredAt?" · "+jourGrossier(w.triggeredAt):"")+(w.by&&w.verdict!=="ok"?" · "+_tr("saidBy").replace("{p}",sanitize(w.by)):"")+'</span></span>'
       :'<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#b45309;background:rgba(217,119,6,.12);padding:3px 9px;border-radius:999px"><span class="mago-live-dot" style="width:6px;height:6px;border-radius:50%;background:#f59e0b;flex-shrink:0"></span>En recherche</span>';
     var lineAction=w.triggered?"openWatchStore('"+String(w.storeId).replace(/'/g,"\\'")+"',"+w.id+")":"var d=DRINKS.find(function(x){return x.id==="+w.id+"});if(d)pick(d)";
     var wd=DRINKS.find(function(x){return Number(x.id)===Number(w.id);});
@@ -12889,7 +13438,7 @@ function renderAlertsCard(){
         '<span style="display:block;margin-top:4px">'+pill+'</span>'+
       '</span>'+
       (found?'<span style="flex-shrink:0;color:var(--s3);cursor:pointer" onclick="'+lineAction+'"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M9 6l6 6-6 6"/></svg></span>':'')+
-      '<span onclick="removeWatch('+w.id+')" role="button" tabindex="0" aria-label="Retirer la veille" onkeydown="if(event.key===\'Enter\'){removeWatch('+w.id+');}" style="flex-shrink:0;width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--s3);cursor:pointer">✕</span>'+
+      '<span onclick="removeWatch('+w.id+')" role="button" tabindex="0" aria-label="Retirer la veille" onkeydown="if(event.key===\'Enter\'){removeWatch('+w.id+');}" style="flex-shrink:0;width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--txt2);cursor:pointer">✕</span>'+
     '</div></div></div>';
   }).join("");
   host.innerHTML='<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:20px;padding:14px 16px 6px;margin-bottom:14px">'+
@@ -14646,7 +15195,7 @@ function renderStoreAudience(s){
 
 function renderMerchantBoard(s){
   var host=merchantBoardHost(); if(!host||!s)return;
-  host.innerHTML='<div class="mb-card"><div class="mb-load">Lecture de la demande du quartier…</div></div>';
+  host.innerHTML='<div class="mb-card"><div class="mb-load">'+magoLoader(true,"Lecture de la demande du quartier…")+'</div></div>';
   var rayon=(s.drinks||[]).map(Number);
   var lat=(typeof s.lat==="number")?s.lat:userLat;
   var lng=(typeof s.lng==="number")?s.lng:userLng;
@@ -15369,7 +15918,7 @@ function osmSearchCity(){
   var q=((document.getElementById("osm-city-q")||{}).value||"").trim();
   var box=document.getElementById("osm-city-results");
   if(!q||!box)return;
-  box.innerHTML='<div style="font-size:12px;color:var(--s3);padding:6px 2px">Recherche\u2026</div>';
+  box.innerHTML='<div style="padding:6px 2px">'+magoLoader(true,"Recherche\u2026")+'</div>';
   fetchWithTimeout("https://nominatim.openstreetmap.org/search?format=json&limit=4&q="+encodeURIComponent(q),15000)
     .then(function(r){return r.json();})
     .then(function(rows){
@@ -16788,7 +17337,7 @@ function openExploreBrandPicker(){
   ov._close=_fermeBrand;
   ov.onclick=function(e){if(e.target===ov)_fermeBrand();};
   ov.innerHTML='<div class="brand-card" style="width:100%;max-width:440px;background:var(--app-bg);border-radius:0 0 22px 22px;padding:calc(14px + env(safe-area-inset-top,0px)) 18px 18px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(0,0,0,.3)">'+
-    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-size:16px;font-weight:800;color:var(--s1)">Choisir une enseigne</div><div onclick="closeBrandPicker();" role="button" tabindex="0" aria-label="Fermer" style="font-size:22px;color:var(--s3);cursor:pointer;padding:2px 6px">✕</div></div>'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-size:16px;font-weight:800;color:var(--s1)">Choisir une enseigne</div><div onclick="closeBrandPicker();" role="button" tabindex="0" aria-label="Fermer" style="font-size:22px;color:var(--txt2);cursor:pointer;padding:2px 6px">✕</div></div>'+
     '<input id="brand-picker-q" placeholder="Tape une enseigne — Carrefour, Lidl…" autocomplete="off" oninput="renderBrandPickerList(this.value);exploreBrandLivePreview(this.value)" onkeydown="if(event.key===\'Enter\'){exploreBrandApplyQuery(this.value);}" style="width:100%;padding:13px 14px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:15px;font-weight:700;font-family:inherit;margin-bottom:8px;outline:none">'+
     '<div id="brand-picker-list" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>'+
   '</div>';
@@ -17101,7 +17650,7 @@ function openExploreMap(opts){
       '<div id="explore-add-fab" onclick="exploreAddStore()" role="button" tabindex="0" aria-label="Ajouter un magasin" onkeydown="if(event.key===\'Enter\'){exploreAddStore()}" style="position:absolute;right:14px;bottom:calc(150px + env(safe-area-inset-bottom));z-index:1150;display:flex;align-items:center;gap:7px;padding:11px 15px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;box-shadow:0 6px 18px rgba(0,0,0,.28);cursor:pointer;transition:opacity .2s,transform .2s">+ Magasin</div>'+
       '<div id="explore-recenter-fab" onclick="exploreCenterUser()" role="button" tabindex="0" aria-label="Recentrer sur ma position" onkeydown="if(event.key===\'Enter\'){exploreCenterUser()}" style="position:absolute;right:14px;bottom:calc(202px + env(safe-area-inset-bottom));z-index:1150;width:46px;height:46px;border-radius:50%;background:var(--app-bg);border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,.24);cursor:pointer;transition:opacity .2s,transform .2s"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.4" stroke="var(--s1)" stroke-width="2"/><path d="M12 2v3.6M12 18.4V22M2 12h3.6M18.4 12H22" stroke="var(--s1)" stroke-width="2" stroke-linecap="round"/></svg></div>'+
       '<div id="explore-store-card" role="button" tabindex="0" style="display:none;position:absolute;bottom:calc(88px + env(safe-area-inset-bottom));left:14px;right:14px;background:var(--app-bg);border:1.5px solid var(--border);border-radius:18px;padding:12px 14px;align-items:center;gap:12px;box-shadow:0 8px 24px rgba(0,0,0,.22);cursor:pointer;z-index:1200"></div>'+
-      '<div id="explore-status" style="position:absolute;bottom:calc(92px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--app-bg);border:1.5px solid var(--border);border-radius:999px;padding:8px 16px;font-size:12px;font-weight:700;color:var(--s1);box-shadow:0 4px 14px rgba(0,0,0,.18);white-space:nowrap;z-index:1100">Chargement\u2026</div>'+
+      '<div id="explore-status" style="position:absolute;bottom:calc(92px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--app-bg);border:1.5px solid var(--border);border-radius:999px;padding:8px 16px;font-size:12px;font-weight:700;color:var(--s1);box-shadow:0 4px 14px rgba(0,0,0,.18);white-space:nowrap;z-index:1100">'+ondeHTML(3)+'<span style="margin-left:8px">Chargement\u2026</span></div>'+
       '<div id="explore-sheet"><div id="explore-sheet-head" role="button" tabindex="0" aria-label="Glisser pour ouvrir ou fermer la liste des magasins" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();exploreToggleSheet();}"><div id="explore-sheet-grip"></div><div style="display:flex;align-items:center;justify-content:space-between"><div id="explore-sheet-title" style="font-size:13.5px;font-weight:800;color:var(--s1)">Magasins autour de toi</div><div id="explore-sheet-chev" style="font-size:12px;font-weight:700;color:var(--s2);white-space:nowrap">Voir la liste \u25b2</div></div></div><div id="explore-sheet-list"></div></div>';
     document.body.appendChild(host);
     /* Le bouton loupe et la touche Entree cherchent d'abord un MAGASIN — c'est
@@ -17657,7 +18206,7 @@ function exploreLoadStores(useCache){
   var _seq = (window._exploreSeq = (window._exploreSeq || 0) + 1);
   var q;
   if(useCache&&window._exploreRawList){q=Promise.resolve(window._exploreRawList);}
-  else{if(status)status.textContent="Chargement\u2026";q=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12))):Promise.resolve(STORES||[]);}
+  else{if(status)status.innerHTML=ondeHTML(3)+'<span style="margin-left:8px">Chargement\u2026</span>';q=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12))):Promise.resolve(STORES||[]);}
   q.then(function(list){
     if(_seq!==window._exploreSeq)return;      // un mouvement plus recent a pris la main
     list=list||[];
@@ -18099,7 +18648,7 @@ function exploreGoCity(auto){
   if(!auto)clearTimeout(window._cityTimer);
   if(!q){exploreCitySuggest();return;}
   var seq=(window._citySeq=(window._citySeq||0)+1);
-  if(!auto)box.innerHTML=_cityBoxCard("Recherche de \u00AB "+sanitize(q)+" \u00BB\u2026");
+  if(!auto)box.innerHTML=_cityBoxCard(ondeHTML(3)+'<span style="margin-left:8px">Recherche de \u00AB '+sanitize(q)+' \u00BB\u2026</span>');
   /* addressdetails=1 : sans lui, le PAYS n'est pas renvoye separement et on ne
      pouvait que decouper display_name a l'aveugle — ce qui donnait « Oujda ·
      Pachalik d'Oujda, Prefecture d'Oujda-Angad », des noms administratifs que
@@ -18509,7 +19058,7 @@ window.magoSessionLost = function(lastMail, provider){
         (who?("Reconnecte-toi à "+who):"Reconnecte-toi pour retrouver tes points")+'</div>'+
     '</div>'+
     '<button id="resume-go" style="flex-shrink:0;padding:10px 15px;border-radius:12px;border:none;background:var(--s1);color:var(--app-bg);font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit">Reprendre</button>'+
-    '<button id="resume-x" aria-label="Fermer" style="flex-shrink:0;width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:var(--s3);cursor:pointer;font-size:16px;font-family:inherit">✕</button>';
+    '<button id="resume-x" aria-label="Fermer" style="flex-shrink:0;width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:var(--txt2);cursor:pointer;font-size:16px;font-family:inherit">✕</button>';
   document.body.appendChild(bar);
   bar.querySelector("#resume-go").onclick=function(){
     bar.remove();
@@ -19831,7 +20380,7 @@ function initPullToRefresh(){
     var dy=e.changedTouches[0].clientY-startY;
     if(dy>60){
       var icon=document.getElementById("ptr-icon"),l=document.getElementById("ptr-label");
-      if(icon){icon.style.transform="rotate(0deg)";icon.style.animation="spin .7s linear infinite";icon.textContent="";}
+      if(icon){icon.style.transform="";icon.innerHTML=ondeHTML(3);}   // la fleche cede la place a l'onde
       if(l)l.textContent="Actualisation…";
       var lat=userLat||50.8503,lng=userLng||4.3517;
       var refresh=window.fbLoadNearbyStores?window.fbLoadNearbyStores(lat,lng,10,{skipCache:true}):Promise.resolve();
@@ -19840,7 +20389,7 @@ function initPullToRefresh(){
         if(curSel)renderStoreList();
         ind.style.height="0";
         toast("Actualisé !");playSound("win");
-        if(icon){icon.style.animation="";icon.textContent="↓";}
+        if(icon)icon.textContent="↓";
       });
     } else {
       ind.style.height="0";
@@ -20617,7 +21166,7 @@ function renderNewcomers(){
     else return;
   }
   host.innerHTML = '<div style="font-size:13px;font-weight:800;color:var(--s1);margin:2px 0 10px">Qui vient d\'arriver</div>' +
-    '<div id="nc-list" style="font-size:12.5px;color:var(--s2);padding:10px 0">Chargement…</div>';
+    '<div id="nc-list" style="font-size:12.5px;color:var(--s2);padding:10px 0">'+magoLoader(true,"Chargement…")+'</div>';
   if (!window.fbRecentUsers) return;
   Promise.all([window.fbRecentUsers(15), window.fbPresenceAll ? window.fbPresenceAll() : {}])
     .then(async function(r){
@@ -22252,36 +22801,47 @@ function timeAgoShort(ts){
 function openUserProfile(u){
   var ppBadges=publicBadges(u);
   var body=document.getElementById("userprofile-body");if(!body)return;
+  window._ppCourant=u;
   var av=avatarHTML(u.avatar,76)||'<span style="font-size:30px;font-weight:800;color:#fff">'+sanitize((u.pseudo||"?").charAt(0).toUpperCase())+'</span>';
   var seen=timeAgoShort(u.updatedAt);
   var favs=(u.favs||[]).map(function(id){return DRINKS.find(function(d){return Number(d.id)===Number(id);});}).filter(Boolean);
-  var statCell=function(v,label){return '<div style="flex:1;background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:13px 8px;text-align:center"><div style="font-size:19px;font-weight:800;color:var(--s1)">'+v+'</div><div style="font-size:10.5px;font-weight:600;color:var(--s2);margin-top:2px">'+label+'</div></div>';};
-  body.innerHTML='<div style="text-align:center;margin-bottom:18px">'+
+  /* Chaque case est un bouton : taper dessus raconte ce que le chiffre veut
+     dire, au nom du joueur regarde (feuille narrative, meme gabarit que la
+     fiche d'un badge). */
+  var statCell=function(v,label,key){return '<div class="pp-cell" data-pp="'+key+'" role="button" tabindex="0" aria-label="'+attr(_tr("ppSeeStats").replace("{l}",label))+'" style="flex:1;background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:13px 8px;text-align:center"><div style="font-size:19px;font-weight:800;color:var(--s1)">'+v+'</div><div style="font-size:10.5px;font-weight:600;color:var(--s2);margin-top:2px">'+label+'</div></div>';};
+  body.innerHTML='<div style="text-align:center;margin-bottom:14px">'+
     '<div style="width:76px;height:76px;border-radius:50%;background:var(--s1);display:flex;align-items:center;justify-content:center;overflow:hidden;margin:0 auto 10px">'+av+'</div>'+
     '<div style="font-size:18px;font-weight:800;color:var(--s1)">'+sanitize(u.pseudo||"Explorateur")+'</div>'+
-    (seen?'<div style="font-size:11.5px;font-weight:600;color:var(--s3);margin-top:3px">Derni\u00E8re activit\u00E9 : '+seen+'</div>':"")+
+    (seen?'<div style="font-size:11.5px;font-weight:600;color:var(--s3);margin-top:3px">Dernière activité : '+seen+'</div>':"")+
+    '<div class="pp-btns" id="pp-btns"></div>'+
   '</div>'+
   '<div style="display:flex;gap:8px;margin-bottom:10px">'+
-    statCell(nbSur(u.points),"points")+
-    statCell(nbSur(u.streak),"s\u00E9rie")+
-    statCell(nbSur(u.bestStreak),"record")+
+    statCell(nbSur(u.points),"points","points")+
+    statCell(nbSur(u.streak),"série","streak")+
+    statCell(nbSur(u.bestStreak),"record","best")+
   '</div>'+
   '<div style="display:flex;gap:8px;margin-bottom:18px">'+
-    statCell(nbSur(u.confirms),"confirmations")+
-    statCell(nbSur(u.signals),"signalements")+
+    statCell(nbSur(u.confirms),"confirmations","confirms")+
+    statCell(nbSur(u.signals),"signalements","signals")+
   '</div>'+
   (function(){
-    if(!ppBadges.length)return "";
+    /* Une ligne de resume avant les pastilles : combien, et le plus haut.
+       Un profil sans badge le dit aussi, plutot que de laisser un vide. */
+    var h='<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:8px">Ses badges</div>';
+    if(!ppBadges.length)return h+'<div class="pp-sum" style="margin-bottom:18px">'+_tr("ppNoBadge")+'</div>';
+    var top=ppBadges.reduce(function(a,b){return b.tier>a.tier?b:a;},ppBadges[0]);
+    h+='<div class="pp-sum">'+_tr("ppBadgesSum").replace("{n}",ppBadges.length).replace("{b}",top.name+(TIER_NAMES?' '+TIER_NAMES[top.tier-1]:''))+'</div>';
     /* Chaque badge est un BOUTON : taper dessus ouvre la meme fiche que sur
        son propre profil (paliers, progression), au nom du joueur regarde. */
-    return '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px">Ses badges</div>'+
-      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px">'+ppBadges.map(function(b,i){
+    return h+'<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px">'+ppBadges.map(function(b,i){
         var ring=(TIER_COLORS&&TIER_COLORS[b.tier-1])||"var(--border)";
         return '<button data-pb="'+i+'" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--bg2);border:1.5px solid '+ring+';cursor:pointer;font:inherit" aria-label="Badge '+b.name+', voir le detail"><span style="display:flex;color:'+ring+'">'+badgeIcon(b.key,16,ring)+'</span><span style="font-size:11.5px;font-weight:800;color:var(--s1)">'+b.name+(TIER_NAMES&&b.tier>1?' '+TIER_NAMES[b.tier-1]:'')+'</span></button>';
       }).join("")+'</div>';
   })()+
-  '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px" data-i18n="hisFavs">Ses boissons pr\u00E9f\u00E9r\u00E9es</div>'+
-  (favs.length?'<div id="userprofile-favs" style="display:flex;flex-direction:column;gap:8px"></div>':'<div style="font-size:12.5px;color:var(--s3);padding:8px 0">Aucun favori partag\u00E9 pour l\'instant</div>')+
+  '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:8px" data-i18n="ppGestes">'+_tr("ppGestes")+'</div>'+
+  '<div id="userprofile-recent" style="margin-bottom:18px">'+ppGestesHTML(u)+'</div>'+
+  '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px" data-i18n="hisFavs">Ses boissons préférées</div>'+
+  (favs.length?'<div id="userprofile-favs" style="display:flex;flex-direction:column;gap:8px"></div>':'<div style="font-size:12.5px;color:var(--s3);padding:8px 0">Aucun favori partagé pour l\'instant</div>')+
   /* Un profil public porte un pseudo et un avatar deposes par la personne :
      c'est du contenu utilisateur, il doit pouvoir etre signale. Le pseudo est
      copie dans l'apercu pour que le signalement garde un sens si la personne
@@ -22294,7 +22854,7 @@ function openUserProfile(u){
       row.style.cssText="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;cursor:pointer";
       row.innerHTML='<div style="width:38px;height:38px;border-radius:11px;overflow:hidden;background:'+d.light+';display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0">'+drinkIconHTML(d)+'</div>'+
         '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:700;color:var(--s1)">'+sanitize(d.name)+'</div><div style="font-size:11px;color:var(--s2)">'+sanitize(d.brand||"")+'</div></div>'+
-        '<span style="font-size:13px;color:var(--s3)">\u203A</span>';
+        '<span style="font-size:13px;color:var(--s3)">›</span>';
       row.onclick=function(){pick(d);playSound("pop");};
       a11yCard(row,"Voir "+d.name);
       box.appendChild(row);
@@ -22309,8 +22869,743 @@ function openUserProfile(u){
         showBadgeInfo({key:b.key,name:b.name,tiers:b.tiers,value:b.value},b.tier,u.pseudo||"Ce joueur");
       };
     });
+    body.querySelectorAll("[data-pp]").forEach(function(c){
+      var go=function(){ppFeuilleStat(c.getAttribute("data-pp"),u);};
+      c.onclick=go;
+      c.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();go();}};
+    });
   }catch(e){}
+  ppMajBoutons(u);
   show("userprofile");
+}
+/* Les deux boutons sous le pseudo : ecrire, bloquer. Sur mon propre profil il
+   n'y a rien a faire, on ne les montre pas. Re-peints quand la liste des
+   blocages change (evenement fbBlocsChanged). */
+function ppMajBoutons(u){
+  var box=document.getElementById("pp-btns");if(!box||!u)return;
+  var uid=String(u.uid||u.id||""),me=msgMe();
+  if(!uid||uid===me){box.innerHTML="";box.style.display="none";return;}
+  box.style.display="";
+  var bloque=MSG.blocs.indexOf(uid)!==-1;
+  box.innerHTML='<button class="msg-bp" id="pp-write"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7.5 8.5 6 8.5-6"/></svg>'+_tr("msgWrite")+'</button>'+
+    '<button class="msg-bs" id="pp-block">'+(bloque?_tr("msgUnblock"):_tr("msgBlock"))+'</button>';
+  var w=document.getElementById("pp-write"),b=document.getElementById("pp-block");
+  if(w)w.onclick=function(){
+    if(bloque){msgErreurToast("blocked");return;}
+    msgEcrire(uid,u);
+  };
+  if(b)b.onclick=function(){
+    if(bloque){msgBloquer(uid,false);return;}
+    var ov=msgFeuille("pp-bloc-confirm",'<div class="claim-title" style="font-size:16px">'+_tr("ppBlockConfirm").replace("{p}",sanitize(u.pseudo||_tr("msgSomeone")))+'</div>'+
+      '<div class="claim-lead">'+_tr("msgBlockedSub")+'</div><button class="msg-bp" id="pp-bloc-go" style="width:100%;min-height:46px;margin-top:6px">'+_tr("msgBlock")+'</button>');
+    if(!ov)return;
+    var g=document.getElementById("pp-bloc-go");
+    if(g)g.onclick=function(){ov.fermer();msgBloquer(uid,true);};
+  };
+}
+/* « Ses derniers gestes » : users.recent, cinq lignes au plus, l'icone de
+   la boisson si on la connait au catalogue, une phrase par type, une date
+   arrondie. Aucune coordonnee n'existe dans ces donnees. */
+function ppGestesHTML(u){
+  var recent=Array.isArray(u.recent)?u.recent.slice(0,5):[];
+  if(!recent.length)return '<div style="font-size:12.5px;color:var(--s3);padding:6px 0">'+_tr("ppNoGeste")+'</div>';
+  var nom=sanitize(u.pseudo||_tr("msgSomeone"));
+  var cles={confirm:"ppGConfirm",rupture:"ppGRupture",scan:"ppGScan",disc:"ppGDisc"};
+  return '<div style="background:var(--bg2);border-radius:16px;padding:4px 14px">'+recent.map(function(g){
+    if(!g||!cles[g.t])return "";
+    var dn=String(g.d||"").slice(0,40),sn=String(g.s||"").slice(0,40);
+    var d=dn?(DRINKS||[]).find(function(x){return String(x.name||"").toLowerCase()===dn.toLowerCase();}):null;
+    var phrase=_tr(cles[g.t]).replace("{d}",'<b>'+sanitize(dn||"?")+'</b>');
+    phrase=sn?phrase.replace("{s}",sanitize(sn)):phrase.replace(/\s\S+\s\{s\}/,"");
+    var quand="";
+    try{var p=String(g.j||"").split("-");if(p.length===3){quand=msgDepuis(new Date(Number(p[0]),Number(p[1])-1,Number(p[2])).getTime());}}catch(e){}
+    var ico=d?'<span class="pp-geste-i" style="background:'+attr(d.light||"var(--bg2)")+'">'+drinkIconHTML(d)+'</span>':
+      '<span class="pp-geste-i" style="color:var(--s2)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+
+      (g.t==="confirm"?'<path d="M20 6 9 17l-5-5"/>':g.t==="rupture"?'<circle cx="12" cy="12" r="9"/><path d="M8 12h8"/>':g.t==="disc"?'<path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 15.4l-4.8 2.5.9-5.4-3.9-3.8 5.4-.8z"/>':'<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M4 12h16"/>')+'</svg></span>';
+    return '<div class="pp-geste">'+ico+'<div style="flex:1;min-width:0"><div class="pp-geste-t">'+nom+' '+phrase+'</div>'+(quand?'<div class="pp-geste-d">'+quand+'</div>':'')+'</div></div>';
+  }).join("")+'</div>';
+}
+/* La feuille narrative d'une case de stats : une phrase qui dit ce que le
+   chiffre mesure, au nom du joueur. Meme gabarit et meme identifiant que la
+   fiche d'un badge, pour qu'une seule feuille existe a la fois. */
+function ppFeuilleStat(key,u){
+  if(document.getElementById("badge-info"))return;
+  var p=sanitize(u.pseudo||_tr("msgSomeone"));
+  var n=nbSur(u.streak),b=nbSur(u.bestStreak);
+  /* Une serie ne vit que si la personne a contribue hier ou aujourd'hui.
+     On ne connait que sa derniere activite : au-dela de deux jours, on parle
+     de sa DERNIERE serie plutot que d'en affirmer une en cours. */
+  var perimee=!u.updatedAt||(Date.now()-msgMs(u.updatedAt)>2*86400000);
+  var T={
+    points:{t:_tr("ppPtsT"),s:_tr("ppPts").replace("{p}",p).replace("{n}",nbSur(u.points))},
+    streak:{t:_tr("ppStreakT"),s:_tr(perimee?"ppStreakOld":"ppStreak").replace("{p}",p).replace("{n}",n).replace("{b}",b)},
+    best:{t:_tr("ppBestT"),s:_tr("ppBest").replace("{p}",p).replace("{b}",b)},
+    confirms:{t:_tr("ppConfT"),s:_tr("ppConf").replace("{p}",p).replace("{n}",nbSur(u.confirms))},
+    signals:{t:_tr("ppSigT"),s:_tr("ppSig").replace("{p}",p).replace("{n}",nbSur(u.signals))}
+  }[key];
+  if(!T)return;
+  var ico={points:'<path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 15.4l-4.8 2.5.9-5.4-3.9-3.8 5.4-.8z"/>',streak:'<path d="M12 3c1 3 4 4.5 4 8.5a4 4 0 0 1-8 0c0-1.5.5-2.5 1.5-3.5.2 1.2.8 2 1.8 2.5C11 8 11.5 5.5 12 3z"/>',best:'<path d="M6 4h12v3a6 6 0 0 1-12 0z"/><path d="M6 6H4.5A1.5 1.5 0 0 0 6 8.5M18 6h1.5A1.5 1.5 0 0 1 18 8.5"/><path d="M9 15.5h6M10 19h4M12 13.5V15"/>',confirms:'<path d="M20 6 9 17l-5-5"/>',signals:'<path d="M4 21V4h12l-1 4 1 4H4"/>'}[key];
+  var ov=document.createElement("div");
+  ov.id="badge-info";ov.setAttribute("role","dialog");ov.setAttribute("aria-modal","true");ov.setAttribute("aria-label",T.t);
+  ov.style.cssText="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;opacity:0;transition:opacity .22s ease";
+  ov.innerHTML='<div id="badge-info-card" style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:22px;max-width:360px;width:100%;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.45);transform:scale(.6);opacity:0;transition:transform .36s cubic-bezier(.34,1.56,.4,1),opacity .22s ease">'+
+    '<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">'+
+      '<span aria-hidden="true" style="width:58px;height:58px;border-radius:17px;background:var(--bg2);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--s1)"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'+ico+'</svg></span>'+
+      '<div style="min-width:0"><div style="font-size:20px;font-weight:850;color:var(--s1)">'+T.t+'</div>'+
+      '<div style="font-size:11.5px;font-weight:800;color:var(--s3);text-transform:uppercase;letter-spacing:.5px">'+p+'</div></div>'+
+    '</div>'+
+    '<div style="font-size:14px;color:var(--s1);line-height:1.6">'+T.s+'</div>'+
+    '<button id="badge-info-close" style="width:100%;margin-top:18px;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">'+_tr("ppClose")+'</button>'+
+  '</div>';
+  document.body.appendChild(ov);
+  var _bc=document.getElementById("badge-info-card");
+  requestAnimationFrame(function(){ov.style.opacity="1";if(_bc){_bc.style.transform="scale(1)";_bc.style.opacity="1";}});
+  var close=function(){ov.style.opacity="0";if(_bc){_bc.style.transform="scale(.88)";_bc.style.opacity="0";}setTimeout(function(){if(ov.parentNode)ov.remove();},200);};
+  var cb=document.getElementById("badge-info-close");if(cb){cb.onclick=close;setTimeout(function(){try{cb.focus();}catch(e){}},60);}
+  ov.addEventListener("click",function(e){if(e.target===ov)close();});
+  ov.addEventListener("keydown",function(e){if(e.key==="Escape")close();});
+  try{playSound("pop");}catch(e){}
+}
+/* ============================================================================
+   MESSAGERIE — les ecrans.
+   ----------------------------------------------------------------------------
+   Deux formats assembles : le fil plein ecran (la barre d'onglets se retire,
+   le composeur prend sa place) et les demandes d'abord (un inconnu n'a droit
+   qu'a UN message tant qu'on ne l'a pas accepte ; ce message est cite dans
+   une carte, avec ce qu'on sait de lui, avant qu'on decide).
+
+   Tout ce qui vient d'un autre joueur passe par sanitize()/attr(). Les
+   compteurs passent par nbSur(). L'etat vit dans MSG ; l'ecouteur Firestore
+   du module publie ses lignes par l'evenement fbConversations, on ne lit
+   jamais Firestore d'ici.
+   ============================================================================ */
+var MSG={rows:null,err:null,unread:0,tab:"msgs",users:{},blocs:[],cid:null,other:null,conv:null,unsub:null,msgs:null,msgErr:null,sel:null,sending:false};
+try{var _mu=JSON.parse(localStorage.getItem("magoMsgUsers")||"{}");if(_mu&&typeof _mu==="object")MSG.users=_mu;}catch(e){}
+try{var _mb=JSON.parse(localStorage.getItem("magoBlocs")||"null");if(_mb&&Array.isArray(_mb.list))MSG.blocs=_mb.list.map(String);}catch(e){}
+function msgMe(){return window._fbUser?window._fbUser.uid:null;}
+function msgAutreDe(conv){var me=msgMe();return ((conv&&conv.members)||[]).filter(function(x){return x!==me;})[0]||null;}
+function msgEcranOn(id){var el=document.getElementById("s-"+id);return !!(el&&el.classList.contains("on"));}
+function msgMs(ts){
+  if(!ts)return 0;
+  if(typeof ts.seconds==="number")return ts.seconds*1000;
+  if(typeof ts.toMillis==="function"){try{return ts.toMillis();}catch(e){return 0;}}
+  if(ts instanceof Date)return ts.getTime();
+  if(typeof ts==="number")return ts;
+  return 0;
+}
+function msgJourKey(ms){var d=new Date(ms);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function msgLocale(){return ({fr:"fr-FR",en:"en-GB",nl:"nl-BE",de:"de-DE",es:"es-ES",it:"it-IT",pt:"pt-PT",pl:"pl-PL",tr:"tr-TR",ar:"ar"})[curLang]||"fr-FR";}
+function msgHeure(ms){try{return new Date(ms).toLocaleTimeString(msgLocale(),{hour:"2-digit",minute:"2-digit"});}catch(e){var d=new Date(ms);return d.getHours()+":"+String(d.getMinutes()).padStart(2,"0");}}
+/* Heure dans la liste : l'heure si c'est aujourd'hui, « hier », le jour de la
+   semaine cette semaine, la date sinon. */
+function msgQuand(ms){
+  if(!ms)return "";
+  var k=msgJourKey(ms);
+  if(k===todayKey())return msgHeure(ms);
+  if(k===yesterdayKey())return _tr("msgYesterday");
+  var d=Date.now()-ms;
+  try{
+    if(d<6*86400000)return new Date(ms).toLocaleDateString(msgLocale(),{weekday:"short"});
+    return new Date(ms).toLocaleDateString(msgLocale(),{day:"numeric",month:"short"});
+  }catch(e){return "";}
+}
+/* Separateur de jour dans le fil. */
+function msgJourLabel(k){
+  if(k===todayKey())return _tr("msgToday");
+  if(k===yesterdayKey())return _tr("msgYesterday");
+  try{var p=k.split("-");return new Date(Number(p[0]),Number(p[1])-1,Number(p[2])).toLocaleDateString(msgLocale(),{weekday:"short",day:"numeric",month:"short"});}catch(e){return k;}
+}
+/* « vu hier », « vu il y a 3 j » : date arrondie, jamais l'heure. */
+function msgDepuis(ms){
+  if(!ms)return "";
+  var k=msgJourKey(ms);
+  if(k===todayKey())return _tr("msgToday").toLowerCase();
+  if(k===yesterdayKey())return _tr("msgYesterday").toLowerCase();
+  var j=Math.round((Date.now()-ms)/86400000);
+  if(j<30)return _tr("msgDaysAgo").replace("{n}",j);
+  return _tr("msgMonthsAgo").replace("{n}",Math.max(1,Math.round(j/30)));
+}
+function msgAvatar(u,cls){
+  var av=avatarHTML(u&&u.avatar,cls==="lg"?44:cls==="sm"?36:46);
+  var ini=sanitize(String((u&&u.pseudo)||"?").charAt(0).toUpperCase());
+  return '<div class="msg-av'+(cls?" "+cls:"")+'" aria-hidden="true">'+(av||ini)+'</div>';
+}
+function msgPseudo(uid){var u=MSG.users[uid];return (u&&u.pseudo)?String(u.pseudo):_tr("msgSomeone");}
+/* Fiche publique d'un correspondant : cache local un jour, chargement en
+   arriere-plan, re-rendu de l'ecran concerne a l'arrivee. */
+var _msgUserPending={};
+function msgUser(uid,force){
+  if(!uid)return null;
+  var u=MSG.users[uid];
+  var frais=u&&u.at&&(Date.now()-u.at<86400000);
+  if(u&&frais&&!force)return u;
+  if(_msgUserPending[uid]||!window.fbLoadUser)return u||null;
+  _msgUserPending[uid]=true;
+  window.fbLoadUser(uid).then(function(x){
+    delete _msgUserPending[uid];
+    if(!x)return;
+    msgRetenirUser(uid,x);
+    msgRerendre();
+  }).catch(function(){delete _msgUserPending[uid];});
+  return u||null;
+}
+function msgRetenirUser(uid,x){
+  MSG.users[uid]={pseudo:String(x.pseudo||"").slice(0,24),avatar:x.avatar||null,points:nbSur(x.points),confirms:nbSur(x.confirms),
+    signals:nbSur(x.signals),discAccepted:nbSur(x.discAccepted),streak:nbSur(x.streak),bestStreak:nbSur(x.bestStreak),
+    updatedAt:msgMs(x.updatedAt)||null,createdAt:msgMs(x.createdAt)||null,at:Date.now()};
+  try{
+    var keep={};Object.keys(MSG.users).sort(function(a,b){return (MSG.users[b].at||0)-(MSG.users[a].at||0);}).slice(0,60).forEach(function(k){keep[k]=MSG.users[k];});
+    localStorage.setItem("magoMsgUsers",JSON.stringify(keep));
+  }catch(e){}
+}
+function msgRerendre(){
+  if(msgEcranOn("messages"))renderMessages();
+  if(msgEcranOn("thread")){renderThreadHead();renderThreadFoot();renderThreadFil(true);}
+}
+/* ── Etat global : pastilles + detection d'un nouveau message ── */
+window.addEventListener("fbConversations",function(e){
+  var d=e.detail||{};
+  var avant=MSG.rows;
+  MSG.rows=d.rows||null;MSG.err=d.err||null;MSG.unread=nbSur(d.unread);
+  try{msgDetecterNouveaux(avant,MSG.rows);}catch(err){}
+  msgRafraichirPastilles();
+  if(MSG.cid){
+    var c=(MSG.rows||[]).find(function(x){return x.cid===MSG.cid;});
+    if(c){MSG.conv=c;}
+  }
+  msgRerendre();
+  (MSG.rows||[]).forEach(function(c){var o=msgAutreDe(c);if(o)msgUser(o);});
+});
+window.addEventListener("fbBlocsChanged",function(e){
+  MSG.blocs=(e.detail||[]).map(String);
+  msgRerendre();
+  try{if(msgEcranOn("userprofile")&&window._ppCourant)ppMajBoutons(window._ppCourant);}catch(err){}
+});
+window.addEventListener("online",function(){try{msgRerendre();}catch(e){}});
+window.addEventListener("offline",function(){try{msgRerendre();}catch(e){}});
+function msgDetecterNouveaux(avant,rows){
+  var me=msgMe();if(!me||!avant||!rows)return; // premier chargement : la pastille suffit
+  var prev={};avant.forEach(function(c){prev[c.cid]=c;});
+  var sonne=false;
+  rows.forEach(function(c){
+    var n=nbSur(c.unread&&c.unread[me]);
+    var p=prev[c.cid];
+    var nAvant=p?nbSur(p.unread&&p.unread[me]):0;
+    if(n<=nAvant||!c.lastMsg||c.lastMsg.by===me)return;
+    if(Date.now()-msgMs(c.lastAt)>3*60000)return;
+    var o=msgAutreDe(c);
+    var ouvert=msgEcranOn("thread")&&MSG.cid===c.cid;
+    if(ouvert){return;}
+    sonne=true;
+    pushActivity({type:"msg",title:_tr("msgNewFrom").replace("{p}",msgPseudo(o)),body:msgApercu(c),
+      key:"msg:"+c.cid,ts:msgMs(c.lastAt)||Date.now(),action:{kind:"conv",cid:c.cid,uid:o}});
+  });
+  if(sonne){try{playSound("pop");}catch(e){}}
+}
+function msgRafraichirPastilles(){
+  var n=MSG.unread;
+  var txt=n>9?"9+":String(n);
+  var b=document.getElementById("msg-badge");
+  if(b){b.textContent=txt;b.classList.toggle("on",n>0);}
+  var nt=document.getElementById("nt-profile-badge");
+  if(nt){nt.textContent=txt;nt.hidden=!(n>0);}
+  var pc=document.getElementById("profile-msg-count");
+  if(pc){pc.textContent=txt;pc.style.display=n>0?"flex":"none";}
+  var ps=document.getElementById("profile-msg-sub");
+  if(ps)ps.textContent=n>0?_tr("msgUnreadN").replace("{n}",n):_tr("msgRowSub");
+}
+function msgApercu(c){
+  var m=c.lastMsg;if(!m)return "";
+  var me=msgMe();
+  var t=m.type==="image"?_tr("msgPhoto"):m.type==="pos"?_tr("msgPosShared"):String(m.text||"");
+  return (m.by===me?_tr("msgYou")+" : ":"")+t;
+}
+/* ── Boite de reception ── */
+function openMessages(tab){
+  if(tab)MSG.tab=tab;
+  show("messages");
+}
+function msgOnglet(t){MSG.tab=t;renderMessages();try{playSound("pop");}catch(e){}
+  try{var on=document.querySelector("#msg-seg [aria-selected=\"true\"]");if(on&&document.activeElement&&document.activeElement.closest("#msg-seg"))on.focus();}catch(e){}}
+(function(){
+  var seg=document.getElementById("msg-seg");if(!seg)return;
+  seg.addEventListener("keydown",function(ev){
+    if(ev.key!=="ArrowLeft"&&ev.key!=="ArrowRight")return;
+    ev.preventDefault();msgOnglet(MSG.tab==="dem"?"msgs":"dem");
+  });
+})();
+function msgEtatHTML(icone,titre,sous,btn,onclick){
+  var ic={lock:'<rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    off:'<path d="M2 8.5a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0"/><path d="M12 19h.01"/><path d="M3 3l18 18"/>',
+    mail:'<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7 8.5 6 8.5-6"/>',
+    inbox:'<path d="M4 4h16v16H4z"/><path d="M4 14h4l2 3h4l2-3h4"/>'}[icone]||"";
+  return '<div class="msg-etat"><div class="msg-etat-i"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'+ic+'</svg></div>'+
+    '<div class="msg-etat-t">'+titre+'</div>'+(sous?'<div class="msg-etat-s">'+sous+'</div>':'')+
+    (btn?'<button class="msg-bs" style="flex:none;margin-top:14px;padding:0 18px" onclick="'+onclick+'">'+btn+'</button>':'')+'</div>';
+}
+function renderMessages(){
+  var body=document.getElementById("msg-body"),seg=document.getElementById("msg-seg");if(!body||!seg)return;
+  var me=msgMe();
+  var rows=MSG.rows||[];
+  var conv=rows.filter(function(c){return !(c.state==="request"&&c.requestBy!==me)&&!(c.state==="declined"&&c.requestBy!==me);});
+  var dem=rows.filter(function(c){return c.state==="request"&&c.requestBy!==me;});
+  var nUnread=0;conv.forEach(function(c){nUnread+=nbSur(c.unread&&c.unread[me]);});
+  seg.innerHTML='<button role="tab" aria-selected="'+(MSG.tab!=="dem")+'" class="'+(MSG.tab!=="dem"?"on":"")+'" onclick="msgOnglet(\'msgs\')">'+_tr("msgTabMsgs")+' · '+nbSur(conv.length)+'</button>'+
+    '<button role="tab" aria-selected="'+(MSG.tab==="dem")+'" class="'+(MSG.tab==="dem"?"on":"")+'" onclick="msgOnglet(\'dem\')">'+_tr("msgTabReq")+' · '+nbSur(dem.length)+'</button>';
+  if(MSG.err==="permission-denied"){body.innerHTML=msgEtatHTML("lock",_tr("msgNotEnabled"),_tr("msgNotEnabledSub"));return;}
+  if(MSG.err==="index"){body.innerHTML=msgEtatHTML("lock",_tr("msgNotEnabled"),_tr("msgIndexSub"));return;}
+  if(MSG.rows===null){
+    if(!navigator.onLine||MSG.err==="offline"||!window.fbMesConversations){body.innerHTML=msgEtatHTML("off",_tr("msgOfflineT"),_tr("msgOfflineSub"));return;}
+    body.innerHTML='<div style="padding:30px 0">'+magoLoader(false,_tr("msgLoading"))+'</div>';return;
+  }
+  if(MSG.tab==="dem"){
+    var h='<div class="msg-intro">'+_tr("msgReqIntro")+'</div>';
+    if(!dem.length)h+=msgEtatHTML("inbox",_tr("msgNoReq"),_tr("msgNoReqSub"));
+    else dem.forEach(function(c){h+=msgCarteDemande(c);});
+    body.innerHTML=h;return;
+  }
+  if(!conv.length){
+    body.innerHTML=msgEtatHTML("mail",_tr("msgEmpty"),_tr("msgEmptySub"),_tr("msgFindPlayer"),"navTo('search');try{setSearchMode('users')}catch(e){}");
+    return;
+  }
+  var frag=document.createDocumentFragment();
+  conv.forEach(function(c){
+    var o=msgAutreDe(c),u=msgUser(o)||{pseudo:_tr("msgSomeone")};
+    var n=nbSur(c.unread&&c.unread[me]);
+    var row=document.createElement("div");
+    row.className="msg-row"+(n>0?" unread":"");
+    var prev;
+    if(c.state==="declined")prev='<span style="color:var(--s3)">'+_tr("msgDeclinedShort")+'</span>';
+    else if(c.state==="request")prev='<span style="color:var(--gold-txt)">'+_tr("msgPendingShort")+'</span>'+(c.lastMsg?' · '+sanitize(msgApercu(c)):'');
+    else prev=sanitize(msgApercu(c));
+    row.innerHTML=msgAvatar(u)+
+      '<div style="flex:1;min-width:0"><div style="display:flex;align-items:baseline;gap:6px"><div class="msg-name" style="flex:1">'+sanitize(u.pseudo||"")+'</div><span class="msg-time">'+msgQuand(msgMs(c.lastAt))+'</span></div>'+
+      '<div style="display:flex;align-items:center"><div class="msg-prev" style="flex:1">'+prev+'</div>'+(n>0?'<span class="msg-dot" aria-hidden="true"></span>':'')+'</div></div>';
+    row.onclick=function(){openThread(c.cid,o);};
+    a11yCard(row,_tr("msgOpenWith").replace("{p}",u.pseudo||"")+(n>0?", "+_tr("msgUnreadN").replace("{n}",n):""));
+    frag.appendChild(row);
+  });
+  body.innerHTML="";body.appendChild(frag);
+}
+/* La carte d'une demande : qui c'est, ce qu'il a fait, ce qu'il a ecrit. */
+function msgCarteDemande(c){
+  var o=msgAutreDe(c),u=msgUser(o)||{};
+  var contribs=nbSur(u.confirms)+nbSur(u.signals)+nbSur(u.discAccepted);
+  var lv=levelInfo(nbSur(u.points));
+  var meta=_tr("msgLevel").replace("{n}",lv.idx+1)+' · '+_tr("msgConfirmsN").replace("{n}",nbSur(u.confirms));
+  var neuf=false;
+  if(u.createdAt){
+    var mois="";try{mois=new Date(u.createdAt).toLocaleDateString(msgLocale(),{month:"long",year:"numeric"});}catch(e){}
+    if(mois)meta+=' · '+_tr("msgJoined").replace("{m}",mois);
+    neuf=(Date.now()-u.createdAt<7*86400000)&&contribs===0;
+  }
+  var quote=c.lastMsg?msgApercu(c):"";
+  return '<div class="req-card" data-cid="'+attr(c.cid)+'">'+
+    '<div class="req-top">'+msgAvatar(u,"lg")+'<div style="flex:1;min-width:0"><div class="msg-name">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</div><div class="req-meta">'+meta+'</div>'+
+    (neuf?'<span class="req-warn"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 8v5M12 16.5h.01"/><circle cx="12" cy="12" r="9"/></svg>'+_tr("msgNewAccount")+'</span>':'')+'</div></div>'+
+    (quote?'<div class="req-quote">« '+sanitize(quote)+' »</div>':'<div class="req-quote" style="color:var(--s3)">'+_tr("msgNoText")+'</div>')+
+    '<div class="req-actions">'+
+      '<button class="msg-bp" onclick="msgRepondre(\''+attr(c.cid)+'\',true)">'+_tr("msgAccept")+'</button>'+
+      '<button class="msg-bs" onclick="msgRepondre(\''+attr(c.cid)+'\',false)">'+_tr("msgDecline")+'</button>'+
+      '<button class="msg-bd" aria-label="'+attr(_tr("msgBlock")+" "+(u.pseudo||""))+'" onclick="msgBloquerDepuisDemande(\''+attr(c.cid)+'\',\''+attr(o)+'\')">'+msgIcoBloc(18)+'</button>'+
+    '</div></div>';
+}
+function msgIcoBloc(s){return '<svg width="'+s+'" height="'+s+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>';}
+function msgRepondre(cid,oui){
+  if(!window.fbAccepterConversation){toast(_tr("msgOfflineT"));return;}
+  window.fbAccepterConversation(cid,oui).then(function(r){
+    if(!r||!r.ok){msgErreurToast(r&&r.reason);return;}
+    try{playSound(oui?"win":"pop");}catch(e){}
+    toast(oui?_tr("msgAccepted"):_tr("msgDeclined"));
+    if(MSG.conv&&MSG.conv.cid===cid)MSG.conv.state=oui?"open":"declined";
+    var row=(MSG.rows||[]).find(function(x){return x.cid===cid;});if(row)row.state=oui?"open":"declined";
+    if(oui&&msgEcranOn("messages")){MSG.tab="msgs";}
+    msgRerendre();
+  });
+}
+function msgBloquerDepuisDemande(cid,uid){
+  msgBloquer(uid,true,function(ok){if(ok&&window.fbAccepterConversation)window.fbAccepterConversation(cid,false).then(function(){msgRerendre();});});
+}
+function msgBloquer(uid,oui,done){
+  if(!window.fbBloquer){toast(_tr("msgOfflineT"));if(done)done(false);return;}
+  var nom=msgPseudo(uid);
+  window.fbBloquer(uid,oui).then(function(r){
+    if(!r||!r.ok){msgErreurToast(r&&r.reason);if(done)done(false);return;}
+    MSG.blocs=(r.list||[]).map(String);
+    try{playSound("pop");}catch(e){}
+    toast(oui?_tr("msgBlocked").replace("{p}",nom):_tr("msgUnblocked").replace("{p}",nom));
+    msgRerendre();
+    try{if(window._ppCourant)ppMajBoutons(window._ppCourant);}catch(e){}
+    if(done)done(true);
+  });
+}
+function msgErreurToast(reason){
+  var k={"permission-denied":"msgNotEnabled",blocked:"msgCantWrite",pending:"msgPendingToast",declined:"msgDeclinedToast",offline:"msgOfflineT","too-big":"msgTooBig",full:"msgBlockFull",empty:"msgEmptyText"}[reason]||"msgSendFail";
+  toast(_tr(k));try{playSound("err");}catch(e){}
+}
+/* ── Le fil ── */
+function openThread(cid,other){
+  var me=msgMe();
+  if(!me){toast(_tr("msgNeedAuth"));return;}
+  if(!other&&cid)other=String(cid).split("_").filter(function(x){return x!==me;})[0];
+  if(!cid&&other)cid=[me,String(other)].sort().join("_");
+  if(!cid||!other||other===me)return;
+  threadQuitter();
+  MSG.cid=cid;MSG.other=String(other);MSG.msgs=null;MSG.msgErr=null;
+  MSG.conv=(MSG.rows||[]).find(function(c){return c.cid===cid;})||null;
+  msgUser(MSG.other);
+  show("thread");
+}
+/* Appele par _showRaw a chaque affichage du fil : (re)branche l'ecouteur des
+   messages. Le retour depuis un profil ouvert par le menu repasse ici. */
+function threadReprendre(){
+  if(!MSG.cid)return;
+  renderThreadHead();renderThreadFoot();
+  if(MSG.unsub){renderThreadFil();return;}
+  if(!MSG.conv)MSG.conv=(MSG.rows||[]).find(function(c){return c.cid===MSG.cid;})||null;
+  if(MSG.conv&&window.fbMessages){
+    MSG.msgs=null;renderThreadFil();
+    var cid=MSG.cid;
+    MSG.unsub=window.fbMessages(cid,function(rows,err){
+      if(MSG.cid!==cid)return;
+      MSG.msgs=rows||[];MSG.msgErr=err||null;
+      renderThreadFil();
+      if(err)renderThreadFoot();
+      msgMarquerLuSiOuvert();
+    },60);
+  }else{MSG.msgs=[];renderThreadFil();}
+}
+function threadQuitter(){
+  if(MSG.unsub){try{MSG.unsub();}catch(e){}}
+  MSG.unsub=null;
+}
+function msgMarquerLuSiOuvert(){
+  var me=msgMe(),c=MSG.conv;
+  if(!c||!me||!window.fbMarquerLu)return;
+  if(c.state!=="open")return; // une demande non acceptee ne signale rien a l'autre
+  if(!nbSur(c.unread&&c.unread[me]))return;
+  if(document.visibilityState!=="visible")return;
+  c.unread[me]=0;
+  window.fbMarquerLu(c.cid).catch(function(){});
+}
+function threadRetour(){if(!navBack())openMessages();try{playSound("pop");}catch(e){}}
+function renderThreadHead(){
+  var el=document.getElementById("th-hd");if(!el)return;
+  var u=MSG.users[MSG.other]||{};
+  var actif=u.updatedAt?timeAgoShort(u.updatedAt):null;
+  el.innerHTML='<div class="th-ico" role="button" tabindex="0" aria-label="'+attr(_tr("msgBack"))+'" onclick="threadRetour()" onkeydown="if(event.key===\'Enter\'){threadRetour();}">←</div>'+
+    '<div role="button" tabindex="0" style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;cursor:pointer" aria-label="'+attr(_tr("msgSeeProfile")+" "+(u.pseudo||""))+'" onclick="msgVoirProfil()" onkeydown="if(event.key===\'Enter\'){msgVoirProfil();}">'+
+      msgAvatar(u,"sm")+'<div style="flex:1;min-width:0"><div class="th-hd-name">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</div>'+
+      (actif?'<div class="th-hd-sub">'+_tr("msgActive").replace("{t}",sanitize(actif))+'</div>':'')+'</div></div>'+
+    '<div class="th-ico" role="button" tabindex="0" aria-label="'+attr(_tr("msgMore"))+'" onclick="msgMenuThread()" onkeydown="if(event.key===\'Enter\'){msgMenuThread();}"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></div>';
+}
+function msgVoirProfil(){
+  var u=MSG.users[MSG.other]||{};
+  try{playSound("pop");}catch(e){}
+  openPlayerProfile({uid:MSG.other,pseudo:u.pseudo||"",points:u.points||0,streak:u.streak||0});
+}
+function msgImgSure(v){return (typeof v==="string"&&/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(v)&&v.length<=220000)?v:null;}
+function renderThreadFil(doux){
+  var el=document.getElementById("th-fil");if(!el)return;
+  var me=msgMe();
+  var u=MSG.users[MSG.other]||{};
+  var nom=u.pseudo||_tr("msgSomeone");
+  var enBas=el.scrollHeight-el.scrollTop-el.clientHeight<80;
+  if(MSG.msgErr==="permission-denied"){el.innerHTML=msgEtatHTML("lock",_tr("msgNotEnabled"),_tr("msgNotEnabledSub"));return;}
+  if(MSG.conv&&MSG.msgs===null){el.innerHTML='<div style="margin:auto">'+magoLoader(true)+'</div>';return;}
+  var rows=MSG.msgs||[];
+  if(!rows.length){
+    var c=MSG.conv;
+    var intro=(c&&c.state==="request"&&c.requestBy!==me)?_tr("msgIntroRecv").replace("{p}",sanitize(nom)):
+      (c&&c.state==="open")?_tr("msgIntroOpen").replace("{p}",sanitize(nom)):_tr("msgIntroNew").replace("{p}",sanitize(nom));
+    el.innerHTML='<div class="th-intro">'+msgAvatar(u)+'<div style="font-size:15px;font-weight:800;color:var(--s1);margin-top:10px">'+sanitize(nom)+'</div><div class="msg-etat-s" style="margin-top:6px">'+intro+'</div></div>';
+    return;
+  }
+  var h="",jour=null;
+  rows.forEach(function(m){
+    var ms=msgMs(m.at)||Date.now();
+    var k=msgJourKey(ms);
+    if(k!==jour){jour=k;h+='<div class="th-day">'+msgJourLabel(k)+'</div>';}
+    h+=msgBulleHTML(m,m.by===me,ms,nom);
+  });
+  el.innerHTML=h;
+  if(!doux||enBas)el.scrollTop=el.scrollHeight;
+}
+function msgBulleHTML(m,mine,ms,nom){
+  var side=mine?"me":"them";
+  var t='<div class="th-t">'+msgHeure(ms)+'</div>';
+  var qui=mine?_tr("msgYou"):sanitize(nom);
+  if(m.type==="image"){
+    var src=msgImgSure(m.img);
+    if(!src)return '<div class="th-b '+side+'">'+_tr("msgPhotoBroken")+t+'</div>';
+    return '<div class="th-card img '+side+'"><img src="'+src+'" alt="'+attr(_tr("msgPhotoOf").replace("{p}",qui))+'" data-act="img" data-mid="'+attr(m.mid)+'" role="button" tabindex="0">'+t+'</div>';
+  }
+  if(m.type==="pos"){
+    var lat=Number(m.lat),lng=Number(m.lng);
+    if(!isFinite(lat)||!isFinite(lng))return "";
+    return '<div class="th-card '+side+'"><div style="display:flex;align-items:center;gap:10px"><div class="th-spot-ico" style="color:var(--s1)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6-5.2-6-10a6 6 0 0 1 12 0c0 4.8-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg></div>'+
+      '<div style="flex:1;min-width:0"><div class="th-pos-t">'+_tr("msgPosOf").replace("{p}",qui)+'</div><div class="th-pos-s">'+_tr("msgPosOnce")+'</div></div></div>'+
+      '<div class="th-spot-btns"><button class="th-sec" data-act="map" data-lat="'+attr(lat)+'" data-lng="'+attr(lng)+'">'+_tr("msgOpenMap")+'</button></div>'+t+'</div>';
+  }
+  if(m.type==="spot"){
+    var d=(m.drinkId!=null)?(DRINKS||[]).find(function(x){return String(x.id)===String(m.drinkId);}):null;
+    var s=(typeof STORES!=="undefined"?STORES:[]).find(function(x){return String(x.fbId)===String(m.storeId)||String(x.id)===String(m.storeId);});
+    var dist=(s&&typeof userLat==="number"&&typeof s.lat==="number")?fmtDist(haversine(userLat,userLng,s.lat,s.lng)):"";
+    var sub=[dist,_tr("msgSeenBy").replace("{t}",msgDepuis(ms)).replace("{p}",qui)].filter(Boolean).join(" · ");
+    return '<div class="th-card '+side+'"><div class="th-spot-top"><div class="th-spot-ico" style="'+(d?'background:'+attr(d.light||"var(--bg2)"):'')+'">'+(d?drinkIconHTML(d):'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--s2)" stroke-width="2" stroke-linecap="round"><path d="M8 3h8l-1 4H9z"/><path d="M9 7l-1.5 13h9L15 7"/></svg>')+'</div>'+
+      '<div style="flex:1;min-width:0"><div class="th-spot-name">'+sanitize(d?d.name:m.drinkName||"")+'</div><div class="th-spot-sub">'+sanitize(d?[d.brand,d.format||d.size].filter(Boolean).join(" · "):"")+'</div></div></div>'+
+      '<div class="th-spot-where"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px"><path d="M12 21s-6-5.2-6-10a6 6 0 0 1 12 0c0 4.8-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg><div style="flex:1;min-width:0">'+sanitize(m.storeName||"")+'<small>'+sub+'</small></div></div>'+
+      '<div class="th-spot-btns"><button class="th-cta" data-act="go" data-store="'+attr(m.storeId)+'"'+(s?'':' data-lat="'+attr(s&&s.lat)+'"')+'>'+_tr("msgGo")+'</button>'+(d?'<button class="th-sec" data-act="fiche" data-drink="'+attr(d.id)+'">'+_tr("msgSheet")+'</button>':'')+'</div>'+t+'</div>';
+  }
+  return '<div class="th-b '+side+(m.pending?" pend":"")+'">'+sanitize(String(m.text||""))+t+'</div>';
+}
+/* Un seul ecouteur pour le fil : les cartes sont recreees a chaque rendu. */
+(function(){
+  var agir=function(el){
+    var act=el.getAttribute("data-act");
+    if(act==="img"){msgPleinEcran(el.getAttribute("src"));return;}
+    if(act==="map"){try{showStoreOnMap(Number(el.getAttribute("data-lat")),Number(el.getAttribute("data-lng")));}catch(e){}return;}
+    if(act==="go"){
+      var sid=el.getAttribute("data-store");
+      var s=(typeof STORES!=="undefined"?STORES:[]).find(function(x){return String(x.fbId)===sid||String(x.id)===sid;});
+      if(s){try{openStoreDetail(s.fbId||s.id);}catch(e){}}
+      else{toast(_tr("msgStoreFar"));}
+      return;
+    }
+    if(act==="fiche"){var d=(DRINKS||[]).find(function(x){return String(x.id)===el.getAttribute("data-drink");});if(d){try{pick(d);}catch(e){}}return;}
+  };
+  document.addEventListener("click",function(ev){
+    var el=ev.target&&ev.target.closest?ev.target.closest("#th-fil [data-act]"):null;
+    if(!el)return;ev.preventDefault();agir(el);try{playSound("pop");}catch(e){}
+  });
+  document.addEventListener("keydown",function(ev){
+    if(ev.key!=="Enter")return;
+    var el=ev.target&&ev.target.closest?ev.target.closest("#th-fil [data-act]"):null;
+    if(!el)return;ev.preventDefault();agir(el);
+  });
+})();
+function msgPleinEcran(src){
+  if(!msgImgSure(src)||document.getElementById("msg-full"))return;
+  var ov=document.createElement("div");ov.id="msg-full";ov.className="msg-full";ov.setAttribute("role","dialog");ov.setAttribute("aria-label",_tr("msgPhoto"));
+  ov.innerHTML='<img src="'+src+'" alt="">';
+  ov.onclick=function(){ov.remove();};
+  document.body.appendChild(ov);
+}
+/* Le pied du fil : composeur, ou l'etat qui l'empeche. */
+function renderThreadFoot(){
+  var el=document.getElementById("th-foot");if(!el)return;
+  var me=msgMe(),c=MSG.conv,u=MSG.users[MSG.other]||{},nom=sanitize(u.pseudo||_tr("msgSomeone"));
+  var bloque=MSG.blocs.indexOf(String(MSG.other))!==-1;
+  if(MSG.err==="permission-denied"||MSG.msgErr==="permission-denied"){el.innerHTML='<div class="th-band">'+_tr("msgNotEnabledSub")+'</div>';return;}
+  if(bloque){
+    el.innerHTML='<div class="th-band"><b>'+_tr("msgYouBlocked").replace("{p}",nom)+'</b> · '+_tr("msgBlockedSub")+
+      '<div class="req-actions"><button class="msg-bs" onclick="msgBloquer(\''+attr(MSG.other)+'\',false)">'+_tr("msgUnblock")+'</button></div></div>';
+    return;
+  }
+  if(c&&c.state==="declined"){
+    el.innerHTML='<div class="th-band">'+(c.requestBy===me?_tr("msgTheyDeclined").replace("{p}",nom):_tr("msgYouDeclined"))+'</div>';
+    return;
+  }
+  if(c&&c.state==="request"&&c.requestBy!==me){
+    el.innerHTML='<div class="th-band"><b>'+_tr("msgWantsToWrite").replace("{p}",nom)+'</b> '+_tr("msgReqIntroShort")+
+      '<div class="req-actions"><button class="msg-bp" onclick="msgRepondre(\''+attr(c.cid)+'\',true)">'+_tr("msgAccept")+'</button>'+
+      '<button class="msg-bs" onclick="msgRepondre(\''+attr(c.cid)+'\',false)">'+_tr("msgDecline")+'</button>'+
+      '<button class="msg-bd" aria-label="'+attr(_tr("msgBlock"))+'" onclick="msgBloquerDepuisDemande(\''+attr(c.cid)+'\',\''+attr(MSG.other)+'\')">'+msgIcoBloc(18)+'</button></div></div>';
+    return;
+  }
+  var attente=c&&c.state==="request"&&c.requestBy===me&&nbSur(c.reqCount)>=1;
+  var horsLigne=!navigator.onLine;
+  var off=attente||horsLigne||MSG.sending;
+  var ph=attente?_tr("msgWaiting"):(c&&c.state==="open")?_tr("msgWriteTo").replace("{p}",u.pseudo||""):_tr("msgFirstOnly").replace("{p}",u.pseudo||"");
+  var bande=attente?'<div class="th-band" style="margin-bottom:8px"><b>'+_tr("msgWaiting")+'</b> · '+_tr("msgWaitingSub").replace("{p}",nom)+'</div>':
+    horsLigne?'<div class="th-band warn" style="margin-bottom:8px">'+_tr("msgOfflineSub")+'</div>':'';
+  el.innerHTML=bande+'<div class="th-comp">'+
+    '<button class="th-plus" aria-label="'+attr(_tr("msgAttach"))+'" onclick="msgOuvrirPlus()"'+(off?' disabled':'')+'><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>'+
+    '<textarea id="th-in" class="th-in" rows="1" maxlength="2000" placeholder="'+attr(ph)+'" aria-label="'+attr(_tr("msgYourMessage"))+'"'+(off?' disabled':'')+'></textarea>'+
+    '<button id="th-send" class="th-send" aria-label="'+attr(_tr("msgSend"))+'" onclick="msgEnvoyerTexte()" disabled><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg></button></div>'+
+    '<input id="th-photo" type="file" accept="image/*" style="display:none" onchange="msgPhotoChoisie(this)">';
+  var ta=document.getElementById("th-in"),sb=document.getElementById("th-send");
+  if(ta&&!off){
+    ta.addEventListener("input",function(){
+      ta.style.height="auto";ta.style.height=Math.min(120,ta.scrollHeight)+"px";
+      sb.disabled=!ta.value.trim();
+    });
+    ta.addEventListener("keydown",function(ev){if(ev.key==="Enter"&&!ev.shiftKey){ev.preventDefault();msgEnvoyerTexte();}});
+  }
+  /* Image ou position envoyee : le lecteur d'ecran doit savoir que ca part. */
+  el.setAttribute("aria-busy",MSG.sending?"true":"false");
+}
+function msgEnvoyerTexte(){
+  var ta=document.getElementById("th-in");if(!ta)return;
+  var t=ta.value.trim();if(!t)return;
+  ta.value="";ta.style.height="auto";var sb=document.getElementById("th-send");if(sb)sb.disabled=true;
+  msgEnvoyer({type:"text",text:t}).then(function(ok){if(!ok&&ta&&!ta.value){ta.value=t;if(sb)sb.disabled=false;}});
+}
+/* Envoi commun a tous les types : cree la conversation au premier message,
+   puis laisse le module faire le lot. La demande n'est creee QUE quand on
+   envoie vraiment quelque chose — ouvrir un fil n'ecrit rien. */
+function msgEnvoyer(msg){
+  if(!window.fbEnvoyerMessage||!window.fbOuvrirConversation){msgErreurToast("offline");return Promise.resolve(false);}
+  if(MSG.sending)return Promise.resolve(false);
+  if(MSG.blocs.indexOf(String(MSG.other))!==-1){msgErreurToast("blocked");return Promise.resolve(false);}
+  MSG.sending=true;
+  var cid=MSG.cid;
+  var prep=MSG.conv?Promise.resolve({ok:true,cid:cid,conv:MSG.conv}):window.fbOuvrirConversation(MSG.other);
+  return prep.then(function(r){
+    if(!r||!r.ok)return r;
+    if(r.conv&&(!MSG.conv||MSG.conv.cid!==r.conv.cid))MSG.conv=r.conv;
+    return window.fbEnvoyerMessage(cid,msg);
+  }).then(function(r){
+    MSG.sending=false;
+    if(!r||!r.ok){msgErreurToast(r&&r.reason);renderThreadFoot();return false;}
+    try{playSound("pop");}catch(e){}
+    if(MSG.conv&&MSG.conv.state==="request"){MSG.conv.reqCount=1;}
+    if(!MSG.unsub&&msgEcranOn("thread"))threadReprendre();else renderThreadFoot();
+    return true;
+  }).catch(function(){MSG.sending=false;msgErreurToast("unknown");renderThreadFoot();return false;});
+}
+/* ── La feuille « + » ── */
+function msgFeuille(id,html){
+  if(document.getElementById(id))return null;
+  var ov=document.createElement("div");ov.id=id;ov.className="claim-ov";ov.setAttribute("role","dialog");ov.setAttribute("aria-modal","true");
+  ov.innerHTML='<div class="claim-card"><div class="claim-grip" aria-hidden="true"></div>'+html+'<button class="claim-cancel" data-close="1">'+_tr("msgCancel")+'</button></div>';
+  var fermer=function(){ov.classList.remove("in");setTimeout(function(){if(ov.parentNode)ov.remove();},240);};
+  ov.addEventListener("click",function(e){if(e.target===ov||(e.target.closest&&e.target.closest("[data-close]")))fermer();});
+  ov.addEventListener("keydown",function(e){if(e.key==="Escape")fermer();});
+  document.body.appendChild(ov);
+  requestAnimationFrame(function(){ov.classList.add("in");});
+  try{playSound("pop");}catch(e){}
+  ov.fermer=fermer;
+  return ov;
+}
+function msgOuvrirPlus(){
+  var ov=msgFeuille("msg-plus",
+    '<div class="claim-title">'+_tr("msgAttachT")+'</div>'+
+    '<button class="msg-opt" data-k="photo"><span class="msg-opt-i"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="3.5"/></svg></span><span style="flex:1;min-width:0"><span class="msg-opt-t">'+_tr("msgOptPhoto")+'</span><span class="msg-opt-s" style="display:block">'+_tr("msgOptPhotoSub")+'</span></span></button>'+
+    '<button class="msg-opt" data-k="pos"><span class="msg-opt-i"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6-5.2-6-10a6 6 0 0 1 12 0c0 4.8-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg></span><span style="flex:1;min-width:0"><span class="msg-opt-t">'+_tr("msgOptPos")+'</span><span class="msg-opt-s" style="display:block">'+_tr("msgOptPosSub")+'</span></span></button>'+
+    '<button class="msg-opt gold" data-k="spot"><span class="msg-opt-i"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h8l-1 4H9z"/><path d="M9 7l-1.5 13h9L15 7"/><path d="M8.2 13h7.6"/></svg></span><span style="flex:1;min-width:0"><span class="msg-opt-t">'+_tr("msgOptSpot")+'</span><span class="msg-opt-s" style="display:block">'+_tr("msgOptSpotSub")+'</span></span></button>');
+  if(!ov)return;
+  ov.querySelectorAll(".msg-opt").forEach(function(b){
+    b.onclick=function(){
+      var k=b.getAttribute("data-k");ov.fermer();
+      if(k==="photo"){var inp=document.getElementById("th-photo");if(inp){inp.value="";inp.click();}}
+      else if(k==="pos")msgEnvoyerPosition();
+      else if(k==="spot")setTimeout(msgOuvrirSpot,120);
+    };
+  });
+}
+function msgPhotoChoisie(input){
+  var file=input.files&&input.files[0];if(!file)return;
+  toast(_tr("msgCompressing"));
+  compressPhotoFile(file,function(data){
+    if(!data||data.length>220000){msgErreurToast("too-big");return;}
+    msgEnvoyer({type:"image",img:data});
+  },function(){msgErreurToast("unknown");},{maxSide:900,maxKb:200});
+}
+/* Position : celle qu'on a deja, sinon une demande unique. Arrondie a la rue
+   (3 decimales) par le module ; rien n'est jamais suivi dans le temps. */
+function msgEnvoyerPosition(){
+  var go=function(lat,lng){msgEnvoyer({type:"pos",lat:lat,lng:lng});};
+  if(typeof userLat==="number"&&typeof userLng==="number"&&userLat){go(userLat,userLng);return;}
+  if(!navigator.geolocation){toast(_tr("msgNoGeo"));return;}
+  toast(_tr("msgLocating"));
+  navigator.geolocation.getCurrentPosition(function(p){go(p.coords.latitude,p.coords.longitude);},function(){toast(_tr("msgNoGeo"));try{playSound("err");}catch(e){}},{enableHighAccuracy:false,timeout:8000,maximumAge:120000});
+}
+/* ── Emplacement d'une boisson : mes trouvailles recentes, puis la recherche ── */
+function msgTrouvailles(){
+  var hist=[];
+  try{hist=JSON.parse(localStorage.getItem("magoScanHist")||"[]")||[];}catch(e){}
+  return hist.filter(function(e){return e&&(e.storeFbId||e.storeId!=null)&&e.storeName;}).slice(0,6).map(function(e){
+    var d=(e.drinkId!=null)?(DRINKS||[]).find(function(x){return String(x.id)===String(e.drinkId);}):null;
+    return {drinkId:d?d.id:(e.drinkId!=null?e.drinkId:null),drinkName:String((d&&d.name)||e.name||"").slice(0,60),storeId:String(e.storeFbId||e.storeId),storeName:String(e.storeName).slice(0,60),d:d};
+  }).filter(function(x){return x.drinkName;});
+}
+function msgOptSpotHTML(x,i,cls){
+  var sel=MSG.sel&&MSG.sel.storeId===x.storeId&&String(MSG.sel.drinkId)===String(x.drinkId);
+  return '<button class="msg-opt'+(sel?" sel":"")+(cls?" "+cls:"")+'" data-i="'+i+'" role="radio" aria-checked="'+(!!sel)+'">'+
+    '<span class="msg-opt-i" style="'+(x.d?'background:'+attr(x.d.light||"var(--bg2)"):'')+'">'+(x.d?drinkIconHTML(x.d):'<span style="font-size:16px;font-weight:800;color:var(--s2)">'+sanitize(x.drinkName.charAt(0).toUpperCase())+'</span>')+'</span>'+
+    '<span style="flex:1;min-width:0"><span class="msg-opt-t" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(x.drinkName)+'</span><span class="msg-opt-s" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(x.storeName)+'</span></span>'+
+    '<span class="msg-chk" aria-hidden="true">'+(sel?'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>':'')+'</span></button>';
+}
+function msgOuvrirSpot(){
+  MSG.sel=null;
+  var ov=msgFeuille("msg-spot",
+    '<div class="claim-title">'+_tr("msgSpotT")+'</div><div class="claim-lead">'+_tr("msgSpotLead")+'</div>'+
+    '<div class="spot-lab">'+_tr("msgSpotRecent")+'</div><div id="spot-recent" role="radiogroup" aria-label="'+attr(_tr("msgSpotRecent"))+'"></div>'+
+    '<div class="spot-lab">'+_tr("msgSpotSearch")+'</div><input id="spot-q" class="spot-in" type="search" autocomplete="off" placeholder="'+attr(_tr("msgSpotSearchPh"))+'" aria-label="'+attr(_tr("msgSpotSearch"))+'">'+
+    '<div id="spot-res" class="spot-list" role="radiogroup" aria-label="'+attr(_tr("msgSpotSearch"))+'"></div>'+
+    '<button id="spot-send" class="msg-bp" style="width:100%;min-height:48px;margin-top:14px" disabled>'+_tr("msgSpotSend")+'</button>');
+  if(!ov)return;
+  var recents=msgTrouvailles();
+  var peindre=function(){
+    var r=document.getElementById("spot-recent");
+    if(r)r.innerHTML=recents.length?recents.map(function(x,i){return msgOptSpotHTML(x,"r"+i);}).join(""):'<div class="msg-vide">'+_tr("msgSpotNoRecent")+'</div>';
+    var b=document.getElementById("spot-send");if(b)b.disabled=!MSG.sel;
+  };
+  peindre();
+  var resultats=[];
+  var chercher=function(){
+    var q=String((document.getElementById("spot-q")||{}).value||"").trim().toLowerCase();
+    var box=document.getElementById("spot-res");if(!box)return;
+    if(q.length<2){box.innerHTML="";return;}
+    var ds=(DRINKS||[]).filter(function(d){return (String(d.name||"")+" "+String(d.brand||"")).toLowerCase().indexOf(q)!==-1;}).slice(0,5);
+    resultats=[];
+    ds.forEach(function(d){
+      /* Un magasin qui a deja cette boisson pres d'ici ; sinon la boisson
+         seule, et la personne dira le magasin dans son message. */
+      var stores=(typeof STORES!=="undefined"?STORES:[]).filter(function(s){return (s.drinks||[]).some(function(id){return String(id)===String(d.id);});})
+        .sort(function(a,b){return (a.dist||0)-(b.dist||0);}).slice(0,3);
+      stores.forEach(function(s){resultats.push({drinkId:d.id,drinkName:d.name,storeId:String(s.fbId||s.id),storeName:String(s.name||"").slice(0,60),d:d});});
+    });
+    box.innerHTML=resultats.length?resultats.map(function(x,i){return msgOptSpotHTML(x,"s"+i);}).join(""):'<div class="msg-vide">'+_tr("msgSpotNoStore")+'</div>';
+  };
+  var qi=document.getElementById("spot-q");if(qi)qi.addEventListener("input",chercher);
+  ov.addEventListener("click",function(e){
+    var b=e.target.closest?e.target.closest(".msg-opt[data-i]"):null;if(!b)return;
+    var i=b.getAttribute("data-i");var x=i.charAt(0)==="r"?recents[Number(i.slice(1))]:resultats[Number(i.slice(1))];
+    if(!x)return;
+    MSG.sel={drinkId:x.drinkId,drinkName:x.drinkName,storeId:x.storeId,storeName:x.storeName};
+    ov.querySelectorAll(".msg-opt[data-i]").forEach(function(o){var on=o===b;o.classList.toggle("sel",on);o.setAttribute("aria-checked",on?"true":"false");o.querySelector(".msg-chk").innerHTML=on?'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>':"";});
+    var sb=document.getElementById("spot-send");if(sb)sb.disabled=false;
+    try{playSound("pop");}catch(err){}
+  });
+  var send=document.getElementById("spot-send");
+  if(send)send.onclick=function(){
+    if(!MSG.sel)return;
+    var sel=MSG.sel;ov.fermer();
+    msgEnvoyer({type:"spot",storeId:sel.storeId,storeName:sel.storeName,drinkId:sel.drinkId,drinkName:sel.drinkName});
+  };
+}
+/* ── Menu ⋯ du fil ── */
+function msgMenuThread(){
+  var u=MSG.users[MSG.other]||{};
+  var bloque=MSG.blocs.indexOf(String(MSG.other))!==-1;
+  var ov=msgFeuille("msg-menu",
+    '<div class="claim-title" style="font-size:16px">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</div>'+
+    '<button class="msg-opt" data-k="profil"><span class="msg-opt-i"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M5 21c0-3.9 3.1-7 7-7s7 3.1 7 7"/></svg></span><span class="msg-opt-t">'+_tr("msgSeeProfile")+'</span></button>'+
+    '<button class="msg-opt" data-k="bloc"><span class="msg-opt-i">'+msgIcoBloc(20)+'</span><span class="msg-opt-t">'+(bloque?_tr("msgUnblock"):_tr("msgBlock"))+'</span></button>'+
+    '<button class="msg-opt" data-k="sig"><span class="msg-opt-i"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V4h12l-1 4 1 4H4"/></svg></span><span class="msg-opt-t">'+_tr("msgReport")+'</span></button>');
+  if(!ov)return;
+  ov.querySelectorAll(".msg-opt").forEach(function(b){
+    b.onclick=function(){
+      var k=b.getAttribute("data-k");ov.fermer();
+      if(k==="profil")msgVoirProfil();
+      else if(k==="bloc")msgBloquer(MSG.other,!bloque);
+      else if(k==="sig"){
+        var dernier=((MSG.msgs||[]).filter(function(m){return m.by===MSG.other&&m.type==="text";}).slice(-1)[0]||{}).text||"";
+        setTimeout(function(){ouvrirSignalement("conversation",MSG.cid,"pseudo : "+String(u.pseudo||"")+(dernier?" / "+String(dernier).slice(0,300):""),String(u.pseudo||_tr("msgSomeone")));},200);
+      }
+    };
+  });
+}
+/* ── Entrees depuis un profil public ── */
+function msgEcrire(uid,u){
+  var me=msgMe();
+  if(!me||!window.fbOuvrirConversation){toast(_tr("msgNeedAuth"));try{playSound("err");}catch(e){}return;}
+  if(String(uid)===me){toast(_tr("msgItsYou"));return;}
+  if(u&&u.pseudo)msgRetenirUser(String(uid),u);
+  try{playSound("pop");}catch(e){}
+  openThread(null,String(uid));
 }
 var _userSearchTimer=null;
 function renderUserSearchList(){
@@ -22320,7 +23615,7 @@ function renderUserSearchList(){
     el.innerHTML='<div style="text-align:center;padding:30px;font-size:13px;color:var(--s3)">'+((LANGS[curLang]||LANGS.fr).userSearchHint)+'</div>';
     return;
   }
-  el.innerHTML='<div style="text-align:center;padding:26px;font-size:13px;color:var(--s3)">Recherche\u2026</div>';
+  el.innerHTML='<div style="text-align:center;padding:26px">'+magoLoader(true,"Recherche\u2026")+'</div>';
   clearTimeout(_userSearchTimer);
   _userSearchTimer=setTimeout(function(){
     if(!window.fbSearchUsers){el.innerHTML="";return;}
@@ -22363,7 +23658,7 @@ function renderUserSearchList(){
     });
   },350);
 }
-function renderSearchHistory(){if(searchMode==="stores")return;var el=document.getElementById("search-list");var q=document.getElementById("q");if(!el||!q||q.value.length>0||!searchHistory.length)return;el.innerHTML='<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px">Récents</div>';searchHistory.forEach(function(h){var div=document.createElement("div");div.style.cssText="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer";div.innerHTML='<div style="width:34px;height:34px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--s3)"></div><span style="flex:1;font-size:14px;font-weight:500;color:var(--s1)">'+h+'</span><span style="font-size:12px;color:var(--s3);padding:4px" onclick="event.stopPropagation();removeHistory(\''+h+'\')">✕</span>';div.onclick=function(){document.getElementById("q").value=h;renderList();};el.appendChild(div);});}
+function renderSearchHistory(){if(searchMode==="stores")return;var el=document.getElementById("search-list");var q=document.getElementById("q");if(!el||!q||q.value.length>0||!searchHistory.length)return;el.innerHTML='<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px">Récents</div>';searchHistory.forEach(function(h){var div=document.createElement("div");div.style.cssText="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer";div.innerHTML='<div style="width:34px;height:34px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--s3)"></div><span style="flex:1;font-size:14px;font-weight:500;color:var(--s1)">'+h+'</span><span style="font-size:12px;color:var(--txt2);padding:4px" onclick="event.stopPropagation();removeHistory(\''+h+'\')">✕</span>';div.onclick=function(){document.getElementById("q").value=h;renderList();};el.appendChild(div);});}
 function removeHistory(term){searchHistory=searchHistory.filter(function(h){return h!==term;});localStorage.setItem("magosearchhist",JSON.stringify(searchHistory));renderSearchHistory();}
 
 /* ================================
@@ -22421,6 +23716,7 @@ try{
   try{renderChasse();}catch(e){}
   try{peindreAideDiscrete();}catch(e){}
   try{refreshBell();}catch(e){}
+  try{if(window.fbMessagerie&&window.fbMessagerie.rows)window.dispatchEvent(new CustomEvent("fbConversations",{detail:window.fbMessagerie}));}catch(e){}
   renderLangGrid();renderDiscoveries();
   renderFavs();
   renderBadges();
