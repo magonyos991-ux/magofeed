@@ -2668,7 +2668,7 @@ window.fbMesConversations = function(cb) {
       rows.push(x);
     });
     cb(rows);
-  }, function(e) { cb(null, _msgErreur(e).reason); });
+  }, function(e) { cb(null, _msgErreur(e).reason, String((e && ((e.code || "") + " " + (e.message || ""))) || e).slice(0, 200)); });
 };
 /* Le fil d'une conversation : les `limite` derniers messages, rendus dans
    l'ordre chronologique. Les envois locaux apparaissent aussitot (horodatage
@@ -2697,10 +2697,13 @@ window.fbDemarrerMessagerie = function() {
   if (!localStorage.getItem("magopseudo")) return;
   _convUid = me;
   try {
-    _convUnsub = window.fbMesConversations(function(rows, err) {
+    _convUnsub = window.fbMesConversations(function(rows, err, detail) {
       var unread = 0;
       (rows || []).forEach(function(r) { unread += (r.unread && r.unread[me] > 0) ? r.unread[me] : 0; });
-      window.fbMessagerie = { rows: rows, err: err || null, unread: unread, uid: me };
+      /* detail : le message brut de Firestore, affiche en petit sous l'etat
+         « pas encore active » — c'est ce qui permet de distinguer, depuis un
+         telephone, des regles pas deployees d'un index qui se construit. */
+      window.fbMessagerie = { rows: rows, err: err || null, errDetail: detail || null, unread: unread, uid: me };
       window.dispatchEvent(new CustomEvent("fbConversations", { detail: window.fbMessagerie }));
     });
   } catch (e) {
@@ -23066,7 +23069,7 @@ function msgRerendre(){
 window.addEventListener("fbConversations",function(e){
   var d=e.detail||{};
   var avant=MSG.rows;
-  MSG.rows=d.rows||null;MSG.err=d.err||null;MSG.unread=nbSur(d.unread);
+  MSG.rows=d.rows||null;MSG.err=d.err||null;MSG.errDetail=d.errDetail||null;MSG.unread=nbSur(d.unread);
   try{msgDetecterNouveaux(avant,MSG.rows);}catch(err){}
   msgRafraichirPastilles();
   if(MSG.cid){
@@ -23152,7 +23155,7 @@ function renderMessages(){
   var nUnread=0;conv.forEach(function(c){nUnread+=nbSur(c.unread&&c.unread[me]);});
   seg.innerHTML='<button role="tab" aria-selected="'+(MSG.tab!=="dem")+'" class="'+(MSG.tab!=="dem"?"on":"")+'" onclick="msgOnglet(\'msgs\')">'+_tr("msgTabMsgs")+' · '+nbSur(conv.length)+'</button>'+
     '<button role="tab" aria-selected="'+(MSG.tab==="dem")+'" class="'+(MSG.tab==="dem"?"on":"")+'" onclick="msgOnglet(\'dem\')">'+_tr("msgTabReq")+' · '+nbSur(dem.length)+'</button>';
-  if(MSG.err==="permission-denied"){body.innerHTML=msgEtatHTML("lock",_tr("msgNotEnabled"),_tr("msgNotEnabledSub"));return;}
+  if(MSG.err==="permission-denied"){body.innerHTML=msgEtatHTML("lock",_tr("msgNotEnabled"),_tr("msgNotEnabledSub"))+msgErrDetailHTML();return;}
   if(MSG.err==="index"){body.innerHTML=msgEtatHTML("lock",_tr("msgNotEnabled"),_tr("msgIndexSub"));return;}
   if(MSG.rows===null){
     if(!navigator.onLine||MSG.err==="offline"||!window.fbMesConversations){body.innerHTML=msgEtatHTML("off",_tr("msgOfflineT"),_tr("msgOfflineSub"));return;}
@@ -23392,11 +23395,17 @@ function msgPleinEcran(src){
   document.body.appendChild(ov);
 }
 /* Le pied du fil : composeur, ou l'etat qui l'empeche. */
+/* Le detail brut de l'erreur serveur, en petit : lisible par le fondateur sur
+   son telephone, sans console. */
+function msgErrDetailHTML(){
+  var d=MSG.errDetail;if(!d)return "";
+  return '<div style="font-size:10.5px;font-weight:600;color:var(--txt2);margin-top:6px;word-break:break-word">'+sanitize(String(d))+'</div>';
+}
 function renderThreadFoot(){
   var el=document.getElementById("th-foot");if(!el)return;
   var me=msgMe(),c=MSG.conv,u=MSG.users[MSG.other]||{},nom=sanitize(u.pseudo||_tr("msgSomeone"));
   var bloque=MSG.blocs.indexOf(String(MSG.other))!==-1;
-  if(MSG.err==="permission-denied"||MSG.msgErr==="permission-denied"){el.innerHTML='<div class="th-band">'+_tr("msgNotEnabledSub")+'</div>';return;}
+  if(MSG.err==="permission-denied"||MSG.msgErr==="permission-denied"){el.innerHTML='<div class="th-band">'+_tr("msgNotEnabledSub")+msgErrDetailHTML()+'</div>';return;}
   if(bloque){
     el.innerHTML='<div class="th-band"><b>'+_tr("msgYouBlocked").replace("{p}",nom)+'</b> · '+_tr("msgBlockedSub")+
       '<div class="req-actions"><button class="msg-bs" onclick="msgBloquer(\''+attr(MSG.other)+'\',false)">'+_tr("msgUnblock")+'</button></div></div>';
