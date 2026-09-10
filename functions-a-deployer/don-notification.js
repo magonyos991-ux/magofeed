@@ -82,14 +82,46 @@ function montantLisible(somme, devise) {
   return txt + (d === "EUR" ? " €" : " " + d);
 }
 
+/* LE DERNIER APPEL DE KO-FI, VISIBLE DEPUIS L'APP.
+   Sans ca, trois pannes tres differentes donnaient le meme silence : Ko-fi qui
+   n'appelle jamais, Ko-fi qui appelle avec un jeton qui ne correspond pas, et
+   Ko-fi qui a change le format de son message. Il fallait les journaux Google
+   Cloud pour les distinguer — autant dire personne.
+
+   UN SEUL DOCUMENT, REECRIT A CHAQUE FOIS. Cette adresse est publique :
+   ajouter une ligne par appel offrirait a n'importe qui le moyen de remplir la
+   base. On garde donc uniquement le dernier appel, et on n'envoie AUCUNE
+   notification depuis ici — un refus ne doit jamais pouvoir faire sonner le
+   telephone du fondateur.
+
+   On note les NOMS des champs recus, jamais leurs valeurs : de quoi voir que
+   Ko-fi a change son format, sans deverser l'identite d'un donateur. */
+async function noterAppel(resultat, don) {
+  try {
+    const champs = don && typeof don === "object" ? Object.keys(don).sort().join(",").slice(0, 400) : "";
+    await db.collection("_meta").doc("kofiDernierAppel").set({
+      quand: FieldValue.serverTimestamp(),
+      resultat: String(resultat).slice(0, 40),
+      champs: champs
+    });
+  } catch (e) { console.warn("trace kofi:", e && e.message); }
+}
+
 exports.kofiWebhook = onRequest(
   { region: REGION, secrets: [KOFI_JETON, BREVO_API_KEY], memory: "256MiB",
     timeoutSeconds: 30, maxInstances: 5 },
   async (req, res) => {
-    if (req.method !== "POST") { res.status(405).send("POST attendu"); return; }
+    if (req.method !== "POST") {
+      await noterAppel("methode-refusee", null);
+      res.status(405).send("POST attendu"); return;
+    }
 
     const don = lireCharge(req);
-    if (!don) { console.warn("charge illisible"); res.status(400).send("charge illisible"); return; }
+    if (!don) {
+      console.warn("charge illisible");
+      await noterAppel("charge-illisible", req.body);
+      res.status(400).send("charge illisible"); return;
+    }
 
     /* LA LIGNE QUI COMPTE. Cette adresse est publique : sans ce controle,
        n'importe qui pourrait t'envoyer de faux dons et faire sonner ton
@@ -97,6 +129,7 @@ exports.kofiWebhook = onRequest(
        par le navigateur. */
     if (String(don.verification_token || "") !== String(KOFI_JETON.value())) {
       console.warn("jeton de verification invalide");
+      await noterAppel("jeton-refuse", don);
       res.status(401).send("jeton invalide");
       return;
     }
@@ -144,6 +177,7 @@ exports.kofiWebhook = onRequest(
        la moindre trace visible cote fondateur — c'est exactement ce qui s'est
        produit. sendToAdmins garde desormais une trace durable de chaque alerte
        et bascule sur le courriel quand aucune poussee ne part. */
+    await noterAppel("accepte", don);
     const r = await sendToAdmins(titre, corps);
     console.log("don : poussees " + r.parties + "/" + r.jetons + ", courriel " + r.courriel);
 

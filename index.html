@@ -3587,6 +3587,21 @@ window.fbLireAlertesAdmin = async function(n) {
    trancher entre « l'argent n'est jamais arrive » et « il est arrive, seule
    l'alerte s'est perdue ». Deux problemes tres differents, qui se ressemblaient
    trop longtemps. */
+/* LE DERNIER APPEL DE KO-FI. Repond a la seule question qui restait quand rien
+   n'arrivait : est-ce que Ko-fi a seulement appele ? Trois pannes donnaient le
+   meme silence, et il fallait les journaux Google Cloud pour les distinguer. */
+window.fbLireAppelKofi = async function() {
+  try {
+    var snap = await getDoc(doc(db, "_meta", "kofiDernierAppel"));
+    if (!snap.exists()) return null;
+    var d = snap.data() || {};
+    return {
+      resultat: String(d.resultat || ""),
+      champs: String(d.champs || ""),
+      quand: (d.quand && d.quand.toMillis) ? d.quand.toMillis() : null
+    };
+  } catch (e) { return null; }
+};
 window.fbLireDons = async function(n) {
   try {
     var snap = await getDocs(query(collection(db, "dons"),
@@ -21130,6 +21145,24 @@ function renderDons(){
   var titre='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:18px 0 10px">Soutiens reçus</div>';
   host.innerHTML=titre+'<div class="c2" style="font-size:12px">Lecture…</div>';
   if(!window.fbLireDons)return;
+  /* Le dernier appel s'affiche TOUJOURS, liste vide ou pleine : c'est justement
+     quand la liste est vide qu'il repond a la question. */
+  var appelHTML=function(a){
+    if(!a)return '<div class="c2" style="font-size:11.5px;margin-top:8px;line-height:1.5">'+
+      'Ko-fi n\'a jamais appelé ton application. L\'adresse du webhook n\'est pas '+
+      'enregistrée chez Ko-fi, ou elle n\'a pas été validée.</div>';
+    var txt,coul;
+    if(a.resultat==="accepte"){ txt="Ko-fi a appelé et le don a été enregistré."; coul="var(--s2)"; }
+    else if(a.resultat==="jeton-refuse"){ txt="Ko-fi a appelé, mais le jeton ne correspond pas. Recopie le « Verification Token » de Ko-fi dans le secret KOFI_JETON."; coul="#b42318"; }
+    else if(a.resultat==="charge-illisible"){ txt="Ko-fi a appelé, mais le message était illisible. Son format a peut-être changé."; coul="#b45309"; }
+    else if(a.resultat==="methode-refusee"){ txt="Quelque chose a visité l\'adresse sans envoyer de don."; coul="var(--s3)"; }
+    else { txt="Dernier appel : "+a.resultat; coul="var(--s2)"; }
+    return '<div style="margin-top:8px;font-size:11.5px;line-height:1.5;color:'+coul+';font-weight:600">'+
+      sanitize(txt)+'</div>'+
+      (a.quand?'<div class="c3" style="font-size:10.5px;margin-top:2px">'+sanitize(new Date(a.quand).toLocaleString("fr-BE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))+
+        (a.champs?" · champs reçus : "+sanitize(a.champs.slice(0,90)):"")+'</div>':'');
+  };
+  var pAppel=window.fbLireAppelKofi?window.fbLireAppelKofi().catch(function(){return null;}):Promise.resolve(null);
   window.fbLireDons(20).then(function(rows){
     if(!rows||rows.erreur){
       host.innerHTML=titre+'<div class="c2" style="font-size:12px">Lecture impossible'+
@@ -21140,11 +21173,15 @@ function renderDons(){
       host.innerHTML=titre+
         '<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px">'+
           '<div style="font-size:12.5px;font-weight:700;color:var(--s1)">Aucun soutien enregistré</div>'+
+          /* Ce texte n'affirme plus POURQUOI la liste est vide : la ligne
+             juste en dessous le sait vraiment, lui. Il disait « Ko-fi n'a
+             jamais appelé » alors que le dernier appel pouvait montrer le
+             contraire — l'écran se serait contredit dans le même cadre. */
           '<div class="c2" style="font-size:11.5px;margin-top:4px;line-height:1.5">'+
-            'Si quelqu\'un t\'a bien envoyé un don, c\'est que Ko-fi n\'a jamais appelé ton application : '+
-            'l\'adresse du webhook n\'est pas enregistrée chez Ko-fi, ou le jeton de vérification n\'y '+
-            'correspond pas. L\'argent est chez Ko-fi, il n\'est pas perdu.</div>'+
+            'Si quelqu\'un t\'a bien envoyé un don, l\'argent est chez Ko-fi : il n\'est pas perdu.</div>'+
+          '<div id="kofi-appel"></div>'+
         '</div>';
+      pAppel.then(function(a){var e=document.getElementById("kofi-appel");if(e)e.innerHTML=appelHTML(a);});
       return;
     }
     var t=titre+'<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;overflow:hidden">';
@@ -21160,7 +21197,8 @@ function renderDons(){
         (d.quand?'<div class="c3" style="font-size:10.5px;margin-top:3px">'+sanitize(new Date(d.quand).toLocaleString("fr-BE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))+'</div>':'')+
       '</div>';
     });
-    host.innerHTML=t+'</div>';
+    host.innerHTML=t+'</div><div id="kofi-appel" style="padding:0 2px"></div>';
+    pAppel.then(function(a){var e=document.getElementById("kofi-appel");if(e)e.innerHTML=appelHTML(a);});
   }).catch(function(e){
     host.innerHTML=titre+'<div class="c2" style="font-size:12px">Lecture impossible</div>';
     console.warn("dons:",e);
