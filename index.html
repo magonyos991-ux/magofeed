@@ -50,7 +50,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
   window.__magoBootOK=function(){window.__MAGO_BOOTED__=true;};
 })();
 </script>
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <title>Magofeed — Trouve ta boisson dans les magasins proches</title>
 <meta name="description" content="Localise en un instant les sodas, ice tea, energy drinks et jus disponibles dans les magasins autour de toi, grâce à une communauté qui confirme le stock en temps réel.">
 
@@ -7094,6 +7094,15 @@ function pickerFetchZone(force){
    a maintenir en parallele, donc plus de derive possible entre les deux.
    ============================================================================ */
 function choisirCeMagasin(s){
+  /* Mode « designe pour la messagerie » : pas de rattachement de scan, on
+     rend le magasin a qui l'a demande, on quitte le mode et on ferme la carte. */
+  if(window._choixMagasinCb){
+    var cb=window._choixMagasinCb;window._choixMagasinCb=null;window._choixMagasin=false;
+    try{_majBandeauChoix();}catch(e){}
+    try{var h=document.getElementById("explore-map-host");if(h){h.classList.remove("in");h.style.display="none";}}catch(e){}
+    try{cb(s);}catch(e){console.warn("choix magasin:",e);}
+    return;
+  }
   /* LA CARTE NE SE FERME PLUS AVANT D'AVOIR DEMANDE.
      Elle se fermait ici, AVANT l'ecriture : le nom du magasin avait donc
      quitte l'ecran au moment ou le message « Rattache a X » s'affichait. On
@@ -7136,7 +7145,7 @@ function _majBandeauChoix(){
   // Le contexte peut etre remis a zero pendant que la carte est ouverte
   // (renderWhereFound(null) le fait). Un mode « designe » sans rien a designer
   // laisserait le bandeau affiche et les pins morts : on en sort ici.
-  if(window._choixMagasin&&!lastScanContext)window._choixMagasin=false;
+  if(window._choixMagasin&&!lastScanContext&&!window._choixMagasinCb)window._choixMagasin=false;
   if(!window._choixMagasin){ if(b)b.remove(); return; }
   var host=document.getElementById("explore-map-host");
   if(!host)return;
@@ -17893,7 +17902,7 @@ function exploreOpenSheetFull(){
 }
 function closeExploreMap(){
   if(window._addStoreSurExplore){ try{exploreFermerAjout();}catch(e){} addStorePos=null; }
-  if(window._choixMagasin){ window._choixMagasin=false; try{_majBandeauChoix();}catch(e){} }
+  if(window._choixMagasin){ window._choixMagasin=false; window._choixMagasinCb=null; try{_majBandeauChoix();}catch(e){} }
   clearRoute();
   // Les magasins bruts de la derniere zone visitee (jusqu'a ~2000 objets
   // COMPLETS) restaient en memoire toute la session, meme carte fermee.
@@ -23463,8 +23472,16 @@ function msgBulleHTML(m,mine,ms,nom){
     if(act==="go"){
       var sid=el.getAttribute("data-store");
       var s=(typeof STORES!=="undefined"?STORES:[]).find(function(x){return String(x.fbId)===sid||String(x.id)===sid;});
-      if(s){try{openStoreDetail(s.fbId||s.id);}catch(e){}}
-      else{toast(_tr("msgStoreFar"));}
+      if(s){try{openStoreDetail(s.fbId||s.id);}catch(e){}return;}
+      /* Hors de la zone chargee : on va chercher la fiche, puis on l'ouvre. */
+      if(window.fbGetStore){
+        toast(_tr("msgLooking"));
+        window.fbGetStore(sid).then(function(st){
+          if(!st){toast(_tr("msgStoreFar"));return;}
+          try{if(typeof STORES!=="undefined"&&!STORES.some(function(x){return String(x.fbId||x.id)===String(st.fbId||st.id);}))STORES.push(st);}catch(e){}
+          try{openStoreDetail(st.fbId||st.id);}catch(e){toast(_tr("msgStoreFar"));}
+        }).catch(function(){toast(_tr("msgStoreFar"));});
+      } else toast(_tr("msgStoreFar"));
       return;
     }
     if(act==="fiche"){var d=(DRINKS||[]).find(function(x){return String(x.id)===el.getAttribute("data-drink");});if(d){try{pick(d);}catch(e){}}return;}
@@ -23676,9 +23693,9 @@ function msgNoterEmplacement(sid,did){
    magasin n'a pas besoin d'avoir deja la boisson : c'est justement le cas
    utile — « je sais ou elle est, et personne ne l'a encore dit ». Dans ce cas
    on propose de la noter pour la carte, coche par defaut. */
-function msgOuvrirSpot(){
+function msgOuvrirSpot(pre){
   MSG.sel=null;
-  var etat={d:null,sid:null,sname:null,deja:false,noter:true};
+  var etat={d:(pre&&pre.d)||null,sid:(pre&&pre.sid)||null,sname:(pre&&pre.sname)||null,deja:!!(pre&&pre.deja),noter:true};
   var ov=msgFeuille("msg-spot",'<div id="spot-body"></div>');
   if(!ov)return;
   var chk='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>';
@@ -23705,7 +23722,15 @@ function msgOuvrirSpot(){
     if(qi)qi.addEventListener("input",function(){
       var q=String(qi.value||"").trim().toLowerCase(),box=document.getElementById("spot-res");if(!box)return;
       if(q.length<2){box.innerHTML="";return;}
-      boissons=(DRINKS||[]).filter(function(d){return (String(d.name||"")+" "+String(d.brand||"")).toLowerCase().indexOf(q)!==-1;}).slice(0,6);
+      /* TOUTE la marque : « red » doit montrer les vingt Red Bull, pas six.
+         La marque qui commence par la recherche passe devant, puis le nom. */
+      boissons=(DRINKS||[]).filter(function(d){return (String(d.name||"")+" "+String(d.brand||"")).toLowerCase().indexOf(q)!==-1;})
+        .sort(function(a,b){
+          var ab=String(a.brand||"").toLowerCase().indexOf(q)===0,bb=String(b.brand||"").toLowerCase().indexOf(q)===0;
+          if(ab!==bb)return ab?-1:1;
+          var c=String(a.brand||"").localeCompare(String(b.brand||""),"fr");
+          return c||String(a.name||"").localeCompare(String(b.name||""),"fr");
+        }).slice(0,80);
       box.innerHTML=boissons.length?boissons.map(optBoisson).join(""):'<div class="msg-vide">'+_tr("msgSpotNoDrink")+'</div>';
     });
   };
@@ -23730,6 +23755,7 @@ function msgOuvrirSpot(){
       '<button class="msg-opt" data-spot-back="1" style="margin-bottom:10px"><span class="msg-opt-i" style="background:'+attr(d.light||"var(--bg2)")+'">'+drinkIconHTML(d)+'</span><span style="flex:1;min-width:0"><span class="msg-opt-t" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(d.name)+'</span><span class="msg-opt-s" style="display:block">'+_tr("msgSpotBack")+'</span></span></button>'+
       '<input id="spot-sq" class="spot-in" type="search" autocomplete="off" placeholder="'+attr(_tr("msgSpotStorePh"))+'" aria-label="'+attr(_tr("msgSpotStorePh"))+'">'+
       '<div id="spot-stores" class="spot-list" role="radiogroup" aria-label="'+attr(_tr("msgSpotWhere"))+'"></div>'+
+      '<button class="msg-opt" data-spot-map="1" style="margin-top:8px"><span class="msg-opt-i" style="background:var(--bg2)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/></svg></span><span style="flex:1;min-width:0"><span class="msg-opt-t" style="display:block">'+_tr("msgSpotMap")+'</span><span class="msg-opt-s" style="display:block">'+_tr("msgSpotMapSub")+'</span></span><span style="font-size:13px;color:var(--s3)">\u203A</span></button>'+
       '<label id="spot-note" style="display:none;align-items:flex-start;gap:10px;margin-top:12px;font-size:12.5px;font-weight:600;color:var(--txt2);line-height:1.4;cursor:pointer"><input id="spot-note-cb" type="checkbox" checked style="width:18px;height:18px;margin:1px 0 0;accent-color:var(--cta-bg)"><span>'+_tr("msgSpotNote")+'</span></label>'+
       '<button id="spot-send" class="msg-bp" style="width:100%;min-height:48px;margin-top:14px" disabled>'+_tr("msgSpotSend")+'</button>';
     var rendreListe=function(){
@@ -23742,9 +23768,22 @@ function msgOuvrirSpot(){
     var sq=document.getElementById("spot-sq");if(sq)sq.addEventListener("input",rendreListe);
     var cb=document.getElementById("spot-note-cb");if(cb)cb.onchange=function(){etat.noter=!!cb.checked;};
   };
-  peindre1();
+  if(etat.d){peindre2();if(etat.sid){var b0=document.getElementById("spot-send");if(b0)b0.disabled=false;var n0=document.getElementById("spot-note");if(n0)n0.style.display=etat.deja?"none":"flex";}}
+  else peindre1();
   ov.addEventListener("click",function(e){
     var t=e.target;if(!t||!t.closest)return;
+    if(t.closest("[data-spot-map]")){
+      /* La carte en mode « designe » : le pin touche revient ici, boisson gardee. */
+      var dMap=etat.d;ov.fermer();
+      window._choixBoisson=dMap;window._choixMagasin=true;
+      window._choixMagasinCb=function(st){
+        var deja=!!(st&&(st.drinks||[]).some(function(x){return String(x)===String(dMap.id);}));
+        if(st&&!(typeof STORES!=="undefined"&&STORES.some(function(x){return String(x.fbId||x.id)===String(st.fbId||st.id);}))){try{STORES.push(st);}catch(err){}}
+        setTimeout(function(){msgOuvrirSpot({d:dMap,sid:String(st.fbId||st.id),sname:String(st.name||"").slice(0,60),deja:deja});},250);
+      };
+      try{openExploreMap({});setTimeout(_majBandeauChoix,300);setTimeout(_majBandeauChoix,1200);}catch(err){window._choixMagasin=false;window._choixMagasinCb=null;toast(_tr("msgStoreFar"));}
+      return;
+    }
     if(t.closest("[data-spot-back]")){etat.sid=null;etat.sname=null;peindre1();return;}
     var br=t.closest(".msg-opt[data-i]");
     if(br){ // une trouvaille recente : boisson ET magasin connus, on va direct a l'envoi
