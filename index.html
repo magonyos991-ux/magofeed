@@ -798,6 +798,11 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div class="set-txt"><div class="set-title" data-i18n="versionT">Version</div></div>
           <span class="set-val">1.6.0 · build __BUILD_ID__</span>
         </div>
+        <div class="set-row" onclick="chercherMiseAJour()" role="button" tabindex="0" aria-label="Chercher une mise à jour" onkeydown="if(event.key==='Enter'){chercherMiseAJour();}">
+          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M4 12a8 8 0 0 1 13.7-5.7L20 8M20 4v4h-4M20 12a8 8 0 0 1-13.7 5.7L4 16M4 20v-4h4"/></svg></div>
+          <div class="set-txt"><div class="set-title" data-i18n="updateT">Chercher une mise à jour</div><div class="set-sub" data-i18n="updateSub">Si l’app n’a pas la dernière version, elle redémarre dessus</div></div>
+          <span class="set-chev">›</span>
+        </div>
         <div class="set-row static">
           <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="M4 17l5-5 4 4 3-3 4 4"/></svg></div>
           <div class="set-txt"><div class="set-title">Photos produits</div><div class="set-sub">Open Food Facts · licence CC-BY-SA · openfoodfacts.org</div></div>
@@ -22736,6 +22741,24 @@ function registerServiceWorker(){
     try{var p=reg.update();if(p&&p.catch)p.catch(function(){});}catch(e){}
   }).catch(function(e){console.warn("SW registration failed:",e);});
   setTimeout(function(){try{handleDeepLink();}catch(e){}},400);
+  /* Bouton « Chercher une mise à jour » (Réglages) : force la vérification du
+     service worker. Une version neuve s'installe, prend la main, et l'écouteur
+     controllerchange recharge — mais ce verrou de session ne doit pas bloquer
+     un rechargement DEMANDÉ : on le lève avant. Sans version neuve, on le dit. */
+  window.chercherMiseAJour=function(){
+    try{playSound("pop");}catch(e){}
+    if(!navigator.serviceWorker){toast(_tr("updateNone"));return;}
+    toast(_tr("updateLooking"));
+    try{sessionStorage.removeItem("mago_sw_reloaded");}catch(e){}
+    navigator.serviceWorker.getRegistration().then(function(reg){
+      if(!reg){toast(_tr("updateNone"));return;}
+      return reg.update().then(function(){
+        var w=reg.installing||reg.waiting;
+        if(w){toast(_tr("updateFound"));setTimeout(function(){location.reload();},2500);}
+        else toast(_tr("updateNone"));
+      });
+    }).catch(function(){toast(_tr("updateNone"));});
+  };
   /* Un lien de parrainage a pu amener ici : on retient le code et on le
      declare des qu'une identite existe. On ne paie rien maintenant — le
      paiement viendra quand la personne aura reellement contribue. */
