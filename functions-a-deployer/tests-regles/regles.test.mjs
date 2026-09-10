@@ -759,6 +759,24 @@ await doit('bloque : un geste piege cache en cinquieme position',
       {recent:[geste(0),geste(1),geste(2),geste(3),{t:'scan',d:'x',s:'y',j:'2026-09-01',lat:1}]},{merge:true})));
 await doit('bloque : recent qui n est pas une liste',
   ()=>assertFails(setDoc(doc(a,'users',ALICE),{recent:'x'},{merge:true})));
+/* LE JOURNAL DES ALERTES. Il ne vaut que s'il est incontestable : personne
+   d'autre que les Cloud Functions ne doit pouvoir y ecrire, et personne
+   d'autre que l'administrateur ne doit pouvoir le lire. */
+await env.withSecurityRulesDisabled(async (c)=>{
+  await setDoc(doc(c.firestore(),'alertesAdmin','a1'),
+    {titre:'Nouvel utilisateur',corps:'Explorateur',at:new Date(),
+     pousseesEnvoyees:0,jetonsTrouves:0,courrielEnvoye:true});
+});
+await doit('legitime : l admin lit le journal des alertes',
+  ()=>assertSucceeds(getDoc(doc(ad,'alertesAdmin','a1'))));
+await doit('bloque : lire le journal des alertes sans etre admin',
+  ()=>assertFails(getDoc(doc(m,'alertesAdmin','a1'))));
+await doit('bloque : ecrire une fausse alerte',
+  ()=>assertFails(setDoc(doc(m,'alertesAdmin','faux'),{titre:'Don de 500 euros',corps:'x'})));
+await doit('bloque : l admin lui-meme ne peut pas ecrire dans le journal',
+  ()=>assertFails(setDoc(doc(ad,'alertesAdmin','a2'),{titre:'x',corps:'y'})));
+await doit('bloque : effacer une alerte pour cacher un echec',
+  ()=>assertFails(deleteDoc(doc(ad,'alertesAdmin','a1'))));
 
 R.forEach(r=>console.log(r[0],'|',r[1]));
 console.log('\n'+(R.length-ko)+'/'+R.length+' conformes');

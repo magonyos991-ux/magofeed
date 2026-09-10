@@ -3964,6 +3964,63 @@ window.fbRepositionMyHunts = async function(lat, lng, watches) {
 };
 /* Diagnostic : lit le document push de l'utilisateur (jeton + position enregistrée)
    pour montrer, dans l'app, ce que le serveur voit réellement. */
+/* LE JOURNAL DES ALERTES. Chaque evenement qui devait te reveiller y a laisse
+   une ligne, avec le resultat de l'envoi : combien de jetons trouves, combien
+   de poussees parties, courriel de secours ou non. Ecrit par le serveur seul.
+   C'est la reponse a « est-ce que l'evenement a seulement eu lieu ? », question
+   qu'aucune notification manquante ne permettait de trancher. */
+window.fbLireAlertesAdmin = async function(n) {
+  try {
+    var snap = await getDocs(query(collection(db, "alertesAdmin"),
+      orderBy("at", "desc"), limit(Math.min(Number(n) || 20, 50))));
+    return snap.docs.map(function(d) {
+      var x = d.data() || {};
+      return {
+        titre: String(x.titre || ""), corps: String(x.corps || ""),
+        at: (x.at && x.at.toMillis) ? x.at.toMillis() : null,
+        poussees: Number(x.pousseesEnvoyees) || 0,
+        jetons: Number(x.jetonsTrouves) || 0,
+        courriel: x.courrielEnvoye === true
+      };
+    });
+  } catch (e) { return { erreur: String((e && (e.code || e.message)) || e) }; }
+};
+/* LES SOUTIENS RECUS. Ils n'etaient visibles nulle part dans l'app : pour
+   savoir si un don etait arrive, il fallait ouvrir la console Firebase. Quand
+   la notification manque — et elle peut manquer — c'est la seule facon de
+   trancher entre « l'argent n'est jamais arrive » et « il est arrive, seule
+   l'alerte s'est perdue ». Deux problemes tres differents, qui se ressemblaient
+   trop longtemps. */
+/* LE DERNIER APPEL DE KO-FI. Repond a la seule question qui restait quand rien
+   n'arrivait : est-ce que Ko-fi a seulement appele ? Trois pannes donnaient le
+   meme silence, et il fallait les journaux Google Cloud pour les distinguer. */
+window.fbLireAppelKofi = async function() {
+  try {
+    var snap = await getDoc(doc(db, "_meta", "kofiDernierAppel"));
+    if (!snap.exists()) return null;
+    var d = snap.data() || {};
+    return {
+      resultat: String(d.resultat || ""),
+      champs: String(d.champs || ""),
+      quand: (d.quand && d.quand.toMillis) ? d.quand.toMillis() : null
+    };
+  } catch (e) { return null; }
+};
+window.fbLireDons = async function(n) {
+  try {
+    var snap = await getDocs(query(collection(db, "dons"),
+      orderBy("quand", "desc"), limit(Math.min(Number(n) || 20, 50))));
+    return snap.docs.map(function(d) {
+      var x = d.data() || {};
+      return {
+        nom: String(x.nom || "Quelqu'un"), message: String(x.message || ""),
+        montant: String(x.montant || ""), devise: String(x.devise || ""),
+        abonnement: x.abonnement === true, source: String(x.source || ""),
+        quand: (x.quand && x.quand.toMillis) ? x.quand.toMillis() : null
+      };
+    });
+  } catch (e) { return { erreur: String((e && (e.code || e.message)) || e) }; }
+};
 window.fbGetMyPushDoc = async function() {
   try {
     var user = await ensureAuthed();
@@ -20421,10 +20478,55 @@ function obCablerComptes(){
     var actuel=""; try{ actuel=localStorage.getItem("magopseudo")||""; }catch(e){}
     try{ inp.value=(actuel&&actuel!=="Explorateur")?actuel:generatePseudo(); }catch(e){}
   }
+  /* LE DE QUI TOURNE. Le nom changeait d'un coup, sans rien : on ne voyait pas
+     que quelque chose s'etait passe, et l'ecran donnait l'impression d'un
+     prototype. Trois gestes tres courts, ~600 ms en tout, pensés pour qu'on
+     puisse appuyer dix fois de suite sans que ca lasse.
+       - le de fait un tour sur lui-meme ;
+       - le nom defile brievement, comme une roue qui cherche ;
+       - il se pose avec un tout petit rebond.
+     Aucun texte n'est invente pendant le defile : chaque nom montre est un vrai
+     pseudo tire au hasard, et le dernier est celui qui reste. Le champ ne ment
+     donc jamais sur ce qu'il contient, meme en cours d'animation. */
   if(des&&inp)des.onclick=function(){
-    try{ inp.value=generatePseudo(); }catch(e){}
+    if(des._enCours)return;                 // dix clics rapides ne se marchent pas dessus
     if(err)err.textContent="";
     try{playSound("pop");}catch(e){}
+
+    /* Qui a demande moins de mouvement en recoit moins : on change, sans
+       animer. L'accessibilite passe avant le style. */
+    var reduit=false;
+    try{ reduit=matchMedia("(prefers-reduced-motion: reduce)").matches; }catch(e){}
+    if(reduit){ try{ inp.value=generatePseudo(); }catch(e){} return; }
+
+    des._enCours=true;
+    var ico=des.querySelector("svg");
+    if(ico){
+      des._tour=(des._tour||0)+360;
+      ico.style.transition="transform .55s cubic-bezier(.2,.8,.25,1)";
+      ico.style.transform="rotate("+des._tour+"deg)";
+    }
+    inp.style.transition="opacity .08s linear, transform .08s linear";
+    var i=0,ETAPES=4;
+    var tic=setInterval(function(){
+      i++;
+      try{ inp.value=generatePseudo(); }catch(e){}
+      inp.style.opacity=".4"; inp.style.transform="translateY(-2px)";
+      setTimeout(function(){ inp.style.opacity="1"; inp.style.transform="none"; },65);
+      if(i<ETAPES)return;
+      clearInterval(tic);
+      setTimeout(function(){
+        inp.style.transition="transform .2s cubic-bezier(.34,1.56,.64,1)";
+        inp.style.transform="scale(1.035)";
+        setTimeout(function(){
+          inp.style.transform="none";
+          /* On rend le champ tel qu'on l'a trouve : une transition oubliee
+             ralentirait ensuite chaque frappe de l'utilisateur. */
+          setTimeout(function(){ inp.style.transition=""; inp.style.opacity=""; },220);
+          des._enCours=false;
+        },140);
+      },80);
+    },95);
   };
   if(inp&&err)inp.addEventListener("input",function(){ if(err.textContent&&obPseudoSaisi().length>=2)err.textContent=""; });
   if(g)g.onclick=function(){
@@ -20664,6 +20766,8 @@ function renderAdmin(){
   renderFormatSuggestions();
   try{ renderFichesSansCode(); }catch(e){ console.warn("sansCode:",e); }
   renderAdminHistory();
+  try{ renderDons(); }catch(e){ console.warn("dons:",e); }
+  try{ renderAlertes(); }catch(e){ console.warn("alertes:",e); }
   try{ renderSecurite(); }catch(e){ console.warn("securite:",e); }
   var pending=DISCOVERIES.filter(function(d){return !d.promoted&&!d.rejected&&!nameLooksAlcoholic(d.name,d.brand);});
   if(!pending.length){
@@ -21611,6 +21715,135 @@ function _dateCourte(v){
     return new Date(ms).toLocaleString("fr-BE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
   }catch(e){ return null; }
 }
+/* CE QUE MONTRE CE PANNEAU, ET POURQUOI. Trois chiffres par alerte, parce que
+   trois pannes differentes donnent le meme silence cote telephone :
+     jetons 0    aucun appareil enregistre — le canal est mort, il faut le
+                 reactiver dans Reglages puis « Verifier mes notifications »
+     jetons > 0, poussees 0   l'appareil existe mais Google a refuse l'envoi
+     poussees > 0             l'envoi est parti : le probleme est cote telephone
+   Sans ces chiffres, on ne pouvait que deviner, et le doute portait sur toute
+   la chaine a la fois. */
+/* LES SOUTIENS, EN HAUT DE L'ADMINISTRATION. Un don est la seule chose qui
+   arrive de l'exterieur sans qu'on la provoque : elle merite d'etre visible
+   sans aller la chercher. Et un tableau vide est une reponse, pas un manque —
+   il dit que Ko-fi n'a jamais appele. */
+function renderDons(){
+  if(!isAdmin)return;
+  var host=document.getElementById("admin-dons");
+  if(!host){
+    host=document.createElement("div");
+    host.id="admin-dons";
+    var list=document.getElementById("admin-list");
+    if(list&&list.parentNode)list.parentNode.appendChild(host);
+  }
+  var titre='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:18px 0 10px">Soutiens reçus</div>';
+  host.innerHTML=titre+'<div class="c2" style="font-size:12px">Lecture…</div>';
+  if(!window.fbLireDons)return;
+  /* Le dernier appel s'affiche TOUJOURS, liste vide ou pleine : c'est justement
+     quand la liste est vide qu'il repond a la question. */
+  var appelHTML=function(a){
+    if(!a)return '<div class="c2" style="font-size:11.5px;margin-top:8px;line-height:1.5">'+
+      'Ko-fi n\'a jamais appelé ton application. L\'adresse du webhook n\'est pas '+
+      'enregistrée chez Ko-fi, ou elle n\'a pas été validée.</div>';
+    var txt,coul;
+    if(a.resultat==="accepte"){ txt="Ko-fi a appelé et le don a été enregistré."; coul="var(--s2)"; }
+    else if(a.resultat==="jeton-refuse"){ txt="Ko-fi a appelé, mais le jeton ne correspond pas. Recopie le « Verification Token » de Ko-fi dans le secret KOFI_JETON."; coul="#b42318"; }
+    else if(a.resultat==="charge-illisible"){ txt="Ko-fi a appelé, mais le message était illisible. Son format a peut-être changé."; coul="#b45309"; }
+    else if(a.resultat==="methode-refusee"){ txt="Quelque chose a visité l\'adresse sans envoyer de don."; coul="var(--s3)"; }
+    else { txt="Dernier appel : "+a.resultat; coul="var(--s2)"; }
+    return '<div style="margin-top:8px;font-size:11.5px;line-height:1.5;color:'+coul+';font-weight:600">'+
+      sanitize(txt)+'</div>'+
+      (a.quand?'<div class="c3" style="font-size:10.5px;margin-top:2px">'+sanitize(new Date(a.quand).toLocaleString("fr-BE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))+
+        (a.champs?" · champs reçus : "+sanitize(a.champs.slice(0,90)):"")+'</div>':'');
+  };
+  var pAppel=window.fbLireAppelKofi?window.fbLireAppelKofi().catch(function(){return null;}):Promise.resolve(null);
+  window.fbLireDons(20).then(function(rows){
+    if(!rows||rows.erreur){
+      host.innerHTML=titre+'<div class="c2" style="font-size:12px">Lecture impossible'+
+        (rows&&rows.erreur?' ('+sanitize(rows.erreur)+')':'')+'</div>';
+      return;
+    }
+    if(!rows.length){
+      host.innerHTML=titre+
+        '<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px">'+
+          '<div style="font-size:12.5px;font-weight:700;color:var(--s1)">Aucun soutien enregistré</div>'+
+          /* Ce texte n'affirme plus POURQUOI la liste est vide : la ligne
+             juste en dessous le sait vraiment, lui. Il disait « Ko-fi n'a
+             jamais appelé » alors que le dernier appel pouvait montrer le
+             contraire — l'écran se serait contredit dans le même cadre. */
+          '<div class="c2" style="font-size:11.5px;margin-top:4px;line-height:1.5">'+
+            'Si quelqu\'un t\'a bien envoyé un don, l\'argent est chez Ko-fi : il n\'est pas perdu.</div>'+
+          '<div id="kofi-appel"></div>'+
+        '</div>';
+      pAppel.then(function(a){var e=document.getElementById("kofi-appel");if(e)e.innerHTML=appelHTML(a);});
+      return;
+    }
+    var t=titre+'<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;overflow:hidden">';
+    rows.forEach(function(d,i){
+      var somme=d.montant?(d.montant+" "+(d.devise||"")).trim():"";
+      t+='<div style="padding:12px 14px'+(i?';border-top:1px solid var(--border)':'')+'">'+
+        '<div style="display:flex;align-items:baseline;gap:8px">'+
+          '<div style="font-size:13px;font-weight:800;color:var(--s1)">'+sanitize(somme||"Soutien")+'</div>'+
+          (d.abonnement?'<div class="c3" style="font-size:10.5px;font-weight:700">mensuel</div>':'')+
+        '</div>'+
+        '<div class="c2" style="font-size:11.5px;margin-top:2px">'+sanitize(d.nom)+'</div>'+
+        (d.message?'<div style="font-size:12px;margin-top:3px;line-height:1.4">« '+sanitize(d.message)+' »</div>':'')+
+        (d.quand?'<div class="c3" style="font-size:10.5px;margin-top:3px">'+sanitize(new Date(d.quand).toLocaleString("fr-BE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))+'</div>':'')+
+      '</div>';
+    });
+    host.innerHTML=t+'</div><div id="kofi-appel" style="padding:0 2px"></div>';
+    pAppel.then(function(a){var e=document.getElementById("kofi-appel");if(e)e.innerHTML=appelHTML(a);});
+  }).catch(function(e){
+    host.innerHTML=titre+'<div class="c2" style="font-size:12px">Lecture impossible</div>';
+    console.warn("dons:",e);
+  });
+}
+function renderAlertes(){
+  if(!isAdmin)return;
+  var host=document.getElementById("admin-alertes");
+  if(!host){
+    host=document.createElement("div");
+    host.id="admin-alertes";
+    var list=document.getElementById("admin-list");
+    if(list&&list.parentNode)list.parentNode.appendChild(host);
+  }
+  host.innerHTML='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:18px 0 10px">'+
+    'Journal des alertes</div><div class="c2" style="font-size:12px">Lecture…</div>';
+  if(!window.fbLireAlertesAdmin)return;
+  window.fbLireAlertesAdmin(20).then(function(rows){
+    var t='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:18px 0 10px">Journal des alertes</div>';
+    if(!rows||rows.erreur){
+      host.innerHTML=t+'<div class="c2" style="font-size:12px">Lecture impossible'+
+        (rows&&rows.erreur?' ('+sanitize(rows.erreur)+')':'')+'</div>';
+      return;
+    }
+    if(!rows.length){
+      host.innerHTML=t+'<div class="c2" style="font-size:12px;line-height:1.5">'+
+        'Aucune alerte enregistrée. Le journal ne retient que les événements '+
+        'survenus depuis sa mise en place.</div>';
+      return;
+    }
+    t+='<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;overflow:hidden">';
+    rows.forEach(function(a,i){
+      var etat,coul;
+      if(a.poussees>0){ etat="notification envoyée"; coul="var(--s2)"; }
+      else if(a.jetons>0){ etat="envoi refusé par Google"; coul="#b45309"; }
+      else { etat="aucun appareil enregistré"; coul="#b42318"; }
+      if(a.courriel)etat+=" · e-mail de secours envoyé";
+      t+='<div style="padding:12px 14px'+(i?';border-top:1px solid var(--border)':'')+'">'+
+        '<div style="font-size:12.5px;font-weight:700;color:var(--s1)">'+sanitize(a.titre)+'</div>'+
+        (a.corps?'<div class="c2" style="font-size:11.5px;margin-top:2px;line-height:1.4">'+sanitize(a.corps)+'</div>':'')+
+        '<div style="font-size:11px;margin-top:4px;color:'+coul+';font-weight:600">'+etat+'</div>'+
+        (a.at?'<div class="c3" style="font-size:10.5px;margin-top:2px">'+sanitize(new Date(a.at).toLocaleString("fr-BE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))+'</div>':'')+
+      '</div>';
+    });
+    host.innerHTML=t+'</div>';
+  }).catch(function(e){
+    host.innerHTML='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:18px 0 10px">Journal des alertes</div>'+
+      '<div class="c2" style="font-size:12px">Lecture impossible</div>';
+    console.warn("alertes:",e);
+  });
+}
 function renderSecurite(){
   if(!isAdmin)return;
   var host=document.getElementById("admin-securite");
@@ -21716,7 +21949,17 @@ function renderSecurite(){
       window.fbSauvegarderMaintenant()
         .then(function(){ playSound("win"); toast("Sauvegarde lanc\u00E9e"); renderSecurite(); })
         .catch(function(e){ playSound("err"); b.disabled=false; b.textContent="Sauvegarder maintenant";
-                            toast("Sauvegarde impossible : "+((e&&(e.code||e.message))||e)); });
+          /* LE MESSAGE D'ABORD, LE CODE EN DERNIER RECOURS. On affichait
+             e.code en priorite : le serveur renvoyait « Permission manquante
+             pour exporter la base, donne le role... » et l'ecran montrait
+             « functions/failed-precondition ». Tout le travail fait cote
+             serveur pour expliquer la panne etait jete a la derniere ligne. */
+          var dit=(e&&e.message)||(e&&e.code)||String(e);
+          toast("Sauvegarde impossible : "+dit);
+          /* Et on rafraichit meme en cas d'echec : le panneau ne se remettait a
+             jour qu'apres une reussite, donc il continuait d'afficher l'etat
+             d'avant alors que le serveur venait d'enregistrer le nouvel echec. */
+          try{ renderSecurite(); }catch(err){} });
     };
   };
   if(window.fbLireSauvegardes){
