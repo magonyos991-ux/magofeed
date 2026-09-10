@@ -23,7 +23,7 @@
  */
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import { doc, setDoc, updateDoc, getDoc, getDocs, deleteDoc, collection, addDoc,
-         writeBatch, increment, arrayUnion, serverTimestamp, Timestamp } from 'firebase/firestore';
+         writeBatch, increment, arrayUnion, serverTimestamp, Timestamp, query, where, orderBy, limit } from 'firebase/firestore';
 import fs from 'fs';
 
 const env = await initializeTestEnvironment({
@@ -711,6 +711,13 @@ await doit('legitime : l admin efface un message',
   ()=>assertSucceeds(deleteDoc(doc(ad,'conversations',CONV,'messages','pos1'))));
 await doit('legitime : Alice lit le fil',
   ()=>assertSucceeds(getDocs(collection(a,'conversations',CONV,'messages'))));
+/* La requete EXACTE de la boite de reception (array-contains + orderBy + limit) :
+   une regle qui passe en lecture directe peut refuser la requete si le moteur
+   ne sait pas la prouver. C'est ce que l'app fait au demarrage. */
+await doit('legitime : la requete de la boite de reception d un membre',
+  ()=>assertSucceeds(getDocs(query(collection(a,'conversations'),where('members','array-contains',ALICE),orderBy('lastAt','desc'),limit(50)))));
+await doit('bloque : la boite de reception de quelqu un d autre',
+  ()=>assertFails(getDocs(query(collection(m,'conversations'),where('members','array-contains',ALICE),orderBy('lastAt','desc'),limit(50)))));
 await doit('bloque : un tiers lit le fil',
   ()=>assertFails(getDocs(collection(nv,'conversations',CONV,'messages'))));
 await doit('bloque : un tiers lit un message par son identifiant',
