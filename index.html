@@ -19929,10 +19929,55 @@ function obCablerComptes(){
     var actuel=""; try{ actuel=localStorage.getItem("magopseudo")||""; }catch(e){}
     try{ inp.value=(actuel&&actuel!=="Explorateur")?actuel:generatePseudo(); }catch(e){}
   }
+  /* LE DE QUI TOURNE. Le nom changeait d'un coup, sans rien : on ne voyait pas
+     que quelque chose s'etait passe, et l'ecran donnait l'impression d'un
+     prototype. Trois gestes tres courts, ~600 ms en tout, pensés pour qu'on
+     puisse appuyer dix fois de suite sans que ca lasse.
+       - le de fait un tour sur lui-meme ;
+       - le nom defile brievement, comme une roue qui cherche ;
+       - il se pose avec un tout petit rebond.
+     Aucun texte n'est invente pendant le defile : chaque nom montre est un vrai
+     pseudo tire au hasard, et le dernier est celui qui reste. Le champ ne ment
+     donc jamais sur ce qu'il contient, meme en cours d'animation. */
   if(des&&inp)des.onclick=function(){
-    try{ inp.value=generatePseudo(); }catch(e){}
+    if(des._enCours)return;                 // dix clics rapides ne se marchent pas dessus
     if(err)err.textContent="";
     try{playSound("pop");}catch(e){}
+
+    /* Qui a demande moins de mouvement en recoit moins : on change, sans
+       animer. L'accessibilite passe avant le style. */
+    var reduit=false;
+    try{ reduit=matchMedia("(prefers-reduced-motion: reduce)").matches; }catch(e){}
+    if(reduit){ try{ inp.value=generatePseudo(); }catch(e){} return; }
+
+    des._enCours=true;
+    var ico=des.querySelector("svg");
+    if(ico){
+      des._tour=(des._tour||0)+360;
+      ico.style.transition="transform .55s cubic-bezier(.2,.8,.25,1)";
+      ico.style.transform="rotate("+des._tour+"deg)";
+    }
+    inp.style.transition="opacity .08s linear, transform .08s linear";
+    var i=0,ETAPES=4;
+    var tic=setInterval(function(){
+      i++;
+      try{ inp.value=generatePseudo(); }catch(e){}
+      inp.style.opacity=".4"; inp.style.transform="translateY(-2px)";
+      setTimeout(function(){ inp.style.opacity="1"; inp.style.transform="none"; },65);
+      if(i<ETAPES)return;
+      clearInterval(tic);
+      setTimeout(function(){
+        inp.style.transition="transform .2s cubic-bezier(.34,1.56,.64,1)";
+        inp.style.transform="scale(1.035)";
+        setTimeout(function(){
+          inp.style.transform="none";
+          /* On rend le champ tel qu'on l'a trouve : une transition oubliee
+             ralentirait ensuite chaque frappe de l'utilisateur. */
+          setTimeout(function(){ inp.style.transition=""; inp.style.opacity=""; },220);
+          des._enCours=false;
+        },140);
+      },80);
+    },95);
   };
   if(inp&&err)inp.addEventListener("input",function(){ if(err.textContent&&obPseudoSaisi().length>=2)err.textContent=""; });
   if(g)g.onclick=function(){
