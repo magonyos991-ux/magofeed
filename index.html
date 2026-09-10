@@ -796,7 +796,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <div class="set-row static">
           <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v9"/></svg></div>
           <div class="set-txt"><div class="set-title" data-i18n="versionT">Version</div></div>
-          <span class="set-val">1.6.0 · build 0815</span>
+          <span class="set-val">1.6.0 · build __BUILD_ID__</span>
         </div>
         <div class="set-row static">
           <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="M4 17l5-5 4 4 3-3 4 4"/></svg></div>
@@ -2461,7 +2461,7 @@ window.fbLoadUser = async function(uid) {
 function _msgUid() { var u = auth.currentUser; return u ? u.uid : null; }
 function _msgErreur(e) {
   var c = String((e && (e.code || e.message)) || e || "");
-  if (/permission-denied|PERMISSION_DENIED|Missing or insufficient/i.test(c)) return { ok: false, reason: "permission-denied" };
+  if (/permission-denied|PERMISSION_DENIED|Missing or insufficient/i.test(c)) return { ok: false, reason: "permission-denied", detail: c.slice(0, 160) };
   if (!navigator.onLine || /unavailable|network|offline|deadline/i.test(c)) return { ok: false, reason: "offline" };
   if (/failed-precondition/i.test(c)) return { ok: false, reason: "index" };
   console.warn("Messagerie :", c);
@@ -2637,7 +2637,7 @@ window.fbEnvoyerMessage = async function(cid, msg) {
     /* Les regles refusent AUSSI le message d'un bloque par permission-denied.
        Si la lecture des conversations marche, ce n'est pas l'absence de
        regles : c'est un blocage (ou le rythme). On le dit tel quel. */
-    if (err.reason === "permission-denied" && window.fbMessagerie && window.fbMessagerie.rows) err = { ok: false, reason: "blocked" };
+    if (err.reason === "permission-denied" && window.fbMessagerie && window.fbMessagerie.rows) err = { ok: false, reason: "blocked", detail: err.detail };
     return err;
   }
 };
@@ -23255,9 +23255,9 @@ function msgBloquer(uid,oui,done){
     if(done)done(true);
   });
 }
-function msgErreurToast(reason){
+function msgErreurToast(reason,detail){
   var k={"permission-denied":"msgNotEnabled",blocked:"msgCantWrite",pending:"msgPendingToast",declined:"msgDeclinedToast",offline:"msgOfflineT","too-big":"msgTooBig",full:"msgBlockFull",empty:"msgEmptyText"}[reason]||"msgSendFail";
-  toast(_tr(k));try{playSound("err");}catch(e){}
+  toast(_tr(k)+(detail&&(reason==="permission-denied"||reason==="blocked")?" · "+String(detail).slice(0,120):""));try{playSound("err");}catch(e){}
 }
 /* ── Le fil ── */
 function openThread(cid,other){
@@ -23479,7 +23479,7 @@ function msgEnvoyer(msg){
     return window.fbEnvoyerMessage(cid,msg);
   }).then(function(r){
     MSG.sending=false;
-    if(!r||!r.ok){msgErreurToast(r&&r.reason);renderThreadFoot();return false;}
+    if(!r||!r.ok){msgErreurToast(r&&r.reason,r&&r.detail);renderThreadFoot();return false;}
     try{playSound("pop");}catch(e){}
     if(MSG.conv&&MSG.conv.state==="request"){MSG.conv.reqCount=1;}
     if(!MSG.unsub&&msgEcranOn("thread"))threadReprendre();else renderThreadFoot();
