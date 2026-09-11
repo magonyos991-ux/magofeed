@@ -194,6 +194,112 @@ var TEXTES = {
   "Vérification indisponible — envoie ta demande à la main": {en:"Check unavailable — send your request by hand",ar:"التحقق غير متاح — أرسل طلبك يدويًا",nl:"Controle niet beschikbaar — stuur je aanvraag zelf",es:"Verificación no disponible — envía tu solicitud a mano",de:"Prüfung nicht verfügbar — schick deine Anfrage manuell",it:"Verifica non disponibile — invia la richiesta a mano",pt:"Verificação indisponível — envia o teu pedido à mão",tr:"Doğrulama yok — isteğini elle gönder",pl:"Weryfikacja niedostępna — wyślij prośbę ręcznie",zh:"验证不可用 — 请手动发送申请"},
 };
 
+/* ============================================================================
+   APPLIQUER LES TRADUCTIONS À L'ÉCRAN
+   ----------------------------------------------------------------------------
+   tr() traduit un texte qu'on lui donne. Mais l'app écrit la plus grande partie
+   de son interface directement dans du HTML : des titres, des boutons, des
+   étiquettes posés à des centaines d'endroits, souvent au milieu de gabarits
+   assemblés à la volée. Les reprendre un par un aurait voulu dire modifier près
+   de huit cents lignes à la main dans un fichier de 21 000, sans filet.
+
+   On procède donc à l'envers : on laisse l'app écrire son français, puis on
+   relit ce qu'elle vient d'afficher et on remplace ce qu'on sait traduire.
+   C'est la seule approche qui atteint TOUT ce que l'utilisateur voit, y compris
+   les écrans construits dynamiquement.
+
+   TROIS PRÉCAUTIONS, parce qu'un traducteur aveugle ferait des dégâts :
+     1. On ne touche qu'à une correspondance EXACTE et ENTIÈRE. « Ouvert » ne
+        peut pas transformer un morceau de « Ouvert jusqu'à minuit ».
+     2. On n'entre jamais dans un champ de saisie, un script, ni dans un élément
+        marqué data-brut — c'est là que vivent les noms de boissons, de magasins
+        et les pseudos, qui ne se traduisent pas.
+     3. On garde le texte d'origine sur le nœud. Sans ça, changer de langue une
+        deuxième fois chercherait la traduction d'une traduction, et ne
+        trouverait plus rien.
+   ============================================================================ */
+
+var _TR_ORIG = new WeakMap();
+
+function _trNoeud(n) {
+  var p = n.parentElement;
+  if (!p) return;
+  var tag = p.tagName;
+  if (tag === "SCRIPT" || tag === "STYLE" || tag === "TEXTAREA" || tag === "NOSCRIPT") return;
+  if (p.closest("[data-brut]")) return;
+  var origine = _TR_ORIG.get(n);
+  if (origine === undefined) {
+    origine = n.nodeValue;
+    /* On ne retient que ce qu'on sait traduire : garder une référence sur
+       chaque nœud de texte de la page coûterait de la mémoire pour rien. */
+    if (!TEXTES[String(origine).trim()]) return;
+    _TR_ORIG.set(n, origine);
+  }
+  var brut = String(origine);
+  var noyau = brut.trim();
+  if (!noyau) return;
+  var t = tr(noyau);
+  /* On restitue les espaces d'origine : certains textes sont collés à une
+     icône ou à un nombre voisin, et les perdre décalerait la mise en page. */
+  var avant = brut.slice(0, brut.indexOf(noyau));
+  var apres = brut.slice(brut.indexOf(noyau) + noyau.length);
+  var neuf = avant + t + apres;
+  if (n.nodeValue !== neuf) n.nodeValue = neuf;
+}
+
+var _TR_ATTRS = ["placeholder", "aria-label", "title", "alt"];
+
+function traduirePage(racine) {
+  try {
+    if (typeof curLang === "undefined" || !curLang) return;
+    var base = racine || document.body;
+    if (!base) return;
+    if (base.nodeType === 3) { _trNoeud(base); return; }
+
+    var w = document.createTreeWalker(base, NodeFilter.SHOW_TEXT);
+    var n, lot = [];
+    while ((n = w.nextNode())) lot.push(n);
+    for (var i = 0; i < lot.length; i++) _trNoeud(lot[i]);
+
+    var els = base.querySelectorAll ? base.querySelectorAll("[placeholder],[aria-label],[title],[alt]") : [];
+    for (var j = 0; j < els.length; j++) {
+      var el = els[j];
+      if (el.closest("[data-brut]")) continue;
+      for (var k = 0; k < _TR_ATTRS.length; k++) {
+        var a = _TR_ATTRS[k];
+        if (!el.hasAttribute(a)) continue;
+        var cle = "__tr_" + a;
+        var orig = el.dataset[cle] !== undefined ? el.dataset[cle] : null;
+        if (orig === null) {
+          orig = el.getAttribute(a);
+          if (!TEXTES[String(orig).trim()]) continue;
+          el.dataset[cle] = orig;
+        }
+        var v = tr(String(orig).trim());
+        if (el.getAttribute(a) !== v) el.setAttribute(a, v);
+      }
+    }
+  } catch (e) { /* une traduction ratee ne doit jamais casser un rendu */ }
+}
+
+/* L'app redessine sans arrêt : on repasse après chaque salve de modifications,
+   groupées pour ne pas relire la page à chaque nœud ajouté. */
+var _trMinuteur = null;
+function _trObserver() {
+  try {
+    if (typeof MutationObserver !== "function" || !document.body) return;
+    new MutationObserver(function () {
+      if (_trMinuteur) return;
+      _trMinuteur = setTimeout(function () { _trMinuteur = null; traduirePage(); }, 60);
+    }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  } catch (e) {}
+}
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading")
+    document.addEventListener("DOMContentLoaded", function () { traduirePage(); _trObserver(); });
+  else { setTimeout(function () { traduirePage(); _trObserver(); }, 0); }
+}
+
 /* Rend le texte dans la langue courante. Inconnu ou langue sans traduction :
    on rend le français d'origine. Un message dans la mauvaise langue reste
    lisible ; un message vide ne l'est pas. */

@@ -57,6 +57,11 @@ const BROWSER = {
   AudioContext: "readonly", webkitAudioContext: "readonly", TextEncoder: "readonly",
   atob: "readonly", btoa: "readonly", crypto: "readonly", performance: "readonly",
   matchMedia: "readonly", getComputedStyle: "readonly", screen: "readonly",
+  /* Ajoutes avec la traduction du DOM : traduirePage() parcourt les noeuds de
+     texte (NodeFilter) et se redeclenche apres chaque salve de rendu
+     (MutationObserver). Sans ces deux lignes le garde-fou les signalait comme
+     des variables inexistantes, alors que ce sont des API du navigateur. */
+  NodeFilter: "readonly", MutationObserver: "readonly", WeakMap: "readonly",
   devicePixelRatio: "readonly", alert: "readonly", confirm: "readonly", prompt: "readonly",
   /* Bibliothèques chargées par <script> depuis un CDN */
   L: "readonly", Quagga: "readonly", firebase: "readonly",
