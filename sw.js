@@ -29,6 +29,7 @@ const APP_SHELL = [
   "./data/drinks.js",
   "./data/alcool.js",
   "./data/state.js",
+  "./data/textes.js",
   "./data/ui.js",
   "./data/i18n.js",
   "./manifest.json",
