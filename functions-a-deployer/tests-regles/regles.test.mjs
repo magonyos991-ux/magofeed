@@ -23,7 +23,7 @@
  */
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import { doc, setDoc, updateDoc, getDoc, getDocs, deleteDoc, collection, addDoc,
-         writeBatch, increment, arrayUnion, serverTimestamp } from 'firebase/firestore';
+         writeBatch, increment, arrayUnion, serverTimestamp, Timestamp, query, where, orderBy, limit } from 'firebase/firestore';
 import fs from 'fs';
 
 const env = await initializeTestEnvironment({
@@ -530,6 +530,242 @@ await doit('legitime : signaler une annonce de commercant',
       {par:MALLORY,cibleType:'annonce',cibleId:'s1',motif:'alcool',
        apercu:'texte de l annonce',at:new Date(),etat:'nouveau'})));
 
+/* ══ LA MESSAGERIE ═══════════════════════════════════════════════════════
+   Aucune Cloud Function derriere (plan Spark) : ces regles sont TOUT ce qui
+   separe un fil prive d'un canal de harcelement. On attaque donc dans
+   l'ordre ou un malveillant le ferait : lire un fil qui n'est pas le sien,
+   ecrire a qui l'a bloque, insister aupres de qui n'a pas repondu, s'accepter
+   soi-meme, gonfler la pastille de l'autre, deposer un message d'un mega-octet,
+   reecrire un message deja lu.
+
+   LE LOT ATOMIQUE. L'app envoie un message et la mise a jour de la
+   conversation dans UN SEUL lot (fbEnvoyerMessage). Les regles du message
+   lisent la conversation d'AVANT le lot par get() — c'est la qu'est le
+   dernier lastAt et le reqCount a verifier — et celle d'APRES par getAfter(),
+   pour exiger que la conversation soit bien mise a jour. L'epreuve « lot
+   atomique » qui passe ci-dessous PROUVE que get() renvoie l'etat d'avant :
+   si get() lisait l'etat d'apres, lastAt vaudrait l'heure de l'envoi et le
+   rythme de 700 ms refuserait tout message, toujours. ── */
+const CONV='alice_mallory', CONV2='mallory_nouveau1';
+/* Remet lastAt dans le passe, regles desactivees : chaque epreuve d'envoi
+   repart d'un fil « calme », sans attendre 700 ms d'horloge reelle. */
+async function filCalme(cid, quand){
+  await env.withSecurityRulesDisabled(c=>updateDoc(doc(c.firestore(),'conversations',cid),
+    {lastAt:Timestamp.fromMillis(quand ?? Date.now()-10000)}));
+}
+/* Reproduit fbEnvoyerMessage A L'IDENTIQUE : message + conversation, un lot. */
+function envoi(db, cid, moi, autre, msg={}, conv={}, mid){
+  const b=writeBatch(db);
+  const ref=mid ? doc(db,'conversations',cid,'messages',mid)
+                : doc(collection(db,'conversations',cid,'messages'));
+  b.set(ref,{by:moi,at:serverTimestamp(),type:'text',text:'Salut',...msg});
+  b.update(doc(db,'conversations',cid),{lastAt:serverTimestamp(),
+    lastMsg:{by:moi,type:msg.type||'text',text:String(msg.text??'Salut').slice(0,80),at:serverTimestamp()},
+    ['unread.'+autre]:increment(1),...conv});
+  return b.commit();
+}
+/* Le document exact que fbOuvrirConversation ecrit. */
+const nouvelle=(moi,autre,extra={})=>({members:[moi,autre].sort(),createdBy:moi,
+  createdAt:serverTimestamp(),state:'request',requestBy:moi,reqCount:0,
+  lastAt:serverTimestamp(),unread:{[moi]:0,[autre]:0},...extra});
+
+/* La liste de blocage : a soi, et a personne d'autre. */
+await doit('legitime : Alice bloque Mallory',
+  ()=>assertSucceeds(setDoc(doc(a,'blocks',ALICE),{list:[MALLORY],at:serverTimestamp()})));
+await doit('bloque : Mallory lit la liste de bloques d Alice',
+  ()=>assertFails(getDoc(doc(m,'blocks',ALICE))));
+await doit('bloque : Mallory se retire de la liste de bloques d Alice',
+  ()=>assertFails(setDoc(doc(m,'blocks',ALICE),{list:[],at:serverTimestamp()})));
+await doit('bloque : une liste de 201 bloques',
+  ()=>assertFails(setDoc(doc(m,'blocks',MALLORY),{list:Array(201).fill('x'),at:serverTimestamp()})));
+await doit('bloque : un champ en plus dans la liste de bloques',
+  ()=>assertFails(setDoc(doc(m,'blocks',MALLORY),{list:[],at:serverTimestamp(),note:'x'})));
+await doit('legitime : Mallory pose une liste de bloques vide',
+  ()=>assertSucceeds(setDoc(doc(m,'blocks',MALLORY),{list:[],at:serverTimestamp()})));
+
+/* La conversation : un fil par paire, membres tries et figes, nee en demande. */
+await doit('legitime : Mallory ouvre une conversation avec Alice (demande)',
+  ()=>assertSucceeds(setDoc(doc(m,'conversations',CONV),nouvelle(MALLORY,ALICE))));
+await doit('bloque : un tiers ouvre une conversation entre deux autres',
+  ()=>assertFails(setDoc(doc(nv,'conversations','admin1_alice'),nouvelle(ALICE,ADMIN))));
+await doit('bloque : membres non tries',
+  ()=>assertFails(setDoc(doc(nv,'conversations',CONV2),
+      nouvelle(NOUVEAU,MALLORY,{members:[NOUVEAU,MALLORY]}))));
+await doit('bloque : identifiant qui ne correspond pas aux membres',
+  ()=>assertFails(setDoc(doc(nv,'conversations','nouveau1_zoe'),nouvelle(NOUVEAU,MALLORY))));
+await doit('bloque : conversation nee deja ouverte (sans demande)',
+  ()=>assertFails(setDoc(doc(nv,'conversations',CONV2),nouvelle(NOUVEAU,MALLORY,{state:'open'}))));
+await doit('bloque : demande signee du nom de l autre',
+  ()=>assertFails(setDoc(doc(nv,'conversations',CONV2),nouvelle(NOUVEAU,MALLORY,{requestBy:MALLORY}))));
+await doit('bloque : non-lus deja gonfles chez l autre a la creation',
+  ()=>assertFails(setDoc(doc(nv,'conversations',CONV2),
+      nouvelle(NOUVEAU,MALLORY,{unread:{[NOUVEAU]:0,[MALLORY]:5}}))));
+await doit('bloque : conversation avec un champ en plus',
+  ()=>assertFails(setDoc(doc(nv,'conversations',CONV2),nouvelle(NOUVEAU,MALLORY,{admin:true}))));
+await doit('legitime : Alice lit la conversation dont elle est membre',
+  ()=>assertSucceeds(getDoc(doc(a,'conversations',CONV))));
+await doit('bloque : un tiers lit la conversation d Alice et Mallory',
+  ()=>assertFails(getDoc(doc(nv,'conversations',CONV))));
+
+/* La demande : un seul message pour qui ecrit le premier, rien pour l'autre
+   tant qu'elle n'a pas accepte, et seule elle peut accepter. */
+await filCalme(CONV);
+await doit('bloque : Mallory, bloquee par Alice, envoie sa demande',
+  ()=>assertFails(envoi(m,CONV,MALLORY,ALICE,{},{reqCount:1})));
+await doit('legitime : Alice debloque Mallory',
+  ()=>assertSucceeds(setDoc(doc(a,'blocks',ALICE),{list:[],at:serverTimestamp()})));
+await doit('bloque : message hors lot, sans mise a jour de la conversation',
+  ()=>assertFails(addDoc(collection(m,'conversations',CONV,'messages'),
+      {by:MALLORY,at:serverTimestamp(),type:'text',text:'Salut'})));
+await doit('bloque : Alice (destinataire) repond avant d avoir accepte',
+  ()=>assertFails(envoi(a,CONV,ALICE,MALLORY)));
+await doit('bloque : Mallory envoie sa demande sans compter reqCount',
+  ()=>assertFails(envoi(m,CONV,MALLORY,ALICE)));
+await doit('legitime : Mallory envoie son unique message de demande (lot atomique)',
+  ()=>assertSucceeds(envoi(m,CONV,MALLORY,ALICE,{},{reqCount:1},'demande1')));
+await doit('verifie : le lot a bien compte la demande et le non-lu d Alice',
+  async()=>{ const d=(await getDoc(doc(a,'conversations',CONV))).data();
+             if(d.reqCount!==1) throw new Error('reqCount = '+d.reqCount);
+             if(d.unread[ALICE]!==1) throw new Error('unread[alice] = '+d.unread[ALICE]); });
+await filCalme(CONV);
+await doit('bloque : deuxieme message de demande (reqCount 1 vers 2)',
+  ()=>assertFails(envoi(m,CONV,MALLORY,ALICE,{},{reqCount:increment(1)})));
+await doit('bloque : deuxieme message de demande en laissant reqCount a 1',
+  ()=>assertFails(envoi(m,CONV,MALLORY,ALICE)));
+await doit('bloque : Mallory (demandeuse) accepte elle-meme sa demande',
+  ()=>assertFails(updateDoc(doc(m,'conversations',CONV),{state:'open'})));
+await doit('bloque : Mallory remet reqCount a zero pour reecrire',
+  ()=>assertFails(updateDoc(doc(m,'conversations',CONV),{reqCount:0})));
+await doit('bloque : changer les membres d une conversation',
+  ()=>assertFails(updateDoc(doc(m,'conversations',CONV),{members:[MALLORY,NOUVEAU]})));
+await doit('bloque : changer l auteur de la demande',
+  ()=>assertFails(updateDoc(doc(m,'conversations',CONV),{requestBy:ALICE})));
+await doit('bloque : un etat de conversation invente',
+  ()=>assertFails(updateDoc(doc(a,'conversations',CONV),{state:'archived'})));
+await doit('legitime : Alice accepte la demande (request vers open)',
+  ()=>assertSucceeds(updateDoc(doc(a,'conversations',CONV),{state:'open'})));
+await doit('bloque : revenir a l etat request une fois ouverte',
+  ()=>assertFails(updateDoc(doc(a,'conversations',CONV),{state:'request'})));
+await filCalme(CONV);
+await doit('legitime : Alice repond dans le fil ouvert (lot atomique)',
+  ()=>assertSucceeds(envoi(a,CONV,ALICE,MALLORY,{text:'Bonjour !'},{},'reponse1')));
+
+/* Le rythme. lastAt est pose UN PEU DANS LE FUTUR (regles desactivees) : ainsi
+   l'ecart avec l'heure de l'emulateur est surement inferieur a 700 ms, quelle
+   que soit la lenteur de la machine qui fait tourner ce banc. */
+await filCalme(CONV, Date.now()+5000);
+await doit('bloque : deux messages a moins de 700 ms d intervalle',
+  ()=>assertFails(envoi(m,CONV,MALLORY,ALICE)));
+await filCalme(CONV);
+
+/* Les non-lus : les miens ne descendent qu'a zero, ceux de l'autre ne montent
+   que de un, et seulement avec un message. */
+await doit('legitime : Alice marque ses non-lus comme lus (unread[moi] a 0)',
+  ()=>assertSucceeds(updateDoc(doc(a,'conversations',CONV),{['unread.'+ALICE]:0})));
+await doit('bloque : Alice remet a zero les non-lus de Mallory',
+  ()=>assertFails(updateDoc(doc(a,'conversations',CONV),{['unread.'+MALLORY]:0})));
+await doit('bloque : gonfler les non-lus de l autre sans envoyer de message',
+  ()=>assertFails(updateDoc(doc(a,'conversations',CONV),{['unread.'+MALLORY]:increment(1)})));
+await doit('bloque : se gonfler ses propres non-lus',
+  ()=>assertFails(updateDoc(doc(a,'conversations',CONV),{['unread.'+ALICE]:9})));
+await doit('bloque : gonfler de 5 les non-lus de l autre en envoyant',
+  ()=>assertFails(envoi(m,CONV,MALLORY,ALICE,{},{['unread.'+ALICE]:increment(5)})));
+
+/* Les bornes et la forme d'un message. */
+await doit('bloque : un texte de 2001 caracteres',
+  ()=>assertFails(envoi(m,CONV,MALLORY,ALICE,{text:'x'.repeat(2001)})));
+await doit('bloque : une image de 220 001 caracteres',
+  ()=>assertFails(envoi(m,CONV,MALLORY,ALICE,{type:'image',img:'x'.repeat(220001)})));
+await doit('legitime : une image compressee par l app',
+  ()=>assertSucceeds(envoi(m,CONV,MALLORY,ALICE,
+      {type:'image',img:'data:image/jpeg;base64,'+'A'.repeat(1000)},{},'photo1')));
+await filCalme(CONV);
+await doit('bloque : un type de message invente',
+  ()=>assertFails(envoi(m,CONV,MALLORY,ALICE,{type:'html'})));
+await doit('bloque : message signe du nom de l autre',
+  ()=>assertFails(envoi(m,CONV,MALLORY,ALICE,{by:ALICE})));
+await doit('bloque : message antidate',
+  ()=>assertFails(envoi(m,CONV,MALLORY,ALICE,{at:Timestamp.fromMillis(Date.now()-86400000)})));
+await doit('bloque : un champ en plus dans un message',
+  ()=>assertFails(envoi(m,CONV,MALLORY,ALICE,{html:'<b>x</b>'})));
+await doit('bloque : une position en texte',
+  ()=>assertFails(envoi(m,CONV,MALLORY,ALICE,{type:'pos',lat:'50.8',lng:4.3})));
+await doit('legitime : partager sa position',
+  ()=>assertSucceeds(envoi(m,CONV,MALLORY,ALICE,{type:'pos',lat:50.823,lng:4.371},{},'pos1')));
+await filCalme(CONV);
+await doit('legitime : partager l emplacement d une boisson',
+  ()=>assertSucceeds(envoi(m,CONV,MALLORY,ALICE,
+      {type:'spot',storeId:'s1',storeName:'Night Ixelles',drinkId:1,drinkName:'Ramune'},{},'spot1')));
+await filCalme(CONV);
+await doit('bloque : un nom de magasin de 61 caracteres dans un emplacement',
+  ()=>assertFails(envoi(m,CONV,MALLORY,ALICE,{type:'spot',storeId:'s1',storeName:'x'.repeat(61)})));
+
+/* Immuable, effacable par son auteur, lisible par les membres seuls. */
+await doit('bloque : modifier un message envoye',
+  ()=>assertFails(updateDoc(doc(m,'conversations',CONV,'messages','demande1'),{text:'modifie'})));
+await doit('bloque : effacer le message d un autre',
+  ()=>assertFails(deleteDoc(doc(a,'conversations',CONV,'messages','demande1'))));
+await doit('legitime : Mallory efface son propre message',
+  ()=>assertSucceeds(deleteDoc(doc(m,'conversations',CONV,'messages','demande1'))));
+await doit('legitime : l admin efface un message',
+  ()=>assertSucceeds(deleteDoc(doc(ad,'conversations',CONV,'messages','pos1'))));
+await doit('legitime : Alice lit le fil',
+  ()=>assertSucceeds(getDocs(collection(a,'conversations',CONV,'messages'))));
+/* La requete EXACTE de la boite de reception (array-contains + orderBy + limit) :
+   une regle qui passe en lecture directe peut refuser la requete si le moteur
+   ne sait pas la prouver. C'est ce que l'app fait au demarrage. */
+await doit('legitime : la requete de la boite de reception d un membre',
+  ()=>assertSucceeds(getDocs(query(collection(a,'conversations'),where('members','array-contains',ALICE),orderBy('lastAt','desc'),limit(50)))));
+await doit('bloque : la boite de reception de quelqu un d autre',
+  ()=>assertFails(getDocs(query(collection(m,'conversations'),where('members','array-contains',ALICE),orderBy('lastAt','desc'),limit(50)))));
+await doit('bloque : un tiers lit le fil',
+  ()=>assertFails(getDocs(collection(nv,'conversations',CONV,'messages'))));
+await doit('bloque : un tiers lit un message par son identifiant',
+  ()=>assertFails(getDoc(doc(nv,'conversations',CONV,'messages','reponse1'))));
+await doit('bloque : effacer une conversation',
+  ()=>assertFails(deleteDoc(doc(a,'conversations',CONV))));
+
+/* Le blocage prend effet au milieu d'un fil ouvert, immediatement. */
+await doit('legitime : Alice bloque Mallory en pleine conversation',
+  ()=>assertSucceeds(setDoc(doc(a,'blocks',ALICE),{list:[MALLORY],at:serverTimestamp()})));
+await filCalme(CONV);
+await doit('bloque : Mallory ecrit a Alice qui vient de la bloquer',
+  ()=>assertFails(envoi(m,CONV,MALLORY,ALICE)));
+await doit('legitime : Alice debloque Mallory a nouveau',
+  ()=>assertSucceeds(setDoc(doc(a,'blocks',ALICE),{list:[],at:serverTimestamp()})));
+
+/* Le refus : plus personne n'ecrit, et on ne rouvre pas. */
+await doit('legitime : Nouveau fait une demande a Mallory',
+  ()=>assertSucceeds(setDoc(doc(nv,'conversations',CONV2),nouvelle(NOUVEAU,MALLORY))));
+await doit('legitime : Mallory refuse la demande',
+  ()=>assertSucceeds(updateDoc(doc(m,'conversations',CONV2),{state:'declined'})));
+await filCalme(CONV2);
+await doit('bloque : ecrire dans une conversation refusee',
+  ()=>assertFails(envoi(nv,CONV2,NOUVEAU,MALLORY,{},{reqCount:1})));
+await doit('bloque : rouvrir une conversation refusee',
+  ()=>assertFails(updateDoc(doc(m,'conversations',CONV2),{state:'open'})));
+
+/* « Ses derniers gestes » sur le profil public : cinq au plus, type ferme,
+   libelles courts, et jamais de coordonnees. */
+const geste=(i)=>({t:'confirm',d:'Ramune '+i,s:'Night Ixelles',j:'2026-09-0'+(i%9+1)});
+await doit('legitime : cinq derniers gestes sur le profil',
+  ()=>assertSucceeds(setDoc(doc(a,'users',ALICE),{recent:[0,1,2,3,4].map(geste)},{merge:true})));
+await doit('bloque : six derniers gestes',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),{recent:[0,1,2,3,4,5].map(geste)},{merge:true})));
+await doit('bloque : un geste d un type invente',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),
+      {recent:[{t:'insulte',d:'x',s:'y',j:'2026-09-01'}]},{merge:true})));
+await doit('bloque : un geste avec des coordonnees',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),
+      {recent:[{t:'scan',d:'x',s:'y',j:'2026-09-01',lat:50.8}]},{merge:true})));
+await doit('bloque : un nom de boisson de 41 caracteres dans un geste',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),
+      {recent:[{t:'scan',d:'x'.repeat(41),s:'y',j:'2026-09-01'}]},{merge:true})));
+await doit('bloque : un geste piege cache en cinquieme position',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),
+      {recent:[geste(0),geste(1),geste(2),geste(3),{t:'scan',d:'x',s:'y',j:'2026-09-01',lat:1}]},{merge:true})));
+await doit('bloque : recent qui n est pas une liste',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),{recent:'x'},{merge:true})));
 /* LE JOURNAL DES ALERTES. Il ne vaut que s'il est incontestable : personne
    d'autre que les Cloud Functions ne doit pouvoir y ecrire, et personne
    d'autre que l'administrateur ne doit pouvoir le lire. */
