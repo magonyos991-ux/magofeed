@@ -208,3 +208,143 @@ function tr(fr) {
     return e[lg] || s;
   } catch (e) { return String(fr == null ? "" : fr); }
 }
+
+/* ============================================================================
+   TRADUIRE CE QUI EST ÉCRIT DANS LE HTML, SANS TOUCHER AU HTML
+   ----------------------------------------------------------------------------
+   tr() ne servait qu'à toast(). Les 165 messages en profitaient ; les boutons,
+   les titres, les étiquettes de champ et les libellés d'accessibilité — écrits
+   directement entre les balises — restaient en français quelle que soit la
+   langue choisie. La feuille « Proposer une boisson » en est l'exemple complet :
+   titre, indice photo, deux champs, bouton d'envoi, tout en dur.
+
+   LA MÊME IDÉE QUE POUR LES MESSAGES : LE TEXTE FRANÇAIS EST LA CLÉ. On parcourt
+   la page, et chaque texte qui figure dans TEXTES est remplacé par sa version
+   dans la langue courante. Aucun des 300 endroits concernés n'a besoin d'être
+   modifié, donc aucune ligne d'interface n'est mise en danger.
+
+   TROIS PRÉCAUTIONS QUI COMPTENT :
+
+   1. ON MÉMORISE LE FRANÇAIS D'ORIGINE, et on traduit toujours À PARTIR DE LUI.
+      Sans ça, passer de l'espagnol au turc traduirait de l'espagnol — c'est-à-
+      dire ne trouverait plus rien, et figerait l'app dans la première langue
+      choisie.
+
+   2. ON REPÈRE QUAND L'APP A RÉÉCRIT LE TEXTE ELLE-MÊME. On retient aussi ce
+      qu'on a affiché en dernier : si ce qu'on lit ne correspond plus, c'est que
+      le code a écrit autre chose depuis, et l'ancien original ne vaut plus.
+      Sans cette vérification, un compteur ou un nom de magasin fraîchement
+      affiché serait écrasé par la traduction du texte précédent.
+
+   3. ON SUIT LES ÉCRANS QUI NAISSENT APRÈS COUP. Feuilles, listes et fiches sont
+      construites à l'ouverture, bien après le choix de la langue. Un observateur
+      traduit ce qui arrive, sinon la moitié de l'app resterait française pour
+      la seule raison qu'elle s'affiche plus tard.
+
+   CE QUI EST LAISSÉ TRANQUILLE : les éléments marqués data-i18n (setLang s'en
+   occupe déjà, avec des clés courtes), les zones de code, et tout élément
+   portant data-sans-tr. ========================================================= */
+
+var _TR_TXT = (typeof WeakMap === "function") ? new WeakMap() : null;
+var _TR_ATT = (typeof WeakMap === "function") ? new WeakMap() : null;
+var _TR_ATTRS = ["placeholder", "aria-label", "title", "alt"];
+var _TR_MUET = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, CODE: 1, PRE: 1, NOSCRIPT: 1 };
+var _trEnCours = false;
+
+/* Renvoie le français d'origine, en le (re)mémorisant si l'app a écrit depuis. */
+function _trBase(carte, cle, actuel) {
+  if (!carte) return actuel;
+  var e = carte.get(cle);
+  if (!e || e.rendu !== actuel) { e = { fr: actuel, rendu: actuel }; carte.set(cle, e); }
+  return e.fr;
+}
+function _trPose(carte, cle, valeur) {
+  if (!carte) return;
+  var e = carte.get(cle);
+  if (e) e.rendu = valeur;
+}
+
+function _trSauteElement(el) {
+  for (var n = el; n && n.nodeType === 1; n = n.parentNode) {
+    if (_TR_MUET[n.nodeName]) return true;
+    if (n.hasAttribute && (n.hasAttribute("data-i18n") || n.hasAttribute("data-sans-tr"))) return true;
+  }
+  return false;
+}
+
+function traduirePage(racine) {
+  if (_trEnCours) return;
+  if (typeof document === "undefined") return;
+  racine = racine || document.body;
+  if (!racine || !racine.nodeType) return;
+  _trEnCours = true;
+  try {
+    /* les textes entre balises */
+    var w = document.createTreeWalker(racine, NodeFilter.SHOW_TEXT, null, false), n;
+    var lot = [];
+    while ((n = w.nextNode())) lot.push(n);
+    for (var i = 0; i < lot.length; i++) {
+      var t = lot[i];
+      if (!t.nodeValue || !t.nodeValue.trim()) continue;
+      if (!t.parentNode || _trSauteElement(t.parentNode)) continue;
+      var brut = t.nodeValue;
+      var fr = _trBase(_TR_TXT, t, brut);
+      /* on préserve les espaces autour : « ✕ Fermer » ne doit pas se recoller */
+      var noyau = fr.trim();
+      var trad = tr(noyau);
+      /* Pas de raccourci « rien a traduire » ici. La version precedente sortait
+         des que la traduction egalait le francais — ce qui est exactement le cas
+         AU RETOUR VERS LE FRANCAIS, ou tr() rend le texte tel quel. Elle laissait
+         donc la traduction affichee : repasser en francais ne changeait plus
+         rien, l'app restait bloquee dans la derniere langue choisie. On calcule
+         toujours la sortie, et on ecrit des qu'elle differe de l'affiche. */
+      var sortie = (trad === noyau) ? fr : fr.replace(noyau, trad);
+      if (sortie !== brut) t.nodeValue = sortie;
+      _trPose(_TR_TXT, t, t.nodeValue);
+    }
+    /* les attributs lisibles */
+    var els = racine.querySelectorAll ? racine.querySelectorAll("[placeholder],[aria-label],[title],[alt]") : [];
+    for (var k = 0; k < els.length; k++) {
+      var el = els[k];
+      if (_trSauteElement(el)) continue;
+      var sac = _TR_ATT.get(el);
+      if (!sac) { sac = {}; _TR_ATT.set(el, sac); }
+      for (var a = 0; a < _TR_ATTRS.length; a++) {
+        var nom = _TR_ATTRS[a];
+        if (!el.hasAttribute(nom)) continue;
+        var val = el.getAttribute(nom);
+        if (!val || !val.trim()) continue;
+        var e = sac[nom];
+        if (!e || e.rendu !== val) { e = { fr: val, rendu: val }; sac[nom] = e; }
+        var tv = tr(e.fr);
+        if (tv !== val) el.setAttribute(nom, tv);
+        e.rendu = tv;
+      }
+    }
+  } catch (e) { /* jamais au prix de l'affichage */ }
+  _trEnCours = false;
+}
+
+/* Les écrans construits après coup. On regroupe les arrivées dans un seul
+   passage : ouvrir une liste de cent magasins déclenche cent notifications, et
+   les traiter une par une ferait cent parcours du DOM. */
+var _trEnAttente = null;
+function _trObserver() {
+  if (typeof MutationObserver !== "function" || typeof document === "undefined") return;
+  new MutationObserver(function (lots) {
+    if (_trEnCours) return;
+    if (typeof curLang === "undefined" || curLang === "fr") return;
+    for (var i = 0; i < lots.length; i++) {
+      if (lots[i].addedNodes && lots[i].addedNodes.length) {
+        if (_trEnAttente) return;
+        _trEnAttente = setTimeout(function () { _trEnAttente = null; traduirePage(document.body); }, 60);
+        return;
+      }
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+}
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading")
+    document.addEventListener("DOMContentLoaded", _trObserver);
+  else _trObserver();
+}

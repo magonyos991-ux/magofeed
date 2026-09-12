@@ -5054,6 +5054,11 @@ function setLang(l){
     var k=el.getAttribute("data-i18n");
     if(T[k]!=null)el.textContent=T[k];
   });
+  /* Tout ce qui est ecrit en dur dans le HTML — boutons, titres, etiquettes de
+     champ, libelles d'accessibilite. Place AVANT le retour anticipe ci-dessous,
+     sinon la langue enregistree ne s'appliquerait pas au demarrage : on
+     rouvrirait l'app en francais apres avoir choisi le turc la veille. */
+  try{if(typeof traduirePage==="function")traduirePage(document.body);}catch(e){}
   // Zones dynamiques : re-rendre dans la nouvelle langue, a l'instant.
   // PAS au demarrage (application de la langue sauvegardee) : ces re-rendus
   // remplissaient la file d'images avec l'ecran recherche et diluaient
@@ -5083,6 +5088,11 @@ function setLang(l){
   Object.keys(ids).forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=ids[id];});
   var ph=document.getElementById("t-placeholder");if(ph)ph.placeholder=T.placeholder;
   renderLangGrid();renderDiscoveries();
+  /* Second passage : les re-rendus ci-dessus viennent de reconstruire des pans
+     entiers d'interface, en francais. L'observateur les rattraperait, mais avec
+     un battement visible — on ne laisse pas l'utilisateur voir le francais
+     clignoter au moment precis ou il change de langue. */
+  try{if(typeof traduirePage==="function")traduirePage(document.body);}catch(e){}
 }
 function langLabel(k){return String(LANGS[k].name).replace(/[\u{1F1E6}-\u{1F1FF}]/gu,"").trim();}
 /* L'ancienne grille de 10 boutons monopolisait tout l'ecran des reglages.
@@ -8528,7 +8538,7 @@ function openBarcodeDispute(drink,code){
     '</div>'+
     '<input id="dispute-name" type="text" placeholder="Nom exact lu sur l\'\u00E9tiquette" autocomplete="off" '+
       'style="width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:13px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none;text-align:center">'+
-    '<div id="dispute-hint" style="font-size:11px;color:var(--s3);text-align:center;margin-top:6px;min-height:14px">Recherche du vrai nom\u2026</div>'+
+    '<div id="dispute-hint" data-attente="1" style="font-size:11px;color:var(--s3);text-align:center;margin-top:6px;min-height:14px">Recherche du vrai nom\u2026</div>'+
     '<div id="dispute-new" role="button" tabindex="0" style="margin-top:8px;text-align:center;font-size:12.5px;font-weight:800;color:#fff;background:#e67e22;border-radius:12px;padding:12px;cursor:pointer;-webkit-tap-highlight-color:transparent">Ce produit n\'est pas encore dans Magofeed</div>'+
     '<div id="dispute-other" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:12px;font-weight:700;color:var(--s1);background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:11px;cursor:pointer;-webkit-tap-highlight-color:transparent">C\'est une autre boisson d\u00E9j\u00E0 au catalogue</div>'+
     '<div id="dispute-cancel" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:11.5px;font-weight:700;color:var(--s2);padding:8px;cursor:pointer;-webkit-tap-highlight-color:transparent">Annuler \u2014 c\'\u00E9tait bien \u00E7a</div>'+
@@ -8549,9 +8559,14 @@ function openBarcodeDispute(drink,code){
       if(!best||!best.name)return;
       offBrand=best.brand||""; offCat=best.cat||"";
       if(input&&!input.value)input.value=best.name;
-      if(hint)hint.textContent="Nom trouv\u00E9 sur OpenFoodFacts \u2014 corrige-le si besoin";
-    }).catch(function(){ if(hint)hint.textContent=""; });
-    setTimeout(function(){ if(hint&&hint.textContent==="Recherche du vrai nom\u2026")hint.textContent=""; },6000);
+      /* Le marqueur remplace une comparaison de texte : « l'indice affiche-t-il
+         encore le message d'attente ? » se lisait en comparant textContent a la
+         phrase francaise. Des que l'interface est traduite, cette comparaison
+         echoue dans les neuf autres langues et l'indice d'attente ne s'efface
+         plus jamais. Un attribut ne depend d'aucune langue. */
+      if(hint){hint.textContent="Nom trouv\u00E9 sur OpenFoodFacts \u2014 corrige-le si besoin";hint.removeAttribute("data-attente");}
+    }).catch(function(){ if(hint){hint.textContent="";hint.removeAttribute("data-attente");} });
+    setTimeout(function(){ if(hint&&hint.getAttribute("data-attente")==="1"){hint.textContent="";hint.removeAttribute("data-attente");} },6000);
   } else if(hint){ hint.textContent=""; }
   function valider(){
     var nm=(input&&input.value||"").trim();
