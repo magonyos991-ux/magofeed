@@ -64,6 +64,10 @@ function estTechnique(s) {
   if (/^(https?:|data:|mailto:|\/|#|\.|\w+:\/\/)/.test(s)) return true;
   if (/[:;]\s*[-\w]+\s*[:;]/.test(s) && /px|rem|%|var\(|#[0-9a-f]{3,6}|flex|grid|rgba?\(/i.test(s)) return true;
   if (/^[\w-]+(\.[\w-]+)+$/.test(s)) return true;                 /* a.b.c */
+  /* "system-ui,sans-serif" contient le mot francais "sans" : sans ce filtre,
+     chaque icone dessinee etait signalee comme du francais a traduire. Une
+     pile de polices n'est pas une phrase. */
+  if (/font-family|sans-serif|monospace/.test(s)) return true;
   if (/^[A-Za-z_$][\w$]*$/.test(s)) return true;                  /* identifiant */
   /* Un seul mot, sans espace, sans accent, fait de lettres et de tirets :
      c'est une classe CSS ou un identifiant ("th-on", "map-wrap"), pas une
@@ -107,6 +111,32 @@ function estGardeAdmin(n) {
 const FONCTIONS_ADMIN = new Set([
   "actionSensible",     /* garde-fou de confirmation : 4 appels, tous cote admin */
   "journalAdmin",       /* trace des actions d'administration */
+  /* Le panneau d'administration (lignes ~21400 a ~22600) : ces fonctions
+     dessinent des ecrans que seul le proprietaire ouvre. Elles n'ont pas
+     toutes le garde "isAdmin" en tete parce qu'elles sont appelees depuis une
+     fonction qui l'a deja. Liste etablie en remontant, pour chaque phrase
+     signalee, jusqu'a la fonction qui la contient — si une de ces fonctions
+     sert un jour a l'interface publique, il faut la retirer d'ici. */
+  "adminBasculerCertif", "_lancerAssignation", "_lancerAssignationSur",
+  "_lancerPurge", "vIds",
+  "bannerReportStore", "majBoutonCertif", "renderSearchStats", "onlineTile",
+  "_recapMessage", "_contribTypeLabel", "renderContribFeed", "bloc", "stars",
+  "renderAdminHistory", "_claimStatutChip", "renderShopClaims", "_boutonReprise",
+  "admCertifierUn", "admReprendrePhotos", "admApproveClaim", "admRevokeClaim",
+  "renderPhotoSuggestions", "promoteDiscovery", "rejectDiscovery",
+  "rejectDiscoveryPhoto", "renderFounderDash", "renderDemandAdmin",
+  "renderFeedbackAdmin",
+  /* buildChainSets ne contient pas des phrases mais des CLES DE RAPPROCHEMENT :
+     "mountain dew sans" sert a retrouver une boisson dans le catalogue, pas a
+     etre lu. La traduire casserait le rapprochement sans rien afficher de
+     mieux. */
+  "buildChainSets",
+  /* Cas a part, et pour une tout autre raison : generatePseudo tire au sort un
+     surnom dans deux listes de mots. Ce ne sont pas des phrases d'interface,
+     ce sont des noms de personnes. Traduire « Panthere » ferait qu'un meme
+     utilisateur s'appellerait autrement selon la langue de qui le regarde —
+     un classement ou personne ne se reconnait. On n'y touche pas. */
+  "generatePseudo",
 ]);
 const RE_ADMIN = /admin|Admin|ADMIN/;
 
@@ -118,6 +148,7 @@ while ((m = re.exec(html)) !== null) {
 }
 
 const trouves = new Map();
+const promesses = new Set();
 let analyses = 0, illisibles = 0;
 for (const b of blocs) {
   let arbre;
@@ -134,6 +165,24 @@ for (const b of blocs) {
     if (n.type === "CallExpression" && n.callee && n.callee.type === "MemberExpression" &&
         n.callee.object && n.callee.object.name === "console") dansConsole = true;
     if (/Function/.test(n.type) && (estGardeAdmin(n) || (n.id && FONCTIONS_ADMIN.has(n.id.name)))) dansConsole = true;
+    /* Beaucoup de ces fonctions sont ecrites "var bloc = function(){…}" : le
+       noeud Function n'a alors pas de nom a lui, le nom est sur la variable.
+       Sans ce cas, la liste ci-dessus rate justement les fonctions internes du
+       panneau d'administration, qui sont presque toutes ecrites ainsi. */
+    if (n.type === "VariableDeclarator" && n.id && FONCTIONS_ADMIN.has(n.id.name) &&
+        n.init && /Function|ArrowFunction/.test(n.init.type)) dansConsole = true;
+    /* Un appel tr("…") ou trh("…", …) est une promesse : le code annonce que
+       cette phrase est traduisible. Si elle n'est pas dans la table, la
+       promesse est vide — l'utilisateur voit du francais et rien ne le dit.
+       On les releve a part, parce que c'est une erreur franche, pas une
+       heuristique de langue. */
+    if (n.type === "CallExpression" && n.callee && n.callee.type === "Identifier" &&
+        (n.callee.name === "tr" || n.callee.name === "trh") &&
+        n.arguments[0] && n.arguments[0].type === "Literal" &&
+        typeof n.arguments[0].value === "string") {
+      const c = n.arguments[0].value;
+      if (c && !TEXTES[c] && !TEXTES[c.trim()]) promesses.add(c);
+    }
     if (n.type === "Literal" && typeof n.value === "string" && !dansConsole) {
       const s = n.value.trim();
       if (s && !estTechnique(s) && !TEXTES[s] && !TEXTES[n.value] && estFrancais(s)) {
@@ -168,6 +217,45 @@ function couvertParUnAssemblage(s) {
 }
 for (const s of [...trouves.keys()]) if (couvertParUnAssemblage(s)) trouves.delete(s);
 
+/* Une chaine du code n'est pas toujours une phrase : souvent c'est un bout de
+   HTML, "<div class=…>Tes avantages</div>". Ce que l'utilisateur lit, c'est
+   "Tes avantages", et c'est ce texte-la, seul, que la passe DOM comparera a la
+   table. Si tous les morceaux lisibles d'une chaine sont deja traduits, la
+   chaine n'a plus rien a nous dire — la signaler quand meme gonflerait le
+   compte et ferait croire qu'il reste du travail la ou il n'y en a plus. */
+function morceauxVisibles(texte) {
+  const out = [];
+  /* Les libelles d'accessibilite vivent dans des ATTRIBUTS, pas entre les
+     balises : aria-label, title, placeholder, alt. La passe DOM les traduit
+     aussi. Sans les lire ici, une fiche entierement traduite restait signalee
+     a cause de son seul bouton « Centrer sur moi ». */
+  /* On memorise le guillemet ouvrant et on ferme sur le meme : sinon
+     placeholder="Nom exact lu sur l'etiquette" s'arretait a l'apostrophe et
+     donnait un morceau tronque, qui ne correspondait a rien. */
+  const attr = /\b(?:aria-label|title|placeholder|alt)=(["'])((?:(?!\1)[\s\S])*)\1/g;
+  let ma;
+  while ((ma = attr.exec(texte)) !== null) {
+    const v = ma[2].replace(/\s+/g, " ").trim();
+    if (v) out.push(v);
+  }
+  for (const p0 of texte.split(/<[^>]*>/)) {
+    let p = p0;
+    if (p.indexOf(">") !== -1) p = p.slice(p.lastIndexOf(">") + 1);
+    if (p.indexOf("<") !== -1) p = p.slice(0, p.indexOf("<"));
+    const m = p.replace(/\s+/g, " ").trim();
+    if (m && m.length >= 3 && !/=["']|event\.|function\s*\(|\bthis\b/.test(m)) out.push(m);
+  }
+  return out;
+}
+for (const [s] of [...trouves.entries()]) {
+  const parts = morceauxVisibles(s);
+  /* Aucun morceau lisible : la chaine s'arrete au milieu d'une balise ou d'un
+     attribut ('<button class="th-plus" aria-label="'). Il n'y a rien a y lire,
+     donc rien a y traduire — la signaler enverrait chercher une phrase qui
+     n'existe pas. */
+  if (parts.every((m) => TEXTES[m] || !estFrancais(m))) trouves.delete(s);
+}
+
 const liste = [...trouves.entries()].sort((a, b) => a[1] - b[1]);
 const admin = liste.filter(([s]) => RE_ADMIN.test(s));
 const vus = liste.filter(([s]) => !RE_ADMIN.test(s));
@@ -185,5 +273,9 @@ console.log("blocs <script> analyses : " + analyses + (illisibles ? "  (" + illi
 console.log("\nCHAINES FRANCAISES HORS TABLE : " + vus.length);
 for (const [s, l] of vus) console.log("  index.html:" + l + "  " + JSON.stringify(s.length > 110 ? s.slice(0, 110) + "…" : s));
 if (admin.length) console.log("\n(dont mentions d'administration, a part : " + admin.length + ")");
-process.exitCode = vus.length ? 1 : 0;
+if (promesses.size) {
+  console.log("\nAPPELS tr()/trh() SANS ENTREE DANS LA TABLE : " + promesses.size);
+  for (const c of promesses) console.log("  " + JSON.stringify(c));
+}
+process.exitCode = (vus.length || promesses.size) ? 1 : 0;
 }
