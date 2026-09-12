@@ -6578,7 +6578,7 @@ function updateProfileStats(){
        passait rien. Elle ouvre maintenant « Tes points », qui montre ce qu'il
        reste a gagner ET ce que chaque palier suivant debloque. */
     lvHost.innerHTML='<div class="lvl-card" role="button" tabindex="0" '+
-      'aria-label="Niveau '+(lv.idx+1)+', '+attr(lv.name)+'. Voir tes points et les prochains niveaux" '+
+      'aria-label="'+attr(trh("Niveau {n}, {t}. Voir tes points et les prochains niveaux",{n:lv.idx+1,t:lv.name}))+'" '+
       'onclick="show(\'rewards\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();show(\'rewards\');}">'+
       '<div class="lvl-top">'+
         '<span class="lvl-name"><span class="lvl-num">'+(lv.idx+1)+'</span>Niveau '+(lv.idx+1)+' \u00B7 '+sanitize(lv.name)+'</span>'+
@@ -9523,7 +9523,7 @@ function bumpStreak(){
   try{localStorage.setItem("magoStreak",JSON.stringify(userStreak));}catch(e){/* quota */}
   if(userStreak.streak>=2){
     userStats.pts+=2;
-    toast(""+userStreak.streak+" jours d'affil\u00E9e ! +2 pts bonus");
+    toast(trh("{n} jour(s) d'affil\u00E9e ! +2 pts bonus",{n:userStreak.streak}));
   }
   renderStreak();
 }
@@ -9863,7 +9863,7 @@ function renderBrandsRail(){
       '<span class="bt-count">'+g.drinks.length+'</span></div>'+
       '<div class="bt-name">'+sanitize(g.brand)+'</div>';
     div.onclick=function(){openBrand(g.brand);};
-    a11yCard(div,"Marque "+g.brand+", "+g.drinks.length+" boisson"+(g.drinks.length>1?"s":""));
+    a11yCard(div,trh("Marque {b}, {n} boisson(s)",{b:g.brand,n:g.drinks.length}));
     el.appendChild(div);
   });
   try{el.classList.remove("swap");void el.offsetWidth;el.classList.add("swap");}catch(e){}
@@ -13532,7 +13532,7 @@ function renderAlertsCard(){
     return '<div class="swp" data-del="alert:'+w.id+'"><div class="swp-bg">'+
       (typeof icoTrash==="function"?icoTrash(16):"")+'<span>Supprimer</span></div>'+
       '<div class="swp-fg" style="--swp-face:var(--bg2)"><div class="alert-row" style="display:flex;align-items:center;gap:12px;padding:11px 0'+(last?"":";border-bottom:1px solid var(--border)")+'" data-wid="'+w.id+'">'+
-      '<span style="width:46px;height:46px;border-radius:13px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" role="button" tabindex="0" aria-label="Voir '+attr(w.name)+' sur la carte" onkeydown="if(event.key===\'Enter\'){this.click();}" onclick="event.stopPropagation();alertOpenOnMap('+w.id+')">'+thumb+'</span>'+
+      '<span style="width:46px;height:46px;border-radius:13px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" role="button" tabindex="0" aria-label="'+attr(trh("Voir {t} sur la carte",{t:w.name}))+'" onkeydown="if(event.key===\'Enter\'){this.click();}" onclick="event.stopPropagation();alertOpenOnMap('+w.id+')">'+thumb+'</span>'+
       '<span style="flex:1;min-width:0;cursor:pointer" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')this.click()" onclick="'+lineAction+'">'+
         '<span style="display:block;font-size:14px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(w.name)+'</span>'+
         '<span style="display:block;margin-top:4px">'+pill+'</span>'+
@@ -22985,7 +22985,7 @@ function openUserProfile(u){
        son propre profil (paliers, progression), au nom du joueur regarde. */
     return h+'<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px">'+ppBadges.map(function(b,i){
         var ring=(TIER_COLORS&&TIER_COLORS[b.tier-1])||"var(--border)";
-        return '<button data-pb="'+i+'" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--bg2);border:1.5px solid '+ring+';cursor:pointer;font:inherit" aria-label="Badge '+b.name+', voir le detail"><span style="display:flex;color:'+ring+'">'+badgeIcon(b.key,16,ring)+'</span><span style="font-size:11.5px;font-weight:800;color:var(--s1)">'+b.name+(TIER_NAMES&&b.tier>1?' '+TIER_NAMES[b.tier-1]:'')+'</span></button>';
+        return '<button data-pb="'+i+'" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--bg2);border:1.5px solid '+ring+';cursor:pointer;font:inherit" aria-label="'+attr(trh("Badge {t}, voir le detail",{t:b.name}))+'"><span style="display:flex;color:'+ring+'">'+badgeIcon(b.key,16,ring)+'</span><span style="font-size:11.5px;font-weight:800;color:var(--s1)">'+b.name+(TIER_NAMES&&b.tier>1?' '+TIER_NAMES[b.tier-1]:'')+'</span></button>';
       }).join("")+'</div>';
   })()+
   '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:8px" data-i18n="ppGestes">'+_tr("ppGestes")+'</div>'+
@@ -23950,7 +23950,7 @@ function renderUserSearchList(){
         var favs=(u.favs||[]).map(function(id){return DRINKS.find(function(d){return Number(d.id)===Number(id);});}).filter(Boolean).slice(0,4);
         if(favs.length){
           favHTML='<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'+favs.map(function(d){
-            return '<span class="usr-fav" data-drink="'+d.id+'" role="button" tabindex="0" aria-label="Voir '+attr(d.name)+'" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px 5px 5px;border-radius:999px;background:'+d.light+';cursor:pointer"><span style="width:24px;height:24px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:13px">'+drinkIconHTML(d)+'</span><span style="font-size:11px;font-weight:700;color:'+d.color+'">'+sanitize(d.name)+'</span></span>';
+            return '<span class="usr-fav" data-drink="'+d.id+'" role="button" tabindex="0" aria-label="'+attr(trh("Voir {t}",{t:d.name}))+'" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px 5px 5px;border-radius:999px;background:'+d.light+';cursor:pointer"><span style="width:24px;height:24px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:13px">'+drinkIconHTML(d)+'</span><span style="font-size:11px;font-weight:700;color:'+d.color+'">'+sanitize(d.name)+'</span></span>';
           }).join("")+'</div>';
         }
         card.innerHTML='<div style="display:flex;align-items:center;gap:12px">'+

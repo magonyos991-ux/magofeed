@@ -106,7 +106,12 @@ const statique = code.replace(/(<script\b[^>]*>)([\s\S]*?)(<\/script>)/gi,
 const scripts = code.replace(/(<script\b[^>]*>)([\s\S]*?)(<\/script>)/gi,
   (_, o, corps, f) => blanc(o) + corps + blanc(f));
 
-const FRANCAIS = /[éèêàùçôîâûëïÉÈÊÀÇÔÎÂÛ]|\b(?:le|la|les|un|une|des|du|ton|ta|tes|ce|cette|dans|pour|avec|sans|que|qui|est|sont|sur|plus|tout|toute|pas|aucun|aucune|quand|tu|vous|nous|elle|il|son|sa|ses|leur|mais|donc|ou|et|déjà|encore|jamais|toujours|choisir|prendre|envoyer|ajouter|photo|nom|marque)\b/i;
+/* RECONNAITRE UNE PHRASE FRANCAISE SANS SE FIER AUX SEULS ACCENTS.
+   La version precedente exigeait un accent ou un mot-outil. « Magasin » —
+   l'en-tete de la fiche magasin, lue par tout le monde — n'a ni l'un ni l'autre
+   et passait donc a la trappe, pour rester francais dans les neuf autres
+   langues. On ajoute les noms courants de l'interface, sans accent. */
+const FRANCAIS = /[éèêàùçôîâûëïÉÈÊÀÇÔÎÂÛ]|\b(?:le|la|les|un|une|des|du|ton|ta|tes|ce|cette|dans|pour|avec|sans|que|qui|est|sont|sur|plus|tout|toute|pas|aucun|aucune|quand|tu|vous|nous|elle|il|son|sa|ses|leur|mais|donc|ou|et|déjà|encore|jamais|toujours|choisir|prendre|envoyer|ajouter|photo|nom|marque|magasin|magasins|boisson|boissons|produit|produits|compte|comptes|message|messages|point|points|niveau|carte|code|prix|ville|rue|jour|jours|mois|oui|non|moins|comment|nouveau|nouvelle|voir|dire|aider|chasse|chasses|scanner|partager|fermer|ouvrir|retour|suivant|valider|annuler|rechercher|reglages|profil|classement|badge|badges|favori|favoris)\b/i;
 
 /* Ce qui est déjà traduit ne doit plus apparaître : sinon le total ne baisse
    jamais et l'inventaire cesse de dire où on en est. */
@@ -172,7 +177,11 @@ function ajoute(texte, genre, pos, admin, zone) {
   const t = brut.replace(/[ \t\u00A0]+/g, " ").replace(/ *\n */g, "\n").trim();
   if (t.length < 3) return;
   if (!FRANCAIS.test(t)) return;
-  if (/^[\w-]+$/.test(t)) return;                 // un seul mot technique
+  /* Un mot seul n'est un identifiant technique que s'il en a la forme : tout en
+     minuscules, avec tirets ou soulignes. « Magasin », l'en-tete de la fiche
+     magasin, etait ecarte par la regle precedente qui rejetait TOUT mot unique —
+     et restait donc francais dans les neuf autres langues. */
+  if (/^[a-z0-9_-]+$/.test(t)) return;
   if (/^(https?:|\/|#|data:|var\(|rgba?\()/.test(t)) return;
   if (/^[\d\s.,:;%+\-–—·•|/€$()]*$/.test(t)) return;
   if (dejaTraduit.has(t)) return;
@@ -276,6 +285,27 @@ for (const [re, genre] of CONTEXTES) {
   }
 }
 
+/* ---------- 2 bis. LE HTML CONSTRUIT DANS DU JAVASCRIPT ---------------------
+   el.innerHTML = '<div class="t-section">Boisson du moment</div>' + … : le titre
+   est un texte lu par tout le monde, mais il vit dans une chaine qui contient des
+   balises. Le contexte « innerHTML » ci-dessus refuse les chevrons, justement
+   pour ne pas relever du balisage — il laissait donc passer tous les ecrans
+   assembles a la volee, dont la section « Boisson du moment » de l'accueil.
+
+   On relit ces chaines a part, et on n'en garde que ce qui est ENTRE deux
+   balises : le texte, jamais le balisage. Les fragments qui portent une
+   concatenation sont ecartes plus loin, comme partout ailleurs. */
+{
+  const re = /\b(?:innerHTML|outerHTML)\s*=\s*(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\$]|\\.)*)`)/g;
+  let m;
+  while ((m = re.exec(scripts))) {
+    const html = m[1] !== undefined ? m[1] : (m[2] !== undefined ? m[2] : m[3]);
+    if (!html || html.indexOf("<") < 0) continue;
+    for (const t of html.matchAll(/>([^<>]{3,200})</g))
+      ajoute(t[1], "html", m.index, /admin/i.test(fonctionEn(m.index)), ZONE_CODE);
+  }
+}
+
 /* ---------- 3. LE RAPPORT --------------------------------------------------- */
 const tout = [...trouves.entries()].map(([texte, e]) => ({
   texte, genres: [...e.genres].join("+"), occurrences: e.n,
@@ -290,6 +320,11 @@ if (process.argv.includes("--json")) {
   console.log("TEXTES VISIBLES NON TRADUITS (utilisateur) : " + utilisateur.length);
   console.log("écrans d'administration, comptés à part     : " + admin.length);
   console.log("messages composés (clés à trous, à part)     : " + composes.size + "\n");
+  if (process.argv.includes("--composes")) {
+    console.log("Les messages composés — à traiter un par un, avec des trous :");
+    for (const c of composes) console.log("  " + JSON.stringify(c).slice(0, 120));
+    console.log();
+  }
   const parGenre = {};
   for (const x of utilisateur) parGenre[x.genres] = (parGenre[x.genres] || 0) + 1;
   for (const [g, n] of Object.entries(parGenre).sort((a, b) => b[1] - a[1]))
