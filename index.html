@@ -12538,15 +12538,25 @@ function _openActivityUI(){
   try{localStorage.setItem("magoActivitySeen",String(Date.now()));}catch(e){}
   refreshBell();
 }
-/* Un magasin a moins de 10 km liste-t-il cette boisson ? Exactement la regle
-   des alertes (voir checkWatches) : meme rayon, et un stock signale ABSENT ne
+/* Quelqu'un a-t-il VU cette boisson a moins de 10 km ? Exactement la regle des
+   alertes (voir checkWatches) : meme rayon, et un stock signale ABSENT ne
    compte pas. Sortir cette regle ici evite qu'un ecran dise « introuvable »
-   pendant qu'un autre dit « trouvee ». */
+   pendant qu'un autre dit « trouvee ».
+   VU, PAS PROBABLE. Le champ drinks porte le rayon PROBABLE d'une enseigne
+   (« un Delhaize vend generalement ceci »), pas un constat. S'en contenter
+   faisait dire a une alerte « Alpro Barista reperee chez Delhaize Anspach »
+   alors que personne n'y etait entre : on envoie quelqu'un pour rien, et on
+   brule la seule chose que l'app a a vendre, la confiance. Seules comptent
+   donc une confirmation de la communaute (confirmations > 0) ou une
+   verification (drinksVerified : administrateur, gerant certifie, rayon
+   photographie). Le rayon probable, lui, sert a proposer OU CHERCHER — ce
+   n'est pas la meme phrase. */
 function magasinProcheAvec(did){
   var best=null;
   (STORES||[]).forEach(function(st){
-    if(!(st.drinks||[]).some(function(x){return Number(x)===Number(did);}))return;
-    if(((st.confirmations||{})[did]||0)<0)return;
+    var vu=Number((st.confirmations||{})[did])>0||
+           (st.drinksVerified||[]).some(function(x){return Number(x)===Number(did);});
+    if(!vu)return;
     var dist=null;
     if(typeof userLat==="number"&&userLat&&typeof st.lat==="number"){
       var dLa=(userLat-st.lat)*111000,dLo=(userLng-st.lng)*111000*Math.cos(st.lat*Math.PI/180);
