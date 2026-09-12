@@ -89,8 +89,40 @@ for (const lg of SEPT) {
 }
 console.log("langues completes en plus : " + entieres);
 
-/* Ordre alphabétique : un diff lisible vaut mieux qu'un fichier qui se
-   réordonne à chaque exécution. */
+/* ON FUSIONNE, ON NE REMPLACE PAS. Ce fichier est vivant : d'autres sessions y
+   ajoutent des phrases — les modeles a trous de trh(), par exemple. Reecrire la
+   table entiere depuis nos seules listes effacerait leur travail en silence, et
+   personne ne s'en apercevrait avant de voir du francais revenir dans une
+   langue deja livree.
+
+   On relit donc la table presente, on y verse la notre, et on garde ce qui n'y
+   etait pas. En cas de conflit sur une meme phrase ET une meme langue, la
+   traduction deja en place l'emporte : elle a peut-etre ete corrigee a la main,
+   et une correction humaine vaut mieux qu'une regeneration. */
+const fichier = "data/textes.js";
+const actuel = readFileSync(fichier, "utf8");
+
+const debutTable = actuel.indexOf("var TEXTES = {");
+if (debutTable === -1) { console.error("ECHEC : table introuvable dans " + fichier); process.exit(1); }
+const finTable = actuel.indexOf("\n};", debutTable);
+if (finTable === -1) { console.error("ECHEC : fin de table introuvable"); process.exit(1); }
+
+/* On lit la table existante en l'evaluant : c'est du JavaScript, pas du JSON,
+   et le reparser a la main sur des chaines qui contiennent des accolades serait
+   fragile la ou l'evaluation est exacte. */
+const corpsActuel = actuel.slice(debutTable, finTable + 3);
+let dejaLa = {};
+try { dejaLa = new Function(corpsActuel + "\nreturn TEXTES;")(); }
+catch (e) { console.error("ECHEC : table existante illisible — " + e.message); process.exit(1); }
+const avant = Object.keys(dejaLa).length;
+
+for (const [phrase, trads] of Object.entries(dejaLa)) {
+  if (!table.has(phrase)) table.set(phrase, {});
+  const cible = table.get(phrase);
+  for (const [lg, v] of Object.entries(trads)) cible[lg] = v;   // l'existant gagne
+}
+console.log("table existante : " + avant + " phrases, conservees");
+
 const cles = [...table.keys()].sort((a, b) => a.localeCompare(b, "fr"));
 let corps = "";
 for (const p of cles) {
@@ -98,20 +130,8 @@ for (const p of cles) {
   const parts = Object.keys(e).sort().map((lg) => lg + ":" + JSON.stringify(e[lg]));
   if (parts.length) corps += "  " + JSON.stringify(p) + ": {" + parts.join(",") + "},\n";
 }
+writeFileSync(fichier,
+  actuel.slice(0, debutTable) + "var TEXTES = {\n" + corps + actuel.slice(finTable + 1),
+  "utf8");
 
-const fichier = "data/textes.js";
-const actuel = readFileSync(fichier, "utf8");
-/* L'ANCRE DOIT ETRE UNIQUE. La premiere version coupait la queue sur « /* ===== »,
-   motif qui apparait des le cartouche en tete de fichier : tout le fichier
-   d'origine — ancienne table comprise — se retrouvait recolle APRES la nouvelle,
-   et comme la seconde declaration ecrase la premiere, l'app continuait de lire
-   les 156 phrases d'avant. Un bug invisible : le fichier grossissait, tout
-   semblait fait, et rien ne changeait a l'ecran. */
-const tete = actuel.slice(0, actuel.indexOf("var TEXTES = {"));
-const ancre = "/* ============================================================================\n   APPLIQUER LES TRADUCTIONS";
-const iq = actuel.indexOf(ancre);
-if (iq === -1) { console.error("ECHEC : ancre de fin introuvable dans " + fichier); process.exit(1); }
-const queue = actuel.slice(iq);
-if (queue.indexOf("var TEXTES = {") !== -1) { console.error("ECHEC : la queue contient encore une table"); process.exit(1); }
-writeFileSync(fichier, tete + "var TEXTES = {\n" + corps + "};\n\n" + queue, "utf8");
 console.log("\n" + cles.length + " phrases au total -> " + fichier);
