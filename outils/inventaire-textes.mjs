@@ -156,11 +156,17 @@ function versExecutionHTML(t) {
     return ENTITES[corps] !== undefined ? ENTITES[corps] : tout;
   });
 }
-const VENANT_DU_CODE = new Set(["texte", "message", "question", "alerte", "invite"]);
+/* On decide du decodage par la ZONE d'ou vient le texte, pas par son genre.
+   Un placeholder ecrit DANS du JavaScript (une feuille construite a la volee)
+   porte des echappements JavaScript, pas des entites HTML — le classer « champ »
+   et le traiter en HTML laissait « ce qu\\'il faut » dans la cle, qui ne
+   correspondait alors a rien a l'execution. */
+const ZONE_CODE = "code", ZONE_HTML = "html";
 
+const composes = new Set();
 const trouves = new Map();          // texte -> {genres:Set, n, lignes:[], admin}
-function ajoute(texte, genre, pos, admin) {
-  const brut = VENANT_DU_CODE.has(genre) ? versExecutionJS(texte) : versExecutionHTML(texte);
+function ajoute(texte, genre, pos, admin, zone) {
+  const brut = zone === ZONE_CODE ? versExecutionJS(texte) : versExecutionHTML(texte);
   /* Les sauts de ligne d'un confirm() font partie du message : on ne les
      aplatit pas, on ne resserre que les espaces horizontaux. */
   const t = brut.replace(/[ \t\u00A0]+/g, " ").replace(/ *\n */g, "\n").trim();
@@ -170,6 +176,12 @@ function ajoute(texte, genre, pos, admin) {
   if (/^(https?:|\/|#|data:|var\(|rgba?\()/.test(t)) return;
   if (/^[\d\s.,:;%+\-–—·•|/€$()]*$/.test(t)) return;
   if (dejaTraduit.has(t)) return;
+  /* MESSAGES COMPOSES. aria-label="Niveau '+(lv.idx+1)+', '+attr(lv.name)+'…"
+     est un morceau de HTML assemble par concatenation : ce qu'on releve n'est
+     pas une phrase mais un fragment de code. Le traduire produirait une cle
+     introuvable et un libelle absurde. Ces messages se traitent un par un, avec
+     des cles a trous — pas ici. On les compte a part pour ne pas les perdre. */
+  if (/['"`]\s*\+|\+\s*['"`]|\$\{/.test(t)) { composes.add(t); return; }
   if (!trouves.has(t)) trouves.set(t, { genres: new Set(), n: 0, lignes: [], admin: true });
   const e = trouves.get(t);
   e.genres.add(genre); e.n++;
@@ -192,7 +204,7 @@ const AUTOFERMANTES = new Set(["br","hr","img","input","meta","link","source","p
     if (lt < 0) break;
     /* le texte qui précède la balise */
     const txt = statique.slice(i, lt);
-    if (txt.trim() && !estI18n() && !/[{}]/.test(txt)) ajoute(txt, "html", i, estAdmin());
+    if (txt.trim() && !estI18n() && !/[{}]/.test(txt)) ajoute(txt, "html", i, estAdmin(), ZONE_HTML);
     const gt = statique.indexOf(">", lt);
     if (gt < 0) break;
     const balise = statique.slice(lt, gt + 1);
@@ -204,7 +216,7 @@ const AUTOFERMANTES = new Set(["br","hr","img","input","meta","link","source","p
     /* les attributs lisibles portés par CETTE balise */
     for (const [attr, genre] of [["placeholder","champ"],["aria-label","accessibilité"],["title","infobulle"],["alt","alternative"]]) {
       const m = balise.match(new RegExp(attr + '="([^"]{3,200})"'));
-      if (m) ajoute(m[1], genre, lt, estAdmin() || /admin/i.test(balise));
+      if (m) ajoute(m[1], genre, lt, estAdmin() || /admin/i.test(balise), ZONE_HTML);
     }
     if (AUTOFERMANTES.has(nom) || /\/>$/.test(balise)) continue;
     pile.push({
@@ -244,6 +256,12 @@ const CONTEXTES = [
   [apres("placeholder\\s*="), "champ"],
   [apres("aria-label\\s*="), "accessibilité"],
   [apres("title\\s*="), "infobulle"],
+  /* tr("…") est la declaration d'intention la plus claire qui soit : quelqu'un
+     a dit « ce texte doit suivre la langue ». S'il ne figure pas encore dans la
+     table, il s'affiche en francais pour tout le monde. Sans ce contexte,
+     envelopper un texte dans tr() le FAISAIT DISPARAITRE de l'inventaire — le
+     total baissait alors qu'aucune traduction n'avait ete ecrite. */
+  [apres("\\btr\\s*\\("), "texte"],
   [apres("\\btoast\\s*\\("), "message"],
   [apres("\\bconfirm\\w*\\s*\\("), "question"],
   [apres("\\balert\\s*\\("), "alerte"],
@@ -254,7 +272,7 @@ for (const [re, genre] of CONTEXTES) {
   while ((m = re.exec(scripts))) {
     const contenu = m[1] !== undefined ? m[1] : (m[2] !== undefined ? m[2] : m[3]);
     if (contenu !== undefined)
-      ajoute(contenu, genre, m.index, /admin/i.test(fonctionEn(m.index)));
+      ajoute(contenu, genre, m.index, /admin/i.test(fonctionEn(m.index)), ZONE_CODE);
   }
 }
 
@@ -270,7 +288,8 @@ if (process.argv.includes("--json")) {
   console.log(JSON.stringify(process.argv.includes("--admin") ? tout : utilisateur, null, 1));
 } else {
   console.log("TEXTES VISIBLES NON TRADUITS (utilisateur) : " + utilisateur.length);
-  console.log("écrans d'administration, comptés à part     : " + admin.length + "\n");
+  console.log("écrans d'administration, comptés à part     : " + admin.length);
+  console.log("messages composés (clés à trous, à part)     : " + composes.size + "\n");
   const parGenre = {};
   for (const x of utilisateur) parGenre[x.genres] = (parGenre[x.genres] || 0) + 1;
   for (const [g, n] of Object.entries(parGenre).sort((a, b) => b[1] - a[1]))
