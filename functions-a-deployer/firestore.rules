@@ -115,6 +115,21 @@ service cloud.firestore {
            ses courses. Sans borne, cette liste etait aussi un moyen de faire
            grossir un document lu par tout le monde. */
         && (!('recent' in d) || recentValide(d.recent))
+        /* L'ADRESSE E-MAIL N'A RIEN A FAIRE ICI. users/ est lisible par tout le
+           monde sans compte — c'est ce qui fait marcher le classement et les
+           profils publics. Une adresse posee sur ce document, c'est un annuaire
+           ouvert : n'importe qui aspire la collection et repart avec les
+           adresses. Une ancienne version de l'appli en ecrivait une ; le code
+           actuel ne le fait plus et efface celles qui restent a la connexion,
+           mais tant que la REGLE ne l'interdit pas, rien n'empeche de la
+           remettre — un vieux cache de service worker, une console de
+           navigateur, une version future ecrite sans y penser.
+           On l'interdit donc au niveau de la base, la ou ca ne se contourne pas.
+           C'est bien « pas dans le document resultant » et non « champ serveur » :
+           deleteField() fait disparaitre la cle, donc le menage passe toujours,
+           alors que toute ecriture qui la POSE est refusee.
+           L'adresse continue de vivre dans Firebase Auth, qui est faite pour ca. */
+        && !('email' in d)
         && (!('avatar' in d) || d.avatar == null
             || (d.avatar is map
                 && d.avatar.keys().hasOnly(['type','v'])

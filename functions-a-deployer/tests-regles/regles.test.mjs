@@ -23,7 +23,8 @@
  */
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import { doc, setDoc, updateDoc, getDoc, getDocs, deleteDoc, collection, addDoc,
-         writeBatch, increment, arrayUnion, serverTimestamp, Timestamp, query, where, orderBy, limit } from 'firebase/firestore';
+         writeBatch, increment, arrayUnion, serverTimestamp, Timestamp, query, where, orderBy, limit,
+         deleteField } from 'firebase/firestore';
 import fs from 'fs';
 
 const env = await initializeTestEnvironment({
@@ -92,6 +93,21 @@ await doit('bloque : le meme document avec points:0 (le champ appartient au serv
 await doit('legitime : et sans points, la creation passe',
   ()=>assertSucceeds(setDoc(doc(nv,'users',NOUVEAU),
       {pseudo:'Explorateur',signals:0,confirms:0,createdAt:serverTimestamp()})));
+/* L'ADRESSE E-MAIL SUR LE PROFIL PUBLIC. users/ est en lecture libre : une
+   adresse posee la-dessus transforme la collection en annuaire aspirable par
+   n'importe qui, sans compte. Le code n'en ecrit plus, mais un vieux cache de
+   service worker ou une console de navigateur le peut encore tant que la regle
+   se tait. Les trois essais ci-dessous verifient les trois chemins : la poser a
+   la creation, la poser apres coup, et — celui qui compte pour ne rien casser —
+   EFFACER celle qui traine, geste que le menage de l'appli fait a la connexion
+   et qui doit continuer de passer. */
+await doit('fuite : on ne peut pas poser son e-mail a la creation du profil',
+  ()=>assertFails(setDoc(doc(nv,'users',NOUVEAU),
+      {pseudo:'Explorateur',email:'victime@exemple.be'})));
+await doit('fuite : on ne peut pas ajouter son e-mail au profil public',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),{email:'alice@exemple.be'},{merge:true})));
+await doit('legitime : le menage efface une adresse heritee',
+  ()=>assertSucceeds(setDoc(doc(a,'users',ALICE),{email:deleteField()},{merge:true})));
 await doit('legitime : avatar photo normal',
   ()=>assertSucceeds(setDoc(doc(a,'users',ALICE),{avatar:{type:'photo',v:'data:image/png;base64,AAAA'}},{merge:true})));
 await doit('legitime : quelqu un confirme une boisson en rayon',

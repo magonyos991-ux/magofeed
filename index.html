@@ -2141,7 +2141,7 @@ window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
 
   window._fbLoading = true;
   try {
-    if (banner && !servedFromCache) { banner.style.display = "block"; banner.textContent = "Recherche des magasins à proximité…"; }
+    if (banner && !servedFromCache) { banner.style.display = "block"; banner.textContent = tr("Recherche des magasins à proximité…"); }
     var stores = await queryNearbyStores(lat, lng, radiusKm);
     if (mySeq !== window._fbQuerySeq) return stores; // une requête plus récente a pris la main
     window._fbLastQuery = { lat: lat, lng: lng, radiusKm: radiusKm };
@@ -5060,6 +5060,11 @@ function setLang(l){
     var k=el.getAttribute("data-i18n");
     if(T[k]!=null)el.textContent=T[k];
   });
+  /* Tout ce qui est ecrit en dur dans le HTML — boutons, titres, etiquettes de
+     champ, libelles d'accessibilite. Place AVANT le retour anticipe ci-dessous,
+     sinon la langue enregistree ne s'appliquerait pas au demarrage : on
+     rouvrirait l'app en francais apres avoir choisi le turc la veille. */
+  try{if(typeof traduirePage==="function")traduirePage(document.body);}catch(e){}
   // Zones dynamiques : re-rendre dans la nouvelle langue, a l'instant.
   // PAS au demarrage (application de la langue sauvegardee) : ces re-rendus
   // remplissaient la file d'images avec l'ecran recherche et diluaient
@@ -5089,6 +5094,11 @@ function setLang(l){
   Object.keys(ids).forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=ids[id];});
   var ph=document.getElementById("t-placeholder");if(ph)ph.placeholder=T.placeholder;
   renderLangGrid();renderDiscoveries();
+  /* Second passage : les re-rendus ci-dessus viennent de reconstruire des pans
+     entiers d'interface, en francais. L'observateur les rattraperait, mais avec
+     un battement visible — on ne laisse pas l'utilisateur voir le francais
+     clignoter au moment precis ou il change de langue. */
+  try{if(typeof traduirePage==="function")traduirePage(document.body);}catch(e){}
 }
 function langLabel(k){return String(LANGS[k].name).replace(/[\u{1F1E6}-\u{1F1FF}]/gu,"").trim();}
 /* L'ancienne grille de 10 boutons monopolisait tout l'ecran des reglages.
@@ -6574,7 +6584,7 @@ function updateProfileStats(){
        passait rien. Elle ouvre maintenant « Tes points », qui montre ce qu'il
        reste a gagner ET ce que chaque palier suivant debloque. */
     lvHost.innerHTML='<div class="lvl-card" role="button" tabindex="0" '+
-      'aria-label="Niveau '+(lv.idx+1)+', '+attr(lv.name)+'. Voir tes points et les prochains niveaux" '+
+      'aria-label="'+attr(trh("Niveau {n}, {t}. Voir tes points et les prochains niveaux",{n:lv.idx+1,t:lv.name}))+'" '+
       'onclick="show(\'rewards\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();show(\'rewards\');}">'+
       '<div class="lvl-top">'+
         '<span class="lvl-name"><span class="lvl-num">'+(lv.idx+1)+'</span>Niveau '+(lv.idx+1)+' \u00B7 '+sanitize(lv.name)+'</span>'+
@@ -6624,7 +6634,7 @@ function startScan(){
   var video=document.getElementById("scan-video"),hint=document.getElementById("scan-hint"),btn=document.getElementById("scan-btn");
   if(scanActive)return;
   if(!navigator.mediaDevices){
-    hint.textContent="✕ Caméra non disponible";
+    hint.textContent=tr("✕ Caméra non disponible");
     setScanState("idle");toast(_tr("camUnavailable"));
     try{var _row=document.getElementById("scan-manual-row");if(_row&&_row.style.display!=="flex")toggleManualCode();}catch(e){}
     return;
@@ -6641,7 +6651,7 @@ function startScan(){
         var _tb=document.getElementById("scan-torch");
         if(_tb)_tb.style.display=(_caps&&_caps.torch)?"flex":"none";
       }catch(e){}
-      hint.textContent="Approche le code-barre…";
+      hint.textContent=tr("Approche le code-barre…");
       /* CE QUI MANQUAIT QUAND CA NE PREND PAS.
          L'ecran disait « approche le code-barre » et ne disait plus rien
          ensuite : au bout de dix secondes on ne sait pas si l'app cherche, si
@@ -6655,11 +6665,11 @@ function startScan(){
         if(_scanVotes.count>0)return;              // ca lit : on se tait
         window._scanAideT+=1;
         var h=document.getElementById("scan-hint"); if(!h)return;
-        if(window._scanAideT===6)h.textContent="Le code doit remplir la largeur du cadre";
-        else if(window._scanAideT===12)h.textContent="Recule un peu, puis rapproche lentement";
-        else if(window._scanAideT===18)h.textContent="Plus de lumière, et bien à plat — pas sur l'arrondi";
+        if(window._scanAideT===6)h.textContent=tr("Le code doit remplir la largeur du cadre");
+        else if(window._scanAideT===12)h.textContent=tr("Recule un peu, puis rapproche lentement");
+        else if(window._scanAideT===18)h.textContent=tr("Plus de lumière, et bien à plat — pas sur l'arrondi");
         else if(window._scanAideT===26){
-          h.textContent="Tu peux aussi taper le code à la main";
+          h.textContent=tr("Tu peux aussi taper le code à la main");
           try{var _r=document.getElementById("scan-manual-row");if(_r&&_r.style.display!=="flex")toggleManualCode();}catch(e){}
           try{clearInterval(window._scanAide);}catch(e){}
         }
@@ -6672,7 +6682,7 @@ function startScan(){
          affichait « Accès caméra refusé » — un message faux, qui envoyait la
          personne fouiller les réglages de son téléphone pour rien. */
       if(typeof Quagga==="undefined"){
-        hint.textContent="\u2715 Lecteur de code-barre indisponible \u2014 v\u00e9rifie ta connexion";
+        hint.textContent=tr("\u2715 Lecteur de code-barre indisponible \u2014 v\u00e9rifie ta connexion");
         btn.style.display="";
         return;
       }
@@ -6700,7 +6710,7 @@ function startScan(){
           Quagga.offDetected(onBarcodeDetected);Quagga.onDetected(onBarcodeDetected);
         });
     }).catch(function(){
-      hint.textContent="✕ Accès caméra refusé";
+      hint.textContent=tr("✕ Accès caméra refusé");
       // Pas de camera : on revient a la carte et on ouvre la saisie manuelle
       // plutot que de laisser un cadre noir sans issue.
       setScanState("idle");
@@ -7017,7 +7027,7 @@ function renderWhereFound(ctx){
   if(!near.length&&!(STORES||[]).length)return; // aucun magasin charge : rien a proposer
   var title=document.createElement("div");
   title.style.cssText="font-size:12px;font-weight:700;color:var(--s2);margin-bottom:8px";
-  title.textContent="O\u00F9 l'as-tu trouv\u00E9 ?";
+  title.textContent=tr("O\u00F9 l'as-tu trouv\u00E9 ?");
   host.appendChild(title);
   near.forEach(function(s){
     var row=document.createElement("div");
@@ -7174,7 +7184,7 @@ function _majBandeauChoix(){
     host.appendChild(b);
   }
   var nom=(window._choixBoisson&&window._choixBoisson.name)?" \u00AB "+sanitize(window._choixBoisson.name)+" \u00BB":"";
-  b.textContent="Touche le magasin o\u00F9 tu as vu"+(nom?nom:" cette boisson");
+  b.textContent=tr("Touche le magasin o\u00F9 tu as vu")+(nom?nom:" cette boisson");
 }
 function openStorePicker(){
   /* On garde le nom de la fonction : quatre endroits l'appellent, et tous
@@ -7459,7 +7469,7 @@ function saveNewStore(){
     if(window.fbTouchCache)window.fbTouchCache();
     playSound("win");
     toast("\u00AB "+name+" \u00BB enregistr\u00E9 pour tout le monde !");
-    if(createBtn){createBtn.disabled=false;createBtn.textContent="Cr\u00E9er le magasin";}
+    if(createBtn){createBtn.disabled=false;createBtn.textContent=tr("Cr\u00E9er le magasin");}
     /* On laisse passer le message de creation avant d'ouvrir la fiche de
        relecture : toast() ne reinitialise pas sa minuterie, donc le message
        du rattachement serait masque en avance par celui de la creation. */
@@ -7476,7 +7486,7 @@ function saveNewStore(){
   };
   var finishFail=function(e){
     console.warn("Create store error:",e);
-    if(createBtn){createBtn.disabled=false;createBtn.textContent="Cr\u00E9er le magasin";}
+    if(createBtn){createBtn.disabled=false;createBtn.textContent=tr("Cr\u00E9er le magasin");}
     playSound("err");
     alert("Le magasin n'a PAS pu \u00EAtre enregistr\u00E9 dans la base.\n\nRaison : "+((e&&(e.code||e.message))||"inconnue")+"\n\nV\u00E9rifie ta connexion et r\u00E9essaie \u2014 rien n'a \u00E9t\u00E9 perdu, le formulaire est encore l\u00E0.");
   };
@@ -8092,7 +8102,7 @@ function confirmFamilyFormat(family,barcode,fmt){
   var alt=document.getElementById("scan-not-family");
   if(alt)alt.style.display="none";
   var btn=document.getElementById("scan-btn");
-  if(btn){btn.textContent="Voir les magasins";btn.style.background=family.color;btn.onclick=function(){stopScan();pick(family);};}
+  if(btn){btn.textContent=tr("Voir les magasins");btn.style.background=family.color;btn.onclick=function(){stopScan();pick(family);};}
   playSound("win");
   toast("Format ajout\u00E9 \u00E0 "+family.name+" \u00B7 +2 pts");
 }
@@ -8148,7 +8158,7 @@ function renderBrandKinChoice(kin,best,code,p,tout){
     var plus=document.createElement("div");
     plus.setAttribute("role","button");plus.setAttribute("tabindex","0");
     plus.style.cssText="text-align:center;font-size:11.5px;font-weight:800;color:var(--s2);padding:9px;cursor:pointer;-webkit-tap-highlight-color:transparent";
-    plus.textContent="Voir les "+(_tous.length-_coupe)+" autres "+(best&&best.brand?sanitize(best.brand):"de cette marque");
+    plus.textContent=tr("Voir les ")+(_tous.length-_coupe)+" autres "+(best&&best.brand?sanitize(best.brand):"de cette marque");
     plus.onclick=function(){ renderBrandKinChoice(_tous,best,code,p,true); };
     plus.onkeydown=function(ev){if(ev.key==="Enter")plus.onclick();};
     res.appendChild(plus);
@@ -8534,7 +8544,7 @@ function openBarcodeDispute(drink,code){
     '</div>'+
     '<input id="dispute-name" type="text" placeholder="Nom exact lu sur l\'\u00E9tiquette" autocomplete="off" '+
       'style="width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:13px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none;text-align:center">'+
-    '<div id="dispute-hint" style="font-size:11px;color:var(--s3);text-align:center;margin-top:6px;min-height:14px">Recherche du vrai nom\u2026</div>'+
+    '<div id="dispute-hint" data-attente="1" style="font-size:11px;color:var(--s3);text-align:center;margin-top:6px;min-height:14px">Recherche du vrai nom\u2026</div>'+
     '<div id="dispute-new" role="button" tabindex="0" style="margin-top:8px;text-align:center;font-size:12.5px;font-weight:800;color:#fff;background:#e67e22;border-radius:12px;padding:12px;cursor:pointer;-webkit-tap-highlight-color:transparent">Ce produit n\'est pas encore dans Magofeed</div>'+
     '<div id="dispute-other" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:12px;font-weight:700;color:var(--s1);background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:11px;cursor:pointer;-webkit-tap-highlight-color:transparent">C\'est une autre boisson d\u00E9j\u00E0 au catalogue</div>'+
     '<div id="dispute-cancel" role="button" tabindex="0" style="margin-top:7px;text-align:center;font-size:11.5px;font-weight:700;color:var(--s2);padding:8px;cursor:pointer;-webkit-tap-highlight-color:transparent">Annuler \u2014 c\'\u00E9tait bien \u00E7a</div>'+
@@ -8555,9 +8565,14 @@ function openBarcodeDispute(drink,code){
       if(!best||!best.name)return;
       offBrand=best.brand||""; offCat=best.cat||"";
       if(input&&!input.value)input.value=best.name;
-      if(hint)hint.textContent="Nom trouv\u00E9 sur OpenFoodFacts \u2014 corrige-le si besoin";
-    }).catch(function(){ if(hint)hint.textContent=""; });
-    setTimeout(function(){ if(hint&&hint.textContent==="Recherche du vrai nom\u2026")hint.textContent=""; },6000);
+      /* Le marqueur remplace une comparaison de texte : « l'indice affiche-t-il
+         encore le message d'attente ? » se lisait en comparant textContent a la
+         phrase francaise. Des que l'interface est traduite, cette comparaison
+         echoue dans les neuf autres langues et l'indice d'attente ne s'efface
+         plus jamais. Un attribut ne depend d'aucune langue. */
+      if(hint){hint.textContent=tr("Nom trouv\u00E9 sur OpenFoodFacts \u2014 corrige-le si besoin");hint.removeAttribute("data-attente");}
+    }).catch(function(){ if(hint){hint.textContent="";hint.removeAttribute("data-attente");} });
+    setTimeout(function(){ if(hint&&hint.getAttribute("data-attente")==="1"){hint.textContent="";hint.removeAttribute("data-attente");} },6000);
   } else if(hint){ hint.textContent=""; }
   function valider(){
     var nm=(input&&input.value||"").trim();
@@ -8703,11 +8718,11 @@ function onBarcodeDetected(r){
     nope.className="scan-injected";
     nope.setAttribute("role","button");nope.setAttribute("tabindex","0");
     nope.style.cssText="text-align:center;font-size:12px;font-weight:700;color:var(--s2);background:transparent;border:1.5px solid var(--border);border-radius:12px;padding:10px;cursor:pointer;margin-top:8px;-webkit-tap-highlight-color:transparent";
-    nope.textContent="Ce n'est pas ce produit ?";
+    nope.textContent=tr("Ce n'est pas ce produit ?");
     nope.onclick=function(){openBarcodeDispute(found,code);};
     nope.onkeydown=function(ev){if(ev.key==="Enter")openBarcodeDispute(found,code);};
     res.appendChild(nope);
-    btn.textContent="Voir les magasins";btn.style.background=found.color;btn.style.display="block";
+    btn.textContent=tr("Voir les magasins");btn.style.background=found.color;btn.style.display="block";
     btn.onclick=function(){stopScan();pick(found);};
     recordScan(code,found.name,found.brand,found.cat,"catalog",found.id);
     renderWhereFound({drinkId:found.id,code:code});
@@ -8719,7 +8734,7 @@ function onBarcodeDetected(r){
     if(alreadyVoted){
       btn.style.display="none";
     } else {
-      btn.textContent="Voter pour cette découverte";btn.style.background="#e67e22";btn.style.display="block";
+      btn.textContent=tr("Voter pour cette découverte");btn.style.background="#e67e22";btn.style.display="block";
       btn.onclick=function(){voteDisc(foundDiscovery.id);};
     }
     /* LA SORTIE DE SECOURS QUI MANQUAIT ICI.
@@ -8733,7 +8748,7 @@ function onBarcodeDetected(r){
     lien.className="scan-injected";
     lien.setAttribute("role","button");lien.setAttribute("tabindex","0");
     lien.style.cssText="text-align:center;font-size:12px;font-weight:700;color:var(--s2);background:transparent;border:1.5px solid var(--border);border-radius:12px;padding:10px;cursor:pointer;margin-top:8px;-webkit-tap-highlight-color:transparent";
-    lien.textContent="Ce n'est pas le bon nom ?";
+    lien.textContent=tr("Ce n'est pas le bon nom ?");
     lien.onclick=function(){ openDiscoveryFix(foundDiscovery,code); };
     lien.onkeydown=function(ev){if(ev.key==="Enter")lien.onclick();};
     res.appendChild(lien);
@@ -8747,7 +8762,7 @@ function onBarcodeDetected(r){
     var cd=cached.ts?new Date(cached.ts).toLocaleDateString("fr-BE",{day:"numeric",month:"short"}):"";
     res.className="scan-result found";
     res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="font-size:28px">'+scanCatEmoji(cached.cat)+'</div><div><div style="font-size:15px;font-weight:700;color:#166534">'+sanitize(cached.name)+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">Déjà scanné par toi'+(cd?" le "+cd:"")+(cached.cat?" · "+cached.cat:"")+'</div></div></div>';
-    btn.textContent="Ajouter aux découvertes";btn.style.background="#e67e22";btn.style.display="block";
+    btn.textContent=tr("Ajouter aux découvertes");btn.style.background="#e67e22";btn.style.display="block";
     btn.onclick=function(){addDiscovery(cached.name,cached.brand,code,cached.cat);};
     recordScan(code,cached.name,cached.brand,cached.cat,cached.src);
     var cachedDrink=drinkForBarcode(code);
@@ -8801,7 +8816,7 @@ function onBarcodeDetected(r){
             var fmtLabel=(fmt.type||"format")+(fmt.cl?" "+fmt.cl+" cl":"");
             res.className="scan-result found";
             res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="width:40px;height:40px;flex-shrink:0;font-size:28px;border-radius:10px;overflow:hidden">'+drinkIconHTML(family)+'</div><div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:700;color:#166534">'+family.name+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">Nouveau format d\u00E9tect\u00E9 : '+sanitize(fmtLabel)+'</div></div></div>';
-            btn.textContent="\u2713 Oui, c'est bien \u00E7a !";btn.style.background=family.color;btn.style.display="block";
+            btn.textContent=tr("\u2713 Oui, c'est bien \u00E7a !");btn.style.background=family.color;btn.style.display="block";
             btn.onclick=function(){
               confirmFamilyFormat(family,code,fmt);
             };
@@ -8813,7 +8828,7 @@ function onBarcodeDetected(r){
               alt.style.cssText="text-align:center;font-size:12px;font-weight:700;color:var(--s1);background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:11px;cursor:pointer;margin-top:9px;-webkit-tap-highlight-color:transparent";
               btn.parentNode.insertBefore(alt,btn.nextSibling);
             }
-            alt.textContent="Non, c'est un produit diff\u00E9rent";
+            alt.textContent=tr("Non, c'est un produit diff\u00E9rent");
             alt.style.display="block";
             alt.onclick=function(){
               var nm=prompt("Nom exact de ce produit :\n(corrige-le si besoin \u2014 ex. \u00AB AA Drink Pro Energy \u00BB)",best.name||"");
@@ -8835,7 +8850,7 @@ function onBarcodeDetected(r){
           if(best.cat==="Snacks"){
             res.innerHTML+='<div style="margin-top:9px;padding:8px 11px;border-radius:11px;background:var(--bg3);font-size:11.5px;font-weight:600;color:var(--s2);line-height:1.4">Magofeed est avant tout une app de <b>boissons</b> — tu peux quand même ajouter cet aliment si tu le souhaites.</div>';
           }
-          btn.textContent="Ajouter aux découvertes";btn.style.background="#e67e22";btn.style.display="block";
+          btn.textContent=tr("Ajouter aux découvertes");btn.style.background="#e67e22";btn.style.display="block";
           btn.onclick=function(){addDiscovery(best.name,best.brand,code,best.cat);};
           try{ proposerChasse(code,best,res); }catch(e){}
           recordScan(code,best.name,best.brand,best.cat,"off");
@@ -8843,7 +8858,7 @@ function onBarcodeDetected(r){
           lnk2.className="scan-injected";
           lnk2.setAttribute("role","button");lnk2.setAttribute("tabindex","0");
           lnk2.style.cssText="text-align:center;font-size:12px;font-weight:700;color:var(--s1);background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:11px;cursor:pointer;margin-top:9px;-webkit-tap-highlight-color:transparent";
-          lnk2.textContent="C'est une boisson d\u00E9j\u00E0 au catalogue ?";
+          lnk2.textContent=tr("C'est une boisson d\u00E9j\u00E0 au catalogue ?");
           lnk2.onclick=function(){openCatalogLinkPicker(code);};
           lnk2.onkeydown=function(ev){if(ev.key==="Enter")openCatalogLinkPicker(code);};
           btn.parentNode.insertBefore(lnk2,btn.nextSibling);
@@ -8858,7 +8873,7 @@ function onBarcodeDetected(r){
             '<input id="unknown-name-input" type="text" placeholder="Nom du produit (ex : Hell Watermelon)" style="width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:13px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none;text-align:center">'+
           '</div>';
           renderWhereFound({pendingBarcode:code});
-          btn.textContent="Ajouter aux découvertes";btn.style.background="#e67e22";btn.style.display="block";
+          btn.textContent=tr("Ajouter aux découvertes");btn.style.background="#e67e22";btn.style.display="block";
           btn.onclick=function(){
             var input=document.getElementById("unknown-name-input");
             var typedName=input?input.value.trim():"";
@@ -8871,7 +8886,7 @@ function onBarcodeDetected(r){
           lnk.className="scan-injected";
           lnk.setAttribute("role","button");lnk.setAttribute("tabindex","0");
           lnk.style.cssText="text-align:center;font-size:12px;font-weight:700;color:var(--s1);background:var(--bg2);border:1.5px solid var(--border);border-radius:12px;padding:11px;cursor:pointer;margin-top:9px;-webkit-tap-highlight-color:transparent";
-          lnk.textContent="C'est une boisson d\u00E9j\u00E0 au catalogue ?";
+          lnk.textContent=tr("C'est une boisson d\u00E9j\u00E0 au catalogue ?");
           lnk.onclick=function(){openCatalogLinkPicker(code);};
           lnk.onkeydown=function(ev){if(ev.key==="Enter")openCatalogLinkPicker(code);};
           btn.parentNode.insertBefore(lnk,btn.nextSibling);
@@ -8883,7 +8898,7 @@ function onBarcodeDetected(r){
       }).catch(function(){
         res.className="scan-result notfound";
         res.innerHTML='<div style="font-size:13px;color:#991b1b;text-align:center">✕ Erreur de connexion</div>';
-        btn.textContent="Réessayer";btn.style.background=accentColor;btn.style.display="block";
+        btn.textContent=tr("Réessayer");btn.style.background=accentColor;btn.style.display="block";
         btn.onclick=startScan;
       });
   }
@@ -9514,7 +9529,7 @@ function bumpStreak(){
   try{localStorage.setItem("magoStreak",JSON.stringify(userStreak));}catch(e){/* quota */}
   if(userStreak.streak>=2){
     userStats.pts+=2;
-    toast(""+userStreak.streak+" jours d'affil\u00E9e ! +2 pts bonus");
+    toast(trh("{n} jour(s) d'affil\u00E9e ! +2 pts bonus",{n:userStreak.streak}));
   }
   renderStreak();
 }
@@ -9854,7 +9869,7 @@ function renderBrandsRail(){
       '<span class="bt-count">'+g.drinks.length+'</span></div>'+
       '<div class="bt-name">'+sanitize(g.brand)+'</div>';
     div.onclick=function(){openBrand(g.brand);};
-    a11yCard(div,"Marque "+g.brand+", "+g.drinks.length+" boisson"+(g.drinks.length>1?"s":""));
+    a11yCard(div,trh("Marque {b}, {n} boisson(s)",{b:g.brand,n:g.drinks.length}));
     el.appendChild(div);
   });
   try{el.classList.remove("swap");void el.offsetWidth;el.classList.add("swap");}catch(e){}
@@ -10022,7 +10037,7 @@ function renderNearby(){
     var b2=document.createElement("div");
     b2.setAttribute("role","button");b2.setAttribute("tabindex","0");b2.setAttribute("aria-label","Explorer une ville sur la carte");
     b2.style.cssText="flex-shrink:0;padding:11px 14px;border-radius:13px;border:1.5px solid var(--border);color:var(--s1);font-size:13px;font-weight:800;cursor:pointer";
-    b2.textContent="Explorer une ville";
+    b2.textContent=tr("Explorer une ville");
     b2.onclick=function(){playSound("pop");openExploreMap();};
     b2.onkeydown=function(ev){if(ev.key==="Enter"){b2.onclick();}};
     row.appendChild(b1);row.appendChild(b2);c.appendChild(row);
@@ -10040,7 +10055,7 @@ function renderNearby(){
     var eb=document.createElement("div");
     eb.setAttribute("role","button");eb.setAttribute("tabindex","0");eb.setAttribute("aria-label","Explorer la carte des magasins");
     eb.style.cssText="text-align:center;padding:11px;border-radius:13px;border:1.5px solid var(--border);color:var(--s1);font-size:13px;font-weight:800;cursor:pointer";
-    eb.textContent="Explorer la carte";
+    eb.textContent=tr("Explorer la carte");
     eb.onclick=function(){playSound("pop");openExploreMap();};
     eb.onkeydown=function(ev){if(ev.key==="Enter"){eb.onclick();}};
     b.appendChild(eb);card.appendChild(b);
@@ -10235,7 +10250,7 @@ function renderDonRow(){
   r.style.display=donPossible()?"":"none";
   if(!donPossible())return;
   var sub=document.getElementById("don-set-sub");
-  if(sub&&donDejaFait())sub.textContent="Merci pour ton soutien.";
+  if(sub&&donDejaFait())sub.textContent=tr("Merci pour ton soutien.");
 }
 
 /* La carte du profil : une ligne, une phrase, une croix. Elle disparait pour
@@ -10834,7 +10849,7 @@ function renderList(){
   if(isFuzzy){
     var fzHdr=document.createElement("div");
     fzHdr.style.cssText="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px";
-    fzHdr.textContent="R\u00E9sultats proches de \u00AB "+q+" \u00BB";
+    fzHdr.textContent=tr("R\u00E9sultats proches de \u00AB ")+q+" \u00BB";
     el.appendChild(fzHdr);
   }
   f.slice(0,_listLimit).forEach(function(d){
@@ -10858,7 +10873,7 @@ function renderList(){
   if(matchingDiscoveries.length){
     var hdr=document.createElement("div");
     hdr.style.cssText="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin:"+(f.length?"16px":"0")+" 0 10px";
-    hdr.textContent="Suggestions de la communauté";
+    hdr.textContent=tr("Suggestions de la communauté");
     el.appendChild(hdr);
     matchingDiscoveries.forEach(function(d){
       var div=document.createElement("div");div.className="ritem";
@@ -10970,7 +10985,7 @@ function renderStoreSearchList(){
   if(storeFuzzy){
     var sfHdr=document.createElement("div");
     sfHdr.style.cssText="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px";
-    sfHdr.textContent="R\u00E9sultats proches de \u00AB "+q+" \u00BB";
+    sfHdr.textContent=tr("R\u00E9sultats proches de \u00AB ")+q+" \u00BB";
     el.appendChild(sfHdr);
   }
   list.forEach(function(s){
@@ -12575,7 +12590,7 @@ function navUpdatePosition(lat,lng){
   var dEl=document.getElementById("nav-dist");
   if(dEl)dEl.textContent=fmtNavDist(remain)+" · ~"+mins+" min";
   if(remain<40){
-    var sub=document.getElementById("nav-sub");if(sub)sub.textContent="Tu es arrivé ! · "+sanitize(s.name);
+    var sub=document.getElementById("nav-sub");if(sub)sub.textContent=tr("Tu es arrivé ! · ")+sanitize(s.name);
     var dot=document.getElementById("nav-live-dot");if(dot)dot.style.background="#1a1714";
   }
   // Recentrage doux sur la position.
@@ -12589,7 +12604,7 @@ function navUpdatePosition(lat,lng){
     }
     if(minD>55){
       window._navLastReroute=now;
-      var sub2=document.getElementById("nav-sub");if(sub2)sub2.textContent="Recalcul de l'itinéraire…";
+      var sub2=document.getElementById("nav-sub");if(sub2)sub2.textContent=tr("Recalcul de l'itinéraire…");
       var url="https://routing.openstreetmap.de/routed-foot/route/v1/foot/"+lng+","+lat+";"+s.lng+","+s.lat+"?overview=full&geometries=geojson";
       fetch(url).then(function(r){return r.json();}).then(function(d){
         if(!window._navStore||window._navStore.id!==s.id||!d.routes||!d.routes[0])return;
@@ -13523,7 +13538,7 @@ function renderAlertsCard(){
     return '<div class="swp" data-del="alert:'+w.id+'"><div class="swp-bg">'+
       (typeof icoTrash==="function"?icoTrash(16):"")+'<span>Supprimer</span></div>'+
       '<div class="swp-fg" style="--swp-face:var(--bg2)"><div class="alert-row" style="display:flex;align-items:center;gap:12px;padding:11px 0'+(last?"":";border-bottom:1px solid var(--border)")+'" data-wid="'+w.id+'">'+
-      '<span style="width:46px;height:46px;border-radius:13px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" role="button" tabindex="0" aria-label="Voir '+attr(w.name)+' sur la carte" onkeydown="if(event.key===\'Enter\'){this.click();}" onclick="event.stopPropagation();alertOpenOnMap('+w.id+')">'+thumb+'</span>'+
+      '<span style="width:46px;height:46px;border-radius:13px;overflow:hidden;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" role="button" tabindex="0" aria-label="'+attr(trh("Voir {t} sur la carte",{t:w.name}))+'" onkeydown="if(event.key===\'Enter\'){this.click();}" onclick="event.stopPropagation();alertOpenOnMap('+w.id+')">'+thumb+'</span>'+
       '<span style="flex:1;min-width:0;cursor:pointer" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')this.click()" onclick="'+lineAction+'">'+
         '<span style="display:block;font-size:14px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(w.name)+'</span>'+
         '<span style="display:block;margin-top:4px">'+pill+'</span>'+
@@ -15469,10 +15484,10 @@ function verifierParPaiement(){
   var s=curStoreDetail; if(!s)return;
   if(!window.fbOuvrirVerification){toast("Vérification indisponible — envoie ta demande à la main");playSound("err");return;}
   var btn=document.querySelector(".claim-send");
-  if(btn){btn.disabled=true;btn.textContent="Ouverture de la vérification…";}
+  if(btn){btn.disabled=true;btn.textContent=tr("Ouverture de la vérification…");}
   var rendre=function(msg){
     playSound("err"); toast(msg);
-    if(btn){btn.disabled=false;btn.textContent="Vérifier ma boutique — gratuit";}
+    if(btn){btn.disabled=false;btn.textContent=tr("Vérifier ma boutique — gratuit");}
   };
   window.fbOuvrirVerification(String(s.fbId||s.id)).then(function(r){
     if(r&&r.ok&&r.url){ location.href=r.url; return; }
@@ -15521,7 +15536,7 @@ function claimSubmit(){
   setTimeout(function(){
     if(_fini)return;
     _fini=true;
-    if(btn){btn.disabled=false;btn.textContent="Envoyer ma demande";}
+    if(btn){btn.disabled=false;btn.textContent=tr("Envoyer ma demande");}
     try{playSound("err");}catch(e){}
     toast(navigator.onLine?"Le serveur ne répond pas — réessaie":"Pas de réseau — réessaie une fois connecté");
   },12000);
@@ -15538,7 +15553,7 @@ function claimSubmit(){
       body:"Pour "+s.name+". Un humain la vérifie, tu seras prévenu ici même.",ts:Date.now()});}catch(e){}
   }).catch(function(e){
     if(_fini)return; _fini=true;
-    if(btn){btn.disabled=false;btn.textContent="Envoyer ma demande";}
+    if(btn){btn.disabled=false;btn.textContent=tr("Envoyer ma demande");}
     try{playSound("err");}catch(e2){}
     /* permission-denied ici veut dire une chose precise : un document existe
        deja pour ce magasin et il n'est pas a nous (ou il est encore en
@@ -16048,13 +16063,13 @@ function osmAnalyze(){
   // a sa place au lieu d'analyser silencieusement autour de sa position
   var cityTyped=((document.getElementById("osm-city-q")||{}).value||"").trim();
   if(cityTyped&&!osmCenter){
-    status.textContent="Choisis d'abord ta ville dans les propositions ";
+    status.textContent=tr("Choisis d'abord ta ville dans les propositions ");
     osmSearchCity();
     return;
   }
   var cLat=osmCenter?osmCenter.lat:userLat;
   var cLng=osmCenter?osmCenter.lng:userLng;
-  if(typeof cLat!=="number"||!cLat){status.textContent="Position GPS requise (ou choisis une ville ci-dessus)";playSound("err");return;}
+  if(typeof cLat!=="number"||!cLat){status.textContent=tr("Position GPS requise (ou choisis une ville ci-dessus)");playSound("err");return;}
   var km=Number((document.getElementById("osm-radius")||{dataset:{}}).dataset.km||3);
   status.textContent="Interrogation d'OpenStreetMap\u2026";
   runBtn.style.display="none";
@@ -16114,7 +16129,7 @@ function osmAnalyze(){
     })
     .catch(function(e){
       console.warn("Overpass:",e);
-      status.textContent="OpenStreetMap ne r\u00E9pond pas (r\u00E9essaie dans une minute)";
+      status.textContent=tr("OpenStreetMap ne r\u00E9pond pas (r\u00E9essaie dans une minute)");
       playSound("err");
     });
 }
@@ -16585,7 +16600,7 @@ function resetProposeAi(){
   window._aiSeq=(window._aiSeq||0)+1; // invalide une analyse encore en vol
   try{_aiStatusHide();}catch(e){}
   var btn=document.getElementById("propose-send");
-  if(btn)btn.textContent="Envoyer la proposition";
+  if(btn)btn.textContent=tr("Envoyer la proposition");
 }
 function closeProposeForm(){
   var ov=document.getElementById("propose-sheet");if(ov)ov.style.display="none";
@@ -16677,7 +16692,7 @@ function cablerLienCode(drink){
     show("scan");
     try{ resetScanUI(); }catch(e){}
     var h=document.getElementById("scan-hint");
-    if(h)h.textContent="Vise le code-barre de "+drink.name;
+    if(h)h.textContent=tr("Vise le code-barre de ")+drink.name;
     try{ startScan(); }catch(e){}
     playSound("pop");
   };
@@ -16687,7 +16702,7 @@ function cablerLienCode(drink){
 function analyzeProposePhoto(data){
   window._aiPropose=null;window._aiBlockAlcohol=false;
   var btn0=document.getElementById("propose-send");
-  if(btn0)btn0.textContent="Envoyer la proposition"; // nouvelle photo : bouton neutre
+  if(btn0)btn0.textContent=tr("Envoyer la proposition"); // nouvelle photo : bouton neutre
   if(!window.fbIdentifyDrink||photoSuggestTarget)return; // suggestion de photo : pas d'analyse
   var seq=(window._aiSeq=(window._aiSeq||0)+1);
   _aiStatus("think",'<span class="mago-live-dot" style="width:7px;height:7px;border-radius:50%;background:#c69a57;flex-shrink:0;margin-top:5px"></span><span>Analyse de la photo par l’IA…</span>');
@@ -17565,7 +17580,7 @@ function exploreSetHeader(shown,sure){
     // Pas de preposition ("à Japon" est faux, "au Japon" ne marche pas pour
     // New York) : le nom du lieu se suffit a lui-meme.
     if(window._exploreMapFailed){
-      if(sub)sub.textContent="Carte indisponible \u2014 la liste reste accessible";
+      if(sub)sub.textContent=tr("Carte indisponible \u2014 la liste reste accessible");
       return;
     }
     var _place=window._explorePlace||"";
@@ -18276,7 +18291,7 @@ function exploreLoadStores(useCache){
   var dLo=(ne.lng-sw.lng)*111*Math.cos(cLat*Math.PI/180)/2;
   var radiusKm=Math.sqrt(dLa*dLa+dLo*dLo);
   if(!useCache&&radiusKm>30){
-    if(status)status.textContent="Zoome pour voir les magasins";
+    if(status)status.textContent=tr("Zoome pour voir les magasins");
     /* On EFFACE les marqueurs de la vue precedente. Avant, ils restaient a
        l'ecran, empiles les uns sur les autres en un gros tas noir au milieu de
        la carte : on croyait voir des magasins la ou il n'y avait qu'un reste
@@ -18560,7 +18575,7 @@ function exploreLoadStores(useCache){
     }
   }).catch(function(e){
     console.warn("explore:",e);
-    if(status)status.textContent="Chargement impossible, r\u00E9essaie";
+    if(status)status.textContent=tr("Chargement impossible, r\u00E9essaie");
   });
 }
 /* « Aucun magasin » n'avait qu'une seule voix, qu'on n'ait rien cherche, que
@@ -19091,9 +19106,9 @@ function refreshNotifState(){
   if(row)row.setAttribute("aria-checked",on?"true":"false");
   if(sub){
     if(!supported)sub.textContent="Non supportées sur ce navigateur";
-    else if(perm==="denied")sub.textContent="Bloquées par le téléphone — Réglages › Notifications › Magofeed";
-    else if(on&&window._pushToken)sub.textContent="Actives — tu es prévenu même application fermée";
-    else if(on&&window._pushRestoreFailed)sub.textContent="Autorisées, mais la liaison au serveur a échoué — coupe puis rallume l'interrupteur";
+    else if(perm==="denied")sub.textContent=tr("Bloquées par le téléphone — Réglages › Notifications › Magofeed");
+    else if(on&&window._pushToken)sub.textContent=tr("Actives — tu es prévenu même application fermée");
+    else if(on&&window._pushRestoreFailed)sub.textContent=tr("Autorisées, mais la liaison au serveur a échoué — coupe puis rallume l'interrupteur");
     else if(on)sub.textContent="Actives — finalisation en cours…";
     // La description au repos vient du dictionnaire : sans ca, la ligne
     // Notifications restait en francais dans les 9 autres langues.
@@ -19288,7 +19303,7 @@ async function runEmailDiagnostic(){
     btn.disabled=true; btn.style.opacity=".55"; btn.textContent="Envoi en cours…";
     var r={ok:false,reason:"indisponible"};
     try{ if(window.fbSendTestEmail) r=await window.fbSendTestEmail(); }catch(e){ r={ok:false,reason:String(e&&e.message||e)}; }
-    btn.disabled=false; btn.style.opacity="1"; btn.textContent="Envoyer un e-mail de test";
+    btn.disabled=false; btn.style.opacity="1"; btn.textContent=tr("Envoyer un e-mail de test");
     var good=!!(r&&r.ok), msg;
     if(good){ msg="E-mail envoyé à "+String(r.to||"")+". Il arrive dans une minute — regarde aussi les indésirables."; playSound("win"); }
     else{
@@ -21079,7 +21094,7 @@ function proposerChasse(code,best,res){
   var oui=document.createElement("div");
   oui.setAttribute("role","button");oui.setAttribute("tabindex","0");
   oui.style.cssText="margin-top:9px;text-align:center;padding:11px;border-radius:12px;background:#8a6414;color:#fff;font-size:12.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent";
-  oui.textContent="Oui, c\u2019est bien elle";
+  oui.textContent=tr("Oui, c\u2019est bien elle");
   var envoyer=function(){
     if(!window.fbProposerCodeChasse){toast("Indisponible hors ligne");playSound("err");return;}
     oui.textContent="Envoi\u2026"; oui.onclick=null;
@@ -21102,7 +21117,7 @@ function proposerChasse(code,best,res){
       if(/compte requis/.test(msg)){toast("Cr\u00E9e un compte pour participer \u00E0 la chasse");}
       else toast("Envoi impossible");
       playSound("err");
-      oui.textContent="Oui, c\u2019est bien elle"; oui.onclick=envoyer;
+      oui.textContent=tr("Oui, c\u2019est bien elle"); oui.onclick=envoyer;
     });
   };
   oui.onclick=envoyer;
@@ -21111,7 +21126,7 @@ function proposerChasse(code,best,res){
   var non=document.createElement("div");
   non.setAttribute("role","button");non.setAttribute("tabindex","0");
   non.style.cssText="margin-top:6px;text-align:center;padding:9px;font-size:11.5px;font-weight:700;color:var(--s2);cursor:pointer";
-  non.textContent="Non, c\u2019est autre chose";
+  non.textContent=tr("Non, c\u2019est autre chose");
   non.onclick=function(){bloc.remove();};
   non.onkeydown=function(ev){if(ev.key==="Enter")bloc.remove();};
   bloc.appendChild(non);
@@ -21136,11 +21151,11 @@ function renderFichesSansCode(){
   if(!orphelines.length)return;
   var hd=document.createElement("div");
   hd.style.cssText="font-size:13px;font-weight:800;color:var(--s1);margin:4px 0 4px";
-  hd.textContent="Fiches sans code-barre ("+orphelines.length+")";
+  hd.textContent=tr("Fiches sans code-barre (")+orphelines.length+")";
   host.appendChild(hd);
   var sub=document.createElement("div");
   sub.style.cssText="font-size:11.5px;font-weight:600;color:var(--s2);line-height:1.45;margin:0 0 10px";
-  sub.textContent="Elles existent dans la recherche, mais scanner le produit ne les trouve pas \u2014 et cr\u00E9e un doublon. Scanne-le, ou colle son code.";
+  sub.textContent=tr("Elles existent dans la recherche, mais scanner le produit ne les trouve pas \u2014 et cr\u00E9e un doublon. Scanne-le, ou colle son code.");
   host.appendChild(sub);
   orphelines.forEach(function(d){
     var row=document.createElement("div");
@@ -21151,7 +21166,7 @@ function renderFichesSansCode(){
     var btn=document.createElement("span");
     btn.setAttribute("role","button");btn.setAttribute("tabindex","0");
     btn.style.cssText="flex-shrink:0;padding:9px 12px;border-radius:11px;background:var(--s1);color:var(--app-bg);font-size:11.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent";
-    btn.textContent="Coller le code";
+    btn.textContent=tr("Coller le code");
     var poser=function(){
       var c=prompt("Code-barre de \u00AB "+String(d.name||"")+" \u00BB :\n\nCelui imprim\u00E9 sur le produit. V\u00E9rifie la variante \u2014 un code = UNE boisson pr\u00E9cise.","");
       if(c===null)return;
@@ -21202,7 +21217,7 @@ function renderFormatSuggestions(){
     if(!rows.length)return;
     var hd=document.createElement("div");
     hd.style.cssText="font-size:13px;font-weight:800;color:var(--s1);margin:4px 0 10px";
-    hd.textContent="Nouveaux formats \u00E0 valider ("+rows.length+")";
+    hd.textContent=tr("Nouveaux formats \u00E0 valider (")+rows.length+")";
     host.appendChild(hd);
     rows.forEach(function(r){
       var d=DRINKS.find(function(x){return Number(x.id)===Number(r.drinkId);});
@@ -21301,7 +21316,7 @@ function renderNewcomers(){
         return;
       }
       if (!users.length) {
-        box.textContent = "Aucun inscrit avec date d'arrivée enregistrée pour l'instant.";
+        box.textContent = tr("Aucun inscrit avec date d'arrivée enregistrée pour l'instant.");
         return;
       }
       box.innerHTML = users.map(function(u, i){
@@ -21335,7 +21350,7 @@ function renderNewcomers(){
       for (var i = 0; i < cells.length; i++) {
         var c = cells[i];
         var la = parseFloat(c.getAttribute("data-lat")), ln = parseFloat(c.getAttribute("data-lng"));
-        if (!isFinite(la) || !isFinite(ln)) { c.textContent = "position non partagée"; continue; }
+        if (!isFinite(la) || !isFinite(ln)) { c.textContent = tr("position non partagée"); continue; }
         var nom = await reverseCity(la, ln);
         c.textContent = nom || (la.toFixed(2) + ", " + ln.toFixed(2));
         if (i < cells.length - 1) await new Promise(function(res){ setTimeout(res, 1100); });
@@ -21594,7 +21609,7 @@ function renderContribFeed(){
     var myPseudo=(localStorage.getItem("magopseudo")||"").slice(0,24);
     var hd=document.createElement("div");
     hd.style.cssText="font-size:13px;font-weight:800;color:var(--s1);margin:2px 0 10px";
-    hd.textContent="Dernières contributions ("+rows.length+")";
+    hd.textContent=tr("Dernières contributions (")+rows.length+")";
     host.appendChild(hd);
     rows.slice(0,20).forEach(function(r){
       var d=DRINKS.find(function(x){return Number(x.id)===Number(r.drinkId);});
@@ -21643,7 +21658,7 @@ function renderContribFeed(){
               var dd=DRINKS.find(function(x){return String(x.id)===String(_did);});
               if(dd&&dd.barcodes){var i=indexCode(dd.barcodes,_code);if(i!==-1)dd.barcodes.splice(i,1);}
             }catch(e){}
-          }).catch(function(){ fix.textContent="\u00C9chec \u2014 r\u00E9essaie";fix.style.background="#dc2626"; });
+          }).catch(function(){ fix.textContent=tr("\u00C9chec \u2014 r\u00E9essaie");fix.style.background="#dc2626"; });
         };
         fix.onkeydown=function(ev){if(ev.key==="Enter")fix.onclick();};
         card.appendChild(fix);
@@ -22002,17 +22017,17 @@ function renderSecurite(){
   var bf=document.getElementById("sec-figer-go");
   if(bf)bf.onclick=function(){
     if(!window.fbFigerPoints){toast("Fonction pas encore d\u00E9ploy\u00E9e");playSound("err");return;}
-    bf.disabled=true; bf.textContent="Gel des soldes en cours\u2026";
+    bf.disabled=true; bf.textContent=tr("Gel des soldes en cours\u2026");
     window.fbFigerPoints().then(function(r){
       journaliserAction("Figer les soldes de points",{etat:"terminee",compte:(r&&r.traites)||0});
       playSound("win");
       toast("\u2713 "+((r&&r.traites)||0)+" compte"+(((r&&r.traites)||0)>1?"s":"")+" fig\u00E9"+(((r&&r.traites)||0)>1?"s":""));
-      bf.disabled=false; bf.textContent="Figer les soldes maintenant";
+      bf.disabled=false; bf.textContent=tr("Figer les soldes maintenant");
     }).catch(function(e){
       playSound("err");
       var c=String((e&&(e.code||e.message))||e);
       toast(/not-found|unimplemented/.test(c)?"D\u00E9ploie d'abord points-et-parrainage.js":"\u00C9chec : "+c.slice(0,70));
-      bf.disabled=false; bf.textContent="Figer les soldes maintenant";
+      bf.disabled=false; bf.textContent=tr("Figer les soldes maintenant");
     });
   };
   var be=document.getElementById("sec-emoji-go");
@@ -22024,11 +22039,11 @@ function renderSecurite(){
       journaliserAction("Retirer les emojis du catalogue",{etat:"terminee",compte:n});
       playSound(n?"win":"pop");
       toast(n?(n+" fiche"+(n>1?"s":"")+" nettoy\u00E9e"+(n>1?"s":"")):"Aucun emoji \u00E0 retirer");
-      be.disabled=false; be.textContent="Nettoyer le catalogue";
+      be.disabled=false; be.textContent=tr("Nettoyer le catalogue");
     }).catch(function(e){
       playSound("err");
       toast("\u00C9chec : "+String((e&&(e.code||e.message))||e).slice(0,70));
-      be.disabled=false; be.textContent="Nettoyer le catalogue";
+      be.disabled=false; be.textContent=tr("Nettoyer le catalogue");
     });
   };
   var boite=document.getElementById("sec-sauv");
@@ -22413,7 +22428,7 @@ function renderPhotoSuggestions(){
     if(!rows.length)return;
     var hd=document.createElement("div");
     hd.style.cssText="font-size:13px;font-weight:800;color:var(--s1);margin:4px 0 10px";
-    hd.textContent="Photos sugg\u00E9r\u00E9es ("+rows.length+")";
+    hd.textContent=tr("Photos sugg\u00E9r\u00E9es (")+rows.length+")";
     host.appendChild(hd);
     rows.forEach(function(r){
       var card=document.createElement("div");
@@ -22658,7 +22673,7 @@ function authSubmit(){
   var sb=document.getElementById("auth-submit");
   email=email.trim();
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)){if(er){er.textContent="Adresse e-mail invalide.";er.style.display="block";}return;}
-  if(pass.length<6){if(er){er.textContent="Mot de passe : 6 caractères minimum.";er.style.display="block";}return;}
+  if(pass.length<6){if(er){er.textContent=tr("Mot de passe : 6 caractères minimum.");er.style.display="block";}return;}
   if(er)er.style.display="none";
   if(sb){sb.disabled=true;sb.textContent="Un instant…";}
   var optIn=authMode==="up"&&!!((document.getElementById("auth-optin")||{}).checked);
@@ -22681,7 +22696,7 @@ function authSubmit(){
 function authForgot(){
   var email=((document.getElementById("auth-email")||{}).value||"").trim();
   var er=document.getElementById("auth-error");
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)){if(er){er.textContent="Écris d'abord ton adresse e-mail au-dessus.";er.style.display="block";}return;}
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)){if(er){er.textContent=tr("Écris d'abord ton adresse e-mail au-dessus.");er.style.display="block";}return;}
   window.fbEmailReset(email).then(function(){
     toast("E-mail de réinitialisation envoyé à "+email);
     if(er)er.style.display="none";
@@ -22976,7 +22991,7 @@ function openUserProfile(u){
        son propre profil (paliers, progression), au nom du joueur regarde. */
     return h+'<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px">'+ppBadges.map(function(b,i){
         var ring=(TIER_COLORS&&TIER_COLORS[b.tier-1])||"var(--border)";
-        return '<button data-pb="'+i+'" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--bg2);border:1.5px solid '+ring+';cursor:pointer;font:inherit" aria-label="Badge '+b.name+', voir le detail"><span style="display:flex;color:'+ring+'">'+badgeIcon(b.key,16,ring)+'</span><span style="font-size:11.5px;font-weight:800;color:var(--s1)">'+b.name+(TIER_NAMES&&b.tier>1?' '+TIER_NAMES[b.tier-1]:'')+'</span></button>';
+        return '<button data-pb="'+i+'" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--bg2);border:1.5px solid '+ring+';cursor:pointer;font:inherit" aria-label="'+attr(trh("Badge {t}, voir le detail",{t:b.name}))+'"><span style="display:flex;color:'+ring+'">'+badgeIcon(b.key,16,ring)+'</span><span style="font-size:11.5px;font-weight:800;color:var(--s1)">'+b.name+(TIER_NAMES&&b.tier>1?' '+TIER_NAMES[b.tier-1]:'')+'</span></button>';
       }).join("")+'</div>';
   })()+
   '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:8px" data-i18n="ppGestes">'+_tr("ppGestes")+'</div>'+
@@ -23941,7 +23956,7 @@ function renderUserSearchList(){
         var favs=(u.favs||[]).map(function(id){return DRINKS.find(function(d){return Number(d.id)===Number(id);});}).filter(Boolean).slice(0,4);
         if(favs.length){
           favHTML='<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'+favs.map(function(d){
-            return '<span class="usr-fav" data-drink="'+d.id+'" role="button" tabindex="0" aria-label="Voir '+attr(d.name)+'" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px 5px 5px;border-radius:999px;background:'+d.light+';cursor:pointer"><span style="width:24px;height:24px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:13px">'+drinkIconHTML(d)+'</span><span style="font-size:11px;font-weight:700;color:'+d.color+'">'+sanitize(d.name)+'</span></span>';
+            return '<span class="usr-fav" data-drink="'+d.id+'" role="button" tabindex="0" aria-label="'+attr(trh("Voir {t}",{t:d.name}))+'" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px 5px 5px;border-radius:999px;background:'+d.light+';cursor:pointer"><span style="width:24px;height:24px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:13px">'+drinkIconHTML(d)+'</span><span style="font-size:11px;font-weight:700;color:'+d.color+'">'+sanitize(d.name)+'</span></span>';
           }).join("")+'</div>';
         }
         card.innerHTML='<div style="display:flex;align-items:center;gap:12px">'+
