@@ -67,6 +67,28 @@ for (const lot of ["00","01","02","03"]) {
 }
 console.log("textes permanents : " + debut + " phrases sur " + lots + " lots (en, es, de)");
 
+/* 3. Les langues traduites d'un bloc, un fichier de 772 lignes chacune.
+   Elles sont arrivees apres les lots decoupes : meme liste source, meme ordre,
+   mais un seul fichier par langue au lieu de quatre. */
+const SEPT = ["ar", "nl", "it", "pt", "tr", "pl", "zh"];
+let entieres = 0;
+for (const lg of SEPT) {
+  const f = d + "/uiplein-" + lg + ".json";
+  if (!existsSync(f)) { console.log("  absente : " + lg); continue; }
+  const t = JSON.parse(readFileSync(f, "utf8"));
+  if (t.length !== ui.length) {
+    console.error("ECHEC " + lg + " : " + t.length + " au lieu de " + ui.length +
+                  " — l'ordre serait décalé, on n'écrit rien.");
+    process.exit(1);
+  }
+  const vides = t.filter((x) => !String(x).trim()).length;
+  if (vides) { console.error("ECHEC " + lg + " : " + vides + " entrées vides"); process.exit(1); }
+  ui.forEach((p, i) => pose(p, lg, t[i]));
+  entieres++;
+  console.log("  ok  " + lg + " : " + t.length);
+}
+console.log("langues completes en plus : " + entieres);
+
 /* Ordre alphabétique : un diff lisible vaut mieux qu'un fichier qui se
    réordonne à chaque exécution. */
 const cles = [...table.keys()].sort((a, b) => a.localeCompare(b, "fr"));
