@@ -98,6 +98,16 @@ function estGardeAdmin(n) {
   }
   return false;
 }
+/* Quelques fonctions n'ont pas le garde "isAdmin" parce qu'elles sont
+   appelees PAR les outils d'administration, jamais par l'interface publique.
+   Le garde-fou de confirmation en est le cas type : ses quatre appels sont
+   tous dans la zone d'administration. On les nomme ici plutot que de deviner,
+   et on redit pourquoi, pour que la liste puisse etre revue le jour ou l'un
+   d'eux servira ailleurs. */
+const FONCTIONS_ADMIN = new Set([
+  "actionSensible",     /* garde-fou de confirmation : 4 appels, tous cote admin */
+  "journalAdmin",       /* trace des actions d'administration */
+]);
 const RE_ADMIN = /admin|Admin|ADMIN/;
 
 const blocs = [];
@@ -123,7 +133,7 @@ for (const b of blocs) {
        ce qui compte vraiment. */
     if (n.type === "CallExpression" && n.callee && n.callee.type === "MemberExpression" &&
         n.callee.object && n.callee.object.name === "console") dansConsole = true;
-    if (/Function/.test(n.type) && estGardeAdmin(n)) dansConsole = true;   /* meme traitement : hors perimetre */
+    if (/Function/.test(n.type) && (estGardeAdmin(n) || (n.id && FONCTIONS_ADMIN.has(n.id.name)))) dansConsole = true;
     if (n.type === "Literal" && typeof n.value === "string" && !dansConsole) {
       const s = n.value.trim();
       if (s && !estTechnique(s) && !TEXTES[s] && !TEXTES[n.value] && estFrancais(s)) {

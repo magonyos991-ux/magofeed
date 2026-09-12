@@ -38,9 +38,18 @@ const morceaux = new Map();
 for (const l of lignes) {
   const ligne = l.ligne;
   const texte = l.texte;
-  for (const p of texte.split(/<[^>]*>/)) {
+  for (const p0 of texte.split(/<[^>]*>/)) {
+    /* Le decoupage sur les balises laisse des restes quand la chaine du code
+       s'arrete au milieu d'une balise : ",this)\" role=\"button\" …" ou
+       "')\">Trouvee ici !". Ce qu'un utilisateur lit se trouve apres le
+       dernier ">" et avant le premier "<" restant. Ce qui contient encore un
+       attribut est de la mecanique, pas une phrase. */
+    let p = p0;
+    if (p.indexOf(">") !== -1) p = p.slice(p.lastIndexOf(">") + 1);
+    if (p.indexOf("<") !== -1) p = p.slice(0, p.indexOf("<"));
     const s = p.replace(/\s+/g, " ").trim();
     if (!s || s.length < 3) continue;
+    if (/=["']|event\.|function\s*\(|\bthis\b/.test(s)) continue;
     if (TEXTES[s]) continue;
     if (!francais(s)) continue;
     if (CLES.some((c) => c.length >= 8 && s.length >= 8 && c.indexOf(s) !== -1)) continue;
