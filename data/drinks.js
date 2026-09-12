@@ -748,4 +748,5 @@ var DRINKS=[
   {id:13126,name:"Ramune Sangaria Fraise",brand:"Sangaria",emoji:"",color:"#e74c3c",light:"#fdecea",cat:"Exotique",tag:"RAMUNE SANGARIA FRAISE",stars:4.2,formats:[{type:"bouteille",cl:20}],imp:1},
   {id:13127,name:"Ramune Sangaria Melon",brand:"Sangaria",emoji:"",color:"#58d68d",light:"#eafaf1",cat:"Exotique",tag:"RAMUNE SANGARIA MELON",stars:4.2,formats:[{type:"bouteille",cl:20}],imp:1},
   {id:13128,name:"Binggrae Lait Banane",brand:"Binggrae",emoji:"",color:"#aab7b8",light:"#f4f6f6",cat:"Exotique",tag:"BINGGRAE LAIT BANANE",stars:4.2,formats:[{type:"bouteille",cl:20}],imp:1},
+  {id:13200,name:"Alpro Barista Cinnamon Roll",brand:"Alpro",emoji:"",color:"#1d4f9c",light:"#e8eef8",cat:"Lact\u00E9",tag:"ALPRO BARISTA CINNAMON ROLL",stars:4.4},
 ];

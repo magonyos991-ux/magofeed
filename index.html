@@ -1893,10 +1893,22 @@ function normalizeStore(data, id, distKm) {
    seulement) + repli progressif sur les magasins les plus proches si ca ne
    rentre toujours pas. L'app s'ouvre desormais instantanement sur le cache. */
 function compactStore(s) {
+  /* Le rayon d'enseigne est RETIRE avant d'ecrire le cache : il se recalcule
+     gratuitement a la lecture (fusionnerRayonEnseigne), et le garder ferait
+     grossir le cache de plusieurs centaines de kilo-octets — or il tient dans
+     un quota de cinq mega-octets, deja atteint une fois. */
+  var drinks = s.drinks || [];
+  var r = rayonEnseigne(s);
+  if (r && r.ids && r.ids.length) {
+    var ens = {};
+    r.ids.forEach(function(id) { ens[Number(id)] = 1; });
+    var confs = s.confirmations || {};
+    drinks = drinks.filter(function(id) { return !ens[Number(id)] || Number(confs[id]) > 0; });
+  }
   return {
     id: s.id, fbId: s.fbId, name: s.name, brand: s.brand || "", emoji: s.emoji,
     lat: s.lat, lng: s.lng, type: s.type || "", hours: s.hours || null,
-    dist: s.dist, drinks: s.drinks || [], drinksVerified: s.drinksVerified || [],
+    dist: s.dist, drinks: drinks, drinksVerified: s.drinksVerified || [],
     confirmations: s.confirmations || {}, community: s.community || false,
     /* Fraicheur et auteur des observations : sans eux, le cache servait des
        stocks « a reconfirmer » et anonymes pendant 24 h apres chaque
@@ -2007,8 +2019,36 @@ function slimStores(stores) {
   }
   return stores;
 }
+/* RAYON D'ENSEIGNE APPLIQUE A LA LECTURE.
+   Avant, une boisson ajoutee au catalogue d'une enseigne n'apparaissait que
+   sur les magasins importes APRES coup : les 30 000 magasins deja en base
+   gardaient leur rayon du jour de leur import, et il fallait relancer le
+   remplissage serveur (des dizaines de milliers d'ecritures) pour rattraper.
+   Ici on fusionne le rayon probable de l'enseigne au moment ou on lit les
+   magasins : rien n'est ecrit, ni dans Firestore ni dans le cache, et une
+   mise a jour du catalogue est visible au rechargement suivant.
+   Les confirmations de la communaute ne sont pas touchees : elles vivent dans
+   confirmations/drinksVerified, et ce sont elles qui font foi. */
+function rayonEnseigne(s) {
+  if (typeof window.chainIdsForStore !== "function") return null;
+  try { return window.chainIdsForStore(s.name, s.brand); } catch (e) { return null; }
+}
+function fusionnerRayonEnseigne(stores) {
+  (stores || []).forEach(function(s) {
+    var r = rayonEnseigne(s);
+    if (!r || !r.ids || !r.ids.length) return;
+    var vus = {};
+    (s.drinks || []).forEach(function(id) { vus[Number(id)] = 1; });
+    var out = (s.drinks || []).slice();
+    r.ids.forEach(function(id) { if (!vus[Number(id)]) { vus[Number(id)] = 1; out.push(Number(id)); } });
+    s.drinks = out;
+  });
+  return stores;
+}
 function applyStores(stores, banner, fromCache) {
-  window.STORES = slimStores(stores);
+  /* Apres slimStores : inutile de fusionner le rayon de magasins qui seront
+     jetes dans la foulee (la liste est plafonnee a 1400 par distance). */
+  window.STORES = fusionnerRayonEnseigne(slimStores(stores));
   try{if(typeof checkWatches==="function")checkWatches();}catch(e){}
   window._fbStoresLoaded = stores;
   window._fbReady = true;
@@ -11427,12 +11467,30 @@ function buildChainSets(){
   window._chainSets=sets;
   return sets;
 }
+/* PETITS FORMATS : une superette de gare n'a pas l'assortiment du grand
+   magasin de l'enseigne. Delhaize publie le format de chacun de ses magasins :
+   sur la seule region de Bruxelles, 48 Shop&Go et 75 Proxy pour 7 Delhaize
+   Supermarche. Promettre un Alpro Barista Cinnamon Roll dans un Shop&Go de
+   soixante metres carres, c'est envoyer quelqu'un pour rien — et c'est
+   exactement ce que l'app doit eviter. Ces magasins ne recoivent donc que le
+   socle (les marques qu'on trouve VRAIMENT partout), pas les references de
+   niche. La communaute peut evidemment confirmer le contraire : une
+   confirmation en rayon l'emporte toujours sur cette prudence. */
+/* « Shop&Go » s'ecrit « Shop&6Go » dans les donnees de l'enseigne (BRAND_COLORS
+   porte deja cette graphie) : le motif accepte les trois formes rencontrees. */
+var _SHOPGO=/shop\s*(&|and|n)?\s*6?\s*go/;
+function petitFormat(name,brand){
+  var b=normTxt((brand||"")+" "+(name||""));
+  if(_SHOPGO.test(b))return true;
+  return /(^|[^a-z])(proxy|express|city|contact|compact|monop|vival|primo)([^a-z]|$)/.test(b)||
+         /petit\s?casino|daily\s?monop|u\s?express|spar\s?city|to\s?go/.test(b);
+}
 /* Detecte l'enseigne d'un magasin par son nom/marque -> son set verifie */
 function chainIdsFor(name,brand){
   var sets=buildChainSets();
   var b=normTxt((brand||"")+" "+(name||""));
   if(b.indexOf("carrefour")!==-1)return{ids:sets.carrefour,key:"Carrefour"};
-  if(b.indexOf("delhaize")!==-1)return{ids:sets.delhaize,key:"Delhaize"};
+  if(b.indexOf("delhaize")!==-1||_SHOPGO.test(b))return{ids:sets.delhaize,key:"Delhaize"};
   if(b.indexOf("colruyt")!==-1)return{ids:sets.colruyt,key:"Colruyt"};
   if(b.indexOf("auchan")!==-1)return{ids:sets.auchan,key:"Auchan"};
   if(b.indexOf("leclerc")!==-1)return{ids:sets.leclerc,key:"Leclerc"};
@@ -11446,6 +11504,16 @@ function chainIdsFor(name,brand){
   if(b.indexOf("jumbo")!==-1)return{ids:sets.jumbo,key:"Jumbo"};
   return null;
 }
+/* Meme fonction, mais qui tient compte du format du magasin. C'est celle que
+   l'app utilise pour afficher un rayon probable ; chainIdsFor reste brute pour
+   les outils d'administration. */
+function chainIdsForStore(name,brand){
+  var r=chainIdsFor(name,brand);
+  if(!r)return null;
+  if(petitFormat(name,brand))return{ids:packDrinkIds(),key:r.key,petit:true};
+  return r;
+}
+window.chainIdsForStore=chainIdsForStore;
 function adminFillEnseignes(){
   if(!isAdmin)return;
   var sets=buildChainSets();
