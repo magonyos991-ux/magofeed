@@ -65,12 +65,39 @@ function estTechnique(s) {
   if (/[:;]\s*[-\w]+\s*[:;]/.test(s) && /px|rem|%|var\(|#[0-9a-f]{3,6}|flex|grid|rgba?\(/i.test(s)) return true;
   if (/^[\w-]+(\.[\w-]+)+$/.test(s)) return true;                 /* a.b.c */
   if (/^[A-Za-z_$][\w$]*$/.test(s)) return true;                  /* identifiant */
+  /* Un seul mot, sans espace, sans accent, fait de lettres et de tirets :
+     c'est une classe CSS ou un identifiant ("th-on", "map-wrap"), pas une
+     phrase. Sans ce filtre, "th-on" etait signale comme francais a cause du
+     "on" apres le tiret. */
+  if (!/\s/.test(s) && /^[A-Za-z][A-Za-z0-9_-]*$/.test(s)) return true;
   return false;
 }
 
 /* Les ecrans d'administration sont volontairement en francais : ils ne sont
    lus que par le proprietaire de l'application. On ne les compte pas comme
-   une promesse non tenue, mais on les affiche a part pour ne pas les oublier. */
+   une promesse non tenue, mais on les affiche a part pour ne pas les oublier.
+
+   Comment les reconnaitre. Chercher le mot "admin" DANS la phrase ne marche
+   pas : "Purger Lidl, Aldi et Match" est un outil d'administration et ne
+   contient pas le mot. Le vrai signe est structurel — ces fonctions
+   commencent toutes par un garde "if(!isAdmin)return;". On lit donc l'arbre,
+   pas le texte. */
+function estGardeAdmin(n) {
+  if (!n || !n.body) return false;
+  const corps = n.body.type === "BlockStatement" ? n.body.body : [];
+  for (const st of corps.slice(0, 2)) {
+    if (st.type !== "IfStatement") continue;
+    let trouve = false;
+    (function chercher(x) {
+      if (!x || typeof x !== "object" || trouve) return;
+      if (Array.isArray(x)) { x.forEach(chercher); return; }
+      if (x.type === "Identifier" && /^is[A-Z]?admin$/i.test(x.name)) trouve = true;
+      for (const k in x) if (k !== "type" && k !== "start" && k !== "end") chercher(x[k]);
+    })(st.test);
+    if (trouve) return true;
+  }
+  return false;
+}
 const RE_ADMIN = /admin|Admin|ADMIN/;
 
 const blocs = [];
@@ -96,6 +123,7 @@ for (const b of blocs) {
        ce qui compte vraiment. */
     if (n.type === "CallExpression" && n.callee && n.callee.type === "MemberExpression" &&
         n.callee.object && n.callee.object.name === "console") dansConsole = true;
+    if (/Function/.test(n.type) && estGardeAdmin(n)) dansConsole = true;   /* meme traitement : hors perimetre */
     if (n.type === "Literal" && typeof n.value === "string" && !dansConsole) {
       const s = n.value.trim();
       if (s && !estTechnique(s) && !TEXTES[s] && !TEXTES[n.value] && estFrancais(s)) {
@@ -134,8 +162,18 @@ const liste = [...trouves.entries()].sort((a, b) => a[1] - b[1]);
 const admin = liste.filter(([s]) => RE_ADMIN.test(s));
 const vus = liste.filter(([s]) => !RE_ADMIN.test(s));
 
+/* Mode machine : la sortie lisible tronque les longues phrases a 110
+   caracteres pour rester lisible. Un outil qui lirait cette sortie
+   fabriquerait des cles amputees — et une cle amputee ne correspond a rien.
+   Le mode --json rend les chaines entieres. */
+if (process.argv.includes("--json")) {
+  console.log(JSON.stringify(liste.map(([s, l]) => ({ texte: s, ligne: l })), null, 1));
+  process.exitCode = 0;
+} else {
+
 console.log("blocs <script> analyses : " + analyses + (illisibles ? "  (" + illisibles + " illisibles)" : ""));
 console.log("\nCHAINES FRANCAISES HORS TABLE : " + vus.length);
 for (const [s, l] of vus) console.log("  index.html:" + l + "  " + JSON.stringify(s.length > 110 ? s.slice(0, 110) + "…" : s));
 if (admin.length) console.log("\n(dont mentions d'administration, a part : " + admin.length + ")");
 process.exitCode = vus.length ? 1 : 0;
+}
