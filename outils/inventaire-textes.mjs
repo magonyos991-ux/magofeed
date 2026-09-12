@@ -126,9 +126,44 @@ try {
 
 const ligneDe = (i) => code.slice(0, i).split("\n").length;
 
+/* ---- LA FORME QUI COMPTE EST CELLE DE L'EXÉCUTION -------------------------
+   Le code source écrit toast("Trac\\u00e9 indisponible") ; à l'exécution, tr()
+   reçoit « Tracé indisponible ». Si l'inventaire rend la forme SOURCE, la table
+   de traduction se construit avec des clés qui ne correspondront à rien.
+
+   C'est exactement ce qui est arrivé : 38 des 156 premières entrées portaient
+   encore leurs séquences d'échappement et n'ont jamais pu être trouvées — un
+   quart des traductions livrées était mort-né, sans que rien ne le signale.
+
+   On rend donc ce que le moteur rendrait : séquences JavaScript interprétées
+   pour ce qui vient du code, entités HTML pour ce qui vient des balises. */
+const ECHAP = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", '"': '"', "'": "'", "\\": "\\", "/": "/" };
+function versExecutionJS(t) {
+  return t.replace(/\\(u[0-9A-Fa-f]{4}|x[0-9A-Fa-f]{2}|.)/g, (tout, suite) => {
+    if (suite[0] === "u") return String.fromCharCode(parseInt(suite.slice(1), 16));
+    if (suite[0] === "x") return String.fromCharCode(parseInt(suite.slice(1), 16));
+    return ECHAP[suite] !== undefined ? ECHAP[suite] : suite;
+  });
+}
+const ENTITES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: "\u00A0", eacute: "é", egrave: "è", agrave: "à", ccedil: "ç", times: "×", middot: "·", hellip: "…", mdash: "—", ndash: "–", rsquo: "\u2019" };
+function versExecutionHTML(t) {
+  return t.replace(/&(#x?[0-9A-Fa-f]+|[a-zA-Z]+);/g, (tout, corps) => {
+    if (corps[0] === "#") {
+      const n = corps[1] === "x" || corps[1] === "X"
+        ? parseInt(corps.slice(2), 16) : parseInt(corps.slice(1), 10);
+      return isNaN(n) ? tout : String.fromCodePoint(n);
+    }
+    return ENTITES[corps] !== undefined ? ENTITES[corps] : tout;
+  });
+}
+const VENANT_DU_CODE = new Set(["texte", "message", "question", "alerte", "invite"]);
+
 const trouves = new Map();          // texte -> {genres:Set, n, lignes:[], admin}
 function ajoute(texte, genre, pos, admin) {
-  const t = texte.trim().replace(/\s+/g, " ");
+  const brut = VENANT_DU_CODE.has(genre) ? versExecutionJS(texte) : versExecutionHTML(texte);
+  /* Les sauts de ligne d'un confirm() font partie du message : on ne les
+     aplatit pas, on ne resserre que les espaces horizontaux. */
+  const t = brut.replace(/[ \t\u00A0]+/g, " ").replace(/ *\n */g, "\n").trim();
   if (t.length < 3) return;
   if (!FRANCAIS.test(t)) return;
   if (/^[\w-]+$/.test(t)) return;                 // un seul mot technique
@@ -191,20 +226,36 @@ function fonctionEn(pos) {
   for (const [i, n] of declarations) { if (i > pos) break; nom = n; }
   return nom;
 }
+/* UNE CHAÎNE SE LIT SELON SON PROPRE GUILLEMET, PAS SELON TOUS À LA FOIS.
+   La version précédente cherchait le contenu avec [^"'`\n] — c'est-à-dire « des
+   caractères qui ne sont AUCUN des trois guillemets ». Elle coupait donc
+   toast("Déjà signalé aujourd'hui") sur l'apostrophe de « aujourd'hui » et
+   rapportait « Déjà signalé aujourd ». Un tiers des messages français porte une
+   apostrophe : on aurait traduit des moitiés de phrases, et aucune de ces clés
+   tronquées n'aurait jamais correspondu au texte réel à l'exécution.
+
+   Chaque type de guillemet est maintenant lu avec le sien, et les échappements
+   (\" à l'intérieur d'une chaîne double) sont respectés. */
+const CHAINE = '(?:"((?:[^"\\\\\\n]|\\\\.)*)"' + "|'((?:[^'\\\\\\n]|\\\\.)*)'" + '|`((?:[^`\\\\\\n$]|\\\\.)*)`)';
+const apres = (prefixe) => new RegExp(prefixe + "\\s*" + CHAINE, "g");
 const CONTEXTES = [
-  [/textContent\s*=\s*["'`]([^"'`\n]{3,200})["'`]/g, "texte"],
-  [/\binnerHTML\s*=\s*["'`]([^"'`<>{}\n]{3,200})["'`]/g, "texte"],
-  [/placeholder\s*=\s*["']([^"'\n]{3,200})["']/g, "champ"],
-  [/aria-label\s*=\s*["']([^"'\n]{3,200})["']/g, "accessibilité"],
-  [/title\s*=\s*["']([^"'\n]{3,200})["']/g, "infobulle"],
-  [/\btoast\s*\(\s*["'`]([^"'`\n]{3,200})["'`]/g, "message"],
-  [/\bconfirm\w*\s*\(\s*["'`]([^"'`\n]{3,200})["'`]/g, "question"],
-  [/\balert\s*\(\s*["'`]([^"'`\n]{3,200})["'`]/g, "alerte"],
-  [/\bprompt\s*\(\s*["'`]([^"'`\n]{3,200})["'`]/g, "invite"],
+  [apres("textContent\\s*="), "texte"],
+  [apres("\\binnerText\\s*="), "texte"],
+  [apres("placeholder\\s*="), "champ"],
+  [apres("aria-label\\s*="), "accessibilité"],
+  [apres("title\\s*="), "infobulle"],
+  [apres("\\btoast\\s*\\("), "message"],
+  [apres("\\bconfirm\\w*\\s*\\("), "question"],
+  [apres("\\balert\\s*\\("), "alerte"],
+  [apres("\\bprompt\\s*\\("), "invite"],
 ];
 for (const [re, genre] of CONTEXTES) {
   let m;
-  while ((m = re.exec(scripts))) ajoute(m[1], genre, m.index, /admin/i.test(fonctionEn(m.index)));
+  while ((m = re.exec(scripts))) {
+    const contenu = m[1] !== undefined ? m[1] : (m[2] !== undefined ? m[2] : m[3]);
+    if (contenu !== undefined)
+      ajoute(contenu, genre, m.index, /admin/i.test(fonctionEn(m.index)));
+  }
 }
 
 /* ---------- 3. LE RAPPORT --------------------------------------------------- */
