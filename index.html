@@ -591,6 +591,12 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       <div id="fav-list" style="padding:0 20px 20px">
         <div class="mt-empty"><div class="mt-empty-i"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5C7 16.5 3.5 13.2 3.5 9.3 3.5 6.6 5.6 4.5 8.2 4.5c1.6 0 3 .8 3.8 2 .8-1.2 2.2-2 3.8-2 2.6 0 4.7 2.1 4.7 4.8 0 3.9-3.5 7.2-8.5 11.2z"/></svg></div><div class="mt-empty-t">Aucune favorite</div><div class="mt-empty-s">Touche le cœur d'une boisson pour la garder ici, toujours à portée de main.</div></div>
       </div>
+      <!-- MES SCANS. Le journal vivait uniquement dans l'écran Scan, sous le
+           lecteur de code-barres : quelqu'un qui voulait revoir ce qu'il avait
+           scanné ne pensait pas à aller le chercher là. Ici, on en montre les
+           derniers, et on renvoie à la liste complète. -->
+      <div style="padding:8px 20px 10px" class="t-section" id="t-myscans">Mes derniers scans</div>
+      <div id="profile-scans" style="padding:0 20px 6px"></div>
       <div style="padding:8px 20px 10px" class="t-section" id="t-badges">Badges</div>
       <div id="badges-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:0 20px 6px"></div>
       <div style="padding:8px 20px 10px" class="t-section" id="t-activity">Activité</div>
@@ -1549,6 +1555,15 @@ onAuthStateChanged(auth, async function(user) {
   /* Mes boutiques certifiees : lecture unique, dans un document prive. Elle
      remplace l'ancien champ public 'owner'. Un compte anonyme n'en a jamais. */
   try { if (!user.isAnonymous && window.chargerMesMagasins) window.chargerMesMagasins(); } catch (e) {}
+  /* Le journal de scan suit la personne, pas le telephone : on le rapatrie une
+     fois par session, sans bloquer l'affichage (le journal local est deja a
+     l'ecran). Sur un appareil neuf, c'est ce qui fait reapparaitre ses scans. */
+  try {
+    if (!user.isAnonymous && window.fbChargerScans && !window._scansCharges) {
+      window._scansCharges = true;
+      window.fbChargerScans();
+    }
+  } catch (e) {}
   /* Session perdue ? On garde en memoire le dernier vrai compte connecte.
      Si on se reveille en anonyme alors qu'un compte existait, ce n'est pas
      normal : le stockage a ete purge. On le DIT au lieu de laisser la
@@ -1975,10 +1990,22 @@ function normalizeStore(data, id, distKm) {
    seulement) + repli progressif sur les magasins les plus proches si ca ne
    rentre toujours pas. L'app s'ouvre desormais instantanement sur le cache. */
 function compactStore(s) {
+  /* Le rayon d'enseigne est RETIRE avant d'ecrire le cache : il se recalcule
+     gratuitement a la lecture (fusionnerRayonEnseigne), et le garder ferait
+     grossir le cache de plusieurs centaines de kilo-octets — or il tient dans
+     un quota de cinq mega-octets, deja atteint une fois. */
+  var drinks = s.drinks || [];
+  var r = rayonEnseigne(s);
+  if (r && r.ids && r.ids.length) {
+    var ens = {};
+    r.ids.forEach(function(id) { ens[Number(id)] = 1; });
+    var confs = s.confirmations || {};
+    drinks = drinks.filter(function(id) { return !ens[Number(id)] || Number(confs[id]) > 0; });
+  }
   return {
     id: s.id, fbId: s.fbId, name: s.name, brand: s.brand || "", emoji: s.emoji,
     lat: s.lat, lng: s.lng, type: s.type || "", hours: s.hours || null,
-    dist: s.dist, drinks: s.drinks || [], drinksVerified: s.drinksVerified || [],
+    dist: s.dist, drinks: drinks, drinksVerified: s.drinksVerified || [],
     confirmations: s.confirmations || {}, community: s.community || false,
     /* Fraicheur et auteur des observations : sans eux, le cache servait des
        stocks « a reconfirmer » et anonymes pendant 24 h apres chaque
@@ -2089,8 +2116,36 @@ function slimStores(stores) {
   }
   return stores;
 }
+/* RAYON D'ENSEIGNE APPLIQUE A LA LECTURE.
+   Avant, une boisson ajoutee au catalogue d'une enseigne n'apparaissait que
+   sur les magasins importes APRES coup : les 30 000 magasins deja en base
+   gardaient leur rayon du jour de leur import, et il fallait relancer le
+   remplissage serveur (des dizaines de milliers d'ecritures) pour rattraper.
+   Ici on fusionne le rayon probable de l'enseigne au moment ou on lit les
+   magasins : rien n'est ecrit, ni dans Firestore ni dans le cache, et une
+   mise a jour du catalogue est visible au rechargement suivant.
+   Les confirmations de la communaute ne sont pas touchees : elles vivent dans
+   confirmations/drinksVerified, et ce sont elles qui font foi. */
+function rayonEnseigne(s) {
+  if (typeof window.chainIdsForStore !== "function") return null;
+  try { return window.chainIdsForStore(s.name, s.brand); } catch (e) { return null; }
+}
+function fusionnerRayonEnseigne(stores) {
+  (stores || []).forEach(function(s) {
+    var r = rayonEnseigne(s);
+    if (!r || !r.ids || !r.ids.length) return;
+    var vus = {};
+    (s.drinks || []).forEach(function(id) { vus[Number(id)] = 1; });
+    var out = (s.drinks || []).slice();
+    r.ids.forEach(function(id) { if (!vus[Number(id)]) { vus[Number(id)] = 1; out.push(Number(id)); } });
+    s.drinks = out;
+  });
+  return stores;
+}
 function applyStores(stores, banner, fromCache) {
-  window.STORES = slimStores(stores);
+  /* Apres slimStores : inutile de fusionner le rayon de magasins qui seront
+     jetes dans la foulee (la liste est plafonnee a 1400 par distance). */
+  window.STORES = fusionnerRayonEnseigne(slimStores(stores));
   try{if(typeof checkWatches==="function")checkWatches();}catch(e){}
   window._fbStoresLoaded = stores;
   window._fbReady = true;
@@ -2617,14 +2672,26 @@ window.fbEnvoyerMessage = async function(cid, msg) {
       m.lat = Math.round(msg.lat * 1000) / 1000; m.lng = Math.round(msg.lng * 1000) / 1000;
       apercu = "Position";
     } else if (msg.type === "spot") {
+      /* Deux cartes partagent ce type, et c'est volontaire : une trouvaille
+         (une boisson VUE dans un magasin) et un magasin seul, envoye depuis
+         la carte. Un type de plus aurait voulu dire modifier les regles
+         Firestore et les redeployer a la main — pour une carte qui n'apporte
+         aucun champ nouveau. La difference se lit a la presence du nom de
+         boisson, ici comme a l'affichage. */
       m.storeId = String(msg.storeId || "").slice(0, 80);
       m.storeName = String(msg.storeName || "").slice(0, 60);
       // Une cle absente plutot que nulle : les regles n'acceptent que les
       // types documentes, et null n'en fait pas partie.
       if (msg.drinkId != null) m.drinkId = (typeof msg.drinkId === "number") ? msg.drinkId : String(msg.drinkId).slice(0, 40);
-      m.drinkName = String(msg.drinkName || "").slice(0, 60);
-      if (!m.storeId || !m.storeName || !m.drinkName) return { ok: false, reason: "invalid" };
-      apercu = m.drinkName + " chez " + m.storeName;
+      var dn = String(msg.drinkName || "").slice(0, 60);
+      if (dn) m.drinkName = dn;
+      /* Les coordonnees voyagent avec le magasin pour que « GPS » marche meme
+         si celui qui recoit n'a pas cette zone chargee. Un commerce est un
+         lieu public : contrairement au type "pos", on ne les arrondit pas. */
+      if (typeof msg.lat === "number" && typeof msg.lng === "number" &&
+          isFinite(msg.lat) && isFinite(msg.lng)) { m.lat = msg.lat; m.lng = msg.lng; }
+      if (!m.storeId || !m.storeName) return { ok: false, reason: "invalid" };
+      apercu = dn ? (dn + " chez " + m.storeName) : m.storeName;
     } else return { ok: false, reason: "invalid" };
     /* Rythme impose par les regles : 700 ms entre deux ecritures dans le fil,
        creation comprise et messages de l'autre compris. On attend ici plutot
@@ -4871,6 +4938,69 @@ window.fbVoteDiscovery = async function(discoveryId) {
 };
 
 // Tendances : compteur de scans agrégé, un seul doc (clé = id boisson)
+/* JOURNAL DE SCAN, SYNCHRONISE.
+   Il ne vivait que dans le localStorage du telephone : cinquante entrees qui
+   disparaissaient avec le cache du navigateur, et qu'aucun autre appareil ne
+   voyait. Le pere du fondateur a scanne une canette et demande le lendemain si
+   son scan avait servi — la reponse etait introuvable, y compris dans l'ecran
+   d'administration, parce qu'un code-barres deja au catalogue n'ecrit
+   strictement rien cote serveur.
+   On double donc le journal local dans users/{uid}/scans/{code}. La regle
+   existante (match /{col}/{doc=**} { allow read, write: if isSelf(uid) })
+   couvre deja cette sous-collection : c'est PRIVE, personne d'autre n'y
+   accede, et aucun redeploiement n'est necessaire. L'affichage continue de
+   lire le journal local — zero lecture Firestore a l'ouverture, hors ligne
+   compris ; le serveur ne sert qu'a retrouver son historique sur un autre
+   telephone. Les comptes anonymes sont ignores : leur uid change a chaque
+   reinstallation, on ecrirait des orphelins. */
+window.fbEnregistrerScan = async function(entree) {
+  try {
+    var u = auth.currentUser;
+    if (!u || u.isAnonymous || !entree || entree.code == null) return;
+    var cle = String(entree.code).replace(/[^0-9A-Za-z_-]/g, "").slice(0, 60);
+    if (!cle) return;
+    var d = { code: String(entree.code).slice(0, 40), ts: Number(entree.ts) || Date.now() };
+    ["name", "brand", "cat", "src", "storeName"].forEach(function(k) {
+      if (entree[k]) d[k] = String(entree[k]).slice(0, 80);
+    });
+    if (entree.drinkId != null) d.drinkId = Number(entree.drinkId) || String(entree.drinkId).slice(0, 40);
+    if (typeof entree.price === "number") d.price = entree.price;
+    await setDoc(doc(db, "users", u.uid, "scans", cle), d, { merge: true });
+  } catch (e) { console.warn("scan sync:", e); }
+};
+/* Rapatrie le journal du serveur et le fusionne au journal local, entree par
+   entree : la plus recente gagne. Rend le nombre d'entrees ajoutees. */
+window.fbChargerScans = async function() {
+  try {
+    var u = auth.currentUser;
+    if (!u || u.isAnonymous) return 0;
+    var snap = await getDocs(query(collection(db, "users", u.uid, "scans"), orderBy("ts", "desc"), limit(50)));
+    if (snap.empty) return 0;
+    var local = [];
+    try { local = JSON.parse(localStorage.getItem("magoScanHist") || "[]"); } catch (e) {}
+    var par = {};
+    local.forEach(function(x) { if (x && x.code != null) par[String(x.code)] = x; });
+    var ajouts = 0;
+    snap.forEach(function(docSnap) {
+      var d = docSnap.data() || {};
+      if (d.code == null) return;
+      var k = String(d.code), a = par[k];
+      if (!a) { par[k] = d; ajouts++; return; }
+      /* L'entree locale est la reference : elle porte le magasin, le prix et
+         le statut que le serveur ne stocke pas. On ne complete que ce qui
+         manque, et on garde la date la plus ancienne des deux (c'est la date
+         du scan, pas celle de la derniere synchronisation). */
+      ["name", "brand", "cat", "src", "drinkId"].forEach(function(f) { if (a[f] == null && d[f] != null) a[f] = d[f]; });
+    });
+    var fusion = Object.keys(par).map(function(k) { return par[k]; })
+      .sort(function(x, y) { return (Number(y.ts) || 0) - (Number(x.ts) || 0); }).slice(0, 50);
+    window.scanHist = fusion;
+    try { localStorage.setItem("magoScanHist", JSON.stringify(fusion)); } catch (e) {}
+    try { if (typeof window.renderScanHistory === "function") window.renderScanHistory(); } catch (e) {}
+    try { if (typeof window.renderProfileScans === "function") window.renderProfileScans(); } catch (e) {}
+    return ajouts;
+  } catch (e) { console.warn("scan load:", e); return 0; }
+};
 window.fbIncrementScanCount = async function(drinkId) {
   try {
     var patch = {};
@@ -5006,11 +5136,13 @@ window.DRINK_MERGES = { 11286: 3301, 11287: 3300,
   11126: 10049,  // Rauch Happy Day Orange -> Happy Day Orange (meme photo OFF)
   11110: 10079,  // Selecto -> Hamoud Boualem Selecto
   11061: 2401,   // Jarritos Tamarindo -> la fiche 2401, renommee Tamarindo
+  11149: 11430,  // Cecemel Original (sans code) -> Cecemel (avec code et photo), renommee Cecemel Original
   11324: 11238,  // Camlica Gazoz -> Camlica Gazoz (orthographe turque)
   13088: 11347   // Mogu Mogu Bubble Gum -> Mogu Mogu Bubblegum
 };
 </script>
 <script src="data/drinks.js"></script>
+<script src="data/enseignes.js"></script>
 <script>
 /* Les fusions ci-dessus sont connues des maintenant : on les applique tout de
    suite. Celles decidees par l'admin arrivent plus tard et restent traitees
@@ -5025,6 +5157,7 @@ try{
 <script src="data/drinkart.js"></script>
 <script src="data/state.js"></script>
 <script src="data/textes.js"></script>
+<script src="data/alias.js"></script>
 <script src="data/ui.js"></script>
 <script src="data/i18n.js"></script>
 <script>
@@ -5956,7 +6089,7 @@ function showBadgeInfo(def,tier,qui){
   var info=BADGE_INFO[def.key]||{};
   var col=tier?TIER_COLORS[tier-1]:"var(--txt2)";
   var cap=function(s){return s.charAt(0).toUpperCase()+s.slice(1);};
-  var tierLabel=def.special?(tier?"Obtenu":"Verrouillé"):(tier?("Palier "+TIER_NAMES[tier-1]):"À débloquer");
+  var tierLabel=def.special?(tier?tr("Obtenu"):tr("Verrouillé")):(tier?trh("Palier {t}",{t:tr(cap(TIER_NAMES[tier-1]))}):tr("À débloquer"));
   var progressHtml="";
   if(!def.special){
     progressHtml='<div style="display:flex;flex-direction:column;gap:9px;margin:16px 0 2px">'+
@@ -5964,13 +6097,13 @@ function showBadgeInfo(def,tier,qui){
         var got=def.value>=th;
         return '<div style="display:flex;align-items:center;gap:11px">'+
           '<span style="width:24px;height:24px;border-radius:50%;border:2px solid '+(got?TIER_COLORS[i]:"var(--border)")+';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:'+(got?TIER_COLORS[i]:"var(--s3)")+'">'+(got?"✓":(i+1))+'</span>'+
-          '<span style="flex:1;font-size:13px;font-weight:800;color:var(--s1)">'+cap(TIER_NAMES[i])+'</span>'+
-          '<span style="font-size:12.5px;font-weight:800;color:var(--s2)">'+th+' '+(info.unit||"")+'</span>'+
+          '<span style="flex:1;font-size:13px;font-weight:800;color:var(--s1)">'+tr(cap(TIER_NAMES[i]))+'</span>'+
+          '<span style="font-size:12.5px;font-weight:800;color:var(--s2)">'+th+' '+(info.unit?tr(info.unit):"")+'</span>'+
         '</div>';
       }).join("")+'</div>';
     var nextTh=def.tiers[Math.min(tier,def.tiers.length-1)];
     var maxed=tier>=def.tiers.length;
-    progressHtml+='<div style="font-size:12.5px;font-weight:800;color:'+(maxed?"#c69a57":"var(--s2)")+';margin-top:10px;text-align:center">'+(maxed?("Palier maximum atteint · "+def.value+" "+(info.unit||"")):((qui?sanitize(qui):"Toi")+" : "+def.value+" / "+nextTh+" "+(info.unit||"")))+'</div>';
+    progressHtml+='<div style="font-size:12.5px;font-weight:800;color:'+(maxed?"#c69a57":"var(--s2)")+';margin-top:10px;text-align:center">'+(maxed?trh("Palier maximum atteint · {n} {u}",{n:def.value,u:(info.unit?tr(info.unit):"")}):((qui?sanitize(qui):tr("Toi"))+" : "+def.value+" / "+nextTh+" "+(info.unit?tr(info.unit):"")))+'</div>';
   }
   var ov=document.createElement("div");
   ov.id="badge-info";
@@ -5981,10 +6114,10 @@ function showBadgeInfo(def,tier,qui){
       '<div style="min-width:0"><div style="font-size:20px;font-weight:850;color:var(--s1)">'+def.name+'</div>'+
       '<div style="font-size:11.5px;font-weight:800;color:'+(tier?col:"var(--s3)")+';text-transform:uppercase;letter-spacing:.5px">'+tierLabel+'</div></div>'+
     '</div>'+
-    (info.what?'<div style="font-size:14px;font-weight:800;color:var(--s1);margin-bottom:5px">'+info.what+'</div>':'')+
-    '<div style="font-size:13.5px;color:var(--s2);line-height:1.55">'+(qui?"":(info.why||""))+'</div>'+
+    (info.what?'<div style="font-size:14px;font-weight:800;color:var(--s1);margin-bottom:5px">'+tr(info.what)+'</div>':'')+
+    '<div style="font-size:13.5px;color:var(--s2);line-height:1.55">'+(qui?"":(info.why?tr(info.why):""))+'</div>'+
     progressHtml+
-    '<button id="badge-info-close" style="width:100%;margin-top:18px;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">Fermer</button>'+
+    '<button id="badge-info-close" style="width:100%;margin-top:18px;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">'+tr("Fermer")+'</button>'+
   '</div>';
   document.body.appendChild(ov);
   var _bc=document.getElementById("badge-info-card");
@@ -6023,7 +6156,7 @@ function renderLeaderboard(){
     row.style.cssText="display:flex;align-items:center;gap:12px;padding:9px 0;cursor:pointer"+(i<leaderboardRows.length-1?";border-bottom:1px solid var(--border)":"");
     var rlv=levelInfo(r.points||0),rcol=levelPseudoColor(rlv.idx);
     row.innerHTML=rankBadge(i)+
-      '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:'+(isMe?"800":"600")+';color:'+(rcol||"var(--s1)")+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(r.pseudo)+(isMe?' <span style="font-size:11px;font-weight:700;color:var(--s2)">'+((LANGS[curLang]||LANGS.fr).me)+'</span>':"")+(r.streak>=2?' <span style="display:inline-flex;align-items:center;gap:1px;font-size:11px;font-weight:700;color:#e67e22;vertical-align:-1px" title="'+r.streak+' jours d\'affil\u00E9e">'+svgFlame(12,"#e67e22")+r.streak+'</span>':"")+'</div>'+
+      '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:'+(isMe?"800":"600")+';color:'+(rcol||"var(--s1)")+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(r.pseudo)+(isMe?' <span style="font-size:11px;font-weight:700;color:var(--s2)">'+((LANGS[curLang]||LANGS.fr).me)+'</span>':"")+(r.streak>=2?' <span style="display:inline-flex;align-items:center;gap:1px;font-size:11px;font-weight:700;color:#e67e22;vertical-align:-1px" title="'+attr(trh("{n} jours d\'affil\u00E9e",{n:r.streak}))+'">'+svgFlame(12,"#e67e22")+r.streak+'</span>':"")+'</div>'+
       '<div style="font-size:12.5px;font-weight:700;color:var(--s1);flex-shrink:0">'+nbSur(r.points)+' pts</div>'+
       '<span style="font-size:13px;color:var(--s3);flex-shrink:0">\u203A</span>';
     row.onclick=function(){openPlayerProfile(r);};
@@ -6604,6 +6737,7 @@ function updateProfileStats(){
   try{checkLevelUp();}catch(e){}
   try{maybeAskFeedback();}catch(e){} // invite douce à donner son avis (1x, après un peu de contribution)
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+  try{ renderProfileScans(); }catch(e){}
   if(!userStats.activity.length)return;
   var al=document.getElementById("activity-list");
   var noact=document.getElementById("t-noact");if(noact)noact.remove();
@@ -6617,6 +6751,44 @@ function updateProfileStats(){
     '<div style="font-size:12px;font-weight:700;color:#22c55e">+'+a.pts+'pts</div>';
   al.insertBefore(div,al.firstChild);
   while(al.children.length>8)al.removeChild(al.lastChild);
+}
+
+/* LES DERNIERS SCANS, DANS LE PROFIL.
+   Trois lignes, la boisson et la date, puis un renvoi vers la liste complete
+   qui vit dans l'ecran Scan. Le journal est le meme objet (scanHist) : aucune
+   lecture reseau, et ce que le serveur a rapatrie d'un autre telephone
+   apparait ici aussi. */
+function renderProfileScans(){
+  var el=document.getElementById("profile-scans");
+  if(!el)return;
+  var titre=document.getElementById("t-myscans");
+  var h=(window.scanHist||[]).slice(0,3);
+  if(!h.length){
+    if(titre)titre.style.display="none";
+    el.innerHTML="";
+    return;
+  }
+  if(titre)titre.style.display="";
+  var html="";
+  h.forEach(function(e){
+    var nom=sanitize(String(e.name||"Produit inconnu").slice(0,44));
+    var ou=e.storeName?(" \u00b7 "+sanitize(String(e.storeName).slice(0,28))):"";
+    html+='<div class="act-item" style="padding:9px 0;display:flex;align-items:center;gap:10px">'+
+      '<div style="width:30px;height:30px;border-radius:10px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0">'+
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 6v12M8 6v12M12 6v12M16 6v12M20 6v12"/></svg>'+
+      '</div>'+
+      '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+nom+'</div>'+
+      '<div style="font-size:11px;margin-top:2px;color:var(--s2)">'+sanitize(dateCourte(e.ts))+ou+'</div></div></div>';
+  });
+  var n=(window.scanHist||[]).length;
+  html+='<div id="profile-scans-all" role="button" tabindex="0" style="text-align:center;padding:10px;margin-top:4px;border-radius:12px;background:var(--bg2);font-size:12.5px;font-weight:700;color:var(--s1);cursor:pointer">Voir mes '+n+' scan'+(n>1?"s":"")+'</div>';
+  el.innerHTML=html;
+  var b=document.getElementById("profile-scans-all");
+  if(b){
+    var go=function(){ try{show("scan");}catch(e){} try{playSound("pop");}catch(e){} };
+    b.onclick=go;
+    b.onkeydown=function(ev){ if(ev.key==="Enter")go(); };
+  }
 }
 
 /* ================================
@@ -6966,6 +7138,8 @@ function recordScan(code,name,brand,cat,src,drinkId){
   scanHist.unshift(entree);
   scanHist=scanHist.slice(0,50);
   try{localStorage.setItem("magoScanHist",JSON.stringify(scanHist));}catch(e){/* quota */}
+  // Copie privee cote serveur : le journal survit au changement de telephone.
+  try{ if(window.fbEnregistrerScan)window.fbEnregistrerScan(entree); }catch(e){}
   renderScanHistory();
 }
 /* Complete une entree du journal (magasin, prix...) sans la recreer. */
@@ -6975,6 +7149,7 @@ function patchScanEntry(code,patch){
   if(!e)return null;
   Object.assign(e,patch||{});
   try{localStorage.setItem("magoScanHist",JSON.stringify(scanHist));}catch(err){}
+  try{ if(window.fbEnregistrerScan)window.fbEnregistrerScan(e); }catch(err){}
   try{renderScanHistory();}catch(err){}
   return e;
 }
@@ -9689,7 +9864,7 @@ function _catNorm(s){
     .replace(/\u00F6/g,"o").replace(/\u00FC/g,"u").replace(/\u00F8/g,"o").replace(/\u00E5/g,"a")
     .replace(/\u0142/g,"l").replace(/\u0111/g,"d").replace(/\u00E6/g,"ae").replace(/\u0153/g,"oe");
 }
-var _C_IMPORT_B=/\b(mogu\s?mogu|ramune|uludag|jarritos|vimto|rani|supermalt|vitamalt|hypermalt|maltin|malta\s?guinness|pony\s?malta|milkis|sumol|inca\s?kola|kola\s?champagne|ting|fayrouz|barbican|soofty|shani|okf|sappe|sun\s?top|ceres|antarctica|guarana|colombiana|vinut|royal\s?soda|postobon|wong\s?lo\s?kat|boga|grace|sangaria|mitsuya|camlica|fruko|eloa|sac\s?sac|sikhye|kuat|hawai|calypso|pacha|rubicon|selecto|ifri|cockta|materva|ironbeer|bandung|hamoud|peardrax|chilsung|demisoda|matecito|gimber|vita\s?coco|old\s?jamaica|maaza|cheerpal|pop\s?mate|tropical\s?aloe|yedigun|sirma|edessa|dimes|rouiba|ngaous|banga|judor|almdudler|irn[- ]?bru|rivella|tonissteiner|mezzo\s?mix|schwip\s?schwap|\bka\b|nexba|karma|suntory)\b/;
+var _C_IMPORT_B=/\b(mogu\s?mogu|ramune|uludag|jarritos|vimto|rani|supermalt|vitamalt|hypermalt|maltin|malta\s?guinness|pony\s?malta|milkis|sumol|inca\s?kola|kola\s?champagne|ting|fayrouz|barbican|soofty|shani|okf|sappe|sun\s?top|ceres|antarctica|guarana|colombiana|vinut|royal\s?soda|postobon|wong\s?lo\s?kat|boga|grace|sangaria|mitsuya|camlica|fruko|eloa|sac\s?sac|sikhye|kuat|hawai|calypso|pacha|rubicon|selecto|ifri|cockta|materva|ironbeer|bandung|hamoud|peardrax|chilsung|demisoda|matecito|gimber|vita\s?coco|old\s?jamaica|maaza|cheerpal|pop\s?mate|tropical\s?aloe|yedigun|sirma|edessa|dimes|rouiba|ngaous|banga|judor|almdudler|irn[- ]?bru|rivella|tonissteiner|mezzo\s?mix|schwip\s?schwap|\bka\b|nexba|karma|suntory|la\s?cigogne)\b/;
 var _C_IMPORT_H=/\b(aloe\s?vera|ginger\s?beer|yerba\s?mate|basil\s?seed|corossol|tamarind|tamarindo|gazoz|kombucha)\b/;
 var _C_LACTE_B=/\b(cecemel|chocomel|fristi|yop|cacolac|nesquik|candy'?up|vitasoy|yakult|calpis|calpico|binggrae|ayran|sutas|lassi|kefir|milkis|actimel|danao|milkshake|milk\s?shake|cocio|banania)\b/;
 var _C_LACTE_H=/\b(milk|lait\b|lacte|au\s?lait|boisson\s?lactee|soja|soya|avoine|amande)\b/;
@@ -10015,7 +10190,7 @@ function renderNearby(){
   if(!hasLoc){
     var c=document.createElement("div");
     c.innerHTML='<div style="font-size:13.5px;font-weight:700;color:var(--s1);line-height:1.35;margin-bottom:4px">Active ta position</div>'+
-      '<div style="font-size:12px;color:var(--s2);line-height:1.4;margin-bottom:12px">Pour voir d\'un coup tous les magasins autour de toi.</div>';
+      '<div style="font-size:12px;color:var(--s2);line-height:1.4;margin-bottom:12px">'+tr("Pour voir d'un coup tous les magasins autour de toi.")+'</div>';
     var row=document.createElement("div");row.style.cssText="display:flex;gap:8px";
     var b1=document.createElement("div");
     b1.setAttribute("role","button");b1.setAttribute("tabindex","0");b1.setAttribute("aria-label","Activer ma position");
@@ -10673,7 +10848,7 @@ function renderDeals(){
   el.innerHTML='<div class="sec-hd"><div class="t-section">Boisson du moment</div></div>'+
     '<div onclick="pick(DRINKS.find(function(x){return x.id==='+d.id+';}))" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){pick(DRINKS.find(function(x){return x.id==='+d.id+';}));}" style="display:flex;align-items:center;gap:13px;background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:13px;cursor:pointer;margin-bottom:14px">'+
     '<div style="width:52px;height:52px;border-radius:13px;background:'+(d.light||"var(--bg2)")+';display:flex;align-items:center;justify-content:center;font-size:26px;overflow:hidden;flex-shrink:0">'+drinkIconHTML(d)+'</div>'+
-    '<div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:800;color:var(--s1)">'+sanitize(d.name)+'</div><div style="font-size:12px;color:var(--s2);margin-top:2px">'+trh("{b} — trouve-la près de toi",{b:sanitize(d.brand)+starSuffix(d)})+'</div></div>'+
+    '<div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:800;color:var(--s1)">'+sanitize(d.name)+'</div><div style="font-size:12px;color:var(--s2);margin-top:2px">'+sanitize(d.brand)+starSuffix(d)+'<span> — trouve-la près de toi</span></div></div>'+
     '<span style="font-size:18px;color:var(--txt2)">›</span>'+
   '</div>';
 }
@@ -10793,7 +10968,10 @@ function renderList(){
   // Etat d'accueil : categorie "Tous", pas de filtre marque, champ vide -> vue curatee.
   if(!q&&curCat==="Tous"&&!curBrandFilter){renderSearchDefault(el);return;}
   var base=curBrandFilter?DRINKS.filter(function(d){return d.brand===curBrandFilter;}):DRINKS;
-  var f=base.filter(function(d){return(curCat==="Tous"||d.cat===curCat)&&(!q||fuzzyHit(d.name,normTxt(q))||fuzzyHit(d.brand,normTxt(q)));});
+  /* aliasTouche en plus du nom et de la marque : un clavier chinois, arabe,
+     japonais, coreen ou cyrillique doit pouvoir trouver une marque qu'il ne
+     peut pas ecrire en latin. Voir data/alias.js. */
+  var f=base.filter(function(d){return(curCat==="Tous"||d.cat===curCat)&&(!q||fuzzyHit(d.name,normTxt(q))||fuzzyHit(d.brand,normTxt(q))||aliasTouche(d,normTxt(q)));});
   // Repli tolerant aux fautes de frappe : uniquement si la recherche exacte ne donne rien,
   // pour ne jamais melanger des approximations avec des resultats exacts.
   var isFuzzy=false;
@@ -11614,16 +11792,38 @@ function submitAddDrinks(){
     try{renderStoreDetail();}catch(e){}
   }).catch(function(e){playSound("err");toast("\u00c9chec ("+(e&&e.message||"erreur")+")");});
 }
-function shareStore(){
-  if(!curStoreDetail)return;
-  var s=curStoreDetail;
-  bumpStoreStat(s,"partages");
-  var url=storeShareURL(s);
-  var n=(s.drinks||[]).length;
-  var txt=""+s.name+" est sur Magofeed"+(n?" avec "+n+" boissons r\u00e9f\u00e9renc\u00e9es":"")+" !";
-  if(navigator.share){navigator.share({title:"Magofeed \u00b7 "+s.name,text:txt,url:url}).catch(function(){});}
-  else{try{navigator.clipboard.writeText(txt+" "+url);toast("Lien copi\u00e9 !");playSound("pop");}catch(e){prompt("Copie le lien :",url);}}
+/* ENVOYER UN MAGASIN A QUELQU'UN.
+   Cette fonction ne vivait que dans la fiche d'un magasin, et lisait
+   curStoreDetail : depuis la carte, ou l'on voit pourtant tous les magasins,
+   il n'y avait aucun moyen d'en envoyer un. Le fondateur l'a decrit ainsi :
+   « quand j'appuie sur un, ca me demande les details, et aucun moyen de lui
+   transferer les coordonnees du magasin ». Elle accepte desormais le magasin
+   en parametre, et trois surfaces l'appellent : la fiche, le panneau
+   d'itineraire (ce qui s'ouvre quand on touche un pin) et le menu de l'appui
+   long sur un pin.
+   Le message porte DEUX choses, parce que le destinataire n'a pas forcement
+   l'app : le lien Magofeed (la fiche, avec ce qu'on y trouve) et un lien de
+   carte ordinaire, qui s'ouvre dans n'importe quel telephone. */
+/* Le bouton « Envoyer » d'un magasin. Il ouvrait la feuille de partage du
+   telephone, et c'etait tout : impossible d'envoyer le magasin DANS Magofeed,
+   alors que l'app sait deja envoyer la carte d'une boisson vue en rayon. On
+   propose donc d'abord les gens de Magofeed, et le lien reste juste en
+   dessous. S'il n'y a encore personne a qui ecrire, on ne fait pas perdre un
+   geste : on va droit au partage par le telephone. */
+function partagerMagasin(s){
+  if(!s){try{toast(tr("Aucun magasin \u00e0 envoyer"));}catch(e){}return;}
+  if(typeof msgAmisPourPartage==="function"&&msgAmisPourPartage().length){partagerMagasinAmis(s);return;}
+  partagerMagasinLien(s);
 }
+/* Depuis un bouton HTML, ou l'on n'a que l'identifiant sous la main. */
+function partagerMagasinId(id){
+  var sid=String(id);
+  var s=(window.STORES||[]).find(function(x){return String(x.id)===sid||String(x.fbId)===sid;});
+  if(!s&&curStoreDetail&&(String(curStoreDetail.id)===sid||String(curStoreDetail.fbId)===sid))s=curStoreDetail;
+  if(!s&&window._navDest&&(String(window._navDest.id)===sid||String(window._navDest.fbId)===sid))s=window._navDest;
+  partagerMagasin(s);
+}
+function shareStore(){ partagerMagasin(curStoreDetail); }
 /* Poser ou retirer la pastille bleue depuis la fiche. Les deux chemins
    existaient deja cote serveur (fbCertifyPhotoStores / fbRevokeCertification) :
    on les branche simplement la ou on prend la decision. */
@@ -11799,7 +11999,7 @@ function brandIds(brands){
 var M4_CATS={
   asiatique:["mogu mogu","hata kosen","ramune","calpico","otsuka","pocari","lotte","binggrae","dongwon","demisoda","chilsung","wong lo kat","vinut","yakult","sangaria","asahi","mitsuya","suntory","milkis","sikhye"],
   turc:["uludag","camlica","fruko","sutas","sinalco"],
-  maghrebin:["hamoud boualem","selecto","ifri","boga","mecca cola","zamzam"],
+  maghrebin:["hamoud boualem","selecto","ifri","boga","mecca cola","zamzam","la cigogne","rouiba","ngaous","hawai"],
   africain:["supermalt","malta guinness","vitamalt","grace","royal","ting","peardrax","kola champagne"],
   latino:["jarritos","inca kola","postobon","bavaria","polar","antarctica"],
   americain:["prime","arizona","dr pepper","jarritos","canada dry","mountain dew"]
@@ -12115,15 +12315,49 @@ function buildChainSets(){
     okay:pack.concat(vIds(["ayran","gazi","dr pepper","nalu","gimber","aa drink"])),
     jumbo:pack.concat(vIds(["jarritos","vimto","okf","arizona","chupa chups","dr pepper","hell","yakult","fever-tree","canada dry","aa drink","maaza","milkis","ramune","antarctica"]))
   };
+  /* Laits vegetaux, jus et boissons lactees (septembre 2026) : les references
+     d'enseigne vivent dans data/enseignes.js — marques vues au catalogue en
+     ligne de l'enseigne, et fiches vues produit par produit (boutique en
+     ligne ou communaute OpenFoodFacts). Rayon PROBABLE, comme le reste de
+     cette table : c'est la communaute qui confirme en rayon. */
+  try{
+    var refs=(typeof ENSEIGNE_REFS!=="undefined"&&ENSEIGNE_REFS)||{};
+    Object.keys(refs).forEach(function(k){
+      if(!sets[k])return;
+      var r=refs[k]||{};
+      var vus={};DRINKS.forEach(function(d){vus[d.id]=1;});
+      var plus=vIds(r.marques||[]).concat((r.ids||[]).map(Number).filter(function(id){return vus[id]===1;}));
+      sets[k]=sets[k].concat(plus);
+    });
+  }catch(e){ console.warn("enseignes:",e); }
+  Object.keys(sets).forEach(function(k){sets[k]=sets[k].filter(function(v,i,a){return a.indexOf(v)===i;});});
   window._chainSets=sets;
   return sets;
+}
+/* PETITS FORMATS : une superette de gare n'a pas l'assortiment du grand
+   magasin de l'enseigne. Delhaize publie le format de chacun de ses magasins :
+   sur la seule region de Bruxelles, 48 Shop&Go et 75 Proxy pour 7 Delhaize
+   Supermarche. Promettre un Alpro Barista Cinnamon Roll dans un Shop&Go de
+   soixante metres carres, c'est envoyer quelqu'un pour rien — et c'est
+   exactement ce que l'app doit eviter. Ces magasins ne recoivent donc que le
+   socle (les marques qu'on trouve VRAIMENT partout), pas les references de
+   niche. La communaute peut evidemment confirmer le contraire : une
+   confirmation en rayon l'emporte toujours sur cette prudence. */
+/* « Shop&Go » s'ecrit « Shop&6Go » dans les donnees de l'enseigne (BRAND_COLORS
+   porte deja cette graphie) : le motif accepte les trois formes rencontrees. */
+var _SHOPGO=/shop\s*(&|and|n)?\s*6?\s*go/;
+function petitFormat(name,brand){
+  var b=normTxt((brand||"")+" "+(name||""));
+  if(_SHOPGO.test(b))return true;
+  return /(^|[^a-z])(proxy|express|city|contact|compact|monop|vival|primo)([^a-z]|$)/.test(b)||
+         /petit\s?casino|daily\s?monop|u\s?express|spar\s?city|to\s?go/.test(b);
 }
 /* Detecte l'enseigne d'un magasin par son nom/marque -> son set verifie */
 function chainIdsFor(name,brand){
   var sets=buildChainSets();
   var b=normTxt((brand||"")+" "+(name||""));
   if(b.indexOf("carrefour")!==-1)return{ids:sets.carrefour,key:"Carrefour"};
-  if(b.indexOf("delhaize")!==-1)return{ids:sets.delhaize,key:"Delhaize"};
+  if(b.indexOf("delhaize")!==-1||_SHOPGO.test(b))return{ids:sets.delhaize,key:"Delhaize"};
   if(b.indexOf("colruyt")!==-1)return{ids:sets.colruyt,key:"Colruyt"};
   if(b.indexOf("auchan")!==-1)return{ids:sets.auchan,key:"Auchan"};
   if(b.indexOf("leclerc")!==-1)return{ids:sets.leclerc,key:"Leclerc"};
@@ -12137,6 +12371,16 @@ function chainIdsFor(name,brand){
   if(b.indexOf("jumbo")!==-1)return{ids:sets.jumbo,key:"Jumbo"};
   return null;
 }
+/* Meme fonction, mais qui tient compte du format du magasin. C'est celle que
+   l'app utilise pour afficher un rayon probable ; chainIdsFor reste brute pour
+   les outils d'administration. */
+function chainIdsForStore(name,brand){
+  var r=chainIdsFor(name,brand);
+  if(!r)return null;
+  if(petitFormat(name,brand))return{ids:packDrinkIds(),key:r.key,petit:true};
+  return r;
+}
+window.chainIdsForStore=chainIdsForStore;
 function adminFillEnseignes(){
   if(!isAdmin)return;
   var sets=buildChainSets();
@@ -13164,15 +13408,25 @@ function _openActivityUI(){
   try{localStorage.setItem("magoActivitySeen",String(Date.now()));}catch(e){}
   refreshBell();
 }
-/* Un magasin a moins de 10 km liste-t-il cette boisson ? Exactement la regle
-   des alertes (voir checkWatches) : meme rayon, et un stock signale ABSENT ne
+/* Quelqu'un a-t-il VU cette boisson a moins de 10 km ? Exactement la regle des
+   alertes (voir checkWatches) : meme rayon, et un stock signale ABSENT ne
    compte pas. Sortir cette regle ici evite qu'un ecran dise « introuvable »
-   pendant qu'un autre dit « trouvee ». */
+   pendant qu'un autre dit « trouvee ».
+   VU, PAS PROBABLE. Le champ drinks porte le rayon PROBABLE d'une enseigne
+   (« un Delhaize vend generalement ceci »), pas un constat. S'en contenter
+   faisait dire a une alerte « Alpro Barista reperee chez Delhaize Anspach »
+   alors que personne n'y etait entre : on envoie quelqu'un pour rien, et on
+   brule la seule chose que l'app a a vendre, la confiance. Seules comptent
+   donc une confirmation de la communaute (confirmations > 0) ou une
+   verification (drinksVerified : administrateur, gerant certifie, rayon
+   photographie). Le rayon probable, lui, sert a proposer OU CHERCHER — ce
+   n'est pas la meme phrase. */
 function magasinProcheAvec(did){
   var best=null;
   (STORES||[]).forEach(function(st){
-    if(!(st.drinks||[]).some(function(x){return Number(x)===Number(did);}))return;
-    if(((st.confirmations||{})[did]||0)<0)return;
+    var vu=Number((st.confirmations||{})[did])>0||
+           (st.drinksVerified||[]).some(function(x){return Number(x)===Number(did);});
+    if(!vu)return;
     var dist=null;
     if(typeof userLat==="number"&&userLat&&typeof st.lat==="number"){
       var dLa=(userLat-st.lat)*111000,dLo=(userLng-st.lng)*111000*Math.cos(st.lat*Math.PI/180);
@@ -18003,7 +18257,12 @@ var PIN_MENU_SANS_FILTRE=[
   {cle:"fiche", libelle:"Détails", couleur:"#64748b",
    ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.6"/></svg>'},
   {cle:"ajout", libelle:"Ajouter une boisson", couleur:"#16a34a",
-   ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'}
+   ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'},
+  /* Envoyer le magasin a quelqu'un : c'est le geste qui manquait depuis la
+     carte. Le menu en compte desormais quatre ; sa geometrie se calcule sur
+     actions.length, il n'y avait rien d'autre a changer. */
+  {cle:"envoyer", libelle:"Envoyer", couleur:"#7c3aed",
+   ico:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5.5 11.5 6.5-6.5 6.5 6.5"/></svg>'}
 ];
 /* La goutte enchainee : elle ne nait QUE si le pouce s'attarde sur « en stock ».
    Facultative par construction — on peut relacher avant qu'elle apparaisse. */
@@ -18112,6 +18371,7 @@ function executerActionPin(cle,s){
   if(!s)return;
   if(cle==="fiche"){ try{openStoreDetail(s.id);}catch(e){} return; }
   if(cle==="route"){ try{showRouteToStore(s.lat,s.lng,s);}catch(e){} return; }
+  if(cle==="envoyer"){ try{partagerMagasin(s);}catch(e){} return; }
   if(cle==="ajout"){
     /* openAddDrinkToStore travaille sur le magasin ouvert : on le lui designe
        avant d'appeler, sinon il repond « ouvre d'abord un magasin ». */
@@ -20114,6 +20374,7 @@ function showRouteToStore(lat,lng,store){
           '<div style="display:flex;gap:9px;width:100%">'+
             '<div onclick="clearRoute();var h=document.getElementById(\'explore-map-host\');if(h){h.classList.remove(\'in\');h.style.display=\'none\';}window._cameFromExplore=true;if(typeof openStoreDetail===\'function\')openStoreDetail(\''+_sid+'\')" role="button" tabindex="0" aria-label="Voir ce qu\'il y a dans ce magasin" style="flex:1;text-align:center;padding:9px;border-radius:12px;background:'+(_hunt?"var(--bg2)":"var(--s1)")+';border:1.5px solid '+(_hunt?"var(--border)":"var(--s1)")+';color:'+(_hunt?"var(--s1)":"var(--app-bg)")+';font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap">D\u00e9tails du magasin</div>'+
             '<div onclick="openNavApp(\'https://www.google.com/maps/dir/?api=1&travelmode=walking&destination='+lat+','+lng+'\')" role="button" tabindex="0" style="flex-shrink:0;text-align:center;padding:9px 15px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:11.5px;font-weight:800;color:var(--s1);cursor:pointer;white-space:nowrap">GPS \u2197</div>'+
+            '<div onclick="partagerMagasinId(\''+_sid+'\')" role="button" tabindex="0" aria-label="Envoyer ce magasin \u00e0 quelqu\'un" style="flex-shrink:0;text-align:center;padding:9px 15px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--border);font-size:11.5px;font-weight:800;color:var(--s1);cursor:pointer;white-space:nowrap">Envoyer \u2191</div>'+
           '</div>'+
           '<div onclick="bannerReportStore(\''+_sid+'\')" role="button" tabindex="0" aria-label="'+(isAdmin?"Supprimer ce magasin":"Signaler : ce magasin n\'existe pas")+'" style="text-align:center;padding:4px 8px 0;font-size:11px;font-weight:600;color:var(--s3);cursor:pointer">'+(isAdmin?"Supprimer ce magasin de la carte":"Ce magasin n\u2019existe pas ?")+'</div>';
         host.appendChild(b);
@@ -23522,7 +23783,23 @@ function msgBulleHTML(m,mine,ms,nom){
   if(m.type==="spot"){
     var d=(m.drinkId!=null)?(DRINKS||[]).find(function(x){return String(x.id)===String(m.drinkId);}):null;
     var s=(typeof STORES!=="undefined"?STORES:[]).find(function(x){return String(x.fbId)===String(m.storeId)||String(x.id)===String(m.storeId);});
-    var dist=(s&&typeof userLat==="number"&&typeof s.lat==="number")?fmtDist(haversine(userLat,userLng,s.lat,s.lng)):"";
+    /* Distance : d'abord le magasin charge, sinon les coordonnees venues avec
+       le message. Celui qui recoit n'a pas forcement cette zone en memoire —
+       sans ce repli, la carte d'un magasin lointain n'affichait rien. */
+    var _la=(s&&typeof s.lat==="number")?s.lat:(typeof m.lat==="number"?m.lat:null);
+    var _ln=(s&&typeof s.lng==="number")?s.lng:(typeof m.lng==="number"?m.lng:null);
+    /* Pas de boisson : c'est un magasin envoye depuis la carte. Meme dessin,
+       autre contenu — le magasin passe en titre, et le second bouton devient
+       l'itineraire, parce qu'il n'y a pas de fiche boisson a ouvrir. */
+    if(!d&&!m.drinkName){
+      var dSeul=(_la!=null&&typeof userLat==="number")?fmtDist(haversine(userLat,userLng,_la,_ln)):"";
+      var sousSeul=[dSeul,_tr("msgStoreSentBy").replace("{t}",msgDepuis(ms)).replace("{p}",qui)].filter(Boolean).join(" \u00b7 ");
+      return '<div class="th-card '+side+'"><div class="th-spot-top"><div class="th-spot-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--s2)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l1.5-5h15L21 9"/><path d="M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/><path d="M9 20v-6h6v6"/></svg></div>'+
+        '<div style="flex:1;min-width:0"><div class="th-spot-name">'+sanitize(m.storeName||"")+'</div><div class="th-spot-sub">'+sanitize(sousSeul)+'</div></div></div>'+
+        '<div class="th-spot-btns"><button class="th-cta" data-act="go" data-store="'+attr(m.storeId)+'">'+_tr("msgGo")+'</button>'+
+        ((_la!=null&&_ln!=null)?'<button class="th-sec" data-act="nav" data-lat="'+attr(_la)+'" data-lng="'+attr(_ln)+'">'+_tr("msgRoute")+'</button>':'')+'</div>'+t+'</div>';
+    }
+    var dist=(_la!=null&&typeof userLat==="number")?fmtDist(haversine(userLat,userLng,_la,_ln)):"";
     var sub=[dist,_tr("msgSeenBy").replace("{t}",msgDepuis(ms)).replace("{p}",qui)].filter(Boolean).join(" · ");
     return '<div class="th-card '+side+'"><div class="th-spot-top"><div class="th-spot-ico" style="'+(d?'background:'+attr(d.light||"var(--bg2)"):'')+'">'+(d?drinkIconHTML(d):'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--s2)" stroke-width="2" stroke-linecap="round"><path d="M8 3h8l-1 4H9z"/><path d="M9 7l-1.5 13h9L15 7"/></svg>')+'</div>'+
       '<div style="flex:1;min-width:0"><div class="th-spot-name">'+sanitize(d?d.name:m.drinkName||"")+'</div><div class="th-spot-sub">'+sanitize(d?[d.brand,d.format||d.size].filter(Boolean).join(" · "):"")+'</div></div></div>'+
@@ -23550,6 +23827,11 @@ function msgBulleHTML(m,mine,ms,nom){
           try{openStoreDetail(st.fbId||st.id);}catch(e){toast(_tr("msgStoreFar"));}
         }).catch(function(){toast(_tr("msgStoreFar"));});
       } else toast(_tr("msgStoreFar"));
+      return;
+    }
+    if(act==="nav"){
+      var _nla=Number(el.getAttribute("data-lat")),_nln=Number(el.getAttribute("data-lng"));
+      if(isFinite(_nla)&&isFinite(_nln)){try{openNavApp("https://www.google.com/maps/dir/?api=1&travelmode=walking&destination="+_nla+","+_nln);}catch(e){}}
       return;
     }
     if(act==="fiche"){var d=(DRINKS||[]).find(function(x){return String(x.id)===el.getAttribute("data-drink");});if(d){try{pick(d);}catch(e){}}return;}
@@ -23662,6 +23944,99 @@ function msgEnvoyer(msg){
     return true;
   }).catch(function(){MSG.sending=false;msgErreurToast("unknown");renderThreadFoot();return false;});
 }
+/* ── Envoyer une carte a quelqu'un sans ouvrir son fil ────────────────
+   msgEnvoyer() parle au fil ouvert : il lit MSG.cid, MSG.other, MSG.conv. Or
+   on veut pouvoir envoyer un magasin depuis la CARTE, ou aucun fil n'est
+   ouvert. On refait donc le chemin court : identifiant de conversation,
+   creation si besoin, envoi. On ne touche pas a l'etat du fil — si une
+   conversation est ouverte ailleurs, elle ne doit pas bouger sous les pieds
+   de la personne. */
+function msgEnvoyerA(uid,msg){
+  if(!window.fbEnvoyerMessage||!window.fbOuvrirConversation||!window.fbConvId){msgErreurToast("offline");return Promise.resolve(false);}
+  var me=msgMe();
+  if(!me){toast(_tr("msgNeedAuth"));try{playSound("err");}catch(e){}return Promise.resolve(false);}
+  uid=String(uid||"");
+  if(!uid||uid===me)return Promise.resolve(false);
+  if(MSG.blocs.indexOf(uid)!==-1){msgErreurToast("blocked");return Promise.resolve(false);}
+  return window.fbOuvrirConversation(uid).then(function(r){
+    if(!r||!r.ok)return r;
+    return window.fbEnvoyerMessage(r.cid||window.fbConvId(me,uid),msg);
+  }).then(function(r){
+    if(!r||!r.ok){msgErreurToast(r&&r.reason,r&&r.detail);return false;}
+    try{playSound("pop");}catch(e){}
+    return true;
+  }).catch(function(){msgErreurToast("unknown");return false;});
+}
+/* Les personnes a qui on peut vraiment ecrire : on ecarte les demandes RECUES
+   (tant qu'on n'a pas accepte, on ne peut pas repondre) et les refus. Une
+   demande qu'on a soi-meme envoyee et qui attend est gardee : le serveur la
+   refusera peut-etre, et il le dira — mieux vaut ca que de faire disparaitre
+   quelqu'un de la liste sans explication. */
+function msgAmisPourPartage(){
+  var me=msgMe();
+  if(!me)return [];
+  return (MSG.rows||[]).filter(function(c){
+    if(c.state==="declined")return false;
+    if(c.state==="request"&&c.requestBy!==me)return false;
+    var o=msgAutreDe(c);
+    return !!o&&MSG.blocs.indexOf(String(o))===-1;
+  });
+}
+/* Le partage par le systeme (iMessage, Telegram…) : c'est ce que faisait le
+   bouton avant, et ca reste utile pour quelqu'un qui n'est pas sur Magofeed. */
+function partagerMagasinLien(s){
+  if(!s)return;
+  try{bumpStoreStat(s,"partages");}catch(e){}
+  var url=storeShareURL(s);
+  var n=(s.drinks||[]).length;
+  var titre=String(s.name||tr("Ce magasin"));
+  if(s.brand&&String(s.brand)!==titre)titre+=" \u00b7 "+String(s.brand);
+  /* Le texte part chez quelqu'un d'autre, mais c'est TOI qui l'ecris : il suit
+     donc ta langue. Modele a trous plutot que morceaux colles — ailleurs qu'en
+     francais, le nombre ne se place pas au meme endroit. */
+  var txt=n?trh("{s} \u2014 {n} boisson(s) r\u00e9f\u00e9renc\u00e9e(s) sur Magofeed",{s:titre,n:n})
+           :trh("{s} \u2014 sur Magofeed",{s:titre});
+  if(typeof s.lat==="number"&&typeof s.lng==="number"){
+    txt+="\n"+tr("O\u00f9 c'est :")+" https://www.google.com/maps/search/?api=1&query="+s.lat.toFixed(6)+","+s.lng.toFixed(6);
+  }
+  if(navigator.share){navigator.share({title:"Magofeed \u00b7 "+String(s.name||tr("Magasin")),text:txt,url:url}).catch(function(){});return;}
+  try{navigator.clipboard.writeText(txt+"\n"+url);toast(tr("Copi\u00e9 \u2014 colle-le dans ton message"));playSound("pop");}
+  catch(e){prompt(tr("Copie et envoie :"),txt+"\n"+url);}
+}
+/* La feuille de choix : d'abord les gens de Magofeed, puis le lien. L'ordre
+   n'est pas neutre — envoyer dans l'app donne une carte cliquable avec
+   « Y aller », la ou un lien colle dans iMessage n'est qu'un lien. */
+function partagerMagasinAmis(s){
+  var amis=msgAmisPourPartage();
+  var me=msgMe();
+  var lignes=amis.map(function(c,i){
+    var o=msgAutreDe(c),u=msgUser(o)||{pseudo:_tr("msgSomeone")};
+    return '<button class="msg-opt" data-uid="'+attr(String(o))+'" data-i="'+i+'">'+msgAvatar(u,"sm")+
+      '<span style="flex:1;min-width:0"><span class="msg-opt-t">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</span></span></button>';
+  }).join("");
+  var ov=msgFeuille("share-store",
+    '<div class="claim-title">'+_tr("msgSendStoreT")+'</div>'+
+    '<div class="msg-intro" style="margin-bottom:10px">'+sanitize(String(s.name||""))+'</div>'+
+    lignes+
+    '<button class="msg-opt" data-k="lien"><span class="msg-opt-i"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></span>'+
+      '<span style="flex:1;min-width:0"><span class="msg-opt-t">'+_tr("msgShareLink")+'</span><span class="msg-opt-s" style="display:block">'+_tr("msgShareLinkSub")+'</span></span></button>');
+  if(!ov)return;
+  ov.querySelectorAll(".msg-opt").forEach(function(b){
+    b.onclick=function(){
+      if(b.getAttribute("data-k")==="lien"){ov.fermer();setTimeout(function(){partagerMagasinLien(s);},120);return;}
+      var uid=b.getAttribute("data-uid");if(!uid)return;
+      var u=msgUser(uid)||{};
+      ov.fermer();
+      try{bumpStoreStat(s,"partages");}catch(e){}
+      var carte={type:"spot",storeId:String(s.fbId||s.id),storeName:String(s.name||"").slice(0,60)};
+      if(typeof s.lat==="number"&&typeof s.lng==="number"){carte.lat=s.lat;carte.lng=s.lng;}
+      msgEnvoyerA(uid,carte).then(function(ok){
+        if(ok)toast(_tr("msgStoreSent").replace("{p}",String(u.pseudo||_tr("msgSomeone"))));
+      });
+    };
+  });
+}
+
 /* ── La feuille « + » ── */
 function msgFeuille(id,html){
   if(document.getElementById(id))return null;
