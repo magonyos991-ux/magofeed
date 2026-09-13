@@ -1579,4 +1579,5 @@ var DRINKS=[
   {id:14848,name:"Rauch Happy Day Cassis",brand:"Rauch",emoji:"",color:"#f39c12",light:"#fef5e7",cat:"Jus",tag:"RAUCH HAPPY DAY CASSIS",barcodes:["90087271"],stars:4.2,formats:[{type:"brique",cl:100}],img:"https://images.openfoodfacts.org/images/products/90087271/front_de.32.400.jpg"},
   {id:14849,name:"Rauch Happy Day Sprizz Abricot",brand:"Rauch",emoji:"",color:"#f39c12",light:"#fef5e7",cat:"Autre",tag:"RAUCH HAPPY DAY SPRIZZ ABRICOT",barcodes:["9008700123310"],stars:4.2,formats:[{type:"bouteille",cl:50}],img:"https://images.openfoodfacts.org/images/products/900/870/012/3310/front_de.4.400.jpg"},
   {id:14850,name:"Rauch Happy Day Sprizz Orange",brand:"Rauch",emoji:"",color:"#f39c12",light:"#fef5e7",cat:"Autre",tag:"RAUCH HAPPY DAY SPRIZZ ORANGE",barcodes:["90020223"],stars:4.2,formats:[{type:"bouteille",cl:50}],img:"https://images.openfoodfacts.org/images/products/90020223/front_fr.14.400.jpg"},
+  {id:13201,name:"La Cigogne Limonade",brand:"La Cigogne",emoji:"",color:"#c0392b",light:"#fdecea",cat:"Exotique",tag:"LA CIGOGNE LIMONADE",stars:4.6,formats:[{type:"bouteille",cl:25},{type:"canette",cl:33}],imp:1},
 ];
