@@ -96,6 +96,90 @@ async function exporter(motif) {
   return { dossier, operation: op.name };
 }
 
+/* « CALLER DOES NOT HAVE PERMISSION ». C'est le refus de Google Cloud, et il ne
+   dit ni QUI n'a pas le droit, ni SUR QUOI, ni comment le donner. Affiche tel
+   quel dans l'ecran d'administration, il ne servait a rien : la sauvegarde
+   etait rouge depuis des jours sans que personne puisse agir.
+
+   Exporter une base Firestore demande le role « Cloud Datastore Import Export
+   Admin » sur le compte de service qui execute la fonction. Les projets crees
+   depuis 2024 ne le donnent plus par defaut — le code etait juste, la
+   permission manquait, et rien ne le disait.
+
+   On traduit donc le refus en instruction. Un message d'erreur qui ne dit pas
+   quoi faire ne vaut guere mieux que pas de message du tout. */
+function expliquer(e) {
+  const brut = String((e && e.message) || e || "");
+
+  /* LE COFFRE N'EXISTE PAS. Deuxieme panne rencontree, et elle ne ressemble en
+     rien a la premiere : le droit d'exporter etait enfin accorde, mais l'espace
+     de stockage vers lequel ecrire n'avait jamais ete cree. Firebase annonce un
+     seau par defaut dans la configuration du projet AVANT que Storage soit
+     active — le nom existe, le coffre non. On visait donc une adresse valide et
+     vide, et Google repondait NOT_FOUND, ce qui se lit comme un bug de code
+     alors que c'est un service a activer en deux clics. */
+  if (/bucket does not exist|NOT_FOUND/i.test(brut)) {
+    return "L'espace de stockage des sauvegardes n'existe pas encore. Ouvre la " +
+      "console Firebase, section Storage, et clique sur Commencer pour le creer " +
+      "(choisis une region en Europe, ce choix est definitif). Message d'origine : " +
+      brut.slice(0, 150);
+  }
+
+  const refus = /permission|PERMISSION_DENIED|does not have|IAM/i.test(brut);
+  if (!refus) return brut.slice(0, 300);
+  const projet = PROJET || "le projet";
+  return "Permission manquante pour exporter la base. Donne le role « Cloud " +
+    "Datastore Import Export Admin » au compte de service des fonctions, dans " +
+    "la console Google Cloud du projet " + projet + " (IAM). Message d'origine : " +
+    brut.slice(0, 150);
+}
+
+/* LA PURGE, QUI N'EXISTAIT PAS. L'en-tete de ce fichier promettait que « les
+   sauvegardes de plus de 30 jours sont supprimees automatiquement ». La
+   constante JOURS_GARDES etait bien la, et aucune ligne ne s'en servait. Les
+   exports se seraient accumules sans fin, et la facture avec eux — une promesse
+   fausse dans un commentaire est pire qu'un silence, parce qu'on cesse d'y
+   penser.
+
+   ON EFFACE PEU ET ON EFFACE SUR : trois garde-fous, parce qu'une suppression
+   ne se rattrape pas.
+     1. Seuls les chemins de la forme sauvegardes/AAAA-MM-JJ/ sont touches. Tout
+        autre fichier du seau est ignore, quoi qu'il arrive.
+     2. On garde TOUJOURS les trois dossiers les plus recents, meme vieux. Si la
+        sauvegarde automatique tombe en panne deux mois, la purge ne doit pas
+        emporter les dernieres copies existantes le jour ou elle repart.
+     3. La purge ne s'execute qu'apres un export REUSSI. On ne jette jamais
+        l'ancien avant d'avoir le nouveau. */
+async function purger() {
+  try {
+    const seau = getStorage().bucket();
+    const [fichiers] = await seau.getFiles({ prefix: "sauvegardes/" });
+    if (!fichiers.length) return 0;
+
+    /* Le nom du dossier EST la date : rien a lire ailleurs, rien a deviner. */
+    const parJour = new Map();
+    for (const f of fichiers) {
+      const m = /^sauvegardes\/(\d{4}-\d{2}-\d{2})\//.exec(f.name);
+      if (!m) continue;                       // garde-fou 1
+      if (!parJour.has(m[1])) parJour.set(m[1], []);
+      parJour.get(m[1]).push(f);
+    }
+    const jours = [...parJour.keys()].sort();          // du plus ancien au plus recent
+    const limite = new Date(Date.now() - JOURS_GARDES * 86400000).toISOString().slice(0, 10);
+    const proteges = new Set(jours.slice(-3));         // garde-fou 2
+
+    let efface = 0;
+    for (const j of jours) {
+      if (proteges.has(j) || j >= limite) continue;
+      for (const f of parJour.get(j)) {
+        try { await f.delete(); efface++; } catch (e) { console.warn("purge:", f.name, e && e.message); }
+      }
+      console.log("purge : dossier " + j + " supprime");
+    }
+    return efface;
+  } catch (e) { console.warn("purge impossible:", e && e.message); return 0; }
+}
+
 /* Journal des sauvegardes, lisible depuis l'app par l'administrateur : sans
    trace visible, une sauvegarde qui echoue en silence donne un faux
    sentiment de securite — le pire des deux mondes. */
@@ -128,10 +212,15 @@ async function verifierPrecedente() {
     if (!op || !op.done) return;                    // encore en cours : on attend
     await db.collection("_meta").doc("sauvegardes").set({
       derniere: Object.assign({}, prec, op.error
-        ? { etat: "echec-confirme", erreur: String(op.error.message || "").slice(0, 300) }
+        ? { etat: "echec-confirme", erreur: expliquer(op.error) }
         : { etat: "reussie", finiLe: new Date().toISOString() })
     }, { merge: true });
     console.log("sauvegarde precedente :", op.error ? "ECHOUEE" : "reussie");
+    /* Garde-fou 3 : on ne purge qu'apres avoir CONFIRME une reussite. */
+    if (!op.error) {
+      const n = await purger();
+      if (n) console.log("purge : " + n + " fichier(s) de plus de " + JOURS_GARDES + " jours supprime(s)");
+    }
   } catch (e) { console.warn("verification precedente impossible:", e && e.message); }
 }
 
@@ -146,7 +235,7 @@ exports.sauvegardeQuotidienne = onSchedule(
                     etat: "lancee", motif: "automatique" });
     } catch (e) {
       console.error("SAUVEGARDE ECHOUEE:", e && e.message);
-      await noter({ quand: new Date().toISOString(), etat: "echec", erreur: String(e && e.message).slice(0, 300), motif: "automatique" });
+      await noter({ quand: new Date().toISOString(), etat: "echec", erreur: expliquer(e), motif: "automatique" });
       throw e;   // pour que la nouvelle tentative se declenche
     }
   }
@@ -162,7 +251,16 @@ exports.sauvegarderMaintenant = onCall(
     const adm = await db.collection("admins").doc(uid).get();
     if (!adm.exists) throw new HttpsError("permission-denied", "Réservé à l'administrateur.");
     await verifierPrecedente();
-    const r = await exporter("manuelle");
+    let r;
+    try {
+      r = await exporter("manuelle");
+    } catch (e) {
+      /* L'echec est note AVANT d'etre relance : sinon un clic rate ne laissait
+         aucune trace, et l'ecran continuait d'afficher l'etat d'avant. */
+      const dit = expliquer(e);
+      await noter({ quand: new Date().toISOString(), etat: "echec", erreur: dit, motif: "manuelle", par: uid });
+      throw new HttpsError("failed-precondition", dit);
+    }
     await noter({ quand: new Date().toISOString(), dossier: r.dossier, operation: r.operation,
                   etat: "lancee", motif: "manuelle", par: uid });
     return { dossier: r.dossier };

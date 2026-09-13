@@ -26,7 +26,7 @@ var ALCOOL_FAUX = [
   /vitamine?s?/g, /sans[- ]?alcool/g, /alcohol[- ]?free/g, /alkoholfrei/g, /alcoholvrij/g,
   /sin[- ]?alcohol/g, /senza[- ]?alcol/g, /sem[- ]?alcool/g, /bez[- ]?alkoholu/g, /alkolsuz/g,
   /0[.,]0\s*%?/g, /malta[- ]?guinness/g, /\bmocktails?\b/g, /\bboisson[- ]?malt/g, /\bmalta\b/g,
-  /\bbrut[- ]?de[- ]?pomme/g, /cocktails?[- ]?(de[- ]?)?(fruits?|exotique|tropical)/g, /\bspritz\b/g, /\bpanache\b/g
+  /\bbrut[- ]?de[- ]?pomme/g, /cocktails?[- ]?(de[- ]?)?(fruits?|exotique|tropical)/g, /\bspritz\b/g
 ];
 
 var ALCOOL_MOTS = [
@@ -46,6 +46,7 @@ var ALCOOL_MOTS = [
   "pale ale", "wine", "wines", "cider", "ciders", "perry", "mead", "spirits", "liquor", "liquors",
   "booze", "whisky", "whiskey", "whiskies", "whiskeys", "scotch", "vodka", "vodkas", "gin", "gins",
   "rum", "rums", "brandy", "tequila", "mezcal", "absinthe", "vermouth", "sherry", "porto", "madeira", "marsala",
+  "kombucha", "kombuchas", "kefir", "kéfir", "kefirs", "tepache", "panache", "panaché", "panachés",
   "hard seltzer", "hard lemonade", "hard cider", "alcopop", "alcopops", "shandy", "radler",
   "sparkling wine", "red wine", "white wine", "rose wine", "dessert wine", "ice wine", "icewine",
   "moonshine", "hooch", "abv", /* neerlandais */

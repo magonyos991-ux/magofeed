@@ -73,6 +73,9 @@ Object.assign(exports, require("./sauvegarde"));
 /* ── La notification a chaque don Ko-fi. Secret KOFI_JETON : deja en place. */
 Object.assign(exports, require("./don-notification"));
 
+/* ── Le push d'un nouveau message de la messagerie (aucun secret requis). */
+Object.assign(exports, require("./messages-push"));
+
 /* ── RECUPEREES LE 4 SEPTEMBRE 2026 ───────────────────────────────────────
    Ces deux fonctions tournaient en production depuis le 26 juillet sans
    qu'aucune copie n'existe dans le depot : elles avaient ete deployees a la

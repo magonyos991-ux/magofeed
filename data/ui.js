@@ -79,7 +79,10 @@ function playSound(type){
 ================================ */
 function toast(msg){
   var t=document.getElementById("toast");
-  t.textContent=msg;t.classList.add("show");
+  /* La traduction se fait ICI, et pas aux 165 endroits qui appellent toast().
+     Le texte francais sert de cle : voir data/textes.js. */
+  t.textContent=(typeof tr==="function")?tr(msg):msg;
+  t.classList.add("show");
   setTimeout(function(){t.classList.remove("show");},2500);
 }
 

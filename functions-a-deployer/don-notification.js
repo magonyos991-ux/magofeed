@@ -47,13 +47,18 @@ const { onRequest } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
-const { getMessaging } = require("firebase-admin/messaging");
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
 
 const REGION = "europe-west1";
 const KOFI_JETON = defineSecret("KOFI_JETON");
+/* BREVO_API_KEY : le secours par courriel de sendToAdmins. Un secret n'arrive
+   dans process.env que si la fonction qui s'en sert le DECLARE. Sans cette
+   ligne, le secours resterait muet — et muet exactement le jour ou la poussee
+   echoue, c'est-a-dire le seul jour ou il sert. */
+const BREVO_API_KEY = defineSecret("BREVO_API_KEY");
+const { sendToAdmins } = require("./outils-admin");
 const APP_URL = "https://magonyos991-ux.github.io/magofeed/";
 
 /* Ko-fi envoie un formulaire dont le champ « data » contient du JSON. Selon la
@@ -77,21 +82,60 @@ function montantLisible(somme, devise) {
   return txt + (d === "EUR" ? " €" : " " + d);
 }
 
+/* LE DERNIER APPEL DE KO-FI, VISIBLE DEPUIS L'APP.
+   Sans ca, trois pannes tres differentes donnaient le meme silence : Ko-fi qui
+   n'appelle jamais, Ko-fi qui appelle avec un jeton qui ne correspond pas, et
+   Ko-fi qui a change le format de son message. Il fallait les journaux Google
+   Cloud pour les distinguer — autant dire personne.
+
+   UN SEUL DOCUMENT, REECRIT A CHAQUE FOIS. Cette adresse est publique :
+   ajouter une ligne par appel offrirait a n'importe qui le moyen de remplir la
+   base. On garde donc uniquement le dernier appel, et on n'envoie AUCUNE
+   notification depuis ici — un refus ne doit jamais pouvoir faire sonner le
+   telephone du fondateur.
+
+   On note les NOMS des champs recus, jamais leurs valeurs : de quoi voir que
+   Ko-fi a change son format, sans deverser l'identite d'un donateur. */
+async function noterAppel(resultat, don) {
+  try {
+    const champs = don && typeof don === "object" ? Object.keys(don).sort().join(",").slice(0, 400) : "";
+    await db.collection("_meta").doc("kofiDernierAppel").set({
+      quand: FieldValue.serverTimestamp(),
+      resultat: String(resultat).slice(0, 40),
+      champs: champs
+    });
+  } catch (e) { console.warn("trace kofi:", e && e.message); }
+}
+
 exports.kofiWebhook = onRequest(
-  { region: REGION, secrets: [KOFI_JETON], memory: "256MiB",
+  { region: REGION, secrets: [KOFI_JETON, BREVO_API_KEY], memory: "256MiB",
     timeoutSeconds: 30, maxInstances: 5 },
   async (req, res) => {
-    if (req.method !== "POST") { res.status(405).send("POST attendu"); return; }
+    if (req.method !== "POST") {
+      await noterAppel("methode-refusee", null);
+      res.status(405).send("POST attendu"); return;
+    }
 
     const don = lireCharge(req);
-    if (!don) { console.warn("charge illisible"); res.status(400).send("charge illisible"); return; }
+    if (!don) {
+      console.warn("charge illisible");
+      await noterAppel("charge-illisible", req.body);
+      res.status(400).send("charge illisible"); return;
+    }
 
     /* LA LIGNE QUI COMPTE. Cette adresse est publique : sans ce controle,
        n'importe qui pourrait t'envoyer de faux dons et faire sonner ton
        telephone toute la nuit. Le jeton vient de Ko-fi et ne transite jamais
        par le navigateur. */
-    if (String(don.verification_token || "") !== String(KOFI_JETON.value())) {
+    /* ON COMPARE SANS LES BLANCS AUTOUR. Coller un jeton dans une invite
+       masquee de terminal emporte tres souvent un espace ou un retour a la
+       ligne avec lui — invisible, et il suffit a faire echouer la comparaison.
+       Le rogner n'affaiblit rien : un jeton ne commence ni ne finit jamais par
+       un blanc, et deux jetons differents le restent apres rognage. Cela evite
+       en revanche des heures passees a chercher une faute qui n'existe pas. */
+    if (String(don.verification_token || "").trim() !== String(KOFI_JETON.value()).trim()) {
       console.warn("jeton de verification invalide");
+      await noterAppel("jeton-refuse", don);
       res.status(401).send("jeton invalide");
       return;
     }
@@ -129,45 +173,20 @@ exports.kofiWebhook = onRequest(
       if (deja) { res.status(200).send("deja traite"); return; }
     }
 
-    /* Destinataires = les admins qui ont un token push. Meme chemin que le
-       recap quotidien (recap-fondateur.js) : une seule facon de te joindre. */
-    const tokens = [];
-    try {
-      const admins = await db.collection("admins").get();
-      for (const a of admins.docs) {
-        try {
-          const tk = await db.collection("pushTokens").doc(a.id).get();
-          const token = tk.exists && tk.data().token;
-          if (token) tokens.push(token);
-        } catch (e) { /* admin sans token : on saute */ }
-      }
-    } catch (e) { console.warn("lecture admins:", e && e.message); }
-
-    /* Repondre 200 meme sans destinataire : le don est bien arrive, ce n'est
-       pas a Ko-fi de reessayer parce que TON telephone n'a pas de token. */
-    if (!tokens.length) {
-      console.log("don recu, aucun admin avec token push");
-      res.status(200).send("ok (personne a prevenir)");
-      return;
-    }
-
     const titre = (abo ? "Soutien mensuel · " : "Nouveau soutien · ") + somme;
     const corps = nom + (mot ? " — « " + mot + " »" : "");
 
-    try {
-      const r = await getMessaging().sendEach(tokens.map((token) => ({
-        token: token,
-        notification: { title: titre, body: corps },
-        data: { type: "don" },
-        webpush: {
-          notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png" },
-          fcmOptions: { link: APP_URL }
-        }
-      })));
-      console.log("notification de don envoyee : " + r.successCount + "/" + tokens.length);
-    } catch (e) {
-      console.warn("envoi push:", e && e.message);
-    }
+    /* UN SEUL CHEMIN POUR JOINDRE LE FONDATEUR. Ce fichier refaisait sa propre
+       boucle sur les admins et leurs jetons. Elle marchait, mais elle etait
+       AVEUGLE : quand aucun jeton n'existait, elle ecrivait une ligne dans les
+       journaux et repondait « ok (personne a prevenir) ». Un euro recu, et pas
+       la moindre trace visible cote fondateur — c'est exactement ce qui s'est
+       produit. sendToAdmins garde desormais une trace durable de chaque alerte
+       et bascule sur le courriel quand aucune poussee ne part. */
+    await noterAppel("accepte", don);
+    const r = await sendToAdmins(titre, corps);
+    console.log("don : poussees " + r.parties + "/" + r.jetons + ", courriel " + r.courriel);
+
     /* Toujours 200 : le don est enregistre. Un push rate ne doit pas declencher
        une avalanche de reessais chez Ko-fi. */
     res.status(200).send("ok");
