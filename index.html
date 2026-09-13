@@ -2672,14 +2672,26 @@ window.fbEnvoyerMessage = async function(cid, msg) {
       m.lat = Math.round(msg.lat * 1000) / 1000; m.lng = Math.round(msg.lng * 1000) / 1000;
       apercu = "Position";
     } else if (msg.type === "spot") {
+      /* Deux cartes partagent ce type, et c'est volontaire : une trouvaille
+         (une boisson VUE dans un magasin) et un magasin seul, envoye depuis
+         la carte. Un type de plus aurait voulu dire modifier les regles
+         Firestore et les redeployer a la main — pour une carte qui n'apporte
+         aucun champ nouveau. La difference se lit a la presence du nom de
+         boisson, ici comme a l'affichage. */
       m.storeId = String(msg.storeId || "").slice(0, 80);
       m.storeName = String(msg.storeName || "").slice(0, 60);
       // Une cle absente plutot que nulle : les regles n'acceptent que les
       // types documentes, et null n'en fait pas partie.
       if (msg.drinkId != null) m.drinkId = (typeof msg.drinkId === "number") ? msg.drinkId : String(msg.drinkId).slice(0, 40);
-      m.drinkName = String(msg.drinkName || "").slice(0, 60);
-      if (!m.storeId || !m.storeName || !m.drinkName) return { ok: false, reason: "invalid" };
-      apercu = m.drinkName + " chez " + m.storeName;
+      var dn = String(msg.drinkName || "").slice(0, 60);
+      if (dn) m.drinkName = dn;
+      /* Les coordonnees voyagent avec le magasin pour que « GPS » marche meme
+         si celui qui recoit n'a pas cette zone chargee. Un commerce est un
+         lieu public : contrairement au type "pos", on ne les arrondit pas. */
+      if (typeof msg.lat === "number" && typeof msg.lng === "number" &&
+          isFinite(msg.lat) && isFinite(msg.lng)) { m.lat = msg.lat; m.lng = msg.lng; }
+      if (!m.storeId || !m.storeName) return { ok: false, reason: "invalid" };
+      apercu = dn ? (dn + " chez " + m.storeName) : m.storeName;
     } else return { ok: false, reason: "invalid" };
     /* Rythme impose par les regles : 700 ms entre deux ecritures dans le fil,
        creation comprise et messages de l'autre compris. On attend ici plutot
@@ -10178,7 +10190,7 @@ function renderNearby(){
   if(!hasLoc){
     var c=document.createElement("div");
     c.innerHTML='<div style="font-size:13.5px;font-weight:700;color:var(--s1);line-height:1.35;margin-bottom:4px">Active ta position</div>'+
-      '<div style="font-size:12px;color:var(--s2);line-height:1.4;margin-bottom:12px">Pour voir d\'un coup tous les magasins autour de toi.</div>';
+      '<div style="font-size:12px;color:var(--s2);line-height:1.4;margin-bottom:12px">'+tr("Pour voir d'un coup tous les magasins autour de toi.")+'</div>';
     var row=document.createElement("div");row.style.cssText="display:flex;gap:8px";
     var b1=document.createElement("div");
     b1.setAttribute("role","button");b1.setAttribute("tabindex","0");b1.setAttribute("aria-label","Activer ma position");
@@ -10836,7 +10848,7 @@ function renderDeals(){
   el.innerHTML='<div class="sec-hd"><div class="t-section">Boisson du moment</div></div>'+
     '<div onclick="pick(DRINKS.find(function(x){return x.id==='+d.id+';}))" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){pick(DRINKS.find(function(x){return x.id==='+d.id+';}));}" style="display:flex;align-items:center;gap:13px;background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:13px;cursor:pointer;margin-bottom:14px">'+
     '<div style="width:52px;height:52px;border-radius:13px;background:'+(d.light||"var(--bg2)")+';display:flex;align-items:center;justify-content:center;font-size:26px;overflow:hidden;flex-shrink:0">'+drinkIconHTML(d)+'</div>'+
-    '<div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:800;color:var(--s1)">'+sanitize(d.name)+'</div><div style="font-size:12px;color:var(--s2);margin-top:2px">'+sanitize(d.brand)+starSuffix(d)+' — trouve-la près de toi</div></div>'+
+    '<div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:800;color:var(--s1)">'+sanitize(d.name)+'</div><div style="font-size:12px;color:var(--s2);margin-top:2px">'+sanitize(d.brand)+starSuffix(d)+'<span> — trouve-la près de toi</span></div></div>'+
     '<span style="font-size:18px;color:var(--txt2)">›</span>'+
   '</div>';
 }
@@ -11792,20 +11804,16 @@ function submitAddDrinks(){
    Le message porte DEUX choses, parce que le destinataire n'a pas forcement
    l'app : le lien Magofeed (la fiche, avec ce qu'on y trouve) et un lien de
    carte ordinaire, qui s'ouvre dans n'importe quel telephone. */
+/* Le bouton « Envoyer » d'un magasin. Il ouvrait la feuille de partage du
+   telephone, et c'etait tout : impossible d'envoyer le magasin DANS Magofeed,
+   alors que l'app sait deja envoyer la carte d'une boisson vue en rayon. On
+   propose donc d'abord les gens de Magofeed, et le lien reste juste en
+   dessous. S'il n'y a encore personne a qui ecrire, on ne fait pas perdre un
+   geste : on va droit au partage par le telephone. */
 function partagerMagasin(s){
-  if(!s){try{toast("Aucun magasin \u00e0 envoyer");}catch(e){}return;}
-  try{bumpStoreStat(s,"partages");}catch(e){}
-  var url=storeShareURL(s);
-  var n=(s.drinks||[]).length;
-  var titre=String(s.name||"Ce magasin");
-  if(s.brand&&String(s.brand)!==titre)titre+=" \u00b7 "+String(s.brand);
-  var txt=titre+(n?" \u2014 "+n+" boisson"+(n>1?"s":"")+" r\u00e9f\u00e9renc\u00e9e"+(n>1?"s":"")+" sur Magofeed":" \u2014 sur Magofeed");
-  if(typeof s.lat==="number"&&typeof s.lng==="number"){
-    txt+="\nO\u00f9 c'est : https://www.google.com/maps/search/?api=1&query="+s.lat.toFixed(6)+","+s.lng.toFixed(6);
-  }
-  if(navigator.share){navigator.share({title:"Magofeed \u00b7 "+String(s.name||"Magasin"),text:txt,url:url}).catch(function(){});return;}
-  try{navigator.clipboard.writeText(txt+"\n"+url);toast("Copi\u00e9 \u2014 colle-le dans ton message");playSound("pop");}
-  catch(e){prompt("Copie et envoie :",txt+"\n"+url);}
+  if(!s){try{toast(tr("Aucun magasin \u00e0 envoyer"));}catch(e){}return;}
+  if(typeof msgAmisPourPartage==="function"&&msgAmisPourPartage().length){partagerMagasinAmis(s);return;}
+  partagerMagasinLien(s);
 }
 /* Depuis un bouton HTML, ou l'on n'a que l'identifiant sous la main. */
 function partagerMagasinId(id){
@@ -23775,7 +23783,23 @@ function msgBulleHTML(m,mine,ms,nom){
   if(m.type==="spot"){
     var d=(m.drinkId!=null)?(DRINKS||[]).find(function(x){return String(x.id)===String(m.drinkId);}):null;
     var s=(typeof STORES!=="undefined"?STORES:[]).find(function(x){return String(x.fbId)===String(m.storeId)||String(x.id)===String(m.storeId);});
-    var dist=(s&&typeof userLat==="number"&&typeof s.lat==="number")?fmtDist(haversine(userLat,userLng,s.lat,s.lng)):"";
+    /* Distance : d'abord le magasin charge, sinon les coordonnees venues avec
+       le message. Celui qui recoit n'a pas forcement cette zone en memoire —
+       sans ce repli, la carte d'un magasin lointain n'affichait rien. */
+    var _la=(s&&typeof s.lat==="number")?s.lat:(typeof m.lat==="number"?m.lat:null);
+    var _ln=(s&&typeof s.lng==="number")?s.lng:(typeof m.lng==="number"?m.lng:null);
+    /* Pas de boisson : c'est un magasin envoye depuis la carte. Meme dessin,
+       autre contenu — le magasin passe en titre, et le second bouton devient
+       l'itineraire, parce qu'il n'y a pas de fiche boisson a ouvrir. */
+    if(!d&&!m.drinkName){
+      var dSeul=(_la!=null&&typeof userLat==="number")?fmtDist(haversine(userLat,userLng,_la,_ln)):"";
+      var sousSeul=[dSeul,_tr("msgStoreSentBy").replace("{t}",msgDepuis(ms)).replace("{p}",qui)].filter(Boolean).join(" \u00b7 ");
+      return '<div class="th-card '+side+'"><div class="th-spot-top"><div class="th-spot-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--s2)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l1.5-5h15L21 9"/><path d="M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/><path d="M9 20v-6h6v6"/></svg></div>'+
+        '<div style="flex:1;min-width:0"><div class="th-spot-name">'+sanitize(m.storeName||"")+'</div><div class="th-spot-sub">'+sanitize(sousSeul)+'</div></div></div>'+
+        '<div class="th-spot-btns"><button class="th-cta" data-act="go" data-store="'+attr(m.storeId)+'">'+_tr("msgGo")+'</button>'+
+        ((_la!=null&&_ln!=null)?'<button class="th-sec" data-act="nav" data-lat="'+attr(_la)+'" data-lng="'+attr(_ln)+'">'+_tr("msgRoute")+'</button>':'')+'</div>'+t+'</div>';
+    }
+    var dist=(_la!=null&&typeof userLat==="number")?fmtDist(haversine(userLat,userLng,_la,_ln)):"";
     var sub=[dist,_tr("msgSeenBy").replace("{t}",msgDepuis(ms)).replace("{p}",qui)].filter(Boolean).join(" · ");
     return '<div class="th-card '+side+'"><div class="th-spot-top"><div class="th-spot-ico" style="'+(d?'background:'+attr(d.light||"var(--bg2)"):'')+'">'+(d?drinkIconHTML(d):'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--s2)" stroke-width="2" stroke-linecap="round"><path d="M8 3h8l-1 4H9z"/><path d="M9 7l-1.5 13h9L15 7"/></svg>')+'</div>'+
       '<div style="flex:1;min-width:0"><div class="th-spot-name">'+sanitize(d?d.name:m.drinkName||"")+'</div><div class="th-spot-sub">'+sanitize(d?[d.brand,d.format||d.size].filter(Boolean).join(" · "):"")+'</div></div></div>'+
@@ -23803,6 +23827,11 @@ function msgBulleHTML(m,mine,ms,nom){
           try{openStoreDetail(st.fbId||st.id);}catch(e){toast(_tr("msgStoreFar"));}
         }).catch(function(){toast(_tr("msgStoreFar"));});
       } else toast(_tr("msgStoreFar"));
+      return;
+    }
+    if(act==="nav"){
+      var _nla=Number(el.getAttribute("data-lat")),_nln=Number(el.getAttribute("data-lng"));
+      if(isFinite(_nla)&&isFinite(_nln)){try{openNavApp("https://www.google.com/maps/dir/?api=1&travelmode=walking&destination="+_nla+","+_nln);}catch(e){}}
       return;
     }
     if(act==="fiche"){var d=(DRINKS||[]).find(function(x){return String(x.id)===el.getAttribute("data-drink");});if(d){try{pick(d);}catch(e){}}return;}
@@ -23915,6 +23944,99 @@ function msgEnvoyer(msg){
     return true;
   }).catch(function(){MSG.sending=false;msgErreurToast("unknown");renderThreadFoot();return false;});
 }
+/* ── Envoyer une carte a quelqu'un sans ouvrir son fil ────────────────
+   msgEnvoyer() parle au fil ouvert : il lit MSG.cid, MSG.other, MSG.conv. Or
+   on veut pouvoir envoyer un magasin depuis la CARTE, ou aucun fil n'est
+   ouvert. On refait donc le chemin court : identifiant de conversation,
+   creation si besoin, envoi. On ne touche pas a l'etat du fil — si une
+   conversation est ouverte ailleurs, elle ne doit pas bouger sous les pieds
+   de la personne. */
+function msgEnvoyerA(uid,msg){
+  if(!window.fbEnvoyerMessage||!window.fbOuvrirConversation||!window.fbConvId){msgErreurToast("offline");return Promise.resolve(false);}
+  var me=msgMe();
+  if(!me){toast(_tr("msgNeedAuth"));try{playSound("err");}catch(e){}return Promise.resolve(false);}
+  uid=String(uid||"");
+  if(!uid||uid===me)return Promise.resolve(false);
+  if(MSG.blocs.indexOf(uid)!==-1){msgErreurToast("blocked");return Promise.resolve(false);}
+  return window.fbOuvrirConversation(uid).then(function(r){
+    if(!r||!r.ok)return r;
+    return window.fbEnvoyerMessage(r.cid||window.fbConvId(me,uid),msg);
+  }).then(function(r){
+    if(!r||!r.ok){msgErreurToast(r&&r.reason,r&&r.detail);return false;}
+    try{playSound("pop");}catch(e){}
+    return true;
+  }).catch(function(){msgErreurToast("unknown");return false;});
+}
+/* Les personnes a qui on peut vraiment ecrire : on ecarte les demandes RECUES
+   (tant qu'on n'a pas accepte, on ne peut pas repondre) et les refus. Une
+   demande qu'on a soi-meme envoyee et qui attend est gardee : le serveur la
+   refusera peut-etre, et il le dira — mieux vaut ca que de faire disparaitre
+   quelqu'un de la liste sans explication. */
+function msgAmisPourPartage(){
+  var me=msgMe();
+  if(!me)return [];
+  return (MSG.rows||[]).filter(function(c){
+    if(c.state==="declined")return false;
+    if(c.state==="request"&&c.requestBy!==me)return false;
+    var o=msgAutreDe(c);
+    return !!o&&MSG.blocs.indexOf(String(o))===-1;
+  });
+}
+/* Le partage par le systeme (iMessage, Telegram…) : c'est ce que faisait le
+   bouton avant, et ca reste utile pour quelqu'un qui n'est pas sur Magofeed. */
+function partagerMagasinLien(s){
+  if(!s)return;
+  try{bumpStoreStat(s,"partages");}catch(e){}
+  var url=storeShareURL(s);
+  var n=(s.drinks||[]).length;
+  var titre=String(s.name||tr("Ce magasin"));
+  if(s.brand&&String(s.brand)!==titre)titre+=" \u00b7 "+String(s.brand);
+  /* Le texte part chez quelqu'un d'autre, mais c'est TOI qui l'ecris : il suit
+     donc ta langue. Modele a trous plutot que morceaux colles — ailleurs qu'en
+     francais, le nombre ne se place pas au meme endroit. */
+  var txt=n?trh("{s} \u2014 {n} boisson(s) r\u00e9f\u00e9renc\u00e9e(s) sur Magofeed",{s:titre,n:n})
+           :trh("{s} \u2014 sur Magofeed",{s:titre});
+  if(typeof s.lat==="number"&&typeof s.lng==="number"){
+    txt+="\n"+tr("O\u00f9 c'est :")+" https://www.google.com/maps/search/?api=1&query="+s.lat.toFixed(6)+","+s.lng.toFixed(6);
+  }
+  if(navigator.share){navigator.share({title:"Magofeed \u00b7 "+String(s.name||tr("Magasin")),text:txt,url:url}).catch(function(){});return;}
+  try{navigator.clipboard.writeText(txt+"\n"+url);toast(tr("Copi\u00e9 \u2014 colle-le dans ton message"));playSound("pop");}
+  catch(e){prompt(tr("Copie et envoie :"),txt+"\n"+url);}
+}
+/* La feuille de choix : d'abord les gens de Magofeed, puis le lien. L'ordre
+   n'est pas neutre — envoyer dans l'app donne une carte cliquable avec
+   « Y aller », la ou un lien colle dans iMessage n'est qu'un lien. */
+function partagerMagasinAmis(s){
+  var amis=msgAmisPourPartage();
+  var me=msgMe();
+  var lignes=amis.map(function(c,i){
+    var o=msgAutreDe(c),u=msgUser(o)||{pseudo:_tr("msgSomeone")};
+    return '<button class="msg-opt" data-uid="'+attr(String(o))+'" data-i="'+i+'">'+msgAvatar(u,"sm")+
+      '<span style="flex:1;min-width:0"><span class="msg-opt-t">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</span></span></button>';
+  }).join("");
+  var ov=msgFeuille("share-store",
+    '<div class="claim-title">'+_tr("msgSendStoreT")+'</div>'+
+    '<div class="msg-intro" style="margin-bottom:10px">'+sanitize(String(s.name||""))+'</div>'+
+    lignes+
+    '<button class="msg-opt" data-k="lien"><span class="msg-opt-i"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></span>'+
+      '<span style="flex:1;min-width:0"><span class="msg-opt-t">'+_tr("msgShareLink")+'</span><span class="msg-opt-s" style="display:block">'+_tr("msgShareLinkSub")+'</span></span></button>');
+  if(!ov)return;
+  ov.querySelectorAll(".msg-opt").forEach(function(b){
+    b.onclick=function(){
+      if(b.getAttribute("data-k")==="lien"){ov.fermer();setTimeout(function(){partagerMagasinLien(s);},120);return;}
+      var uid=b.getAttribute("data-uid");if(!uid)return;
+      var u=msgUser(uid)||{};
+      ov.fermer();
+      try{bumpStoreStat(s,"partages");}catch(e){}
+      var carte={type:"spot",storeId:String(s.fbId||s.id),storeName:String(s.name||"").slice(0,60)};
+      if(typeof s.lat==="number"&&typeof s.lng==="number"){carte.lat=s.lat;carte.lng=s.lng;}
+      msgEnvoyerA(uid,carte).then(function(ok){
+        if(ok)toast(_tr("msgStoreSent").replace("{p}",String(u.pseudo||_tr("msgSomeone"))));
+      });
+    };
+  });
+}
+
 /* ── La feuille « + » ── */
 function msgFeuille(id,html){
   if(document.getElementById(id))return null;
