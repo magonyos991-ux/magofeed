@@ -93,23 +93,39 @@ var scanHist=JSON.parse(localStorage.getItem("magoScanHist")||"[]");
 })();
 var curBrandFilter=null;
 var isAdmin=false;
-// v3 : purge des resolutions automatiques de l'ancienne verification (incident
-// chips Stax sur le Pepsi) en CONSERVANT les corrections manuelles de l'admin
+/* Cle du cache photo, versionnee. CHANGER CETTE CLE est la seule facon de
+   revoir les photos deja posees sur les telephones : le cache est permanent
+   des qu'une URL est trouvee, donc une photo acceptee par un filtre trop
+   laxiste y reste pour toujours. */
+var IMG_CACHE_KEY="magoImgCache4";
+/* v4 : le filtre comparait les marques par SOUS-CHAINE ("pepsi" est contenu
+   dans "pepsico"), et acceptait les fiches sans categorie — d'ou le tube de
+   chips Elma Chips Stax affiche sur le Pepsi Original. Toutes les photos
+   trouvees automatiquement par l'ancien filtre sont donc suspectes et
+   repartent a la verification. On GARDE en revanche ce qu'un humain a valide :
+   les corrections manuelles de l'admin (manual) et les photos communautaires
+   validees (community) — les rejeter ferait perdre les marques exotiques que
+   les bases mondiales ne connaissent pas. */
 var imgCache=(function(){
-  var v3={};
-  try{v3=JSON.parse(localStorage.getItem("magoImgCache3")||"{}");}catch(e){}
+  var v4=null;
+  try{v4=JSON.parse(localStorage.getItem(IMG_CACHE_KEY)||"null");}catch(e){}
+  if(v4)return v4;
+  var garde={};
   try{
-    var v2=JSON.parse(localStorage.getItem("magoImgCache2")||"null");
-    if(v2){
-      Object.keys(v2).forEach(function(k){
-        if(v2[k]&&v2[k].manual&&!v3[k])v3[k]=v2[k];
+    var v3=JSON.parse(localStorage.getItem("magoImgCache3")||"{}")||{};
+    var v2=JSON.parse(localStorage.getItem("magoImgCache2")||"{}")||{};
+    [v2,v3].forEach(function(vieux){
+      Object.keys(vieux).forEach(function(k){
+        var e=vieux[k];
+        if(e&&(e.manual||e.community))garde[k]=e;
       });
-      localStorage.removeItem("magoImgCache2");
-      localStorage.setItem("magoImgCache3",JSON.stringify(v3));
-    }
+    });
+    localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(garde));
+    localStorage.removeItem("magoImgCache3");
+    localStorage.removeItem("magoImgCache2");
     localStorage.removeItem("magoImgCache");
   }catch(e){}
-  return v3;
+  return garde;
 })();
 var imgFetchInFlight={};
 var communityCatalogLoaded=false;
