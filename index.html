@@ -12644,6 +12644,11 @@ function initLeafletMap(lat,lng){
          recouvraient — impossible d'atteindre celui du dessous. Rayon
          degressif + eventail : plus aucun magasin hors de portee du doigt. */
       maxClusterRadius:rayonRegroupement,
+      /* Plus AUCUNE bulle de comptage des le zoom de detail : a partir de la,
+         chaque magasin a son point. Ce reglage cachait autrefois les magasins
+         superposes ; il ne le peut plus, etalerMarqueurs les ecarte en rosace
+         a chaque zoom. */
+      disableClusteringAtZoom:ZOOM_DETAIL,
       spiderfyOnMaxZoom:true,
       spiderfyDistanceMultiplier:1.6,
       spiderLegPolylineOptions:{weight:2,color:"#8c8378",opacity:.8},
@@ -12666,6 +12671,9 @@ function initLeafletMap(lat,lng){
     window._leafletCluster=cluster;
     var stores=populateClusterMarkers(cluster);
     map.addLayer(cluster);
+    // Rosace : recalculee a chaque zoom et a chaque deplacement.
+    map.on("zoomend moveend",function(){etalerMarqueurs(map,cluster);});
+    setTimeout(function(){etalerMarqueurs(map,cluster);},360);
 
     // Le conteneur peut avoir une taille nulle si la carte est construite pendant que l'écran est encore masqué
     // (transition d'écran en cours) : on force Leaflet à recalculer sa taille avant de centrer/cadrer la vue.
@@ -12735,6 +12743,7 @@ function populateClusterMarkers(cluster){
   });
   if(cluster.addLayers)cluster.addLayers(_lot);
   else _lot.forEach(function(m){cluster.addLayer(m);});
+  try{if(window._leafletMap)etalerMarqueurs(window._leafletMap,cluster);}catch(eE){}
   return stores;
 }
 /* Plein ecran carte : la boite passe en fixe pleine fenetre, Leaflet recalcule
@@ -14197,15 +14206,111 @@ function ensureCluster(onDone){
        memes coordonnees se dessinaient l'un SUR l'autre : le second devenait
        invisible et intouchable. La carte perdait un magasin en silence
        pendant que le compteur de l'en-tete continuait de le compter.
-   Le rayon suit donc le zoom, comme chez Uber Eats ou Google Maps : large
-   quand on regarde une region (peu de grosses bulles, mais qui annoncent le
-   VRAI nombre), etroit dans la rue (un point par magasin). Et on ne coupe
-   JAMAIS le regroupement : c'est lui, et lui seul, qui garantit qu'un magasin
-   superpose a un autre reste compte, visible et atteignable au doigt — au
-   pire dans un eventail (spiderfy) quand zoomer ne peut plus les separer.
+   Le rayon suit donc le zoom : large quand on regarde une region (peu de
+   grosses bulles, mais qui annoncent le VRAI nombre), etroit des qu'on
+   approche. Cette fonction ne sert plus qu'EN DESSOUS de ZOOM_DETAIL : a
+   partir de la, le regroupement est coupe et c'est etalerMarqueurs qui
+   garantit qu'un magasin superpose a un autre reste visible et atteignable au
+   doigt, en les ecartant en rosace au lieu de les compter.
    Reperes de lecture (a 50° de latitude, ~1 px vaut) : zoom 13 ~13 m,
    zoom 15 ~3,3 m, zoom 17 ~0,8 m, zoom 19 ~0,2 m. Deux magasins a 15 m se
    separent donc vers le zoom 17, deux magasins a 100 m des le zoom 14. */
+/* ZOOM_DETAIL : le zoom a partir duquel la carte arrete de compter et se met
+   a MONTRER. En dessous, on regroupe et la bulle annonce le vrai nombre ;
+   a partir de la, plus une seule bulle — chaque magasin a son point, et deux
+   magasins au meme endroit s'ecartent en rosace (voir etalerMarqueurs). La
+   carte s'ouvre au zoom 13/14 : au premier coup d'oeil on voit donc des
+   magasins, pas des « 2 ». */
+var ZOOM_DETAIL=13;
+
+/* L'EVENTAIL PERMANENT. Le greffon sait deja ouvrir un eventail, mais
+   seulement sur un clic et seulement au zoom maximal : entre les deux, deux
+   magasins a 5 m (le hub et le WHSmith de Brussels Airport, par exemple) se
+   dessinaient l'un SUR l'autre et le second devenait invisible et
+   intouchable. On ecarte donc nous-memes, a chaque zoom : les magasins qui
+   tomberaient a moins de 26 px l'un de l'autre sont poses en cercle autour de
+   leur barycentre, relies par un fil fin pour dire « c'est le meme endroit ».
+   Le rayon est calcule EN PIXELS puis reprojete, donc l'ecart reste lisible au
+   doigt a tous les zooms, et les positions d'origine sont restaurees des qu'on
+   dezoome (le greffon, lui, regroupe toujours d'apres les vraies positions). */
+function etalerMarqueurs(map,groupe){
+  if(!map||!groupe||!map._loaded||!groupe.getLayers)return;
+  if(map._etalementEnCours)return;
+  map._etalementEnCours=true;
+  try{
+    var fils=map._eventailFils;
+    if(!fils){fils=map._eventailFils=L.layerGroup().addTo(map);}
+    fils.clearLayers();
+    var tous=groupe.getLayers(),i,m;
+    for(i=0;i<tous.length;i++){m=tous[i];if(!m._llOrig&&m.getLatLng)m._llOrig=m.getLatLng();}
+    var z=map.getZoom();
+    if(z<ZOOM_DETAIL){
+      for(i=0;i<tous.length;i++){m=tous[i];if(m._llOrig&&m.setLatLng)m.setLatLng(m._llOrig);}
+      return;
+    }
+    /* On ne calcule que ce qui est a l'ecran (marge de 30 %) : projeter des
+       milliers de magasins a chaque zoom couterait cher pour rien. */
+    var vue=map.getBounds().pad(0.3), vus=[], pts=[];
+    for(i=0;i<tous.length;i++){
+      m=tous[i];
+      if(!m._llOrig)continue;
+      if(!vue.contains(m._llOrig))continue;
+      vus.push(m); pts.push(map.project(m._llOrig,z));
+    }
+    /* Regroupement par CHEF, pas de proche en proche : chaque point encore
+       libre devient chef et n'absorbe que ce qui est a moins de 20 px de LUI.
+       De proche en proche, une rue commercante entiere aurait fini en une
+       seule rosace geante ; ici un paquet ne depasse jamais 40 px de large. */
+    var SEUIL=20, cases={}, pris=[], i2, j2;
+    for(i2=0;i2<vus.length;i2++){
+      var gx=Math.floor(pts[i2].x/SEUIL), gy=Math.floor(pts[i2].y/SEUIL), cle=gx+":"+gy;
+      (cases[cle]||(cases[cle]=[])).push(i2);
+      pris[i2]=false;
+    }
+    var paquets=[];
+    for(i2=0;i2<vus.length;i2++){
+      if(pris[i2])continue;
+      pris[i2]=true;
+      var g=[i2], gx2=Math.floor(pts[i2].x/SEUIL), gy2=Math.floor(pts[i2].y/SEUIL), dx2, dy2;
+      for(dx2=-1;dx2<=1;dx2++)for(dy2=-1;dy2<=1;dy2++){
+        var liste=cases[(gx2+dx2)+":"+(gy2+dy2)];
+        if(!liste)continue;
+        for(j2=0;j2<liste.length;j2++){
+          var q=liste[j2];
+          if(pris[q])continue;
+          var ex=pts[i2].x-pts[q].x, ey=pts[i2].y-pts[q].y;
+          if(ex*ex+ey*ey<SEUIL*SEUIL){pris[q]=true;g.push(q);}
+        }
+      }
+      paquets.push(g);
+    }
+    paquets.forEach(function(g){
+      if(g.length<2){ if(vus[g[0]]._llOrig)vus[g[0]].setLatLng(vus[g[0]]._llOrig); return; }
+      var sx=0,sy=0;
+      g.forEach(function(ix){sx+=pts[ix].x;sy+=pts[ix].y;});
+      var bx=sx/g.length, by=sy/g.length;
+      var centre=map.unproject(L.point(bx,by),z);
+      /* Anneaux concentriques : un pin fait 28 px, on garde 26 px entre deux
+         voisins pour que le pouce puisse viser. Un seul cercle aurait colle
+         les pins des qu'ils sont plus de cinq. */
+      var pose=0, anneau=0;
+      while(pose<g.length){
+        var R=20+anneau*26;
+        var cap=Math.max(1,Math.floor(2*Math.PI*R/26));
+        var n=Math.min(cap,g.length-pose);
+        for(var q2=0;q2<n;q2++){
+          var a=-Math.PI/2+2*Math.PI*q2/n+(anneau%2?Math.PI/n:0);
+          var ou=map.unproject(L.point(bx+R*Math.cos(a),by+R*Math.sin(a)),z);
+          vus[g[pose+q2]].setLatLng(ou);
+          fils.addLayer(L.polyline([centre,ou],{weight:1.4,color:"#8c8378",opacity:.5,interactive:false}));
+        }
+        pose+=n; anneau++;
+      }
+    });
+  }catch(e){}
+  finally{map._etalementEnCours=false;}
+}
+
 function rayonRegroupement(zoom){
   if(zoom<=10)return 100;   // pays / region : quelques grosses bulles
   if(zoom<=12)return 75;    // ville
@@ -18199,6 +18304,12 @@ function openExploreMap(opts){
                zoomer dans le vide : c'est ce que fait spiderfyOnMaxZoom, qui
                etait desactive. Chaque magasin redevient donc atteignable au
                doigt, meme empile sur un autre. */
+            /* Plus AUCUNE bulle de comptage des le zoom de detail : « 2 »
+               n'apprend rien a qui regarde sa rue, il veut voir les deux
+               magasins. Ce reglage cachait autrefois les magasins superposes ;
+               etalerMarqueurs les ecarte desormais en rosace a chaque zoom,
+               donc couper le regroupement ne perd plus personne. */
+            disableClusteringAtZoom:ZOOM_DETAIL,
             spiderfyOnMaxZoom:true,
             /* Un pin fait 30 px de large : l'ecartement par defaut collait les
                branches de l'eventail les unes aux autres et on ne pouvait plus
@@ -18214,6 +18325,7 @@ function openExploreMap(opts){
          redessiner et detruire le marqueur sous le doigt. On referme avant. */
       exploreMap.on("movestart zoomstart",function(){ try{fermerMenuPin();}catch(e){} });
       exploreMap.on("moveend zoomend",function(){
+        try{etalerMarqueurs(exploreMap,exploreLayer);}catch(e){}
         try{renderInStockArrows();}catch(e){}
         clearTimeout(_exploreTimer);
         _exploreTimer=setTimeout(function(){exploreLoadStores();},350);
@@ -18880,6 +18992,10 @@ function exploreLoadStores(useCache){
        recalculer a chaque ajout — c'est le piege classique. */
     if(exploreLayer.addLayers)exploreLayer.addLayers(_lot);
     else _lot.forEach(function(m){exploreLayer.addLayer(m);});
+    // Les marqueurs viennent de changer : on refait la rosace tout de suite,
+    // sinon deux magasins superposes resteraient l'un sur l'autre jusqu'au
+    // prochain geste de l'utilisateur.
+    try{etalerMarqueurs(exploreMap,exploreLayer);}catch(eE){}
     try{renderExploreChips();exploreSetHeader(exploreFilter?withDrink:shown,_sureCount);}catch(eHdr){}
     try{renderExploreSheet(exploreFilter?list.filter(function(s){return s._hasDrink;}):list);}catch(eSheet){console.warn("exploreSheet:",eSheet);}
     try{renderInStockArrows();}catch(eArr){}
