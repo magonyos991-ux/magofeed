@@ -1975,10 +1975,22 @@ function normalizeStore(data, id, distKm) {
    seulement) + repli progressif sur les magasins les plus proches si ca ne
    rentre toujours pas. L'app s'ouvre desormais instantanement sur le cache. */
 function compactStore(s) {
+  /* Le rayon d'enseigne est RETIRE avant d'ecrire le cache : il se recalcule
+     gratuitement a la lecture (fusionnerRayonEnseigne), et le garder ferait
+     grossir le cache de plusieurs centaines de kilo-octets — or il tient dans
+     un quota de cinq mega-octets, deja atteint une fois. */
+  var drinks = s.drinks || [];
+  var r = rayonEnseigne(s);
+  if (r && r.ids && r.ids.length) {
+    var ens = {};
+    r.ids.forEach(function(id) { ens[Number(id)] = 1; });
+    var confs = s.confirmations || {};
+    drinks = drinks.filter(function(id) { return !ens[Number(id)] || Number(confs[id]) > 0; });
+  }
   return {
     id: s.id, fbId: s.fbId, name: s.name, brand: s.brand || "", emoji: s.emoji,
     lat: s.lat, lng: s.lng, type: s.type || "", hours: s.hours || null,
-    dist: s.dist, drinks: s.drinks || [], drinksVerified: s.drinksVerified || [],
+    dist: s.dist, drinks: drinks, drinksVerified: s.drinksVerified || [],
     confirmations: s.confirmations || {}, community: s.community || false,
     /* Fraicheur et auteur des observations : sans eux, le cache servait des
        stocks « a reconfirmer » et anonymes pendant 24 h apres chaque
@@ -2089,8 +2101,36 @@ function slimStores(stores) {
   }
   return stores;
 }
+/* RAYON D'ENSEIGNE APPLIQUE A LA LECTURE.
+   Avant, une boisson ajoutee au catalogue d'une enseigne n'apparaissait que
+   sur les magasins importes APRES coup : les 30 000 magasins deja en base
+   gardaient leur rayon du jour de leur import, et il fallait relancer le
+   remplissage serveur (des dizaines de milliers d'ecritures) pour rattraper.
+   Ici on fusionne le rayon probable de l'enseigne au moment ou on lit les
+   magasins : rien n'est ecrit, ni dans Firestore ni dans le cache, et une
+   mise a jour du catalogue est visible au rechargement suivant.
+   Les confirmations de la communaute ne sont pas touchees : elles vivent dans
+   confirmations/drinksVerified, et ce sont elles qui font foi. */
+function rayonEnseigne(s) {
+  if (typeof window.chainIdsForStore !== "function") return null;
+  try { return window.chainIdsForStore(s.name, s.brand); } catch (e) { return null; }
+}
+function fusionnerRayonEnseigne(stores) {
+  (stores || []).forEach(function(s) {
+    var r = rayonEnseigne(s);
+    if (!r || !r.ids || !r.ids.length) return;
+    var vus = {};
+    (s.drinks || []).forEach(function(id) { vus[Number(id)] = 1; });
+    var out = (s.drinks || []).slice();
+    r.ids.forEach(function(id) { if (!vus[Number(id)]) { vus[Number(id)] = 1; out.push(Number(id)); } });
+    s.drinks = out;
+  });
+  return stores;
+}
 function applyStores(stores, banner, fromCache) {
-  window.STORES = slimStores(stores);
+  /* Apres slimStores : inutile de fusionner le rayon de magasins qui seront
+     jetes dans la foulee (la liste est plafonnee a 1400 par distance). */
+  window.STORES = fusionnerRayonEnseigne(slimStores(stores));
   try{if(typeof checkWatches==="function")checkWatches();}catch(e){}
   window._fbStoresLoaded = stores;
   window._fbReady = true;
@@ -5006,11 +5046,13 @@ window.DRINK_MERGES = { 11286: 3301, 11287: 3300,
   11126: 10049,  // Rauch Happy Day Orange -> Happy Day Orange (meme photo OFF)
   11110: 10079,  // Selecto -> Hamoud Boualem Selecto
   11061: 2401,   // Jarritos Tamarindo -> la fiche 2401, renommee Tamarindo
+  11149: 11430,  // Cecemel Original (sans code) -> Cecemel (avec code et photo), renommee Cecemel Original
   11324: 11238,  // Camlica Gazoz -> Camlica Gazoz (orthographe turque)
   13088: 11347   // Mogu Mogu Bubble Gum -> Mogu Mogu Bubblegum
 };
 </script>
 <script src="data/drinks.js"></script>
+<script src="data/enseignes.js"></script>
 <script>
 /* Les fusions ci-dessus sont connues des maintenant : on les applique tout de
    suite. Celles decidees par l'admin arrivent plus tard et restent traitees
@@ -12119,15 +12161,49 @@ function buildChainSets(){
     okay:pack.concat(vIds(["ayran","gazi","dr pepper","nalu","gimber","aa drink"])),
     jumbo:pack.concat(vIds(["jarritos","vimto","okf","arizona","chupa chups","dr pepper","hell","yakult","fever-tree","canada dry","aa drink","maaza","milkis","ramune","antarctica"]))
   };
+  /* Laits vegetaux, jus et boissons lactees (septembre 2026) : les references
+     d'enseigne vivent dans data/enseignes.js — marques vues au catalogue en
+     ligne de l'enseigne, et fiches vues produit par produit (boutique en
+     ligne ou communaute OpenFoodFacts). Rayon PROBABLE, comme le reste de
+     cette table : c'est la communaute qui confirme en rayon. */
+  try{
+    var refs=(typeof ENSEIGNE_REFS!=="undefined"&&ENSEIGNE_REFS)||{};
+    Object.keys(refs).forEach(function(k){
+      if(!sets[k])return;
+      var r=refs[k]||{};
+      var vus={};DRINKS.forEach(function(d){vus[d.id]=1;});
+      var plus=vIds(r.marques||[]).concat((r.ids||[]).map(Number).filter(function(id){return vus[id]===1;}));
+      sets[k]=sets[k].concat(plus);
+    });
+  }catch(e){ console.warn("enseignes:",e); }
+  Object.keys(sets).forEach(function(k){sets[k]=sets[k].filter(function(v,i,a){return a.indexOf(v)===i;});});
   window._chainSets=sets;
   return sets;
+}
+/* PETITS FORMATS : une superette de gare n'a pas l'assortiment du grand
+   magasin de l'enseigne. Delhaize publie le format de chacun de ses magasins :
+   sur la seule region de Bruxelles, 48 Shop&Go et 75 Proxy pour 7 Delhaize
+   Supermarche. Promettre un Alpro Barista Cinnamon Roll dans un Shop&Go de
+   soixante metres carres, c'est envoyer quelqu'un pour rien — et c'est
+   exactement ce que l'app doit eviter. Ces magasins ne recoivent donc que le
+   socle (les marques qu'on trouve VRAIMENT partout), pas les references de
+   niche. La communaute peut evidemment confirmer le contraire : une
+   confirmation en rayon l'emporte toujours sur cette prudence. */
+/* « Shop&Go » s'ecrit « Shop&6Go » dans les donnees de l'enseigne (BRAND_COLORS
+   porte deja cette graphie) : le motif accepte les trois formes rencontrees. */
+var _SHOPGO=/shop\s*(&|and|n)?\s*6?\s*go/;
+function petitFormat(name,brand){
+  var b=normTxt((brand||"")+" "+(name||""));
+  if(_SHOPGO.test(b))return true;
+  return /(^|[^a-z])(proxy|express|city|contact|compact|monop|vival|primo)([^a-z]|$)/.test(b)||
+         /petit\s?casino|daily\s?monop|u\s?express|spar\s?city|to\s?go/.test(b);
 }
 /* Detecte l'enseigne d'un magasin par son nom/marque -> son set verifie */
 function chainIdsFor(name,brand){
   var sets=buildChainSets();
   var b=normTxt((brand||"")+" "+(name||""));
   if(b.indexOf("carrefour")!==-1)return{ids:sets.carrefour,key:"Carrefour"};
-  if(b.indexOf("delhaize")!==-1)return{ids:sets.delhaize,key:"Delhaize"};
+  if(b.indexOf("delhaize")!==-1||_SHOPGO.test(b))return{ids:sets.delhaize,key:"Delhaize"};
   if(b.indexOf("colruyt")!==-1)return{ids:sets.colruyt,key:"Colruyt"};
   if(b.indexOf("auchan")!==-1)return{ids:sets.auchan,key:"Auchan"};
   if(b.indexOf("leclerc")!==-1)return{ids:sets.leclerc,key:"Leclerc"};
@@ -12141,6 +12217,16 @@ function chainIdsFor(name,brand){
   if(b.indexOf("jumbo")!==-1)return{ids:sets.jumbo,key:"Jumbo"};
   return null;
 }
+/* Meme fonction, mais qui tient compte du format du magasin. C'est celle que
+   l'app utilise pour afficher un rayon probable ; chainIdsFor reste brute pour
+   les outils d'administration. */
+function chainIdsForStore(name,brand){
+  var r=chainIdsFor(name,brand);
+  if(!r)return null;
+  if(petitFormat(name,brand))return{ids:packDrinkIds(),key:r.key,petit:true};
+  return r;
+}
+window.chainIdsForStore=chainIdsForStore;
 function adminFillEnseignes(){
   if(!isAdmin)return;
   var sets=buildChainSets();
@@ -13168,15 +13254,25 @@ function _openActivityUI(){
   try{localStorage.setItem("magoActivitySeen",String(Date.now()));}catch(e){}
   refreshBell();
 }
-/* Un magasin a moins de 10 km liste-t-il cette boisson ? Exactement la regle
-   des alertes (voir checkWatches) : meme rayon, et un stock signale ABSENT ne
+/* Quelqu'un a-t-il VU cette boisson a moins de 10 km ? Exactement la regle des
+   alertes (voir checkWatches) : meme rayon, et un stock signale ABSENT ne
    compte pas. Sortir cette regle ici evite qu'un ecran dise « introuvable »
-   pendant qu'un autre dit « trouvee ». */
+   pendant qu'un autre dit « trouvee ».
+   VU, PAS PROBABLE. Le champ drinks porte le rayon PROBABLE d'une enseigne
+   (« un Delhaize vend generalement ceci »), pas un constat. S'en contenter
+   faisait dire a une alerte « Alpro Barista reperee chez Delhaize Anspach »
+   alors que personne n'y etait entre : on envoie quelqu'un pour rien, et on
+   brule la seule chose que l'app a a vendre, la confiance. Seules comptent
+   donc une confirmation de la communaute (confirmations > 0) ou une
+   verification (drinksVerified : administrateur, gerant certifie, rayon
+   photographie). Le rayon probable, lui, sert a proposer OU CHERCHER — ce
+   n'est pas la meme phrase. */
 function magasinProcheAvec(did){
   var best=null;
   (STORES||[]).forEach(function(st){
-    if(!(st.drinks||[]).some(function(x){return Number(x)===Number(did);}))return;
-    if(((st.confirmations||{})[did]||0)<0)return;
+    var vu=Number((st.confirmations||{})[did])>0||
+           (st.drinksVerified||[]).some(function(x){return Number(x)===Number(did);});
+    if(!vu)return;
     var dist=null;
     if(typeof userLat==="number"&&userLat&&typeof st.lat==="number"){
       var dLa=(userLat-st.lat)*111000,dLo=(userLng-st.lng)*111000*Math.cos(st.lat*Math.PI/180);
