@@ -11427,46 +11427,80 @@ function drinkIconHTML(d){
   return '<img src="'+url+'" alt="" style="width:100%;height:100%;object-fit:contain;background:#fff;padding:7%;box-sizing:border-box;border-radius:inherit" onerror="if(this.parentNode)this.parentNode.innerHTML=window._genBottle">';
 }
 /* Verification stricte du produit OpenFoodFacts avant d'accepter sa photo :
-   1) la marque doit correspondre ;
+   1) la marque doit correspondre MOT POUR MOT ;
    2) la majorite des mots distinctifs du nom aussi (les mots "original/classic"
       sont optionnels : la fiche OFF de l'original s'appelle souvent juste
       "Monster Energy") ;
-   3) et surtout : si la fiche OFF contient un mot de VARIANTE (white, zero,
-      cherry, mango...) que la boisson n'a pas, on REFUSE. C'est ce point qui
-      manquait et qui a fait accepter la photo du Monster Ultra White pour
-      le Monster Energy original. */
+   3) si la fiche OFF contient un mot de VARIANTE (white, zero, cherry,
+      mango...) que la boisson n'a pas, on REFUSE. C'est ce point qui manquait
+      et qui a fait accepter la photo du Monster Ultra White pour le Monster
+      Energy original ;
+   4) la fiche doit etre une BOISSON, et quand elle ne dit NI sa categorie NI
+      sa marque, on refuse (voir offImageMatches). */
 var OFF_OPTIONAL_WORDS=["original","originale","classic","classique","regular","nature","energy","drink"];
 var OFF_VARIANT_WORDS=["edition","zero","light","diet","sugarfree","ultra","white","blanc","blanche","noir","black","cherry","cerise","vanille","vanilla","mango","mangue","watermelon","pasteque","citron","lemon","lime","peach","peche","tropical","paradise","rosa","gold","punch","exotic","exotique","fraise","strawberry","framboise","raspberry","orange","pomme","apple","raisin","grape","ananas","pineapple","coco","coconut","menthe","mint","mojito","cassis","myrtille","blueberry","grenade","pomegranate","abricot","apricot","poire","pear","kiwi","litchi","lychee","passion","goyave","guava","gingembre","ginger","sans","cafeine","decaf","max","intense","fusion","touch","sparkling","petillante","petillant","plate","green","vert","verte","rouge","red","blue","bleu","yellow","jaune","pink","rose","juiced","juice","assault","khaos","ripper","rehab","pipeline","loco"];
-/* Verrou categorie : la fiche doit etre une BOISSON. Les marques ombrelles
-   (PepsiCo...) taguent aussi leurs chips et snacks avec la marque mere :
-   sans ce verrou, un tube de chips Stax a illustre le Pepsi Original. */
-function offIsBeverage(p){
-  var tags=(p.categories_tags||[]).join(" ").toLowerCase();
-  if(!tags)return true; // fiche peu renseignee : les autres verrous (marque, nom, variantes) decident
-  if(/snack|chips|crisps|biscuit|cookie|cracker|chocolat|candy|bonbon|confection|cereal|cereale|sauce|soup|soupe|yaourt|yogurt|fromage|cheese|pizza|dessert|ice-cream|creme-glacee|pet-food|baby-food/.test(tags))return false;
-  return /beverage|boisson|drink|water|eaux|soda|juice|jus-de|nectar|\btea\b|the-glace|iced-tea|coffee|cafe|energy|smoothie|limonade|lemonade|sirop|syrup/.test(tags);
+/* Decoupe en MOTS normalises (sans accents, traits d'union en espaces).
+   Comparer des marques par sous-chaine etait le defaut de fond : "pepsi" est
+   contenu dans "pepsico", donc un tube de chips Elma Chips (groupe PepsiCo)
+   passait pour du Pepsi. Un mot n'est plus jamais un morceau d'un autre. */
+function offTokens(s){
+  return normFamilyTxt(s||"").split(/[^a-z0-9]+/).filter(Boolean);
+}
+/* Un mot distinctif est trouve s'il est un mot entier de la fiche, ou s'il en
+   commence / termine un (les fiches OFF collent les mots : "Fuzetea" pour
+   "Fuze Tea"). Jamais au milieu : c'est la ou naissent les faux positifs. */
+function offWordHit(w,tokens){
+  if(tokens.indexOf(w)!==-1)return true;
+  for(var i=0;i<tokens.length;i++){
+    var t=tokens[i];
+    if(t.length>w.length&&(t.indexOf(w)===0||t.lastIndexOf(w)===t.length-w.length))return true;
+  }
+  return false;
+}
+/* Verrou categorie a TROIS reponses : true = boisson, false = pas une boisson,
+   null = la fiche ne dit rien. Les marques ombrelles (PepsiCo...) taguent
+   aussi leurs chips et snacks avec la marque mere ; et beaucoup de fiches
+   n'ont AUCUN categories_tags — c'est precisement le cas du tube de chips
+   Stax qui a illustre le Pepsi Original. Ce "null" doit donc rendre le reste
+   du filtre plus severe, pas plus laxiste (avant : return true). */
+function offBeverageVerdict(p){
+  var tags=((p&&p.categories_tags)||[]).join(" ").toLowerCase();
+  if(!tags)return null;
+  if(/snack|chips|crisps|popcorn|salgadinho|biscuit|cookie|cracker|chocolat|candy|bonbon|confection|cereal|cereale|sauce|soup|soupe|yaourt|yogurt|fromage|cheese|pizza|dessert|ice-cream|creme-glacee|pet-food|baby-food|peanut|cacahuete|nuts|legumes|meat|viande|fish|poisson|pasta|pates|rice|riz|bread|pain|spread|pate-a-tartiner/.test(tags))return false;
+  return /beverage|boisson|drink|water|eaux|soda|juice|jus-de|nectar|\btea\b|the-glace|iced-tea|coffee|cafe|energy|smoothie|limonade|lemonade|sirop|syrup/.test(tags)?true:false;
 }
 function offImageMatches(d,p){
-  if(!offIsBeverage(p))return false;
-  var pBrands=normFamilyTxt(p.brands||"");
-  var dBrand=normFamilyTxt(d.brand||"");
-  if(dBrand&&pBrands.indexOf(dBrand)===-1)return false;
-  var pName=normFamilyTxt((p.product_name_fr||p.product_name||""));
+  if(!d||!p)return false;
+  var verdict=offBeverageVerdict(p);
+  if(verdict===false)return false;               // chips, snacks, biscuits...
+  var pName=normFamilyTxt(p.product_name_fr||p.product_name||"");
   if(!pName)return false;
-  var dTokens=normFamilyTxt(d.name+" "+d.brand).split(/[^a-z0-9]+/).filter(Boolean);
+  var pNameTokens=pName.split(/[^a-z0-9]+/).filter(Boolean);
+  var pBrandTokens=offTokens(p.brands);
+  var dBrandTokens=offTokens(d.brand);
+  /* 1) marque, MOT ENTIER. Elle peut venir du champ marques (le cas propre) ou
+     du nom du produit (beaucoup de fiches laissent "marques" vide). */
+  var brandInBrands=dBrandTokens.length>0&&dBrandTokens.every(function(t){return pBrandTokens.indexOf(t)!==-1;});
+  var brandInName=dBrandTokens.length>0&&dBrandTokens.every(function(t){return pNameTokens.indexOf(t)!==-1;});
+  if(dBrandTokens.length&&!brandInBrands&&!brandInName)return false;
+  /* 4) fiche muette sur sa categorie : on n'accepte QUE si son champ marques
+     porte vraiment la marque de la boisson. Sans categorie et sans marque
+     exploitable, rien ne prouve que la photo montre la bonne chose — et une
+     mauvaise photo est pire que pas de photo (le dessin prend le relais). */
+  if(verdict===null&&!brandInBrands)return false;
   // 3) mots de variante etrangers dans la fiche OFF -> refus
-  var pTokens=pName.split(/[^a-z0-9]+/).filter(Boolean);
-  for(var i=0;i<pTokens.length;i++){
-    if(OFF_VARIANT_WORDS.indexOf(pTokens[i])!==-1&&dTokens.indexOf(pTokens[i])===-1)return false;
+  var dTokens=offTokens(d.name+" "+d.brand);
+  for(var i=0;i<pNameTokens.length;i++){
+    if(OFF_VARIANT_WORDS.indexOf(pNameTokens[i])!==-1&&dTokens.indexOf(pNameTokens[i])===-1)return false;
   }
-  // 2) mots distinctifs requis (hors tokens de la marque et hors mots optionnels)
-  var brandTokens=dBrand.split(/[^a-z0-9]+/).filter(Boolean);
-  var words=normFamilyTxt(d.name).split(/[^a-z0-9]+/).filter(function(w){
-    return w.length>=3&&brandTokens.indexOf(w)===-1&&OFF_OPTIONAL_WORDS.indexOf(w)===-1;
+  // 2) mots distinctifs requis (hors mots de la marque et hors mots optionnels)
+  var words=offTokens(d.name).filter(function(w){
+    return w.length>=3&&dBrandTokens.indexOf(w)===-1&&OFF_OPTIONAL_WORDS.indexOf(w)===-1;
   });
   if(!words.length)return true;
+  var hay=pNameTokens.concat(pBrandTokens);
   var hits=0;
-  words.forEach(function(w){if(pName.indexOf(w)!==-1||pBrands.indexOf(w)!==-1)hits++;});
+  words.forEach(function(w){if(offWordHit(w,hay))hits++;});
   return hits/words.length>=0.6;
 }
 function fetchVerifiedOFFImage(d){
@@ -11516,12 +11550,12 @@ function fetchVerifiedOFFImage(d){
           }else{
             imgCache[key]={url:null,ts:Date.now()};
           }
-          try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+          try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
           if(userPhoto){refreshDrinkVisual(d);renderTrends();}
         });
       }
       imgCache[key]=best?{url:best.image_front_url||best.image_front_small_url,ts:Date.now()}:{url:null,ts:Date.now()};
-      try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){/* quota */}
+      try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){/* quota */}
       delete imgFetchInFlight[key];
       if(best){
         refreshDrinkVisual(d);
@@ -11921,7 +11955,7 @@ function adminRemoveDrink(){
   var idx=DRINKS.findIndex(function(x){return x.id===d.id;});
   if(idx!==-1)DRINKS.splice(idx,1);
   delete imgCache[String(d.id)];
-  try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+  try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
   if(window.fbRemoveCatalogDrink)window.fbRemoveCatalogDrink(d.id).catch(function(e){console.warn(e);toast("Suppression distante \u00E9chou\u00E9e");});
   playSound("pop");
   toast("\u00AB "+d.name+" \u00BB retir\u00E9e du catalogue");
@@ -12511,7 +12545,7 @@ function adminFixPhoto(){
   var key=String(d.id);
   if(/^x$/i.test(input)){
     imgCache[key]={url:null,ts:Date.now(),manual:true};
-    try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+    try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
     refreshDrinkVisual(d);
     toast("Photo retir\u00E9e (canette stylis\u00E9e) \u2014 sur cet appareil");
     return;
@@ -12522,7 +12556,7 @@ function adminFixPhoto(){
       playSound("err");return;
     }
     imgCache[key]={url:url,ts:Date.now(),manual:true};
-    try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+    try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
     refreshDrinkVisual(d);
     renderTrends();
     if(window.fbSaveDrinkImage)window.fbSaveDrinkImage(key,url);
@@ -12541,7 +12575,7 @@ function adminFixPhoto(){
     if(!url){toast("Cette fiche n'a pas de photo");playSound("err");return;}
     // Garde-fou meme en manuel : les marques ombrelles polluent les recherches
     // (fiche de chips Stax trouvee en cherchant "Pepsi"). L'admin peut forcer.
-    if(!offIsBeverage(p)){
+    if(offBeverageVerdict(p)===false){
       var pn=(p.product_name_fr||p.product_name||"cette fiche");
       if(!confirm("\u00AB "+pn+" \u00BB n'est pas class\u00E9e comme une boisson (chips/snack ?).\nUtiliser sa photo quand m\u00EAme ?"))return;
     }
@@ -12610,7 +12644,22 @@ function initLeafletMap(lat,lng){
   // Clustering des magasins
   if(curSel && window.L.markerClusterGroup){
     var cluster=L.markerClusterGroup({
-      maxClusterRadius:60,
+      /* Meme correctif que la carte Explorer, et il compte double ici : c'est
+         l'ecran ou l'on DESIGNE un magasin. Le rayon etait fige a 60 px a tous
+         les zooms, donc on gardait des bulles de comptage meme colle a la rue ;
+         et deux magasins aux memes coordonnees, une fois la bulle ouverte, se
+         recouvraient — impossible d'atteindre celui du dessous. Rayon
+         degressif + eventail : plus aucun magasin hors de portee du doigt. */
+      maxClusterRadius:rayonRegroupement,
+      /* Plus AUCUNE bulle de comptage des le zoom de detail : a partir de la,
+         chaque magasin a son point. Ce reglage cachait autrefois les magasins
+         superposes ; il ne le peut plus, etalerMarqueurs les ecarte en rosace
+         a chaque zoom. */
+      disableClusteringAtZoom:ZOOM_DETAIL,
+      spiderfyOnMaxZoom:true,
+      spiderfyDistanceMultiplier:1.6,
+      spiderLegPolylineOptions:{weight:2,color:"#8c8378",opacity:.8},
+      chunkedLoading:true,
       showCoverageOnHover:false,
       iconCreateFunction:function(c){
         var n=c.getChildCount();
@@ -12629,6 +12678,9 @@ function initLeafletMap(lat,lng){
     window._leafletCluster=cluster;
     var stores=populateClusterMarkers(cluster);
     map.addLayer(cluster);
+    // Rosace : recalculee a chaque zoom et a chaque deplacement.
+    map.on("zoomend moveend",function(){etalerMarqueurs(map,cluster);});
+    setTimeout(function(){etalerMarqueurs(map,cluster);},360);
 
     // Le conteneur peut avoir une taille nulle si la carte est construite pendant que l'écran est encore masqué
     // (transition d'écran en cours) : on force Leaflet à recalculer sa taille avant de centrer/cadrer la vue.
@@ -12657,6 +12709,11 @@ function populateClusterMarkers(cluster){
     stores=(STORES||[]).filter(function(s){return typeof s.lat==="number";})
       .slice().sort(function(a,b){return(a.dist||9e9)-(b.dist||9e9);}).slice(0,30);
   }
+  /* Un seul appel a addLayers a la fin : le greffon calcule ses groupes UNE
+     fois pour tout le lot. Marqueur par marqueur, il recalculait la grille a
+     chaque ajout — c'est le piege classique, et il coute cher des la centaine
+     de magasins. */
+  var _lot=[];
   stores.forEach(function(s){
     if(!s.lat||!s.lng)return;
     var color=brandColor(s.brand);
@@ -12689,8 +12746,11 @@ function populateClusterMarkers(cluster){
     marker._brand=s.brand||"";
     var storeIdForSheet=String(s.id);
     marker.on("click",function(){routeFromMarker(storeIdForSheet);});
-    marker.addTo(cluster);
+    _lot.push(marker);
   });
+  if(cluster.addLayers)cluster.addLayers(_lot);
+  else _lot.forEach(function(m){cluster.addLayer(m);});
+  try{if(window._leafletMap)etalerMarqueurs(window._leafletMap,cluster);}catch(eE){}
   return stores;
 }
 /* Plein ecran carte : la boite passe en fixe pleine fenetre, Leaflet recalcule
@@ -14140,6 +14200,133 @@ function ensureCluster(onDone){
   sc.onload=go; sc.onerror=go;
   document.head.appendChild(sc);
   setTimeout(go,6000);   // jamais d'attente infinie
+}
+
+/* ── RAYON DE REGROUPEMENT, PALIER PAR PALIER ─────────────────────────────
+   Le defaut vu en vrai, capture a l'appui : une bulle « 2 » apparaissait deja
+   au zoom 14 ; on zoomait dessus, et il ne restait QU'UN magasin. Deux causes
+   ajoutees l'une a l'autre :
+     - le rayon etait fige a 1 px sous le zoom 14, donc on ne regroupait que
+       les magasins quasi superposes -> des « 2 » isoles au milieu des points,
+       la ou une vraie bulle de comptage aurait du dire « 40 » ;
+     - le regroupement etait COUPE au-dela du zoom 15, donc deux magasins aux
+       memes coordonnees se dessinaient l'un SUR l'autre : le second devenait
+       invisible et intouchable. La carte perdait un magasin en silence
+       pendant que le compteur de l'en-tete continuait de le compter.
+   Le rayon suit donc le zoom : large quand on regarde une region (peu de
+   grosses bulles, mais qui annoncent le VRAI nombre), etroit des qu'on
+   approche. Cette fonction ne sert plus qu'EN DESSOUS de ZOOM_DETAIL : a
+   partir de la, le regroupement est coupe et c'est etalerMarqueurs qui
+   garantit qu'un magasin superpose a un autre reste visible et atteignable au
+   doigt, en les ecartant en rosace au lieu de les compter.
+   Reperes de lecture (a 50° de latitude, ~1 px vaut) : zoom 13 ~13 m,
+   zoom 15 ~3,3 m, zoom 17 ~0,8 m, zoom 19 ~0,2 m. Deux magasins a 15 m se
+   separent donc vers le zoom 17, deux magasins a 100 m des le zoom 14. */
+/* ZOOM_DETAIL : le zoom a partir duquel la carte arrete de compter et se met
+   a MONTRER. En dessous, on regroupe et la bulle annonce le vrai nombre ;
+   a partir de la, plus une seule bulle — chaque magasin a son point, et deux
+   magasins au meme endroit s'ecartent en rosace (voir etalerMarqueurs). La
+   carte s'ouvre au zoom 13/14 : au premier coup d'oeil on voit donc des
+   magasins, pas des « 2 ». */
+var ZOOM_DETAIL=13;
+
+/* L'EVENTAIL PERMANENT. Le greffon sait deja ouvrir un eventail, mais
+   seulement sur un clic et seulement au zoom maximal : entre les deux, deux
+   magasins a 5 m (le hub et le WHSmith de Brussels Airport, par exemple) se
+   dessinaient l'un SUR l'autre et le second devenait invisible et
+   intouchable. On ecarte donc nous-memes, a chaque zoom : les magasins qui
+   tomberaient a moins de 26 px l'un de l'autre sont poses en cercle autour de
+   leur barycentre, relies par un fil fin pour dire « c'est le meme endroit ».
+   Le rayon est calcule EN PIXELS puis reprojete, donc l'ecart reste lisible au
+   doigt a tous les zooms, et les positions d'origine sont restaurees des qu'on
+   dezoome (le greffon, lui, regroupe toujours d'apres les vraies positions). */
+function etalerMarqueurs(map,groupe){
+  if(!map||!groupe||!map._loaded||!groupe.getLayers)return;
+  if(map._etalementEnCours)return;
+  map._etalementEnCours=true;
+  try{
+    var fils=map._eventailFils;
+    if(!fils){fils=map._eventailFils=L.layerGroup().addTo(map);}
+    fils.clearLayers();
+    var tous=groupe.getLayers(),i,m;
+    for(i=0;i<tous.length;i++){m=tous[i];if(!m._llOrig&&m.getLatLng)m._llOrig=m.getLatLng();}
+    var z=map.getZoom();
+    if(z<ZOOM_DETAIL){
+      for(i=0;i<tous.length;i++){m=tous[i];if(m._llOrig&&m.setLatLng)m.setLatLng(m._llOrig);}
+      return;
+    }
+    /* On ne calcule que ce qui est a l'ecran (marge de 30 %) : projeter des
+       milliers de magasins a chaque zoom couterait cher pour rien. */
+    var vue=map.getBounds().pad(0.3), vus=[], pts=[];
+    for(i=0;i<tous.length;i++){
+      m=tous[i];
+      if(!m._llOrig)continue;
+      if(!vue.contains(m._llOrig))continue;
+      vus.push(m); pts.push(map.project(m._llOrig,z));
+    }
+    /* Regroupement par CHEF, pas de proche en proche : chaque point encore
+       libre devient chef et n'absorbe que ce qui est a moins de 20 px de LUI.
+       De proche en proche, une rue commercante entiere aurait fini en une
+       seule rosace geante ; ici un paquet ne depasse jamais 40 px de large. */
+    var SEUIL=20, cases={}, pris=[], i2, j2;
+    for(i2=0;i2<vus.length;i2++){
+      var gx=Math.floor(pts[i2].x/SEUIL), gy=Math.floor(pts[i2].y/SEUIL), cle=gx+":"+gy;
+      (cases[cle]||(cases[cle]=[])).push(i2);
+      pris[i2]=false;
+    }
+    var paquets=[];
+    for(i2=0;i2<vus.length;i2++){
+      if(pris[i2])continue;
+      pris[i2]=true;
+      var g=[i2], gx2=Math.floor(pts[i2].x/SEUIL), gy2=Math.floor(pts[i2].y/SEUIL), dx2, dy2;
+      for(dx2=-1;dx2<=1;dx2++)for(dy2=-1;dy2<=1;dy2++){
+        var liste=cases[(gx2+dx2)+":"+(gy2+dy2)];
+        if(!liste)continue;
+        for(j2=0;j2<liste.length;j2++){
+          var q=liste[j2];
+          if(pris[q])continue;
+          var ex=pts[i2].x-pts[q].x, ey=pts[i2].y-pts[q].y;
+          if(ex*ex+ey*ey<SEUIL*SEUIL){pris[q]=true;g.push(q);}
+        }
+      }
+      paquets.push(g);
+    }
+    paquets.forEach(function(g){
+      if(g.length<2){ if(vus[g[0]]._llOrig)vus[g[0]].setLatLng(vus[g[0]]._llOrig); return; }
+      var sx=0,sy=0;
+      g.forEach(function(ix){sx+=pts[ix].x;sy+=pts[ix].y;});
+      var bx=sx/g.length, by=sy/g.length;
+      var centre=map.unproject(L.point(bx,by),z);
+      /* Anneaux concentriques : un pin fait 28 px, on garde 26 px entre deux
+         voisins pour que le pouce puisse viser. Un seul cercle aurait colle
+         les pins des qu'ils sont plus de cinq. */
+      var pose=0, anneau=0;
+      while(pose<g.length){
+        var R=20+anneau*26;
+        var cap=Math.max(1,Math.floor(2*Math.PI*R/26));
+        var n=Math.min(cap,g.length-pose);
+        for(var q2=0;q2<n;q2++){
+          var a=-Math.PI/2+2*Math.PI*q2/n+(anneau%2?Math.PI/n:0);
+          var ou=map.unproject(L.point(bx+R*Math.cos(a),by+R*Math.sin(a)),z);
+          vus[g[pose+q2]].setLatLng(ou);
+          fils.addLayer(L.polyline([centre,ou],{weight:1.4,color:"#8c8378",opacity:.5,interactive:false}));
+        }
+        pose+=n; anneau++;
+      }
+    });
+  }catch(e){}
+  finally{map._etalementEnCours=false;}
+}
+
+function rayonRegroupement(zoom){
+  if(zoom<=10)return 100;   // pays / region : quelques grosses bulles
+  if(zoom<=12)return 75;    // ville
+  if(zoom===13)return 55;
+  if(zoom===14)return 42;   // arrondissement
+  if(zoom===15)return 30;   // quartier : ca commence a se separer
+  if(zoom===16)return 20;
+  if(zoom===17)return 12;   // rue : un point par magasin
+  return 8;                 // 18-19 : plus que les vrais chevauchements
 }
 
 /* La pastille d'un groupe. Dessinee a la main plutot qu'avec le style par
@@ -16184,7 +16371,7 @@ function drinkPhotoBtn(){
       var save=window.fbApplyDrinkPhoto?window.fbApplyDrinkPhoto(d.id,data):Promise.reject(new Error("hors-ligne"));
       save.then(function(){
         imgCache[key]={url:data,ts:Date.now(),community:true};
-        try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+        try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
         refreshDrinkVisual(d);
         try{renderTrends();}catch(e){}
         try{renderResults();}catch(e){}
@@ -17123,7 +17310,7 @@ function submitProposal(){
       try{mergeCatalog([res.entry]);}catch(e){console.warn(e);}
       if(photoData){
         imgCache[String(res.entry.id)]={url:photoData,ts:Date.now(),community:true,manual:true};
-        try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+        try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
         var dr=DRINKS.find(function(x){return String(x.id)===String(res.entry.id);});
         if(dr){try{refreshDrinkVisual(dr);}catch(e){}}
       }
@@ -18104,36 +18291,38 @@ function openExploreMap(opts){
       var darkE=document.body.classList.contains("dark");
       fondMago(darkE).addTo(exploreMap);
       /* Regroupement si le greffon est la, sinon simple couche : la carte
-         s'affiche dans les deux cas. disableClusteringAtZoom : au-dela, on
-         est assez pres pour que chaque magasin merite son propre pin. */
+         s'affiche dans les deux cas. */
       exploreLayer=(window.L&&L.markerClusterGroup)
         ? L.markerClusterGroup({
             chunkedLoading:true,          // ajout par paquets : l'interface ne gele pas
-            /* Le rayon etait fixe a 55 px jusqu'au zoom 17 : a l'echelle d'une
-               ville, TOUT se regroupait et on ne voyait que des bulles de
-               comptage, jamais les magasins. C'est ce qui donnait l'aspect
-               grumeleux au lieu du semis de points d'Uber Eats.
-               Un point de palier 0 coute 1 noeud DOM contre 5 pour un pin
-               complet : on peut donc en montrer beaucoup. On ne regroupe plus
-               que ce qui se chevauche vraiment, palier par palier. */
-            maxClusterRadius:function(zoom){
-              /* Aux paliers larges, l'eclaircissement par grille garantit deja
-                 qu'aucun marqueur n'en recouvre un autre : regrouper par-dessus
-                 ne ferait que remplacer un semis lisible par des bulles de
-                 comptage. On ne regroupe donc qu'a partir du palier « rue »,
-                 la ou les pins complets peuvent vraiment se chevaucher. */
-              return zoom<=14?1:40;
-            },
-            /* Il fallait zoomer jusqu'au niveau 17 — deux ou trois rues — pour
-               que les bulles de comptage se defassent et laissent voir les
-               magasins un par un. Beaucoup trop tard : on veut les voir en
-               regardant un quartier.
-               Sur un telephone de 390 px de large, le niveau 15 couvre ~1,2 km
-               (rayon ~590 m) et le niveau 16 ~590 m (rayon ~295 m). Defaire les
-               regroupements des 15 met donc les magasins a nu bien au-dela des
-               300-400 m demandes. */
-            disableClusteringAtZoom:15,
-            spiderfyOnMaxZoom:false,
+            // Voir rayonRegroupement() : large de loin, etroit dans la rue.
+            maxClusterRadius:rayonRegroupement,
+            /* disableClusteringAtZoom a ete RETIRE, et c'est le coeur du
+               correctif. Il coupait tout regroupement des le zoom 15 : a
+               partir de la, deux magasins aux memes coordonnees etaient
+               dessines l'un sur l'autre et le second disparaissait — pas
+               regroupe, juste cache. Sans ce reglage, le greffon garde une
+               grille jusqu'au zoom maximal de la carte (19) : ce qui ne peut
+               pas etre separe reste une bulle honnete plutot qu'un magasin
+               escamote. */
+            /* Toucher une bulle zoome sur son contenu (zoomToBoundsOnClick,
+               actif par defaut). Quand le contenu ne peut PLUS se separer —
+               coordonnees identiques — le greffon ouvre l'eventail au lieu de
+               zoomer dans le vide : c'est ce que fait spiderfyOnMaxZoom, qui
+               etait desactive. Chaque magasin redevient donc atteignable au
+               doigt, meme empile sur un autre. */
+            /* Plus AUCUNE bulle de comptage des le zoom de detail : « 2 »
+               n'apprend rien a qui regarde sa rue, il veut voir les deux
+               magasins. Ce reglage cachait autrefois les magasins superposes ;
+               etalerMarqueurs les ecarte desormais en rosace a chaque zoom,
+               donc couper le regroupement ne perd plus personne. */
+            disableClusteringAtZoom:ZOOM_DETAIL,
+            spiderfyOnMaxZoom:true,
+            /* Un pin fait 30 px de large : l'ecartement par defaut collait les
+               branches de l'eventail les unes aux autres et on ne pouvait plus
+               viser au pouce. */
+            spiderfyDistanceMultiplier:1.6,
+            spiderLegPolylineOptions:{weight:2,color:"#8c8378",opacity:.8},
             showCoverageOnHover:false,
             iconCreateFunction:exploreClusterIcon
           })
@@ -18143,6 +18332,7 @@ function openExploreMap(opts){
          redessiner et detruire le marqueur sous le doigt. On referme avant. */
       exploreMap.on("movestart zoomstart",function(){ try{fermerMenuPin();}catch(e){} });
       exploreMap.on("moveend zoomend",function(){
+        try{etalerMarqueurs(exploreMap,exploreLayer);}catch(e){}
         try{renderInStockArrows();}catch(e){}
         clearTimeout(_exploreTimer);
         _exploreTimer=setTimeout(function(){exploreLoadStores();},350);
@@ -18701,44 +18891,25 @@ function exploreLoadStores(useCache){
        getZoom() 800 fois couterait plus cher que tout le reste. */
     var _zNiv=14; try{_zNiv=exploreMap.getZoom();}catch(eZ){}
     var _palier=_zNiv<=12?0:(_zNiv<=14?1:2);
-    /* ECLAIRCISSEMENT PAR GRILLE, aux paliers larges seulement.
-       A l'echelle d'une ville, deux magasins distants de 20 m tombent sur le
-       meme pixel : en dessiner un par-dessus l'autre ne montre rien de plus,
-       ca ne fait que payer des noeuds DOM. On decoupe donc l'ecran en cellules
-       et on ne garde que le magasin le plus informatif de chaque cellule —
-       stock confirme d'abord, puis certifie, puis vendeur.
-       Ce n'est pas cacher des magasins : c'est dessiner ce qui est dessinable a
-       cette echelle. Le compteur de l'en-tete continue d'annoncer le VRAI
-       nombre, et des le zoom suivant tout reapparait. */
+    /* PLUS D'ECLAIRCISSEMENT PAR GRILLE — c'etait le mensonge principal.
+       Sous le zoom 15, le code ne gardait QU'UN magasin par cellule de 34 a
+       42 px : les autres n'etaient pas regroupes, ils etaient JETES. On voyait
+       donc « 12 magasins » dans l'en-tete au-dessus de 5 points, et zoomer sur
+       une bulle « 2 » ne revelait qu'un seul magasin puisque l'autre avait ete
+       ecarte du lot avant meme d'etre dessine.
+       Ce que la grille economisait, le regroupement le fait mieux : il est
+       fait pour des milliers de marqueurs (chunkedLoading + grille interne
+       par zoom), il n'en perd aucun, et sa bulle porte le VRAI nombre.
+       On envoie donc TOUTE la liste visible au regroupement. */
     var _pourCarte=list;
-    if(_palier<2&&list.length>60){
-      try{
-        var _cell=_palier===0?34:42, _grille={}, _rang=function(x){
-          var _d=exploreFilter?exploreFilter.drinkId:null;
-          if(_d&&(storeVerifiedFor(x,_d)||((x.confirmations||{})[_d]||0)>0))return 3;
-          if(storeCertifie(x))return 2;
-          if(!exploreFilter||x._hasDrink)return 1;
-          return 0;
-        };
-        list.forEach(function(x){
-          if(typeof x.lat!=="number"||typeof x.lng!=="number")return;
-          var pt=exploreMap.latLngToContainerPoint([x.lat,x.lng]);
-          var k=Math.round(pt.x/_cell)+":"+Math.round(pt.y/_cell);
-          var cur=_grille[k];
-          if(!cur||_rang(x)>_rang(cur))_grille[k]=x;
-        });
-        var _clair=[];
-        Object.keys(_grille).forEach(function(k){_clair.push(_grille[k]);});
-        if(_clair.length)_pourCarte=_clair;
-      }catch(eG){}
-    }
-    /* Seuls les MARQUEURS sont eclaircis. La liste du bas et les compteurs
-       continuent de parler de tous les magasins de la zone : sinon la carte
-       dirait « 25 magasins » la ou il y en a 800. */
     var _lot=[], _avant=0;
-    /* Les plus proches d'abord, pour que les six mis en avant soient ceux qui
-       servent vraiment — pas les six premiers du tableau. */
-    if(_palier<2&&typeof userLat==="number"&&userLat&&typeof _distM==="function"){
+    /* Les plus proches d'abord, pour deux raisons : les six mis en avant sont
+       alors ceux qui servent vraiment (pas les six premiers du tableau), et si
+       le plafond de 3000 devait un jour mordre, ce sont les magasins les plus
+       LOINTAINS qui sauteraient — pas six magasins au hasard sous le nez de
+       celui qui regarde. Le tri vaut donc a tous les paliers, pas seulement
+       aux larges. */
+    if(typeof userLat==="number"&&userLat&&typeof _distM==="function"){
       try{ _pourCarte=_pourCarte.slice().sort(function(a,b){
         return _distM(userLat,userLng,a.lat,a.lng)-_distM(userLat,userLng,b.lat,b.lng);}); }catch(eS){}
     }
@@ -18759,9 +18930,10 @@ function exploreLoadStores(useCache){
       var certif=storeCertifie(s);
       /* « Mis en avant » facon Uber Eats : quelques marqueurs lisibles au
          milieu d'un semis de points. Si TOUS les magasins sûrs passaient en
-         gros, il n'y aurait plus aucun contraste — c'est justement ce que
-         l'eclaircissement produit, puisqu'il retient les meilleurs de chaque
-         cellule. On plafonne donc a six, les plus proches d'abord. */
+         gros, il n'y aurait plus aucun contraste. On plafonne donc a six, les
+         plus proches d'abord (d'ou le tri par distance juste au-dessus).
+         C'est un choix de DESSIN, pas de contenu : les autres restent tous
+         sur la carte, en point simple. */
       var _enAvant=(sure||certif)&&_avant<6;
       if(_enAvant)_avant++;
       var cls="mago-pin"+(closed?" closed":"")+(sure?" sure":"")+(certif?" certif":"");
@@ -18827,6 +18999,10 @@ function exploreLoadStores(useCache){
        recalculer a chaque ajout — c'est le piege classique. */
     if(exploreLayer.addLayers)exploreLayer.addLayers(_lot);
     else _lot.forEach(function(m){exploreLayer.addLayer(m);});
+    // Les marqueurs viennent de changer : on refait la rosace tout de suite,
+    // sinon deux magasins superposes resteraient l'un sur l'autre jusqu'au
+    // prochain geste de l'utilisateur.
+    try{etalerMarqueurs(exploreMap,exploreLayer);}catch(eE){}
     try{renderExploreChips();exploreSetHeader(exploreFilter?withDrink:shown,_sureCount);}catch(eHdr){}
     try{renderExploreSheet(exploreFilter?list.filter(function(s){return s._hasDrink;}):list);}catch(eSheet){console.warn("exploreSheet:",eSheet);}
     try{renderInStockArrows();}catch(eArr){}
@@ -19382,9 +19558,16 @@ function refreshNotifState(){
     else sub.textContent=((window.LANGS&&LANGS[window.curLang])||(window.LANGS&&LANGS.fr)||{}).notifsSub
       ||"Sois prévenu quand une boisson que tu chasses est repérée près de toi";
   }
-  // La ligne "Tester la notification" n'a de sens qu'une fois le push actif.
-  var tr=document.getElementById("notif-test-row");
-  if(tr)tr.style.display=(on&&window._pushToken)?"":"none";
+  /* La ligne "Tester la notification" n'a de sens qu'une fois le push actif.
+     Elle s'appelait « tr » : var etant hisse en haut de la fonction, ce nom
+     MASQUAIT la fonction de traduction tr() pour toute la fonction — donc les
+     tr("Bloquées par le téléphone…") vingt lignes plus haut levaient
+     « tr is not a function ». Comme ca partait pendant le demarrage, le filet
+     de securite affichait l'ecran « L'appli n'a pas reussi a demarrer » par
+     dessus TOUTE l'application. Vu en test des que la permission de
+     notification vaut "denied". */
+  var ligneTest=document.getElementById("notif-test-row");
+  if(ligneTest)ligneTest.style.display=(on&&window._pushToken)?"":"none";
   try{updateHuntRadiusUI();}catch(e){}
 }
 /* Un tap = on allume ou on éteint. Plus de « appuie sur le texte ». */
@@ -22713,7 +22896,7 @@ function renderPhotoSuggestions(){
         var did=String(r.drinkId);
         if(window.fbApplyDrinkPhoto)window.fbApplyDrinkPhoto(did,r.data).catch(function(e){console.warn(e);});
         imgCache[did]={url:r.data,ts:Date.now(),community:true,manual:true};
-        try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+        try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
         var dr=DRINKS.find(function(x){return Number(x.id)===Number(r.drinkId);});
         if(dr)refreshDrinkVisual(dr);
         renderTrends();
@@ -24586,7 +24769,7 @@ try{
       if(!imgCache[k]||!imgCache[k].url){imgCache[k]={url:url,ts:Date.now()};applied++;}
     });
     if(applied){
-      try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(err){}
+      try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(err){}
       // Le lot de photos communautaires vient d'arriver : UNE recomposition de
       // la vitrine (puis la selection reste figee pour la session).
       window._homeTop8=null;

@@ -527,15 +527,118 @@ ART["ciao"]=function(d){
 };
 
 
+/* ── art_coca-cola.js ── */
+// Gabarit parametrique Coca-Cola — canette de la couleur du parfum (rouge,
+// noir pour le zero, argent pour le light), le ruban blanc qui traverse, le nom
+// en blanc penche par-dessus, le parfum dessous.
+ART["coca-cola"]=function(d){
+  var c=d.color||'#c0392b', id=d.id||0;
+  var lt=shade(c,0.72), dk=shade(c,-0.45);
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  var fl=String(d.name||'').replace(new RegExp('^\\s*'+String(d.brand||'Coca-Cola'),'i'),'')
+        .replace(/\([^)]*\)?/g,'').replace(/\s+/g,' ').trim();
+  var FL=(fl||'Original').toUpperCase();
+  var fs=FL.length<=8?13.5:(FL.length<=12?11.5:(FL.length<=17?10:8.8));
+  var fit=FL.length*fs*0.62>94?' textLength="94" lengthAdjust="spacingAndGlyphs"':'';
+  /* Le nom doit tenir DANS la canette (96 px) : sans contrainte il etait
+     coupe des deux cotes et se lisait « oca-Co ». */
+  var nom=String(d.brand||'Coca-Cola');
+  var fnom=nom.length<=6?30:(nom.length<=9?25:21);
+  var fitn=nom.length*fnom*0.52>90?' textLength="90" lengthAdjust="spacingAndGlyphs"':'';
+  return '<svg viewBox="0 0 240 360" xmlns="http://www.w3.org/2000/svg" font-family="Georgia,system-ui,serif">'
+  +'<defs>'
+  +'<linearGradient id="kb'+id+'" x1="0" y1="0" x2="1" y2="0">'
+  +'<stop offset="0" stop-color="'+shade(c,0.32)+'"/><stop offset="0.18" stop-color="'+shade(c,0.10)+'"/>'
+  +'<stop offset="0.56" stop-color="'+c+'"/><stop offset="0.88" stop-color="'+shade(c,-0.34)+'"/>'
+  +'<stop offset="1" stop-color="'+shade(c,-0.08)+'"/></linearGradient>'
+  +'<linearGradient id="kl'+id+'" x1="0" y1="0" x2="1" y2="0">'
+  +'<stop offset="0" stop-color="#eceef1"/><stop offset="0.5" stop-color="#aab0b8"/><stop offset="1" stop-color="#71767e"/></linearGradient>'
+  +'<clipPath id="kc'+id+'"><path d="M77,58 C73,64 72,70 72,78 L72,288 C72,300 75,308 81,314 L83,317 C85,320 89,321 95,321 L145,321 C151,321 155,320 157,317 L159,314 C165,308 168,300 168,288 L168,78 C168,70 167,64 163,58 Z"/></clipPath>'
+  +'</defs>'
+  +'<ellipse cx="120" cy="336" rx="58" ry="8" fill="#000" opacity="0.16"/>'
+  +'<path d="M77,58 C73,64 72,70 72,78 L72,288 C72,300 75,308 81,314 L83,317 C85,320 89,321 95,321 L145,321 C151,321 155,320 157,317 L159,314 C165,308 168,300 168,288 L168,78 C168,70 167,64 163,58 Z"'
+  +' fill="url(#kb'+id+')" stroke="'+dk+'" stroke-width="1.6"/>'
+  +'<g clip-path="url(#kc'+id+')">'
+  /* Le ruban : une vague blanche qui traverse toute la canette, releve a
+     droite — la signature visuelle qu'on lit meme en vignette. */
+  +'<path d="M60,232 C92,200 132,258 186,204 L186,238 C134,288 94,232 60,262 Z" fill="#fff"/>'
+  +'<text x="120" y="176" text-anchor="middle" font-size="'+fnom+'" font-style="italic" font-weight="700" letter-spacing="-0.6" fill="#fff"'+fitn+'>'+esc(nom)+'</text>'
+  +'<text x="120" y="290" text-anchor="middle" font-family="system-ui,sans-serif" font-size="'+fs+'" font-weight="800" letter-spacing="0.7" fill="'+lt+'"'+fit+'>'+esc(FL)+'</text>'
+  +'<rect x="78" y="60" width="13" height="258" rx="6" fill="#fff" opacity="0.16"/>'
+  +'</g>'
+  +'<path d="M77,58 C90,52 150,52 163,58 L163,66 C150,60 90,60 77,66 Z" fill="url(#kl'+id+')"/>'
+  +'<ellipse cx="120" cy="58" rx="43" ry="7" fill="url(#kl'+id+')" stroke="#8d949c" stroke-width="1"/>'
+  +'<ellipse cx="120" cy="58" rx="30" ry="4.2" fill="#c9ced4"/>'
+  +'<path d="M75,300 C88,308 152,308 165,300 L165,306 C152,314 88,314 75,306 Z" fill="#000" opacity="0.18"/>'
+  +'</svg>';
+};
+
+
+/* ── art_fanta.js ── */
+// Gabarit parametrique Fanta — canette de la couleur du parfum, la grande
+// volute blanche en diagonale (la « swirl » qu'on reconnait de loin), le nom
+// de la marque en blanc arrondi par-dessus, le parfum en dessous.
+ART["fanta"]=function(d){
+  var c=d.color||'#e67e22', id=d.id||0;
+  var lt=shade(c,0.68), dk=shade(c,-0.42);
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  var fl=String(d.name||'').replace(new RegExp('^\\s*'+String(d.brand||'Fanta'),'i'),'')
+        .replace(/\([^)]*\)?/g,'').replace(/\s+/g,' ').trim();
+  var FL=(fl||'Orange').toUpperCase();
+  var fs=FL.length<=8?13.5:(FL.length<=12?11.5:(FL.length<=17?10:8.8));
+  var fit=FL.length*fs*0.62>94?' textLength="94" lengthAdjust="spacingAndGlyphs"':'';
+  /* Le nom de la marque doit tenir DANS la canette (96 px de large) : sans
+     cette contrainte il debordait a droite et se faisait couper. */
+  var nom=String(d.brand||'Fanta'), fnom=nom.length<=6?36:(nom.length<=9?29:24);
+  var fitn=nom.length*fnom*0.58>92?' textLength="92" lengthAdjust="spacingAndGlyphs"':'';
+  return '<svg viewBox="0 0 240 360" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">'
+  +'<defs>'
+  +'<linearGradient id="fb'+id+'" x1="0" y1="0" x2="1" y2="0">'
+  +'<stop offset="0" stop-color="'+shade(c,0.34)+'"/><stop offset="0.18" stop-color="'+shade(c,0.12)+'"/>'
+  +'<stop offset="0.56" stop-color="'+c+'"/><stop offset="0.88" stop-color="'+shade(c,-0.32)+'"/>'
+  +'<stop offset="1" stop-color="'+shade(c,-0.08)+'"/></linearGradient>'
+  +'<linearGradient id="fl'+id+'" x1="0" y1="0" x2="1" y2="0">'
+  +'<stop offset="0" stop-color="#eceef1"/><stop offset="0.5" stop-color="#aab0b8"/><stop offset="1" stop-color="#71767e"/></linearGradient>'
+  +'<clipPath id="fc'+id+'"><path d="M77,58 C73,64 72,70 72,78 L72,288 C72,300 75,308 81,314 L83,317 C85,320 89,321 95,321 L145,321 C151,321 155,320 157,317 L159,314 C165,308 168,300 168,288 L168,78 C168,70 167,64 163,58 Z"/></clipPath>'
+  +'</defs>'
+  +'<ellipse cx="120" cy="336" rx="58" ry="8" fill="#000" opacity="0.16"/>'
+  +'<path d="M77,58 C73,64 72,70 72,78 L72,288 C72,300 75,308 81,314 L83,317 C85,320 89,321 95,321 L145,321 C151,321 155,320 157,317 L159,314 C165,308 168,300 168,288 L168,78 C168,70 167,64 163,58 Z"'
+  +' fill="url(#fb'+id+')" stroke="'+dk+'" stroke-width="1.6"/>'
+  +'<g clip-path="url(#fc'+id+')">'
+  /* Les deux volutes : une large en blanc, une plus fine en teinte foncee
+     juste dessous, comme le tourbillon de fruit du vrai emballage. */
+  +'<path d="M60,206 C96,168 128,214 178,150 L186,178 C136,246 100,196 62,232 Z" fill="#fff" opacity="0.95"/>'
+  +'<path d="M60,232 C98,198 126,240 182,182 L186,196 C132,262 96,222 60,248 Z" fill="'+dk+'" opacity="0.55"/>'
+  +'<text x="120" y="146" text-anchor="middle" font-size="'+fnom+'" font-weight="800" letter-spacing="-1.2" fill="#fff" stroke="'+dk+'" stroke-width="1.4" paint-order="stroke" stroke-linejoin="round"'+fitn+'>'+esc(nom)+'</text>'
+  +'<text x="120" y="286" text-anchor="middle" font-size="'+fs+'" font-weight="800" letter-spacing="0.7" fill="'+lt+'"'+fit+'>'+esc(FL)+'</text>'
+  +'<rect x="78" y="60" width="13" height="258" rx="6" fill="#fff" opacity="0.16"/>'
+  +'</g>'
+  +'<path d="M77,58 C90,52 150,52 163,58 L163,66 C150,60 90,60 77,66 Z" fill="url(#fl'+id+')"/>'
+  +'<ellipse cx="120" cy="58" rx="43" ry="7" fill="url(#fl'+id+')" stroke="#8d949c" stroke-width="1"/>'
+  +'<ellipse cx="120" cy="58" rx="30" ry="4.2" fill="#c9ced4"/>'
+  +'<path d="M75,300 C88,308 152,308 165,300 L165,306 C152,314 88,314 75,306 Z" fill="#000" opacity="0.18"/>'
+  +'</svg>';
+};
+
+
 /* ── art_generique.js ── */
-// Gabarit generique parametrique — canette 33cl (defaut) ou bouteille
-// (formats[0].type==="bouteille"). Corps/liquide = degrade de d.color,
-// etiquette blanche : MARQUE en capitales grasses sombres (taille adaptee),
+// Gabarit generique parametrique — trois silhouettes : la BRIQUE (jus et
+// laits vegetaux : c'est la forme qu'on cherche des yeux dans le rayon, et
+// c'etait la plus grosse erreur du dessin generique — 950 boissons dessinees
+// en canette 33cl alors qu'un Tropicana ou un Alpro n'a jamais ete une
+// canette), la BOUTEILLE (formats[0].type==="bouteille") et la CANETTE 33cl
+// par defaut. Corps/liquide = degrade de d.color, etiquette blanche :
+// MARQUE en capitales grasses sombres (taille adaptee),
 // PARFUM en petites capitales couleur foncee du parfum.
 ART["generique"]=function(d){
   var c=d.color||'#888888', id=d.id||0;
-  var isBottle=!!(d.formats&&d.formats[0]&&d.formats[0].type==="bouteille");
-  var cl=(d.formats&&d.formats[0]&&d.formats[0].cl)||33;
+  var forme=(d.formats&&d.formats[0]&&d.formats[0].type)||"";
+  var isBottle=forme==="bouteille";
+  /* Une brique des que le produit est un jus ou un lait et que le catalogue ne
+     dit pas explicitement autre chose : c'est le format de loin le plus
+     courant en rayon, et le catalogue precise « bouteille » quand il faut. */
+  var isBrique=forme==="brique"||(!forme&&(d.cat==="Jus"||d.cat==="Lact\u00e9"));
+  var cl=(d.formats&&d.formats[0]&&d.formats[0].cl)||(isBrique?100:33);
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   // ---- textes -------------------------------------------------------------
   var brand=String(d.brand||'').trim()||'?';
@@ -593,6 +696,43 @@ ART["generique"]=function(d){
   +'<stop offset="1" stop-color="#71767e"/>'
   +'</linearGradient>'
   +'</defs>';
+
+  if(isBrique){
+    // ================= BRIQUE (Tetra Brik) =================
+    var corps='M78,84 L162,84 L162,314 C162,320 158,324 151,324 L89,324 C82,324 78,320 78,314 Z';
+    return '<svg viewBox="0 0 240 360" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">'
+    +D
+    +'<defs><clipPath id="gc'+id+'"><path d="'+corps+'"/></clipPath></defs>'
+    +'<ellipse cx="120" cy="336" rx="56" ry="8" fill="#000" opacity="0.16"/>'
+    // le dessus incline : c'est lui qui fait lire « brique » et pas « boite »
+    +'<path d="M78,84 L93,60 L147,60 L162,84 Z" fill="'+shade(c,0.28)+'" stroke="'+shade(c,-0.5)+'" stroke-width="1.2"/>'
+    +'<path d="M78,84 L93,60 L93,84 Z" fill="'+shade(c,-0.18)+'"/>'
+    +'<path d="M162,84 L147,60 L147,84 Z" fill="'+shade(c,-0.34)+'"/>'
+    // bouchon a visser, pose sur le dessus
+    +'<rect x="126" y="46" width="21" height="15" rx="3" fill="'+shade(c,-0.5)+'" stroke="'+shade(c,-0.65)+'" stroke-width="1"/>'
+    +'<rect x="128.5" y="47.5" width="4" height="12" rx="2" fill="#fff" opacity="0.28"/>'
+    +'<path d="'+corps+'" fill="url(#gb'+id+')" stroke="'+shade(c,-0.55)+'" stroke-width="1.4"/>'
+    +'<g clip-path="url(#gc'+id+')">'
+    // gouttes de fruit discretes, jitterees par d.id
+    +(function(){
+      var s2='', BX=[96,146,90,150], BY=[112,124,286,272], BR=[7,5,6,4.5];
+      for(var q=0;q<4;q++){
+        var jx=((id*17+q*29)%11)-5, jy=((id*23+q*13)%15)-7;
+        s2+='<circle cx="'+(BX[q]+jx)+'" cy="'+(BY[q]+jy)+'" r="'+BR[q]+'" fill="'+shade(c,0.32)+'" opacity="0.45"/>';
+      }
+      return s2;
+    })()
+    +'<polygon points="92,84 116,84 84,324 68,324" fill="#fff" opacity="0.09"/>'
+    +'</g>'
+    // le pli vertical de l'arete droite : sans lui la brique reste plate
+    +'<path d="M152,86 L152,320" stroke="#000" stroke-width="9" opacity="0.16" stroke-linecap="butt"/>'
+    +'<rect x="82" y="92" width="7" height="222" rx="3.5" fill="#fff" opacity="0.26"/>'
+    // etiquette blanche
+    +'<rect x="84" y="146" width="72" height="102" rx="9" fill="url(#gw'+id+')" stroke="'+shade(c,-0.3)+'" stroke-width="1" opacity="0.98"/>'
+    +labelBlock(197)
+    +'<text x="120" y="300" text-anchor="middle" font-size="10" font-weight="600" letter-spacing="1.4" fill="'+shade(c,0.62)+'">'+cl+'cl</text>'
+    +'</svg>';
+  }
 
   if(!isBottle){
     // ================= CANETTE 33cl =================
@@ -984,6 +1124,58 @@ ART["mogu mogu"]=function(d){
 };
 
 
+/* ── art_monster.js ── */
+// Gabarit parametrique Monster — canette haute NOIRE, les trois griffes de la
+// couleur du parfum en travers (la signature qu'on reconnait de loin), le nom
+// en capitales sous les griffes, le parfum en bas.
+ART["monster"]=function(d){
+  var c=d.color||'#39ff14', id=d.id||0;
+  var lt=shade(c,0.45);
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  var fl=String(d.name||'').replace(new RegExp('^\\s*'+String(d.brand||'Monster'),'i'),'')
+        .replace(/\([^)]*\)?/g,'').replace(/\s+/g,' ').trim();
+  var FL=(fl||'Energy').toUpperCase();
+  var fs=FL.length<=8?13:(FL.length<=13?11:(FL.length<=18?9.5:8.4));
+  var fit=FL.length*fs*0.78>86?' textLength="86" lengthAdjust="spacingAndGlyphs"':'';
+  var nom=String(d.brand||'Monster').toUpperCase();
+  var fnom=nom.length<=7?26:(nom.length<=10?21:17);
+  var fitn=nom.length*fnom*0.78>90?' textLength="90" lengthAdjust="spacingAndGlyphs"':'';
+  /* Trois griffes : des bandes effilees, legerement en biais, un peu decalees
+     l'une de l'autre — dessinees en chemins pour rester nettes a 44 px. */
+  function griffe(x,ep){
+    return 'M'+x+',96 C'+(x+7)+',150 '+(x+3)+',196 '+(x-9)+',250 L'+(x-9+ep)+',252 C'+(x+3+ep*0.7)+',196 '+(x+7+ep*0.6)+',150 '+(x+ep)+',96 Z';
+  }
+  return '<svg viewBox="0 0 240 360" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">'
+  +'<defs>'
+  +'<linearGradient id="mb'+id+'" x1="0" y1="0" x2="1" y2="0">'
+  +'<stop offset="0" stop-color="#3b3b40"/><stop offset="0.18" stop-color="#1c1c20"/>'
+  +'<stop offset="0.55" stop-color="#0d0d10"/><stop offset="0.88" stop-color="#050506"/>'
+  +'<stop offset="1" stop-color="#2a2a2e"/></linearGradient>'
+  +'<linearGradient id="ml'+id+'" x1="0" y1="0" x2="1" y2="0">'
+  +'<stop offset="0" stop-color="#eceef1"/><stop offset="0.5" stop-color="#aab0b8"/><stop offset="1" stop-color="#71767e"/></linearGradient>'
+  +'<linearGradient id="mg'+id+'" x1="0" y1="0" x2="0" y2="1">'
+  +'<stop offset="0" stop-color="'+shade(c,0.35)+'"/><stop offset="1" stop-color="'+shade(c,-0.2)+'"/></linearGradient>'
+  +'<clipPath id="mc'+id+'"><path d="M77,58 C73,64 72,70 72,78 L72,288 C72,300 75,308 81,314 L83,317 C85,320 89,321 95,321 L145,321 C151,321 155,320 157,317 L159,314 C165,308 168,300 168,288 L168,78 C168,70 167,64 163,58 Z"/></clipPath>'
+  +'</defs>'
+  +'<ellipse cx="120" cy="336" rx="58" ry="8" fill="#000" opacity="0.16"/>'
+  +'<path d="M77,58 C73,64 72,70 72,78 L72,288 C72,300 75,308 81,314 L83,317 C85,320 89,321 95,321 L145,321 C151,321 155,320 157,317 L159,314 C165,308 168,300 168,288 L168,78 C168,70 167,64 163,58 Z"'
+  +' fill="url(#mb'+id+')" stroke="#000" stroke-width="1.6"/>'
+  +'<g clip-path="url(#mc'+id+')">'
+  +'<path d="'+griffe(96,13)+'" fill="url(#mg'+id+')"/>'
+  +'<path d="'+griffe(120,15)+'" fill="url(#mg'+id+')"/>'
+  +'<path d="'+griffe(144,13)+'" fill="url(#mg'+id+')"/>'
+  +'<text x="120" y="278" text-anchor="middle" font-size="'+fnom+'" font-weight="800" letter-spacing="1.4" fill="#fff"'+fitn+'>'+esc(nom)+'</text>'
+  +'<text x="120" y="298" text-anchor="middle" font-size="'+fs+'" font-weight="800" letter-spacing="0.8" fill="'+lt+'"'+fit+'>'+esc(FL)+'</text>'
+  +'<rect x="78" y="60" width="12" height="258" rx="6" fill="#fff" opacity="0.10"/>'
+  +'</g>'
+  +'<path d="M77,58 C90,52 150,52 163,58 L163,66 C150,60 90,60 77,66 Z" fill="url(#ml'+id+')"/>'
+  +'<ellipse cx="120" cy="58" rx="43" ry="7" fill="url(#ml'+id+')" stroke="#8d949c" stroke-width="1"/>'
+  +'<ellipse cx="120" cy="58" rx="30" ry="4.2" fill="#c9ced4"/>'
+  +'<path d="M75,300 C88,308 152,308 165,300 L165,306 C152,314 88,314 75,306 Z" fill="#000" opacity="0.22"/>'
+  +'</svg>';
+};
+
+
 /* ── art_mountain-dew.js ── */
 // Gabarit parametrique Mountain Dew — canette 33cl : corps degrade dans la
 // couleur du parfum, bande diagonale sombre #0f260c portant "MTN" blanc
@@ -1066,6 +1258,59 @@ ART["mountain dew"]=function(d){
   +'<rect x="103" y="62" width="20" height="5.5" rx="2.7" fill="#cdd2d6" stroke="#8f959a" stroke-width="1"/>'
   +'<circle cx="131" cy="65" r="4.6" fill="#c4c9cd" stroke="#8f959a" stroke-width="1.2"/>'
   +'<path d="M66,63 Q120,52 174,63" stroke="#f4f6f7" stroke-width="1.6" fill="none" opacity="0.8"/>'
+  +'</svg>';
+};
+
+
+/* ── art_pepsi.js ── */
+// Gabarit parametrique Pepsi — canette 33cl de la couleur du parfum, le disque
+// bicolore (rouge en haut, bleu en bas, vague blanche au milieu) au centre, le
+// nom de la marque en blanc dessous, le parfum en teinte claire tout en bas.
+// Dessin stylise : on cherche la silhouette et les couleurs qu'on reconnait en
+// rayon, pas la reproduction d'un logo.
+ART["pepsi"]=function(d){
+  var c=d.color||'#1a56db', id=d.id||0;
+  var lt=shade(c,0.62), dk=shade(c,-0.45);
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  var fl=String(d.name||'').replace(new RegExp('^\\s*'+String(d.brand||'Pepsi'),'i'),'')
+        .replace(/\([^)]*\)?/g,'').replace(/\s+/g,' ').trim();
+  var FL=(fl||'Original').toUpperCase();
+  var fs=FL.length<=7?14:(FL.length<=11?12:(FL.length<=15?10.5:9));
+  var fit=FL.length*fs*0.62>92?' textLength="92" lengthAdjust="spacingAndGlyphs"':'';
+  /* Le disque : deux demi-disques separes par une vague. Les couleurs sont
+     celles du produit, pas celles du parfum — c'est ce qui le rend
+     reconnaissable ; le parfum, lui, colore la canette. */
+  var CX=120, CY=163, R=47;
+  /* La vague blanche doit rester lisible a 44 px : on l'epaissit (7 px) et on
+     la fait onduler nettement, sinon le disque se lit comme deux aplats colles. */
+  var haut='M'+(CX-R)+','+(CY-4)+' A'+R+','+R+' 0 0 1 '+(CX+R)+','+(CY-4)+' C'+(CX+20)+','+(CY-15)+' '+(CX-18)+','+(CY+3)+' '+(CX-R)+','+(CY-4)+' Z';
+  var bas ='M'+(CX-R)+','+(CY+6)+' C'+(CX-18)+','+(CY+13)+' '+(CX+20)+','+(CY-5)+' '+(CX+R)+','+(CY+6)+' A'+R+','+R+' 0 0 1 '+(CX-R)+','+(CY+6)+' Z';
+  return '<svg viewBox="0 0 240 360" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">'
+  +'<defs>'
+  +'<linearGradient id="pb'+id+'" x1="0" y1="0" x2="1" y2="0">'
+  +'<stop offset="0" stop-color="'+shade(c,0.30)+'"/><stop offset="0.17" stop-color="'+shade(c,0.10)+'"/>'
+  +'<stop offset="0.55" stop-color="'+c+'"/><stop offset="0.88" stop-color="'+shade(c,-0.34)+'"/>'
+  +'<stop offset="1" stop-color="'+shade(c,-0.10)+'"/></linearGradient>'
+  +'<linearGradient id="pl'+id+'" x1="0" y1="0" x2="1" y2="0">'
+  +'<stop offset="0" stop-color="#eceef1"/><stop offset="0.5" stop-color="#aab0b8"/><stop offset="1" stop-color="#71767e"/></linearGradient>'
+  +'<clipPath id="pc'+id+'"><path d="M77,58 C73,64 72,70 72,78 L72,288 C72,300 75,308 81,314 L83,317 C85,320 89,321 95,321 L145,321 C151,321 155,320 157,317 L159,314 C165,308 168,300 168,288 L168,78 C168,70 167,64 163,58 Z"/></clipPath>'
+  +'</defs>'
+  +'<ellipse cx="120" cy="336" rx="58" ry="8" fill="#000" opacity="0.16"/>'
+  +'<path d="M77,58 C73,64 72,70 72,78 L72,288 C72,300 75,308 81,314 L83,317 C85,320 89,321 95,321 L145,321 C151,321 155,320 157,317 L159,314 C165,308 168,300 168,288 L168,78 C168,70 167,64 163,58 Z"'
+  +' fill="url(#pb'+id+')" stroke="'+dk+'" stroke-width="1.6"/>'
+  +'<g clip-path="url(#pc'+id+')">'
+  +'<rect x="72" y="86" width="96" height="4" fill="#fff" opacity="0.10"/>'
+  +'<circle cx="'+CX+'" cy="'+CY+'" r="'+(R+5)+'" fill="#fff"/>'
+  +'<path d="'+haut+'" fill="#e32934"/>'
+  +'<path d="'+bas+'" fill="#0a4fa0"/>'
+  +'<text x="120" y="238" text-anchor="middle" font-size="34" font-weight="800" letter-spacing="-1.5" fill="#fff">'+esc((d.brand||'pepsi').toLowerCase())+'</text>'
+  +'<text x="120" y="266" text-anchor="middle" font-size="'+fs+'" font-weight="800" letter-spacing="0.8" fill="'+lt+'"'+fit+'>'+esc(FL)+'</text>'
+  +'<rect x="78" y="60" width="13" height="258" rx="6" fill="#fff" opacity="0.16"/>'
+  +'</g>'
+  +'<path d="M77,58 C90,52 150,52 163,58 L163,66 C150,60 90,60 77,66 Z" fill="url(#pl'+id+')"/>'
+  +'<ellipse cx="120" cy="58" rx="43" ry="7" fill="url(#pl'+id+')" stroke="#8d949c" stroke-width="1"/>'
+  +'<ellipse cx="120" cy="58" rx="30" ry="4.2" fill="#c9ced4"/>'
+  +'<path d="M75,300 C88,308 152,308 165,300 L165,306 C152,314 88,314 75,306 Z" fill="#000" opacity="0.18"/>'
   +'</svg>';
 };
 
@@ -1289,6 +1534,132 @@ ART["ramune"]=function(d){
   +'<rect x="101" y="47" width="38" height="7" rx="3.5" fill="#2c5aa3"/>'
   +'<path d="M110,29 L110,46 M117,28 L117,46 M124,28 L124,46 M131,29 L131,46" stroke="#1d3f76" stroke-width="1.6" opacity="0.55"/>'
   +'<rect x="106" y="29" width="4" height="15" rx="2" fill="#fff" opacity="0.35"/>'
+  +'</svg>';
+};
+
+
+/* ── art_red-bull.js ── */
+// Gabarit parametrique Red Bull — canette SLIM haute a la couleur de l'edition
+// (les Editions sont des canettes entierement colorees), le damier bleu nuit /
+// rouge en biais devant le disque dore : la marque qu'on reconnait a 3 metres.
+// Le nom de l'edition est ecrit sous le damier.
+ART["red bull"]=function(d){
+  var c=d.color||'#1a56db', id=d.id||0;
+  var clair=shade(c,0.45), fonce=shade(c,-0.45);
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  var fl=String(d.name||'').replace(new RegExp('^\\s*'+String(d.brand||'Red Bull'),'i'),'')
+        .replace(/\bEdition\b/ig,' ').replace(/\([^)]*\)?/g,'').replace(/\s+/g,' ').trim();
+  var FL=(fl||'Original').toUpperCase();
+  // deux lignes si le parfum est long : la canette slim est etroite
+  var lignes=[FL];
+  if(FL.length>11 && FL.indexOf(' ')>-1){
+    var ws=FL.split(' '), a='', b='';
+    for(var i=0;i<ws.length;i++){ if(a.length<FL.length/2) a+=(a?' ':'')+ws[i]; else b+=(b?' ':'')+ws[i]; }
+    if(!b){ b=a.split(' ').pop(); a=a.split(' ').slice(0,-1).join(' '); }
+    lignes=[a,b];
+  }
+  var mx=0; for(var j=0;j<lignes.length;j++) if(lignes[j].length>mx) mx=lignes[j].length;
+  var fs=mx<=6?12:(mx<=9?10.5:(mx<=13?9:8));
+  function tsp(t,y){
+    var fit=t.length*fs*0.78>58?' textLength="58" lengthAdjust="spacingAndGlyphs"':'';
+    return '<text x="120" y="'+y+'" text-anchor="middle" font-size="'+fs+'" font-weight="800" letter-spacing="0.4" fill="#ffffff"'+fit+'>'+esc(t)+'</text>';
+  }
+  var parfum = lignes.length===1 ? tsp(lignes[0],252) : tsp(lignes[0],246)+tsp(lignes[1],246+fs+2);
+  var corps='M92,52 C88,58 87,64 87,72 L87,292 C87,304 90,311 95,316 L97,318 C99,320 102,321 107,321 L133,321 C138,321 141,320 143,318 L145,316 C150,311 153,304 153,292 L153,72 C153,64 152,58 148,52 Z';
+  return '<svg viewBox="0 0 240 360" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">'
+  +'<defs>'
+  +'<linearGradient id="rb'+id+'" x1="0" y1="0" x2="1" y2="0">'
+  +'<stop offset="0" stop-color="'+shade(c,0.42)+'"/><stop offset="0.2" stop-color="'+shade(c,0.16)+'"/>'
+  +'<stop offset="0.55" stop-color="'+c+'"/><stop offset="0.88" stop-color="'+shade(c,-0.35)+'"/>'
+  +'<stop offset="1" stop-color="'+shade(c,0.06)+'"/></linearGradient>'
+  +'<linearGradient id="rl'+id+'" x1="0" y1="0" x2="1" y2="0">'
+  +'<stop offset="0" stop-color="#eceef1"/><stop offset="0.5" stop-color="#aab0b8"/><stop offset="1" stop-color="#71767e"/></linearGradient>'
+  +'<radialGradient id="rs'+id+'" cx="0.4" cy="0.34" r="0.85">'
+  +'<stop offset="0" stop-color="#ffe98f"/><stop offset="0.7" stop-color="#f6bd27"/><stop offset="1" stop-color="#d99105"/></radialGradient>'
+  +'<clipPath id="rc'+id+'"><path d="'+corps+'"/></clipPath>'
+  +'</defs>'
+  +'<ellipse cx="120" cy="336" rx="44" ry="7" fill="#000" opacity="0.16"/>'
+  +'<path d="'+corps+'" fill="url(#rb'+id+')" stroke="'+shade(c,-0.55)+'" stroke-width="1.4"/>'
+  +'<g clip-path="url(#rc'+id+')">'
+  /* bandeau clair du haut : les canettes Red Bull ont le tiers superieur plus clair */
+  +'<path d="M85,52 L155,52 L155,120 C140,127 100,127 85,120 Z" fill="'+clair+'" opacity="0.55"/>'
+  +'<text x="120" y="98" text-anchor="middle" font-size="15" font-weight="800" letter-spacing="0.8" fill="'+fonce+'" textLength="60" lengthAdjust="spacingAndGlyphs">RED BULL</text>'
+  /* le disque dore + les deux carres en biais (le taureau stylise en damier) */
+  +'<circle cx="120" cy="178" r="33" fill="url(#rs'+id+')"/>'
+  +'<path d="M120,140 L152,172 L120,204 L88,172 Z" fill="#0d2f7a"/>'
+  +'<path d="M120,166 L152,198 L120,230 L88,198 Z" fill="#cf1226" opacity="0.92"/>'
+  +parfum
+  +'<rect x="92" y="54" width="9" height="262" rx="4" fill="#fff" opacity="0.34"/>'
+  +'<path d="M150,60 L150,314" stroke="#000" stroke-width="6" opacity="0.22" stroke-linecap="round"/>'
+  +'</g>'
+  +'<path d="M92,52 C102,47 138,47 148,52 L148,60 C138,55 102,55 92,60 Z" fill="url(#rl'+id+')"/>'
+  +'<ellipse cx="120" cy="52" rx="30" ry="6" fill="url(#rl'+id+')" stroke="#8d949c" stroke-width="1"/>'
+  +'<ellipse cx="120" cy="52" rx="20" ry="3.4" fill="#c9ced4"/>'
+  +'<path d="M96,319 Q120,325 144,319" fill="none" stroke="#7d838c" stroke-width="2.4" stroke-linecap="round"/>'
+  +'</svg>';
+};
+
+
+/* ── art_schweppes.js ── */
+// Gabarit parametrique Schweppes — canette a la couleur du parfum, medaillon
+// ovale blanc cercle d'or au centre avec « Schweppes » en italique, le parfum
+// dessous, et les bulles qui montent (l'eau petillante d'origine).
+ART["schweppes"]=function(d){
+  var c=d.color||'#f1c40f', id=d.id||0;
+  var fonce=shade(c,-0.55);
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  var fl=String(d.name||'').replace(new RegExp('^\\s*'+String(d.brand||'Schweppes'),'i'),'')
+        .replace(/\bSelection\b/ig,' ').replace(/\([^)]*\)?/g,'').replace(/\s+/g,' ').trim();
+  var FL=(fl||'Tonic').toUpperCase();
+  var lignes=[FL];
+  if(FL.length>11 && FL.indexOf(' ')>-1){
+    var ws=FL.split(' '), a='', b='';
+    for(var i=0;i<ws.length;i++){ if(a.length<FL.length/2) a+=(a?' ':'')+ws[i]; else b+=(b?' ':'')+ws[i]; }
+    if(!b){ b=a.split(' ').pop(); a=a.split(' ').slice(0,-1).join(' '); }
+    lignes=[a,b];
+  }
+  var mx=0; for(var j=0;j<lignes.length;j++) if(lignes[j].length>mx) mx=lignes[j].length;
+  var fs=mx<=6?14:(mx<=9?12:(mx<=13?10.5:9));
+  function tsp(t,y){
+    var fit=t.length*fs*0.78>84?' textLength="84" lengthAdjust="spacingAndGlyphs"':'';
+    return '<text x="120" y="'+y+'" text-anchor="middle" font-size="'+fs+'" font-weight="800" letter-spacing="0.7" fill="#ffffff"'+fit+'>'+esc(t)+'</text>';
+  }
+  var parfum = lignes.length===1 ? tsp(lignes[0],254) : tsp(lignes[0],248)+tsp(lignes[1],248+fs+2);
+  // bulles deterministes par d.id
+  var bulles='';
+  for(var k=0;k<9;k++){
+    var bx=84+((id*17+k*29)%72), by=96+((id*23+k*41)%196), br=1.6+((id+k*5)%4)*0.7;
+    bulles+='<circle cx="'+bx+'" cy="'+by+'" r="'+br.toFixed(1)+'" fill="#fff" opacity="0.30"/>';
+  }
+  var corps='M77,58 C73,64 72,70 72,78 L72,288 C72,300 75,308 81,314 L83,317 C85,320 89,321 95,321 L145,321 C151,321 155,320 157,317 L159,314 C165,308 168,300 168,288 L168,78 C168,70 167,64 163,58 Z';
+  return '<svg viewBox="0 0 240 360" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">'
+  +'<defs>'
+  +'<linearGradient id="sb'+id+'" x1="0" y1="0" x2="1" y2="0">'
+  +'<stop offset="0" stop-color="'+shade(c,0.4)+'"/><stop offset="0.2" stop-color="'+shade(c,0.14)+'"/>'
+  +'<stop offset="0.55" stop-color="'+c+'"/><stop offset="0.88" stop-color="'+shade(c,-0.38)+'"/>'
+  +'<stop offset="1" stop-color="'+shade(c,0.04)+'"/></linearGradient>'
+  +'<linearGradient id="sl'+id+'" x1="0" y1="0" x2="1" y2="0">'
+  +'<stop offset="0" stop-color="#eceef1"/><stop offset="0.5" stop-color="#aab0b8"/><stop offset="1" stop-color="#71767e"/></linearGradient>'
+  +'<clipPath id="sc'+id+'"><path d="'+corps+'"/></clipPath>'
+  +'</defs>'
+  +'<ellipse cx="120" cy="336" rx="58" ry="8" fill="#000" opacity="0.16"/>'
+  +'<path d="'+corps+'" fill="url(#sb'+id+')" stroke="'+fonce+'" stroke-width="1.5"/>'
+  +'<g clip-path="url(#sc'+id+')">'
+  +bulles
+  /* medaillon ovale : le sceau Schweppes */
+  +'<ellipse cx="120" cy="168" rx="46" ry="40" fill="#ffffff" opacity="0.96"/>'
+  +'<ellipse cx="120" cy="168" rx="46" ry="40" fill="none" stroke="#c9a227" stroke-width="3"/>'
+  +'<ellipse cx="120" cy="168" rx="39" ry="33" fill="none" stroke="'+fonce+'" stroke-width="1.4" opacity="0.5"/>'
+  +'<text x="120" y="167" text-anchor="middle" font-size="17" font-weight="800" font-style="italic" fill="'+fonce+'" textLength="76" lengthAdjust="spacingAndGlyphs">Schweppes</text>'
+  +'<path d="M84,176 Q120,186 156,176" fill="none" stroke="#c9a227" stroke-width="2.2" stroke-linecap="round"/>'
+  +'<text x="120" y="195" text-anchor="middle" font-size="8" font-weight="700" letter-spacing="1.2" fill="#c9a227" textLength="52" lengthAdjust="spacingAndGlyphs">DEPUIS 1783</text>'
+  +parfum
+  +'<rect x="79" y="76" width="8" height="230" rx="4" fill="#fff" opacity="0.28"/>'
+  +'<path d="M162,72 L162,306" stroke="#000" stroke-width="7" opacity="0.2" stroke-linecap="round"/>'
+  +'</g>'
+  +'<path d="M77,58 Q120,50 163,58 L163,63 Q120,71 77,63 Z" fill="url(#sl'+id+')" stroke="#5c6167" stroke-width="1"/>'
+  +'<path d="M80,57.2 Q120,50.4 160,57.2" fill="none" stroke="#f4f6f8" stroke-width="2.4" stroke-linecap="round"/>'
+  +'<path d="M84,319 Q120,326 156,319" fill="none" stroke="#7d838c" stroke-width="2.6" stroke-linecap="round"/>'
   +'</svg>';
 };
 

@@ -49,11 +49,11 @@ ART["chupa chups"]=function(d){
   // Lignes du parfum
   var ftxt='';
   var y0=lines.length===1?263:255;
-  for(var t=0;t<lines.length;t++){
-    var len=lines[t].length;
+  for(var li=0;li<lines.length;li++){
+    var len=lines[li].length;
     var est=len*fs*0.7+(len-1)*ls;
     var tfit=est>88?' textLength="88" lengthAdjust="spacingAndGlyphs"':'';
-    ftxt+='<text x="120" y="'+(y0+t*fs*1.18)+'" text-anchor="middle" font-size="'+fs+'" font-weight="800" letter-spacing="'+ls+'" fill="'+tc+'"'+tfit+'>'+esc(lines[t])+'</text>';
+    ftxt+='<text x="120" y="'+(y0+li*fs*1.18)+'" text-anchor="middle" font-size="'+fs+'" font-weight="800" letter-spacing="'+ls+'" fill="'+tc+'"'+tfit+'>'+esc(lines[li])+'</text>';
   }
   return '<svg viewBox="0 0 240 360" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">'
   +'<defs>'

@@ -33,8 +33,8 @@ ART["tango"]=function(d){
   var pts=[];
   for(var k=0;k<n;k++){
     var rr=RO[k]+((id*13+k*7)%9)-4;
-    var a=-Math.PI/2 + k*2*Math.PI/n + AJ[k] + rot;
-    pts.push([cx+rr*Math.cos(a)*0.8, cy+rr*Math.sin(a)*1.04, a]);
+    var ang=-Math.PI/2 + k*2*Math.PI/n + AJ[k] + rot;
+    pts.push([cx+rr*Math.cos(ang)*0.8, cy+rr*Math.sin(ang)*1.04, ang]);
   }
   var sp='M'+pts[0][0].toFixed(1)+','+pts[0][1].toFixed(1);
   for(var k2=0;k2<n;k2++){

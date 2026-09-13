@@ -10,7 +10,12 @@ var DRINKS=[
   {id:203,name:"Fanta Raisin",brand:"Fanta",emoji:"",color:"#8e44ad",light:"#f5eef8",cat:"Soda",tag:"FANTA RAISIN",barcodes:[],stars:4.2},
   {id:204,name:"Fanta Mangue",brand:"Fanta",emoji:"",color:"#e67e22",light:"#fef3e2",cat:"Soda",tag:"FANTA MANGUE",barcodes:[],stars:4.4},
   {id:3,name:"Sprite Original",brand:"Sprite",emoji:"",color:"#27ae60",light:"#eafaf1",cat:"Soda",tag:"SPRITE",barcodes:["5000112575071","8901764032905","54492691","049000007640"],stars:4.1},
-  {id:6,name:"Pepsi Original",brand:"Pepsi",emoji:"",color:"#1a56db",light:"#ebf5fb",cat:"Soda",tag:"PEPSI",barcodes:["4006381333030"],stars:4.2},
+  /* Photo epinglee a la main : l'ancien code-barre 4006381333030 n'existe pas
+     sur Open Food Facts (prefixe allemand qui n'est pas du Pepsi), la recherche
+     par nom prenait donc le relais et ramenait un tube de chips Elma Chips
+     (groupe PepsiCo). Les codes ci-dessous sont de vraies fiches Pepsi vues
+     dans une reponse OFF ; la photo est le packshot de la 1,5 L belgo-francaise. */
+  {id:6,name:"Pepsi Original",brand:"Pepsi",emoji:"",color:"#1a56db",light:"#ebf5fb",cat:"Soda",tag:"PEPSI",barcodes:["3502110008329","5942204003010","5949000012031","5949000012048"],stars:4.2,img:"https://images.openfoodfacts.org/images/products/350/211/000/8329/front_fr.111.400.jpg",formats:[{type:"bouteille",cl:150},{type:"canette",cl:33}]},
   {id:14,name:"Mecca Cola",brand:"Mecca Cola",emoji:"",color:"#c0392b",light:"#fdecea",cat:"Soda",tag:"MECCA",barcodes:[],stars:4.1},
   {id:15,name:"7UP Original",brand:"7UP",emoji:"",color:"#27ae60",light:"#eafaf1",cat:"Soda",tag:"7UP",barcodes:["40608136","065400000968","5997264104658"],stars:4.0},
   {id:4,name:"Ice Tea Pastèque",brand:"Lipton",emoji:"",color:"#8e44ad",light:"#f5eef8",cat:"Ice Tea",tag:"ICE TEA",barcodes:["8718114916590"],stars:4.8},
