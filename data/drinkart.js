@@ -622,14 +622,23 @@ ART["fanta"]=function(d){
 
 
 /* ── art_generique.js ── */
-// Gabarit generique parametrique — canette 33cl (defaut) ou bouteille
-// (formats[0].type==="bouteille"). Corps/liquide = degrade de d.color,
-// etiquette blanche : MARQUE en capitales grasses sombres (taille adaptee),
+// Gabarit generique parametrique — trois silhouettes : la BRIQUE (jus et
+// laits vegetaux : c'est la forme qu'on cherche des yeux dans le rayon, et
+// c'etait la plus grosse erreur du dessin generique — 950 boissons dessinees
+// en canette 33cl alors qu'un Tropicana ou un Alpro n'a jamais ete une
+// canette), la BOUTEILLE (formats[0].type==="bouteille") et la CANETTE 33cl
+// par defaut. Corps/liquide = degrade de d.color, etiquette blanche :
+// MARQUE en capitales grasses sombres (taille adaptee),
 // PARFUM en petites capitales couleur foncee du parfum.
 ART["generique"]=function(d){
   var c=d.color||'#888888', id=d.id||0;
-  var isBottle=!!(d.formats&&d.formats[0]&&d.formats[0].type==="bouteille");
-  var cl=(d.formats&&d.formats[0]&&d.formats[0].cl)||33;
+  var forme=(d.formats&&d.formats[0]&&d.formats[0].type)||"";
+  var isBottle=forme==="bouteille";
+  /* Une brique des que le produit est un jus ou un lait et que le catalogue ne
+     dit pas explicitement autre chose : c'est le format de loin le plus
+     courant en rayon, et le catalogue precise « bouteille » quand il faut. */
+  var isBrique=forme==="brique"||(!forme&&(d.cat==="Jus"||d.cat==="Lact\u00e9"));
+  var cl=(d.formats&&d.formats[0]&&d.formats[0].cl)||(isBrique?100:33);
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   // ---- textes -------------------------------------------------------------
   var brand=String(d.brand||'').trim()||'?';
@@ -687,6 +696,43 @@ ART["generique"]=function(d){
   +'<stop offset="1" stop-color="#71767e"/>'
   +'</linearGradient>'
   +'</defs>';
+
+  if(isBrique){
+    // ================= BRIQUE (Tetra Brik) =================
+    var corps='M78,84 L162,84 L162,314 C162,320 158,324 151,324 L89,324 C82,324 78,320 78,314 Z';
+    return '<svg viewBox="0 0 240 360" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">'
+    +D
+    +'<defs><clipPath id="gc'+id+'"><path d="'+corps+'"/></clipPath></defs>'
+    +'<ellipse cx="120" cy="336" rx="56" ry="8" fill="#000" opacity="0.16"/>'
+    // le dessus incline : c'est lui qui fait lire « brique » et pas « boite »
+    +'<path d="M78,84 L93,60 L147,60 L162,84 Z" fill="'+shade(c,0.28)+'" stroke="'+shade(c,-0.5)+'" stroke-width="1.2"/>'
+    +'<path d="M78,84 L93,60 L93,84 Z" fill="'+shade(c,-0.18)+'"/>'
+    +'<path d="M162,84 L147,60 L147,84 Z" fill="'+shade(c,-0.34)+'"/>'
+    // bouchon a visser, pose sur le dessus
+    +'<rect x="126" y="46" width="21" height="15" rx="3" fill="'+shade(c,-0.5)+'" stroke="'+shade(c,-0.65)+'" stroke-width="1"/>'
+    +'<rect x="128.5" y="47.5" width="4" height="12" rx="2" fill="#fff" opacity="0.28"/>'
+    +'<path d="'+corps+'" fill="url(#gb'+id+')" stroke="'+shade(c,-0.55)+'" stroke-width="1.4"/>'
+    +'<g clip-path="url(#gc'+id+')">'
+    // gouttes de fruit discretes, jitterees par d.id
+    +(function(){
+      var s2='', BX=[96,146,90,150], BY=[112,124,286,272], BR=[7,5,6,4.5];
+      for(var q=0;q<4;q++){
+        var jx=((id*17+q*29)%11)-5, jy=((id*23+q*13)%15)-7;
+        s2+='<circle cx="'+(BX[q]+jx)+'" cy="'+(BY[q]+jy)+'" r="'+BR[q]+'" fill="'+shade(c,0.32)+'" opacity="0.45"/>';
+      }
+      return s2;
+    })()
+    +'<polygon points="92,84 116,84 84,324 68,324" fill="#fff" opacity="0.09"/>'
+    +'</g>'
+    // le pli vertical de l'arete droite : sans lui la brique reste plate
+    +'<path d="M152,86 L152,320" stroke="#000" stroke-width="9" opacity="0.16" stroke-linecap="butt"/>'
+    +'<rect x="82" y="92" width="7" height="222" rx="3.5" fill="#fff" opacity="0.26"/>'
+    // etiquette blanche
+    +'<rect x="84" y="146" width="72" height="102" rx="9" fill="url(#gw'+id+')" stroke="'+shade(c,-0.3)+'" stroke-width="1" opacity="0.98"/>'
+    +labelBlock(197)
+    +'<text x="120" y="300" text-anchor="middle" font-size="10" font-weight="600" letter-spacing="1.4" fill="'+shade(c,0.62)+'">'+cl+'cl</text>'
+    +'</svg>';
+  }
 
   if(!isBottle){
     // ================= CANETTE 33cl =================
