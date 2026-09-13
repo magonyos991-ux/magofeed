@@ -166,12 +166,20 @@ function versExecutionHTML(t) {
    porte des echappements JavaScript, pas des entites HTML — le classer « champ »
    et le traiter en HTML laissait « ce qu\\'il faut » dans la cle, qui ne
    correspondait alors a rien a l'execution. */
-const ZONE_CODE = "code", ZONE_HTML = "html";
+const ZONE_CODE = "code", ZONE_HTML = "html", ZONE_CODE_HTML = "code+html";
 
 const composes = new Set();
 const trouves = new Map();          // texte -> {genres:Set, n, lignes:[], admin}
 function ajoute(texte, genre, pos, admin, zone) {
-  const brut = zone === ZONE_CODE ? versExecutionJS(texte) : versExecutionHTML(texte);
+  /* Le balisage ecrit DANS du JavaScript porte les deux jeux d'echappement a la
+     fois : ceux de JavaScript (\\u00e9) parce que c'est une chaine, et ceux du
+     HTML (&eacute;) parce que c'est du balisage. Le navigateur defait les deux
+     avant d'afficher — la cle doit donc l'etre aussi, sinon « M'alerter &amp;
+     lancer la chasse » ne correspondra jamais au « M'alerter & lancer la chasse »
+     que tr() recoit. */
+  const brut = zone === ZONE_CODE_HTML ? versExecutionHTML(versExecutionJS(texte))
+             : zone === ZONE_CODE      ? versExecutionJS(texte)
+             :                           versExecutionHTML(texte);
   /* Les sauts de ligne d'un confirm() font partie du message : on ne les
      aplatit pas, on ne resserre que les espaces horizontaux. */
   const t = brut.replace(/[ \t\u00A0]+/g, " ").replace(/ *\n */g, "\n").trim();
@@ -183,6 +191,12 @@ function ajoute(texte, genre, pos, admin, zone) {
      et restait donc francais dans les neuf autres langues. */
   if (/^[a-z0-9_-]+$/.test(t)) return;
   if (/^(https?:|\/|#|data:|var\(|rgba?\()/.test(t)) return;
+  /* UN CHEMIN DE FICHIER N'EST PAS UNE PHRASE. « functions-a-deployer/BASCULE-
+     POINTS-ET-PARRAINAGE.md » s'affiche dans un ecran d'administration, mais il
+     s'ecrit pareil dans les dix langues : le proposer a la traduction ne pouvait
+     produire qu'une entree identique au francais partout — que la fusion refuse,
+     a juste titre. On l'ecarte a la source. */
+  if (/^[\w.-]+\/[\w./-]+$/.test(t) || /\.(md|js|mjs|json|html|css|ya?ml)$/i.test(t)) return;
   if (/^[\d\s.,:;%+\-–—·•|/€$()]*$/.test(t)) return;
   if (dejaTraduit.has(t)) return;
   /* MESSAGES COMPOSES. aria-label="Niveau '+(lv.idx+1)+', '+attr(lv.name)+'…"
@@ -286,23 +300,51 @@ for (const [re, genre] of CONTEXTES) {
 }
 
 /* ---------- 2 bis. LE HTML CONSTRUIT DANS DU JAVASCRIPT ---------------------
-   el.innerHTML = '<div class="t-section">Boisson du moment</div>' + … : le titre
-   est un texte lu par tout le monde, mais il vit dans une chaine qui contient des
-   balises. Le contexte « innerHTML » ci-dessus refuse les chevrons, justement
-   pour ne pas relever du balisage — il laissait donc passer tous les ecrans
-   assembles a la volee, dont la section « Boisson du moment » de l'accueil.
+   el.innerHTML = '<span class="t">Tes alertes</span>' + '<div>On te previent…</div>'
+     + rows + '</div>';
 
-   On relit ces chaines a part, et on n'en garde que ce qui est ENTRE deux
-   balises : le texte, jamais le balisage. Les fragments qui portent une
-   concatenation sont ecartes plus loin, comme partout ailleurs. */
+   PREMIERE VERSION : on partait de « innerHTML = » et on lisait la chaine qui
+   suit. Elle ne voyait donc QUE LE PREMIER MORCEAU. Or ces ecrans sont assembles
+   en dix, vingt morceaux colles bout a bout, et tout ce qui venait apres le
+   premier « + » restait invisible. C'est ainsi que la carte « Tes alertes » —
+   son titre, sa phrase d'explication — est restee francaise dans les neuf autres
+   langues alors que l'inventaire annoncait zero.
+
+   ON NE PART PLUS DE L'AFFECTATION, MAIS DE LA CHAINE. Toute chaine du
+   JavaScript qui contient du balisage est relue, d'ou qu'elle vienne : une
+   affectation, un return, un argument de fonction, le dixieme morceau d'une
+   concatenation. On n'en garde que ce qui est ENTRE deux balises — le texte,
+   jamais le balisage. Les fragments porteurs d'une concatenation sont ecartes
+   plus loin, comme partout ailleurs. */
 {
-  const re = /\b(?:innerHTML|outerHTML)\s*=\s*(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\$]|\\.)*)`)/g;
+  const re = new RegExp(CHAINE, "g");
   let m;
   while ((m = re.exec(scripts))) {
     const html = m[1] !== undefined ? m[1] : (m[2] !== undefined ? m[2] : m[3]);
-    if (!html || html.indexOf("<") < 0) continue;
-    for (const t of html.matchAll(/>([^<>]{3,200})</g))
-      ajoute(t[1], "html", m.index, /admin/i.test(fonctionEn(m.index)), ZONE_CODE);
+    if (!html || html.indexOf("<") < 0 || html.indexOf(">") < 0) continue;
+    /* 400 et non 200 : un paragraphe d'explication de 224 caracteres — « La
+       regle : annoncer une boisson en stock rapporte des points… » — tombait
+       juste au-dela de l'ancienne limite et n'etait jamais releve. Les textes
+       les plus longs sont souvent les plus lus. */
+    const pose = (txt) => ajoute(txt, "html", m.index,
+      /admin/i.test(fonctionEn(m.index)), ZONE_CODE_HTML);
+    for (const t of html.matchAll(/>([^<>]{3,400})</g)) pose(t[1]);
+
+    /* LE TEXTE QUI DEBORDE DU MORCEAU. Un ecran assemble par concatenation coupe
+       ou ca l'arrange, pas la ou le balisage se ferme :
+
+         '<b>La regle :</b> annoncer une boisson en stock rapporte des points…'
+
+       La phrase court jusqu'au BOUT de la chaine : aucun « < » derriere elle, donc
+       le motif « >texte< » ne la voyait pas. C'est ainsi qu'un paragraphe entier,
+       lu par tout le monde sur l'ecran des points, est reste francais dans les
+       neuf autres langues alors que trois outils annoncaient zero.
+       On releve donc aussi la queue apres le dernier « > », et la tete avant le
+       premier « < » — le morceau suivant commence souvent en plein texte. */
+    const queue = html.slice(html.lastIndexOf(">") + 1);
+    if (queue.indexOf("<") < 0) pose(queue);
+    const tete = html.slice(0, html.indexOf("<"));
+    if (tete.indexOf(">") < 0) pose(tete);
   }
 }
 

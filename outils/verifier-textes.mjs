@@ -97,7 +97,15 @@ for (const cle of Object.keys(TEXTES)) {
   const e = TEXTES[cle];
   const manque = LANGUES.filter((l) => !e[l] || !String(e[l]).trim());
   if (manque.length) vides.push(cle + " — manque : " + manque.join(", "));
-  else if (LANGUES.every((l) => String(e[l]).trim() === cle.trim())) suspectes.push(cle);
+  /* UN NOM PROPRE S'ÉCRIT PAREIL PARTOUT, ET C'EST LA BONNE RÉPONSE.
+     « Intermarché », « Coca-Cola », « Magofeed » : identiques dans les dix
+     langues parce qu'une enseigne ne se traduit pas. Les signaler comme « source
+     recopiée » fait échouer le contrôle sur une entrée parfaitement juste — et
+     un contrôle qui se trompe finit par ne plus être lu. On n'alerte donc que
+     sur les entrées qui contiennent PLUSIEURS mots : une phrase identique dans
+     les neuf langues, elle, est bien le signe qu'on a oublié de traduire. */
+  else if (/\s/.test(cle.trim())
+           && LANGUES.every((l) => String(e[l]).trim() === cle.trim())) suspectes.push(cle);
 }
 
 const bloc = (titre, liste, explication) => {
