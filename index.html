@@ -12637,7 +12637,17 @@ function initLeafletMap(lat,lng){
   // Clustering des magasins
   if(curSel && window.L.markerClusterGroup){
     var cluster=L.markerClusterGroup({
-      maxClusterRadius:60,
+      /* Meme correctif que la carte Explorer, et il compte double ici : c'est
+         l'ecran ou l'on DESIGNE un magasin. Le rayon etait fige a 60 px a tous
+         les zooms, donc on gardait des bulles de comptage meme colle a la rue ;
+         et deux magasins aux memes coordonnees, une fois la bulle ouverte, se
+         recouvraient — impossible d'atteindre celui du dessous. Rayon
+         degressif + eventail : plus aucun magasin hors de portee du doigt. */
+      maxClusterRadius:rayonRegroupement,
+      spiderfyOnMaxZoom:true,
+      spiderfyDistanceMultiplier:1.6,
+      spiderLegPolylineOptions:{weight:2,color:"#8c8378",opacity:.8},
+      chunkedLoading:true,
       showCoverageOnHover:false,
       iconCreateFunction:function(c){
         var n=c.getChildCount();
@@ -12684,6 +12694,11 @@ function populateClusterMarkers(cluster){
     stores=(STORES||[]).filter(function(s){return typeof s.lat==="number";})
       .slice().sort(function(a,b){return(a.dist||9e9)-(b.dist||9e9);}).slice(0,30);
   }
+  /* Un seul appel a addLayers a la fin : le greffon calcule ses groupes UNE
+     fois pour tout le lot. Marqueur par marqueur, il recalculait la grille a
+     chaque ajout — c'est le piege classique, et il coute cher des la centaine
+     de magasins. */
+  var _lot=[];
   stores.forEach(function(s){
     if(!s.lat||!s.lng)return;
     var color=brandColor(s.brand);
@@ -12716,8 +12731,10 @@ function populateClusterMarkers(cluster){
     marker._brand=s.brand||"";
     var storeIdForSheet=String(s.id);
     marker.on("click",function(){routeFromMarker(storeIdForSheet);});
-    marker.addTo(cluster);
+    _lot.push(marker);
   });
+  if(cluster.addLayers)cluster.addLayers(_lot);
+  else _lot.forEach(function(m){cluster.addLayer(m);});
   return stores;
 }
 /* Plein ecran carte : la boite passe en fixe pleine fenetre, Leaflet recalcule
@@ -14167,6 +14184,37 @@ function ensureCluster(onDone){
   sc.onload=go; sc.onerror=go;
   document.head.appendChild(sc);
   setTimeout(go,6000);   // jamais d'attente infinie
+}
+
+/* ── RAYON DE REGROUPEMENT, PALIER PAR PALIER ─────────────────────────────
+   Le defaut vu en vrai, capture a l'appui : une bulle « 2 » apparaissait deja
+   au zoom 14 ; on zoomait dessus, et il ne restait QU'UN magasin. Deux causes
+   ajoutees l'une a l'autre :
+     - le rayon etait fige a 1 px sous le zoom 14, donc on ne regroupait que
+       les magasins quasi superposes -> des « 2 » isoles au milieu des points,
+       la ou une vraie bulle de comptage aurait du dire « 40 » ;
+     - le regroupement etait COUPE au-dela du zoom 15, donc deux magasins aux
+       memes coordonnees se dessinaient l'un SUR l'autre : le second devenait
+       invisible et intouchable. La carte perdait un magasin en silence
+       pendant que le compteur de l'en-tete continuait de le compter.
+   Le rayon suit donc le zoom, comme chez Uber Eats ou Google Maps : large
+   quand on regarde une region (peu de grosses bulles, mais qui annoncent le
+   VRAI nombre), etroit dans la rue (un point par magasin). Et on ne coupe
+   JAMAIS le regroupement : c'est lui, et lui seul, qui garantit qu'un magasin
+   superpose a un autre reste compte, visible et atteignable au doigt — au
+   pire dans un eventail (spiderfy) quand zoomer ne peut plus les separer.
+   Reperes de lecture (a 50° de latitude, ~1 px vaut) : zoom 13 ~13 m,
+   zoom 15 ~3,3 m, zoom 17 ~0,8 m, zoom 19 ~0,2 m. Deux magasins a 15 m se
+   separent donc vers le zoom 17, deux magasins a 100 m des le zoom 14. */
+function rayonRegroupement(zoom){
+  if(zoom<=10)return 100;   // pays / region : quelques grosses bulles
+  if(zoom<=12)return 75;    // ville
+  if(zoom===13)return 55;
+  if(zoom===14)return 42;   // arrondissement
+  if(zoom===15)return 30;   // quartier : ca commence a se separer
+  if(zoom===16)return 20;
+  if(zoom===17)return 12;   // rue : un point par magasin
+  return 8;                 // 18-19 : plus que les vrais chevauchements
 }
 
 /* La pastille d'un groupe. Dessinee a la main plutot qu'avec le style par
@@ -18131,36 +18179,32 @@ function openExploreMap(opts){
       var darkE=document.body.classList.contains("dark");
       fondMago(darkE).addTo(exploreMap);
       /* Regroupement si le greffon est la, sinon simple couche : la carte
-         s'affiche dans les deux cas. disableClusteringAtZoom : au-dela, on
-         est assez pres pour que chaque magasin merite son propre pin. */
+         s'affiche dans les deux cas. */
       exploreLayer=(window.L&&L.markerClusterGroup)
         ? L.markerClusterGroup({
             chunkedLoading:true,          // ajout par paquets : l'interface ne gele pas
-            /* Le rayon etait fixe a 55 px jusqu'au zoom 17 : a l'echelle d'une
-               ville, TOUT se regroupait et on ne voyait que des bulles de
-               comptage, jamais les magasins. C'est ce qui donnait l'aspect
-               grumeleux au lieu du semis de points d'Uber Eats.
-               Un point de palier 0 coute 1 noeud DOM contre 5 pour un pin
-               complet : on peut donc en montrer beaucoup. On ne regroupe plus
-               que ce qui se chevauche vraiment, palier par palier. */
-            maxClusterRadius:function(zoom){
-              /* Aux paliers larges, l'eclaircissement par grille garantit deja
-                 qu'aucun marqueur n'en recouvre un autre : regrouper par-dessus
-                 ne ferait que remplacer un semis lisible par des bulles de
-                 comptage. On ne regroupe donc qu'a partir du palier « rue »,
-                 la ou les pins complets peuvent vraiment se chevaucher. */
-              return zoom<=14?1:40;
-            },
-            /* Il fallait zoomer jusqu'au niveau 17 — deux ou trois rues — pour
-               que les bulles de comptage se defassent et laissent voir les
-               magasins un par un. Beaucoup trop tard : on veut les voir en
-               regardant un quartier.
-               Sur un telephone de 390 px de large, le niveau 15 couvre ~1,2 km
-               (rayon ~590 m) et le niveau 16 ~590 m (rayon ~295 m). Defaire les
-               regroupements des 15 met donc les magasins a nu bien au-dela des
-               300-400 m demandes. */
-            disableClusteringAtZoom:15,
-            spiderfyOnMaxZoom:false,
+            // Voir rayonRegroupement() : large de loin, etroit dans la rue.
+            maxClusterRadius:rayonRegroupement,
+            /* disableClusteringAtZoom a ete RETIRE, et c'est le coeur du
+               correctif. Il coupait tout regroupement des le zoom 15 : a
+               partir de la, deux magasins aux memes coordonnees etaient
+               dessines l'un sur l'autre et le second disparaissait — pas
+               regroupe, juste cache. Sans ce reglage, le greffon garde une
+               grille jusqu'au zoom maximal de la carte (19) : ce qui ne peut
+               pas etre separe reste une bulle honnete plutot qu'un magasin
+               escamote. */
+            /* Toucher une bulle zoome sur son contenu (zoomToBoundsOnClick,
+               actif par defaut). Quand le contenu ne peut PLUS se separer —
+               coordonnees identiques — le greffon ouvre l'eventail au lieu de
+               zoomer dans le vide : c'est ce que fait spiderfyOnMaxZoom, qui
+               etait desactive. Chaque magasin redevient donc atteignable au
+               doigt, meme empile sur un autre. */
+            spiderfyOnMaxZoom:true,
+            /* Un pin fait 30 px de large : l'ecartement par defaut collait les
+               branches de l'eventail les unes aux autres et on ne pouvait plus
+               viser au pouce. */
+            spiderfyDistanceMultiplier:1.6,
+            spiderLegPolylineOptions:{weight:2,color:"#8c8378",opacity:.8},
             showCoverageOnHover:false,
             iconCreateFunction:exploreClusterIcon
           })
@@ -18728,44 +18772,25 @@ function exploreLoadStores(useCache){
        getZoom() 800 fois couterait plus cher que tout le reste. */
     var _zNiv=14; try{_zNiv=exploreMap.getZoom();}catch(eZ){}
     var _palier=_zNiv<=12?0:(_zNiv<=14?1:2);
-    /* ECLAIRCISSEMENT PAR GRILLE, aux paliers larges seulement.
-       A l'echelle d'une ville, deux magasins distants de 20 m tombent sur le
-       meme pixel : en dessiner un par-dessus l'autre ne montre rien de plus,
-       ca ne fait que payer des noeuds DOM. On decoupe donc l'ecran en cellules
-       et on ne garde que le magasin le plus informatif de chaque cellule —
-       stock confirme d'abord, puis certifie, puis vendeur.
-       Ce n'est pas cacher des magasins : c'est dessiner ce qui est dessinable a
-       cette echelle. Le compteur de l'en-tete continue d'annoncer le VRAI
-       nombre, et des le zoom suivant tout reapparait. */
+    /* PLUS D'ECLAIRCISSEMENT PAR GRILLE — c'etait le mensonge principal.
+       Sous le zoom 15, le code ne gardait QU'UN magasin par cellule de 34 a
+       42 px : les autres n'etaient pas regroupes, ils etaient JETES. On voyait
+       donc « 12 magasins » dans l'en-tete au-dessus de 5 points, et zoomer sur
+       une bulle « 2 » ne revelait qu'un seul magasin puisque l'autre avait ete
+       ecarte du lot avant meme d'etre dessine.
+       Ce que la grille economisait, le regroupement le fait mieux : il est
+       fait pour des milliers de marqueurs (chunkedLoading + grille interne
+       par zoom), il n'en perd aucun, et sa bulle porte le VRAI nombre.
+       On envoie donc TOUTE la liste visible au regroupement. */
     var _pourCarte=list;
-    if(_palier<2&&list.length>60){
-      try{
-        var _cell=_palier===0?34:42, _grille={}, _rang=function(x){
-          var _d=exploreFilter?exploreFilter.drinkId:null;
-          if(_d&&(storeVerifiedFor(x,_d)||((x.confirmations||{})[_d]||0)>0))return 3;
-          if(storeCertifie(x))return 2;
-          if(!exploreFilter||x._hasDrink)return 1;
-          return 0;
-        };
-        list.forEach(function(x){
-          if(typeof x.lat!=="number"||typeof x.lng!=="number")return;
-          var pt=exploreMap.latLngToContainerPoint([x.lat,x.lng]);
-          var k=Math.round(pt.x/_cell)+":"+Math.round(pt.y/_cell);
-          var cur=_grille[k];
-          if(!cur||_rang(x)>_rang(cur))_grille[k]=x;
-        });
-        var _clair=[];
-        Object.keys(_grille).forEach(function(k){_clair.push(_grille[k]);});
-        if(_clair.length)_pourCarte=_clair;
-      }catch(eG){}
-    }
-    /* Seuls les MARQUEURS sont eclaircis. La liste du bas et les compteurs
-       continuent de parler de tous les magasins de la zone : sinon la carte
-       dirait « 25 magasins » la ou il y en a 800. */
     var _lot=[], _avant=0;
-    /* Les plus proches d'abord, pour que les six mis en avant soient ceux qui
-       servent vraiment — pas les six premiers du tableau. */
-    if(_palier<2&&typeof userLat==="number"&&userLat&&typeof _distM==="function"){
+    /* Les plus proches d'abord, pour deux raisons : les six mis en avant sont
+       alors ceux qui servent vraiment (pas les six premiers du tableau), et si
+       le plafond de 3000 devait un jour mordre, ce sont les magasins les plus
+       LOINTAINS qui sauteraient — pas six magasins au hasard sous le nez de
+       celui qui regarde. Le tri vaut donc a tous les paliers, pas seulement
+       aux larges. */
+    if(typeof userLat==="number"&&userLat&&typeof _distM==="function"){
       try{ _pourCarte=_pourCarte.slice().sort(function(a,b){
         return _distM(userLat,userLng,a.lat,a.lng)-_distM(userLat,userLng,b.lat,b.lng);}); }catch(eS){}
     }
@@ -18786,9 +18811,10 @@ function exploreLoadStores(useCache){
       var certif=storeCertifie(s);
       /* « Mis en avant » facon Uber Eats : quelques marqueurs lisibles au
          milieu d'un semis de points. Si TOUS les magasins sûrs passaient en
-         gros, il n'y aurait plus aucun contraste — c'est justement ce que
-         l'eclaircissement produit, puisqu'il retient les meilleurs de chaque
-         cellule. On plafonne donc a six, les plus proches d'abord. */
+         gros, il n'y aurait plus aucun contraste. On plafonne donc a six, les
+         plus proches d'abord (d'ou le tri par distance juste au-dessus).
+         C'est un choix de DESSIN, pas de contenu : les autres restent tous
+         sur la carte, en point simple. */
       var _enAvant=(sure||certif)&&_avant<6;
       if(_enAvant)_avant++;
       var cls="mago-pin"+(closed?" closed":"")+(sure?" sure":"")+(certif?" certif":"");
@@ -19409,9 +19435,16 @@ function refreshNotifState(){
     else sub.textContent=((window.LANGS&&LANGS[window.curLang])||(window.LANGS&&LANGS.fr)||{}).notifsSub
       ||"Sois prévenu quand une boisson que tu chasses est repérée près de toi";
   }
-  // La ligne "Tester la notification" n'a de sens qu'une fois le push actif.
-  var tr=document.getElementById("notif-test-row");
-  if(tr)tr.style.display=(on&&window._pushToken)?"":"none";
+  /* La ligne "Tester la notification" n'a de sens qu'une fois le push actif.
+     Elle s'appelait « tr » : var etant hisse en haut de la fonction, ce nom
+     MASQUAIT la fonction de traduction tr() pour toute la fonction — donc les
+     tr("Bloquées par le téléphone…") vingt lignes plus haut levaient
+     « tr is not a function ». Comme ca partait pendant le demarrage, le filet
+     de securite affichait l'ecran « L'appli n'a pas reussi a demarrer » par
+     dessus TOUTE l'application. Vu en test des que la permission de
+     notification vaut "denied". */
+  var ligneTest=document.getElementById("notif-test-row");
+  if(ligneTest)ligneTest.style.display=(on&&window._pushToken)?"":"none";
   try{updateHuntRadiusUI();}catch(e){}
 }
 /* Un tap = on allume ou on éteint. Plus de « appuie sur le texte ». */
