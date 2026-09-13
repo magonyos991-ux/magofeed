@@ -11420,46 +11420,80 @@ function drinkIconHTML(d){
   return '<img src="'+url+'" alt="" style="width:100%;height:100%;object-fit:contain;background:#fff;padding:7%;box-sizing:border-box;border-radius:inherit" onerror="if(this.parentNode)this.parentNode.innerHTML=window._genBottle">';
 }
 /* Verification stricte du produit OpenFoodFacts avant d'accepter sa photo :
-   1) la marque doit correspondre ;
+   1) la marque doit correspondre MOT POUR MOT ;
    2) la majorite des mots distinctifs du nom aussi (les mots "original/classic"
       sont optionnels : la fiche OFF de l'original s'appelle souvent juste
       "Monster Energy") ;
-   3) et surtout : si la fiche OFF contient un mot de VARIANTE (white, zero,
-      cherry, mango...) que la boisson n'a pas, on REFUSE. C'est ce point qui
-      manquait et qui a fait accepter la photo du Monster Ultra White pour
-      le Monster Energy original. */
+   3) si la fiche OFF contient un mot de VARIANTE (white, zero, cherry,
+      mango...) que la boisson n'a pas, on REFUSE. C'est ce point qui manquait
+      et qui a fait accepter la photo du Monster Ultra White pour le Monster
+      Energy original ;
+   4) la fiche doit etre une BOISSON, et quand elle ne dit NI sa categorie NI
+      sa marque, on refuse (voir offImageMatches). */
 var OFF_OPTIONAL_WORDS=["original","originale","classic","classique","regular","nature","energy","drink"];
 var OFF_VARIANT_WORDS=["edition","zero","light","diet","sugarfree","ultra","white","blanc","blanche","noir","black","cherry","cerise","vanille","vanilla","mango","mangue","watermelon","pasteque","citron","lemon","lime","peach","peche","tropical","paradise","rosa","gold","punch","exotic","exotique","fraise","strawberry","framboise","raspberry","orange","pomme","apple","raisin","grape","ananas","pineapple","coco","coconut","menthe","mint","mojito","cassis","myrtille","blueberry","grenade","pomegranate","abricot","apricot","poire","pear","kiwi","litchi","lychee","passion","goyave","guava","gingembre","ginger","sans","cafeine","decaf","max","intense","fusion","touch","sparkling","petillante","petillant","plate","green","vert","verte","rouge","red","blue","bleu","yellow","jaune","pink","rose","juiced","juice","assault","khaos","ripper","rehab","pipeline","loco"];
-/* Verrou categorie : la fiche doit etre une BOISSON. Les marques ombrelles
-   (PepsiCo...) taguent aussi leurs chips et snacks avec la marque mere :
-   sans ce verrou, un tube de chips Stax a illustre le Pepsi Original. */
-function offIsBeverage(p){
-  var tags=(p.categories_tags||[]).join(" ").toLowerCase();
-  if(!tags)return true; // fiche peu renseignee : les autres verrous (marque, nom, variantes) decident
-  if(/snack|chips|crisps|biscuit|cookie|cracker|chocolat|candy|bonbon|confection|cereal|cereale|sauce|soup|soupe|yaourt|yogurt|fromage|cheese|pizza|dessert|ice-cream|creme-glacee|pet-food|baby-food/.test(tags))return false;
-  return /beverage|boisson|drink|water|eaux|soda|juice|jus-de|nectar|\btea\b|the-glace|iced-tea|coffee|cafe|energy|smoothie|limonade|lemonade|sirop|syrup/.test(tags);
+/* Decoupe en MOTS normalises (sans accents, traits d'union en espaces).
+   Comparer des marques par sous-chaine etait le defaut de fond : "pepsi" est
+   contenu dans "pepsico", donc un tube de chips Elma Chips (groupe PepsiCo)
+   passait pour du Pepsi. Un mot n'est plus jamais un morceau d'un autre. */
+function offTokens(s){
+  return normFamilyTxt(s||"").split(/[^a-z0-9]+/).filter(Boolean);
+}
+/* Un mot distinctif est trouve s'il est un mot entier de la fiche, ou s'il en
+   commence / termine un (les fiches OFF collent les mots : "Fuzetea" pour
+   "Fuze Tea"). Jamais au milieu : c'est la ou naissent les faux positifs. */
+function offWordHit(w,tokens){
+  if(tokens.indexOf(w)!==-1)return true;
+  for(var i=0;i<tokens.length;i++){
+    var t=tokens[i];
+    if(t.length>w.length&&(t.indexOf(w)===0||t.lastIndexOf(w)===t.length-w.length))return true;
+  }
+  return false;
+}
+/* Verrou categorie a TROIS reponses : true = boisson, false = pas une boisson,
+   null = la fiche ne dit rien. Les marques ombrelles (PepsiCo...) taguent
+   aussi leurs chips et snacks avec la marque mere ; et beaucoup de fiches
+   n'ont AUCUN categories_tags — c'est precisement le cas du tube de chips
+   Stax qui a illustre le Pepsi Original. Ce "null" doit donc rendre le reste
+   du filtre plus severe, pas plus laxiste (avant : return true). */
+function offBeverageVerdict(p){
+  var tags=((p&&p.categories_tags)||[]).join(" ").toLowerCase();
+  if(!tags)return null;
+  if(/snack|chips|crisps|popcorn|salgadinho|biscuit|cookie|cracker|chocolat|candy|bonbon|confection|cereal|cereale|sauce|soup|soupe|yaourt|yogurt|fromage|cheese|pizza|dessert|ice-cream|creme-glacee|pet-food|baby-food|peanut|cacahuete|nuts|legumes|meat|viande|fish|poisson|pasta|pates|rice|riz|bread|pain|spread|pate-a-tartiner/.test(tags))return false;
+  return /beverage|boisson|drink|water|eaux|soda|juice|jus-de|nectar|\btea\b|the-glace|iced-tea|coffee|cafe|energy|smoothie|limonade|lemonade|sirop|syrup/.test(tags)?true:false;
 }
 function offImageMatches(d,p){
-  if(!offIsBeverage(p))return false;
-  var pBrands=normFamilyTxt(p.brands||"");
-  var dBrand=normFamilyTxt(d.brand||"");
-  if(dBrand&&pBrands.indexOf(dBrand)===-1)return false;
-  var pName=normFamilyTxt((p.product_name_fr||p.product_name||""));
+  if(!d||!p)return false;
+  var verdict=offBeverageVerdict(p);
+  if(verdict===false)return false;               // chips, snacks, biscuits...
+  var pName=normFamilyTxt(p.product_name_fr||p.product_name||"");
   if(!pName)return false;
-  var dTokens=normFamilyTxt(d.name+" "+d.brand).split(/[^a-z0-9]+/).filter(Boolean);
+  var pNameTokens=pName.split(/[^a-z0-9]+/).filter(Boolean);
+  var pBrandTokens=offTokens(p.brands);
+  var dBrandTokens=offTokens(d.brand);
+  /* 1) marque, MOT ENTIER. Elle peut venir du champ marques (le cas propre) ou
+     du nom du produit (beaucoup de fiches laissent "marques" vide). */
+  var brandInBrands=dBrandTokens.length>0&&dBrandTokens.every(function(t){return pBrandTokens.indexOf(t)!==-1;});
+  var brandInName=dBrandTokens.length>0&&dBrandTokens.every(function(t){return pNameTokens.indexOf(t)!==-1;});
+  if(dBrandTokens.length&&!brandInBrands&&!brandInName)return false;
+  /* 4) fiche muette sur sa categorie : on n'accepte QUE si son champ marques
+     porte vraiment la marque de la boisson. Sans categorie et sans marque
+     exploitable, rien ne prouve que la photo montre la bonne chose — et une
+     mauvaise photo est pire que pas de photo (le dessin prend le relais). */
+  if(verdict===null&&!brandInBrands)return false;
   // 3) mots de variante etrangers dans la fiche OFF -> refus
-  var pTokens=pName.split(/[^a-z0-9]+/).filter(Boolean);
-  for(var i=0;i<pTokens.length;i++){
-    if(OFF_VARIANT_WORDS.indexOf(pTokens[i])!==-1&&dTokens.indexOf(pTokens[i])===-1)return false;
+  var dTokens=offTokens(d.name+" "+d.brand);
+  for(var i=0;i<pNameTokens.length;i++){
+    if(OFF_VARIANT_WORDS.indexOf(pNameTokens[i])!==-1&&dTokens.indexOf(pNameTokens[i])===-1)return false;
   }
-  // 2) mots distinctifs requis (hors tokens de la marque et hors mots optionnels)
-  var brandTokens=dBrand.split(/[^a-z0-9]+/).filter(Boolean);
-  var words=normFamilyTxt(d.name).split(/[^a-z0-9]+/).filter(function(w){
-    return w.length>=3&&brandTokens.indexOf(w)===-1&&OFF_OPTIONAL_WORDS.indexOf(w)===-1;
+  // 2) mots distinctifs requis (hors mots de la marque et hors mots optionnels)
+  var words=offTokens(d.name).filter(function(w){
+    return w.length>=3&&dBrandTokens.indexOf(w)===-1&&OFF_OPTIONAL_WORDS.indexOf(w)===-1;
   });
   if(!words.length)return true;
+  var hay=pNameTokens.concat(pBrandTokens);
   var hits=0;
-  words.forEach(function(w){if(pName.indexOf(w)!==-1||pBrands.indexOf(w)!==-1)hits++;});
+  words.forEach(function(w){if(offWordHit(w,hay))hits++;});
   return hits/words.length>=0.6;
 }
 function fetchVerifiedOFFImage(d){
@@ -11509,12 +11543,12 @@ function fetchVerifiedOFFImage(d){
           }else{
             imgCache[key]={url:null,ts:Date.now()};
           }
-          try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+          try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
           if(userPhoto){refreshDrinkVisual(d);renderTrends();}
         });
       }
       imgCache[key]=best?{url:best.image_front_url||best.image_front_small_url,ts:Date.now()}:{url:null,ts:Date.now()};
-      try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){/* quota */}
+      try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){/* quota */}
       delete imgFetchInFlight[key];
       if(best){
         refreshDrinkVisual(d);
@@ -11914,7 +11948,7 @@ function adminRemoveDrink(){
   var idx=DRINKS.findIndex(function(x){return x.id===d.id;});
   if(idx!==-1)DRINKS.splice(idx,1);
   delete imgCache[String(d.id)];
-  try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+  try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
   if(window.fbRemoveCatalogDrink)window.fbRemoveCatalogDrink(d.id).catch(function(e){console.warn(e);toast("Suppression distante \u00E9chou\u00E9e");});
   playSound("pop");
   toast("\u00AB "+d.name+" \u00BB retir\u00E9e du catalogue");
@@ -12504,7 +12538,7 @@ function adminFixPhoto(){
   var key=String(d.id);
   if(/^x$/i.test(input)){
     imgCache[key]={url:null,ts:Date.now(),manual:true};
-    try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+    try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
     refreshDrinkVisual(d);
     toast("Photo retir\u00E9e (canette stylis\u00E9e) \u2014 sur cet appareil");
     return;
@@ -12515,7 +12549,7 @@ function adminFixPhoto(){
       playSound("err");return;
     }
     imgCache[key]={url:url,ts:Date.now(),manual:true};
-    try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+    try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
     refreshDrinkVisual(d);
     renderTrends();
     if(window.fbSaveDrinkImage)window.fbSaveDrinkImage(key,url);
@@ -12534,7 +12568,7 @@ function adminFixPhoto(){
     if(!url){toast("Cette fiche n'a pas de photo");playSound("err");return;}
     // Garde-fou meme en manuel : les marques ombrelles polluent les recherches
     // (fiche de chips Stax trouvee en cherchant "Pepsi"). L'admin peut forcer.
-    if(!offIsBeverage(p)){
+    if(offBeverageVerdict(p)===false){
       var pn=(p.product_name_fr||p.product_name||"cette fiche");
       if(!confirm("\u00AB "+pn+" \u00BB n'est pas class\u00E9e comme une boisson (chips/snack ?).\nUtiliser sa photo quand m\u00EAme ?"))return;
     }
@@ -16177,7 +16211,7 @@ function drinkPhotoBtn(){
       var save=window.fbApplyDrinkPhoto?window.fbApplyDrinkPhoto(d.id,data):Promise.reject(new Error("hors-ligne"));
       save.then(function(){
         imgCache[key]={url:data,ts:Date.now(),community:true};
-        try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+        try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
         refreshDrinkVisual(d);
         try{renderTrends();}catch(e){}
         try{renderResults();}catch(e){}
@@ -17116,7 +17150,7 @@ function submitProposal(){
       try{mergeCatalog([res.entry]);}catch(e){console.warn(e);}
       if(photoData){
         imgCache[String(res.entry.id)]={url:photoData,ts:Date.now(),community:true,manual:true};
-        try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+        try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
         var dr=DRINKS.find(function(x){return String(x.id)===String(res.entry.id);});
         if(dr){try{refreshDrinkVisual(dr);}catch(e){}}
       }
@@ -22706,7 +22740,7 @@ function renderPhotoSuggestions(){
         var did=String(r.drinkId);
         if(window.fbApplyDrinkPhoto)window.fbApplyDrinkPhoto(did,r.data).catch(function(e){console.warn(e);});
         imgCache[did]={url:r.data,ts:Date.now(),community:true,manual:true};
-        try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(e){}
+        try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
         var dr=DRINKS.find(function(x){return Number(x.id)===Number(r.drinkId);});
         if(dr)refreshDrinkVisual(dr);
         renderTrends();
@@ -24579,7 +24613,7 @@ try{
       if(!imgCache[k]||!imgCache[k].url){imgCache[k]={url:url,ts:Date.now()};applied++;}
     });
     if(applied){
-      try{localStorage.setItem("magoImgCache3",JSON.stringify(imgCache));}catch(err){}
+      try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(err){}
       // Le lot de photos communautaires vient d'arriver : UNE recomposition de
       // la vitrine (puis la selection reste figee pour la session).
       window._homeTop8=null;
