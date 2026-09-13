@@ -126,11 +126,6 @@ const FONCTIONS_ADMIN = new Set([
   "renderPhotoSuggestions", "promoteDiscovery", "rejectDiscovery",
   "rejectDiscoveryPhoto", "renderFounderDash", "renderDemandAdmin",
   "renderFeedbackAdmin",
-  /* buildChainSets ne contient pas des phrases mais des CLES DE RAPPROCHEMENT :
-     "mountain dew sans" sert a retrouver une boisson dans le catalogue, pas a
-     etre lu. La traduire casserait le rapprochement sans rien afficher de
-     mieux. */
-  "buildChainSets",
   /* Cas a part, et pour une tout autre raison : generatePseudo tire au sort un
      surnom dans deux listes de mots. Ce ne sont pas des phrases d'interface,
      ce sont des noms de personnes. Traduire « Panthere » ferait qu'un meme
@@ -171,6 +166,18 @@ for (const b of blocs) {
        panneau d'administration, qui sont presque toutes ecrites ainsi. */
     if (n.type === "VariableDeclarator" && n.id && FONCTIONS_ADMIN.has(n.id.name) &&
         n.init && /Function|ArrowFunction/.test(n.init.type)) dansConsole = true;
+    /* Une liste faite ENTIEREMENT de chaines en minuscules n'est pas du texte
+       d'interface : c'est une table de rapprochement. ["hamoud boualem",
+       "la cigogne", "mountain dew sans"] sert a retrouver une boisson dans le
+       catalogue, jamais a etre lu. Une phrase affichee commence par une
+       majuscule ou porte une ponctuation de phrase — ces listes, non. Sans
+       cette regle, chaque marque ajoutee au catalogue revenait dans le
+       rapport comme du francais a traduire, et il fallait la nommer a la
+       main : un controle qui reclame une exception a chaque livraison finit
+       par etre ignore. */
+    if (n.type === "ArrayExpression" && n.elements.length >= 3 &&
+        n.elements.every((e) => e && e.type === "Literal" && typeof e.value === "string" &&
+                                e.value === e.value.toLowerCase() && !/[.!?:;]/.test(e.value))) dansConsole = true;
     /* Un appel tr("…") ou trh("…", …) est une promesse : le code annonce que
        cette phrase est traduisible. Si elle n'est pas dans la table, la
        promesse est vide — l'utilisateur voit du francais et rien ne le dit.
