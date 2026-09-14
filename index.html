@@ -3306,20 +3306,34 @@ function _magasinConnu(storeId) {
   }
   return null;
 }
-window.fbAddDrinkToStore = async function(storeId, drinkId) {
+/* VU, OU SEULEMENT SU ? Deux ecritures differentes, et c'est toute la valeur
+   de l'app qui tient a cette distinction.
+   `drinks` dit « on en trouve probablement ici ». `confirmations` dit « quelqu'un
+   l'a VUE », et c'est ce qui allume la pastille, nourrit les alertes et fait
+   apparaitre « vu par X ». Jusqu'ici, les deux etaient ecrits ensemble quelle
+   que soit la distance : depuis Bruxelles, on pouvait « confirmer » un Coca a
+   Seoul, et personne sur place ne pouvait distinguer cette ligne d'une vraie
+   observation. Le serveur, lui, refusait deja de payer au-dela de 500 metres —
+   les deux disent enfin la meme chose.
+   Signaler de loin reste utile (on connait le magasin d'a cote sans y etre) :
+   ca pose le rayon probable, pas le constat. */
+window.fbAddDrinkToStore = async function(storeId, drinkId, opts) {
   var s = _magasinConnu(storeId);
   /* L'identifiant recu EST celui du document : les magasins importes gardent
      leur identifiant OpenStreetMap comme nom de document. On peut donc ecrire
      meme quand la fiche n'est dans aucune liste en memoire. */
   var fbId = (s && s.fbId) || String(storeId || "");
   if (!fbId) throw new Error("magasin inconnu");
+  var vu = !opts || opts.vu !== false;
   var updates = {};
   updates["drinks"] = arrayUnion(Number(drinkId) || drinkId);
-  updates["confirmations." + drinkId] = increment(1);
-  var heure = Math.floor(Date.now() / 3600000) * 3600000;   // a l'heure, jamais a la minute
-  updates["seenAt." + drinkId] = heure;
-  updates["confirmedBy." + drinkId] = (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24);
-  updates["confirmedAt." + drinkId] = heure;
+  if (vu) {
+    updates["confirmations." + drinkId] = increment(1);
+    var heure = Math.floor(Date.now() / 3600000) * 3600000;   // a l'heure, jamais a la minute
+    updates["seenAt." + drinkId] = heure;
+    updates["confirmedBy." + drinkId] = (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24);
+    updates["confirmedAt." + drinkId] = heure;
+  }
   await window.fbUpdateDoc(window.fbDoc(window.db, "stores", fbId), updates);
 };
 
@@ -8161,6 +8175,35 @@ function confirmerRattachement(ctx,s){
 
 /* PRIVEE. N'appeler QUE depuis tagScanToStore, apres la fiche de relecture.
    Tout appel direct contourne la relecture. */
+/* LA PORTEE D'UN SIGNALEMENT, EN UN SEUL ENDROIT.
+   Trois regimes, et ils doivent etre les memes partout — la fiche, la carte,
+   le scan en rafale, la messagerie. Une regle recopiee a quatre endroits finit
+   par diverger, et c'est exactement le genre de divergence qu'on ne voit
+   qu'une fois les fausses donnees en base.
+
+     a moins de 500 m  : VU. Confirmation pleine, et le serveur credite.
+                         Meme seuil que crediterContribution (DIST_MAX_M) :
+                         deux regles differentes feraient mentir l'interface.
+     jusqu'a 100 km    : SU. On connait le magasin d'a cote sans y etre. Le
+                         rayon probable est pose, pas le constat.
+     au-dela           : REFUSE. On ne connait pas le rayon d'une superette de
+                         Seoul depuis Bruxelles. Ce n'est plus un souvenir,
+                         c'est une supposition — et elle s'afficherait a des
+                         gens qui, eux, sont sur place.
+
+   Position inconnue : on laisse passer en SU. Quelqu'un qui a refuse la
+   localisation n'est pas un tricheur, et son signalement restera probable. */
+var SIGNAL_SUR_PLACE_M = 500;
+var SIGNAL_PORTEE_M = 100000;
+function _regimeSignalement(s){
+  var d = (s && typeof s.dist === "number" && isFinite(s.dist)) ? s.dist : null;
+  if (d != null && d > SIGNAL_PORTEE_M) return { ok:false, vu:false, loin:true };
+  return { ok:true, vu:(d != null && d <= SIGNAL_SUR_PLACE_M), loin:false };
+}
+function _refusTropLoin(){
+  try{ toast("Trop loin pour signaler ce magasin \u00b7 il faut l'avoir vu, ou le conna\u00eetre"); }catch(e){}
+  try{ playSound("err"); }catch(e){}
+}
 /* UN SIGNALEMENT QUI ECHOUE DOIT LE DIRE.
    L'echec d'ecriture etait avale dans un console.warn : la personne lisait
    « Rattache · +3 pts », rangeait son telephone, et rien n'etait parti. Le
@@ -8182,6 +8225,18 @@ function _ecrireRattachement(s,ctx){
      donc de vrais points serveur en double. Avec une fiche de relecture, la
      personne qui doute va logiquement revalider : ce defaut serait devenu
      visible tous les jours. */
+  /* UNE LIMITE DURE, PARCE QUE « JE SAIS OU » A UNE PORTEE.
+     On peut signaler le magasin d'a cote sans y etre : on le connait. On ne
+     connait pas le rayon d'une superette de Seoul depuis Bruxelles. Au-dela de
+     cent kilometres, le signalement n'est plus un souvenir, c'est une
+     supposition — et elle s'afficherait a des gens qui, eux, sont sur place.
+     Cent kilometres est la distance que l'app emploie deja pour decider qu'un
+     chercheur est « vraiment trop loin » d'une chasse. Sans position connue, on
+     laisse passer : quelqu'un qui a refuse la localisation n'est pas un
+     tricheur, et son signalement restera de toute facon « probable ». */
+  var _reg=_regimeSignalement(s);
+  if(ctx.drinkId!=null&&!_reg.ok){ _refusTropLoin(); return; }
+  var _surPlace=_reg.vu;
   var tagKey="tag:"+(ctx.drinkId!=null?ctx.drinkId:(ctx.discoveryId!=null?"d"+ctx.discoveryId:"b"+ctx.pendingBarcode))+":"+sid;
   if(!awardFree(tagKey,FOREVER)){
     toast("D\u00e9j\u00e0 rattach\u00e9 \u00e0 "+sanitize(s.name));
@@ -8192,9 +8247,16 @@ function _ecrireRattachement(s,ctx){
     if(!s.drinks)s.drinks=[];
     var did=ctx.drinkId;
     if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
-    if(!s.confirmations)s.confirmations={};
-    s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
-    if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||sid,did).catch(_rattachementEchoue);
+    /* VU sur place, ou SU de memoire ? Seule une observation a moins de 500
+       metres devient une confirmation — le meme seuil que le serveur emploie
+       pour crediter. Au-dela, on pose le rayon probable sans pretendre que
+       quelqu'un l'a vue : sinon, depuis Bruxelles, on « confirmerait » un
+       rayon a Seoul, et personne sur place ne pourrait faire la difference. */
+    if(_surPlace){
+      if(!s.confirmations)s.confirmations={};
+      s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
+    }
+    if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||sid,did,{vu:_surPlace}).catch(_rattachementEchoue);
     /* La PREUVE que le serveur saura crediter (reports type "stock", +3) :
        ce chemin etait le seul a n'en laisser aucune. La carte l'ecrit deja
        elle-meme (mapStockReport), on ne double pas. */
@@ -8235,13 +8297,12 @@ function _ecrireRattachement(s,ctx){
      On dit desormais la meme chose que le serveur, avant lui. Le signalement
      reste enregistre dans les deux cas : il sert aux autres, il ne rapporte
      simplement rien. */
-  var _surPlace = (typeof s.dist === "number" && isFinite(s.dist) && s.dist <= 500);
   if(awardOnce(tagKey,FOREVER)){
     if(_surPlace){
       userStats.pts+=3;flyPts(3);
       toast("Rattach\u00E9 \u00E0 "+sanitize(s.name)+" \u00B7 +3 pts");
     }else{
-      toast("Not\u00E9 pour "+sanitize(s.name)+" \u00B7 les points arrivent quand tu le signales sur place");
+      toast("Not\u00E9 comme probable chez "+sanitize(s.name)+" \u00B7 confirme sur place pour la valider et gagner tes points");
     }
   }
   trackStoreContribution(sid);
@@ -16114,6 +16175,7 @@ function claimSubmit(){
 }
 function startRafale(){
   var s=curStoreDetail; if(!s){toast("Ouvre d'abord un magasin");return;}
+  if(!_regimeSignalement(s).ok){ _refusTropLoin(); return; }
   window._rafaleStore=s; window._rafaleCount=0; window._rafaleLast=null;
   show("scan");
   try{startScan();}catch(e){}
@@ -16168,9 +16230,15 @@ function rafaleAddCode(code){
   }
   if(!s.drinks)s.drinks=[];
   s.drinks.push(did);
-  if(!s.confirmations)s.confirmations={};
-  s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
-  if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(_rattachementEchoue);
+  /* Le scan en rafale part du magasin OUVERT, pas du magasin ou l'on est : on
+     peut tres bien scanner ses canettes chez soi apres avoir ouvert la fiche
+     d'ailleurs. La rafale suit donc la meme regle que le reste. */
+  var _regR=_regimeSignalement(s);
+  if(_regR.vu){
+    if(!s.confirmations)s.confirmations={};
+    s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
+  }
+  if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did,{vu:_regR.vu}).catch(_rattachementEchoue);
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
   window._rafaleCount=(window._rafaleCount||0)+1;
   try{if(awardOnce("tag:"+did+":"+String(s.id),FOREVER)){userStats.pts+=2;if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);}}catch(e){}
@@ -16261,9 +16329,16 @@ function addDrinkToStoreHere(d){
   if(!s.drinks)s.drinks=[];
   var did=d.id;
   if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
-  if(!s.confirmations)s.confirmations={};
-  s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
-  if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(_rattachementEchoue);
+  /* Meme regle que partout ailleurs : on peut ouvrir la fiche d'un magasin a
+     l'autre bout du monde, donc « ici » ne veut rien dire tant qu'on n'a pas
+     regarde la distance. */
+  var _reg=_regimeSignalement(s);
+  if(!_reg.ok){ _refusTropLoin(); return; }
+  if(_reg.vu){
+    if(!s.confirmations)s.confirmations={};
+    s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
+  }
+  if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did,{vu:_reg.vu}).catch(_rattachementEchoue);
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
   var key="tag:"+did+":"+String(s.id);
   if(awardOnce(key,FOREVER)){
@@ -24462,7 +24537,9 @@ function msgNoterEmplacement(sid,did){
   try{
     if(!s.drinks)s.drinks=[];
     var deja=s.drinks.some(function(x){return String(x)===String(d.id);});
-    if(!deja){s.drinks.push(d.id);if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||s.id,d.id).catch(function(e){console.warn(e);});}
+    var _regM=_regimeSignalement(s);
+    if(!_regM.ok){ _refusTropLoin(); return; }
+    if(!deja){s.drinks.push(d.id);if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||s.id,d.id,{vu:_regM.vu}).catch(_rattachementEchoue);}
     else if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||s.id,d.id,1);
     if(!s.confirmations)s.confirmations={};if(!s.confirmations[d.id])s.confirmations[d.id]=0;s.confirmations[d.id]++;
     try{_noterObservation(s,d.id,true);}catch(e){}
