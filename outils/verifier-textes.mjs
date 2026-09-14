@@ -86,6 +86,40 @@ const lisibleCode = code
      françaises — étaient déclarées orphelines à tort. */
   .replace(/\\(['"`])/g, "$1");
 
+/* ============================================================================
+   5. LE CONTROLE QUI MANQUAIT : tr("...") SUR UNE PHRASE ABSENTE DE LA TABLE
+   ----------------------------------------------------------------------------
+   Les quatre controles ci-dessus partent tous de la TABLE et cherchent dans le
+   code. Aucun ne faisait le chemin inverse — et c'est par la qu'une faute passe.
+
+   tr() ne signale jamais rien : si la phrase demandee n'est pas dans la table,
+   il rend le francais et poursuit. C'est ce qu'il faut a l'execution (mieux
+   vaut du francais qu'une case vide), mais cela veut dire qu'une phrase neuve
+   entourée de tr() s'affiche en francais dans les dix langues sans qu'un seul
+   avertissement n'apparaisse nulle part. C'est arrive : tr("Masquer"), ajoute
+   au glissement des conversations, etait absent de la table — et l'inventaire
+   le comptait comme traduit puisqu'il PASSE par tr().
+
+   On releve donc ici toutes les phrases litterales confiees a tr(), et on
+   verifie qu'elles existent. Les appels a variable — tr(x) — sont ignores : on
+   ne peut rien en dire sans executer le code. ============================== */
+const trAbsents = [];
+{
+  const vus = new Set();
+  /* tr("..."), tr('...') et tr(`...`) — sans interpolation : une phrase
+     composee a l'execution n'a pas de cle fixe a verifier. */
+  const re = /(?<![\w$.])tr\s*\(\s*(["'`])((?:\\.|(?!\1)[^\\])*)\1\s*[,)]/g;
+  let m;
+  while ((m = re.exec(lisibleCode))) {
+    const brut = m[2];
+    if (brut.includes("${")) continue;
+    const cle = brut.replace(/\\n/g, "\n").replace(/\\(.)/g, "$1");
+    if (!cle.trim() || vus.has(cle)) continue;
+    vus.add(cle);
+    if (!(cle in TEXTES)) trAbsents.push(cle);
+  }
+}
+
 const orphelines = [], echappees = [], suspectes = [], vides = [];
 for (const cle of Object.keys(TEXTES)) {
   if (/\\u[0-9A-Fa-f]{4}/.test(cle)) { echappees.push(cle); continue; }
@@ -128,6 +162,8 @@ ko += bloc("TRADUCTIONS MANQUANTES", vides,
   "une langue proposée par l'app n'a rien à afficher.");
 ko += bloc("TRADUCTIONS IDENTIQUES AU FRANÇAIS PARTOUT", suspectes,
   "la source a sans doute été recopiée au lieu d'être traduite.");
+ko += bloc("tr() SUR UNE PHRASE ABSENTE DE LA TABLE", trAbsents,
+  "le code la demande traduite ; elle restera en français dans les dix langues, sans rien signaler.");
 
 if (!ko) console.log("\nrien de bloquant : la table est complète et atteignable."
   + (orphelines.length ? "  (" + orphelines.length + " avertissement(s) ci-dessus)" : ""));
