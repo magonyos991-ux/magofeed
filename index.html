@@ -867,6 +867,9 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <div style="font-size:20px;font-weight:800" class="c1">Administration</div>
       </div>
       <div style="font-size:12.5px;color:var(--s2);margin:0 0 18px 46px">Découvertes de la communauté à valider</div>
+      <!-- Rattrapage des signalements qui n'ont pas atteint leur magasin :
+           le bouton constate d'abord, il ne répare que si on le redemande. -->
+      <div id="admin-rejouer" style="margin-bottom:18px"></div>
       <div id="admin-list"></div>
     </div>
     </div>
@@ -3148,6 +3151,51 @@ window.fbReportBadBarcode = async function(code, drinkId, drinkName, realName) {
 /* Dernières contributions de la communauté, pour l'admin : qui a signalé quoi
    (stock, rupture, découverte…) — afin de distinguer ses propres actions de
    celles des autres joueurs. Lecture réservée à l'admin par les règles. */
+/* REJOUER LES SIGNALEMENTS QUI N'ONT PAS ATTEINT LEUR MAGASIN.
+   Un signalement ecrit DEUX choses : un document `reports`, qui sert au credit
+   des points, et une mise a jour du magasin (`drinks` + `confirmations`), qui
+   sert a l'afficher sur la carte. La seconde cherchait le magasin dans la
+   liste chargee autour de MA position : hors de ce rayon, elle sortait sans
+   rien ecrire et sans le dire. Le rapport existait, la carte restait vide.
+   Le defaut est repare, mais les signalements deja faits sont a rattraper.
+   Cet outil relit les rapports recents et pose ce qui manque, sans rien
+   doubler : il lit d'abord le magasin, et n'ecrit que si la boisson n'y est
+   pas encore confirmee. On peut le relancer autant de fois qu'on veut. */
+window.fbRejouerSignalements = async function(jours, appliquer) {
+  const adm = await getDoc(doc(db, "admins", (auth.currentUser || {}).uid || "-"));
+  if (!adm.exists()) throw new Error("Reserve a l'administrateur");
+  const depuis = Date.now() - (Number(jours) || 30) * 86400000;
+  const snap = await getDocs(query(collection(db, "reports"), orderBy("createdAt", "desc"), limit(600)));
+  const aFaire = new Map();
+  snap.forEach(function(d) {
+    const r = d.data() || {};
+    if (r.type !== "stock" || r.storeId == null || r.drinkId == null) return;
+    const t = r.createdAt && r.createdAt.toMillis ? r.createdAt.toMillis() : 0;
+    if (t && t < depuis) return;
+    aFaire.set(String(r.storeId) + "|" + String(r.drinkId),
+      { storeId: String(r.storeId), drinkId: Number(r.drinkId) || r.drinkId, pseudo: r.byPseudo || null, at: t });
+  });
+  const res = { examines: aFaire.size, manquants: [], poses: 0, absents: [] };
+  for (const v of aFaire.values()) {
+    let st;
+    try { st = await getDoc(doc(db, "stores", v.storeId)); } catch (e) { continue; }
+    if (!st.exists()) { res.absents.push(v.storeId); continue; }
+    const d = st.data() || {};
+    const dedans = (d.drinks || []).some(function(x) { return Number(x) === Number(v.drinkId); });
+    const conf = Number((d.confirmations || {})[v.drinkId]) || 0;
+    if (dedans && conf > 0) continue;
+    res.manquants.push({ storeId: v.storeId, nom: d.name || null, drinkId: v.drinkId, pseudo: v.pseudo });
+    if (!appliquer) continue;
+    const patch = {};
+    patch["drinks"] = arrayUnion(Number(v.drinkId) || v.drinkId);
+    /* Valeur POSEE, pas incrementee : rejouer ne doit jamais gonfler un
+       compteur. Une confirmation deja presente est laissee telle quelle. */
+    if (conf <= 0) patch["confirmations." + v.drinkId] = 1;
+    await updateDoc(doc(db, "stores", v.storeId), patch);
+    res.poses++;
+  }
+  return res;
+};
 window.fbRecentReports = async function(n) {
   try {
     var snap = await getDocs(query(collection(db, "reports"), orderBy("createdAt", "desc"), limit(n || 25)));
@@ -3238,9 +3286,33 @@ window.fbCreateStore = async function(store) {
   await setDoc(doc(db, "stores", String(store.id)), data);
 };
 
+/* RETROUVER UN MAGASIN, OU QU'IL SOIT AFFICHE.
+   window.STORES ne contient que les magasins charges autour de MA position.
+   La carte d'exploration, elle, interroge la zone qu'on regarde et garde son
+   resultat dans window._exploreRawList : deux listes distinctes. Chercher dans
+   la premiere seulement revenait a ignorer tout magasin situe hors de mon
+   rayon — et c'est precisement la que servent les signalements, quand on
+   deplace la carte vers une autre ville. */
+function _magasinConnu(storeId) {
+  var sid = String(storeId);
+  var listes = [window.STORES, window._exploreRawList, window._fbStoresLoaded];
+  for (var i = 0; i < listes.length; i++) {
+    var l = listes[i];
+    if (!l || !l.length) continue;
+    for (var j = 0; j < l.length; j++) {
+      var x = l[j];
+      if (String(x.id) === sid || String(x.fbId) === sid) return x;
+    }
+  }
+  return null;
+}
 window.fbAddDrinkToStore = async function(storeId, drinkId) {
-  var s = window.STORES.find(function(x){ return x.id === storeId || x.fbId === storeId; });
-  if (!s || !s.fbId) return;
+  var s = _magasinConnu(storeId);
+  /* L'identifiant recu EST celui du document : les magasins importes gardent
+     leur identifiant OpenStreetMap comme nom de document. On peut donc ecrire
+     meme quand la fiche n'est dans aucune liste en memoire. */
+  var fbId = (s && s.fbId) || String(storeId || "");
+  if (!fbId) throw new Error("magasin inconnu");
   var updates = {};
   updates["drinks"] = arrayUnion(Number(drinkId) || drinkId);
   updates["confirmations." + drinkId] = increment(1);
@@ -3248,7 +3320,7 @@ window.fbAddDrinkToStore = async function(storeId, drinkId) {
   updates["seenAt." + drinkId] = heure;
   updates["confirmedBy." + drinkId] = (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24);
   updates["confirmedAt." + drinkId] = heure;
-  await window.fbUpdateDoc(window.fbDoc(window.db, "stores", s.fbId), updates);
+  await window.fbUpdateDoc(window.fbDoc(window.db, "stores", fbId), updates);
 };
 
 /* Memorise le magasin ou une decouverte a ete scannee : a la promotion,
@@ -8089,6 +8161,17 @@ function confirmerRattachement(ctx,s){
 
 /* PRIVEE. N'appeler QUE depuis tagScanToStore, apres la fiche de relecture.
    Tout appel direct contourne la relecture. */
+/* UN SIGNALEMENT QUI ECHOUE DOIT LE DIRE.
+   L'echec d'ecriture etait avale dans un console.warn : la personne lisait
+   « Rattache · +3 pts », rangeait son telephone, et rien n'etait parti. Le
+   fondateur l'a vecu de l'autre cote — une amie signale deux boissons, il ne
+   voit rien sur la carte, et personne ne peut savoir pourquoi. Le point local
+   reste acquis (elle a bien fait le travail), mais le doute est dit. */
+function _rattachementEchoue(e){
+  console.warn("rattachement:", e);
+  try{ toast("Signalement pas enregistr\u00e9 \u2014 v\u00e9rifie ta connexion, puis r\u00e9essaie"); }catch(_e){}
+  try{ playSound("err"); }catch(_e){}
+}
 function _ecrireRattachement(s,ctx){
   var sid=String(s.id);
   /* LE VERROU PASSE AVANT LES ECRITURES, ET NON APRES.
@@ -8111,7 +8194,7 @@ function _ecrireRattachement(s,ctx){
     if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
     if(!s.confirmations)s.confirmations={};
     s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
-    if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||sid,did).catch(function(e){console.warn(e);});
+    if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||sid,did).catch(_rattachementEchoue);
     /* La PREUVE que le serveur saura crediter (reports type "stock", +3) :
        ce chemin etait le seul a n'en laisser aucune. La carte l'ecrit deja
        elle-meme (mapStockReport), on ne double pas. */
@@ -8142,9 +8225,24 @@ function _ecrireRattachement(s,ctx){
     if(_anc&&_anc.storeId!=null&&String(_anc.storeId)!==sid){_patch.price=null;_patch.priceAt=null;} // un prix vu ailleurs ne vaut pas ici
     patchScanEntry(_codeJ,_patch);
   }catch(e){}
+  /* NE PROMETS QUE CE QUE LE SERVEUR TIENDRA.
+     Le serveur ne paie un « vue en rayon » que signale a moins de 500 metres du
+     magasin (crediterContribution, DIST_MAX_M) : personne ne voit un rayon
+     depuis son canape, et c'est ce qui protege le classement. L'app, elle,
+     annoncait « +3 pts » dans tous les cas. Une amie du fondateur a signale
+     deux boissons depuis chez elle, lu deux fois « +3 pts », et vu son profil
+     rester a zero — sans que rien, nulle part, ne lui explique pourquoi.
+     On dit desormais la meme chose que le serveur, avant lui. Le signalement
+     reste enregistre dans les deux cas : il sert aux autres, il ne rapporte
+     simplement rien. */
+  var _surPlace = (typeof s.dist === "number" && isFinite(s.dist) && s.dist <= 500);
   if(awardOnce(tagKey,FOREVER)){
-    userStats.pts+=3;flyPts(3);
-    toast("Rattach\u00E9 \u00E0 "+sanitize(s.name)+" \u00B7 +3 pts");
+    if(_surPlace){
+      userStats.pts+=3;flyPts(3);
+      toast("Rattach\u00E9 \u00E0 "+sanitize(s.name)+" \u00B7 +3 pts");
+    }else{
+      toast("Not\u00E9 pour "+sanitize(s.name)+" \u00B7 les points arrivent quand tu le signales sur place");
+    }
   }
   trackStoreContribution(sid);
   // Rattacher une boisson que des gens attendent rend le meme service qu'un
@@ -16072,7 +16170,7 @@ function rafaleAddCode(code){
   s.drinks.push(did);
   if(!s.confirmations)s.confirmations={};
   s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
-  if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(function(e){console.warn(e);});
+  if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(_rattachementEchoue);
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
   window._rafaleCount=(window._rafaleCount||0)+1;
   try{if(awardOnce("tag:"+did+":"+String(s.id),FOREVER)){userStats.pts+=2;if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);}}catch(e){}
@@ -16165,7 +16263,7 @@ function addDrinkToStoreHere(d){
   if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
   if(!s.confirmations)s.confirmations={};
   s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
-  if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(function(e){console.warn(e);});
+  if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(_rattachementEchoue);
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
   var key="tag:"+did+":"+String(s.id);
   if(awardOnce(key,FOREVER)){
@@ -21341,7 +21439,54 @@ function clearHistory(){if(!confirm("Effacer tout l'historique ?"))return;search
 function showAdmin(){if(!isAdmin){toast("Acc\u00E8s r\u00E9serv\u00E9");return;}show("admin");}
 var ADMIN_VOTE_THRESHOLD=3;
 var adminCatChoice={};
+/* RATTRAPAGE DES SIGNALEMENTS PERDUS.
+   Deux temps, jamais un seul : le premier appui CONSTATE et n'ecrit rien, le
+   second repare. Une action qui modifie les magasins de tout le monde ne doit
+   pas partir d'un seul appui, surtout quand on ne sait pas encore combien de
+   lignes elle touche. */
+function renderRejouerSignalements(){
+  var el=document.getElementById("admin-rejouer");
+  if(!el)return;
+  el.innerHTML='<div id="rej-btn" role="button" tabindex="0" style="padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;font-size:13.5px;font-weight:700;color:var(--s1)">Vérifier les signalements perdus</div>'+
+    '<div id="rej-res" style="font-size:12px;color:var(--s2);margin-top:8px"></div>';
+  var btn=document.getElementById("rej-btn"), res=document.getElementById("rej-res");
+  var trouves=null;
+  function lancer(appliquer){
+    if(!window.fbRejouerSignalements){res.textContent="Outil indisponible (module hors ligne)";return;}
+    btn.style.opacity=".5";
+    res.textContent=appliquer?"Réparation en cours…":"Lecture des signalements…";
+    window.fbRejouerSignalements(30,appliquer).then(function(r){
+      btn.style.opacity="";
+      if(appliquer){
+        trouves=null;
+        btn.textContent="Vérifier les signalements perdus";
+        res.textContent="✓ "+r.poses+" signalement"+(r.poses>1?"s":"")+" reposé"+(r.poses>1?"s":"")+" sur son magasin.";
+        try{playSound("win");}catch(e){}
+        return;
+      }
+      trouves=r.manquants.length;
+      if(!trouves){
+        res.textContent="Rien à rattraper sur les 30 derniers jours ("+r.examines+" signalements examinés).";
+        return;
+      }
+      btn.textContent="Reposer ces "+trouves+" signalement"+(trouves>1?"s":"");
+      res.innerHTML=sanitize(trouves+" signalement"+(trouves>1?"s":"")+" n'"+(trouves>1?"ont":"a")+" pas atteint son magasin :")+"<br>"+
+        r.manquants.slice(0,6).map(function(m){
+          var d=DRINKS.find(function(x){return Number(x.id)===Number(m.drinkId);});
+          return "• "+sanitize((d&&d.name)||("boisson "+m.drinkId))+" chez "+sanitize(m.nom||m.storeId)+(m.pseudo?" ("+sanitize(m.pseudo)+")":"");
+        }).join("<br>")+(trouves>6?"<br>…et "+(trouves-6)+" de plus":"");
+    }).catch(function(e){
+      btn.style.opacity="";
+      res.textContent="Échec : "+((e&&e.message)||e);
+      try{playSound("err");}catch(_e){}
+    });
+  }
+  var go=function(){ lancer(trouves>0); };
+  btn.onclick=go;
+  btn.onkeydown=function(ev){ if(ev.key==="Enter")go(); };
+}
 function renderAdmin(){
+  try{ renderRejouerSignalements(); }catch(e){}
   var el=document.getElementById("admin-list");if(!el)return;
   el.innerHTML="";
   renderFounderDash();
