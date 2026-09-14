@@ -890,7 +890,16 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
     <div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch">
       <div class="msg-hd">
         <div class="th-ico" onclick="if(!navBack())show('home')" role="button" tabindex="0" aria-label="Retour" onkeydown="if(event.key==='Enter'){if(!navBack())show('home');}">←</div>
-        <span class="t-section" style="margin:0" data-i18n="msgTitle">Messages</span>
+        <span class="t-section" style="margin:0;flex:1" data-i18n="msgTitle">Messages</span>
+        <!-- ECRIRE A QUELQU'UN : LE SEUL CHEMIN, ET IL ETAIT CACHE.
+             « Trouver un joueur » n'existait que dans l'etat vide, celui qu'on
+             ne voit qu'avant sa toute premiere conversation. Des la premiere
+             recue, le bouton disparaissait et plus rien ne permettait d'en
+             ouvrir une autre : la messagerie ne servait plus qu'a repondre.
+             Il vit maintenant dans l'en-tete, ou il reste atteignable. -->
+        <div class="th-ico" onclick="msgNouveau()" role="button" tabindex="0"
+             aria-label="Écrire à un joueur"
+             onkeydown="if(event.key==='Enter'){msgNouveau();}">+</div>
       </div>
       <div id="msg-seg" class="msg-seg" role="tablist" aria-label="Messages ou demandes"></div>
       <div id="msg-body" style="padding-bottom:20px"></div>
@@ -2762,11 +2771,6 @@ window.fbAccepterConversation = async function(cid, oui) {
     return { ok: true };
   } catch (e) { return _msgErreur(e); }
 };
-window.fbSupprimerMessage = async function(cid, mid) {
-  if (!cid || !mid) return { ok: false, reason: "invalid" };
-  try { await deleteDoc(doc(db, "conversations", cid, "messages", mid)); return { ok: true }; }
-  catch (e) { return _msgErreur(e); }
-};
 /* Mes conversations, en direct. cb(rows) a chaque changement ; cb(null, reason)
    si la lecture est refusee. Renvoie la fonction d'arret. */
 window.fbMesConversations = function(cb) {
@@ -2786,6 +2790,42 @@ window.fbMesConversations = function(cb) {
 /* Le fil d'une conversation : les `limite` derniers messages, rendus dans
    l'ordre chronologique. Les envois locaux apparaissent aussitot (horodatage
    estime) sans attendre l'aller-retour serveur. */
+/* ============================================================================
+   RANGER SA MESSAGERIE
+   ----------------------------------------------------------------------------
+   Deux gestes manquaient, et ils ne se valent pas.
+
+   EFFACER SON MESSAGE : les regles l'autorisaient deja (« resource.data.by ==
+   request.auth.uid ») ; il n'existait simplement aucun bouton. On efface le
+   sien, jamais celui d'un autre, et jamais on ne le corrige : un message
+   modifie apres coup ferait dire a quelqu'un ce qu'il n'a pas dit dans un fil
+   deja lu.
+
+   MASQUER UN FIL, ET NON LE SUPPRIMER. Supprimer emporterait la moitie de
+   l'autre, et donnerait a un harceleur le moyen d'effacer ses traces avant
+   d'etre signale. « masque » range le fil de son cote uniquement. Un nouveau
+   message porte un lastAt plus recent et le fait revenir : personne ne peut
+   etre fait taire pour de bon d'un simple geste. ============================ */
+window.fbSupprimerMessage = async function(cid, mid) {
+  var me = _msgUid();
+  if (!me) return { ok: false, reason: "auth" };
+  if (!cid || !mid) return { ok: false, reason: "invalid" };
+  try {
+    await deleteDoc(doc(db, "conversations", cid, "messages", mid));
+    return { ok: true };
+  } catch (e) { return _msgErreur(e); }
+};
+window.fbMasquerConversation = async function(cid) {
+  var me = _msgUid();
+  if (!me) return { ok: false, reason: "auth" };
+  if (!cid) return { ok: false, reason: "invalid" };
+  try {
+    var maj = {}; maj["masque." + me] = serverTimestamp();
+    await updateDoc(doc(db, "conversations", cid), maj);
+    return { ok: true };
+  } catch (e) { return _msgErreur(e); }
+};
+
 window.fbMessages = function(cid, cb, limite) {
   if (!cid) { cb(null, "invalid"); return function() {}; }
   var q1 = query(collection(db, "conversations", cid, "messages"), orderBy("at", "desc"), limit(limite || 60));
@@ -2794,7 +2834,26 @@ window.fbMessages = function(cid, cb, limite) {
     snap.forEach(function(d) { rows.push(Object.assign({ mid: d.id, pending: d.metadata.hasPendingWrites }, d.data({ serverTimestamps: "estimate" }))); });
     rows.reverse();
     cb(rows);
-  }, function(e) { cb(null, _msgErreur(e).reason); });
+  }, function(e) {
+    var r = _msgErreur(e).reason;
+    /* UN FIL QUI N'EXISTE PAS ENCORE N'EST PAS UNE PANNE DE SERVEUR.
+       La regle des messages lit la conversation parente pour savoir qui en est
+       membre : get(conversations/<cid>). Tant que personne n'a ecrit, cette
+       conversation n'existe pas, il n'y a aucun membre a verifier, et la
+       lecture est refusee. C'est le comportement voulu — mais l'app recevait
+       « permission-denied » et l'affichait comme « la messagerie n'est pas
+       encore activee sur le serveur ». Elle accusait le serveur d'etre en
+       panne au moment precis ou quelqu'un ouvrait sa premiere conversation.
+       Verifie sur l'emulateur : lecture d'un fil inexistant refusee, lecture
+       du meme fil une fois cree acceptee, des deux cotes.
+       On distingue donc les deux cas en allant voir si la conversation existe.
+       « absent » veut dire « rien a lire, pas encore » ; « permission-denied »
+       reste reserve a un vrai refus. */
+    if (r !== "permission-denied") { cb(null, r); return; }
+    getDoc(doc(db, "conversations", cid))
+      .then(function(s) { cb(null, s.exists() ? "permission-denied" : "absent"); })
+      .catch(function() { cb(null, "absent"); });
+  });
 };
 
 /* L'ecouteur global des non-lus : demarre des que l'identite est connue et
@@ -15444,7 +15503,7 @@ function renderStoreDetail(){
     try{playSound("pop");}catch(e){}
     try{closeStoreDetail();}catch(e){}
     setTimeout(function(){
-      try{openExploreMap({center:{lat:la,lng:ln}});}catch(e){}
+      try{montrerMagasinSurCarte(la,ln,s.name||"");}catch(e){try{openExploreMap({center:{lat:la,lng:ln}});}catch(e2){}}
       // Filet : on force le recentrage sur le magasin après le rendu de la carte
       // (avant, elle retombait sur "Magasins autour de toi" sans centrer).
       [250,650,1100].forEach(function(t){setTimeout(function(){try{if(window.exploreMap&&!isNaN(la)){exploreMap.setView([la,ln],17);if(typeof exploreLoadStores==="function")exploreLoadStores();}}catch(e){}},t);});
@@ -18327,6 +18386,95 @@ function showStoreOnMap(lat,lng){
   // Voir le magasin dans NOTRE carte (pas un renvoi vers Google Maps)
   openExploreMap({center:{lat:lat,lng:lng}});
 }
+
+/* ============================================================================
+   LE REPERE PARTAGE
+   ----------------------------------------------------------------------------
+   Ouvrir la carte sur une position recue ne faisait que la CENTRER. Aucun
+   marqueur n'etait pose : on arrivait au bon endroit sans rien voir, et il
+   etait impossible de dire ou se trouvait la personne — meme en etant a cote
+   d'elle. Recentrer n'est pas montrer.
+
+   On pose donc un repere, volontairement different du point bleu qui marque sa
+   propre position : un halo ambre et une bulle qui nomme la personne. Il reste
+   tant qu'on ne le retire pas, pour qu'on puisse se deplacer sur la carte sans
+   le perdre de vue.
+
+   LA PRECISION EST CELLE DU MESSAGE, PAS PLUS. Une position partagee est
+   arrondie au millieme de degre a l'envoi (~100 m) — c'est un choix de vie
+   privee documente dans les regles. Le cercle affiche cette imprecision au lieu
+   de la cacher derriere un point net qui mentirait sur ce qu'on sait. */
+window._repereCouche = null;
+function poserRepere(lat, lng, libelle, couleur, avecItineraire){
+  lat = Number(lat); lng = Number(lng);
+  if (!isFinite(lat) || !isFinite(lng)) return;
+  window._repere = { lat: lat, lng: lng, libelle: String(libelle || ""),
+                     couleur: couleur || "#e0912f", itin: !!avecItineraire };
+  appliquerRepere();
+}
+/* Tracer le chemin vers le repere. Appele par le bouton de la bulle, jamais
+   tout seul : voir l'explication sur la statistique « itineraires ». */
+function repereItineraire(){
+  var r = window._repere; if (!r) return;
+  try { playSound("pop"); } catch(e) {}
+  try { showRouteToStore(r.lat, r.lng, null); } catch(e) {}
+}
+function retirerRepere(){
+  window._repere = null;
+  try { if (window._repereCouche && window.exploreMap) exploreMap.removeLayer(window._repereCouche); } catch(e) {}
+  window._repereCouche = null;
+}
+function appliquerRepere(){
+  if (typeof L === "undefined" || !window.exploreMap) return;
+  try { if (window._repereCouche) exploreMap.removeLayer(window._repereCouche); } catch(e) {}
+  window._repereCouche = null;
+  var r = window._repere;
+  if (!r) return;
+  try {
+    var g = L.layerGroup();
+    /* Le rayon dit l'imprecision reelle de la position partagee (~100 m). */
+    L.circle([r.lat, r.lng], { radius: 110, color: r.couleur, weight: 1.5,
+      fillColor: r.couleur, fillOpacity: .12 }).addTo(g);
+    var pt = L.circleMarker([r.lat, r.lng], { radius: 9, color: "#fff", weight: 3,
+      fillColor: r.couleur, fillOpacity: 1 }).addTo(g);
+    if (r.libelle) {
+      pt.bindTooltip(r.libelle, { permanent: true, direction: "top", offset: [0, -10],
+        className: "repere-bulle" });
+    }
+    /* L'itineraire est a UN geste, sur le repere lui-meme : c'est la qu'on
+       regarde quand on cherche « comment j'y vais ». */
+    if (r.itin) {
+      pt.bindPopup('<div style="font-weight:800;margin-bottom:6px">' + sanitize(r.libelle) + '</div>'
+        + '<button onclick="repereItineraire()" style="padding:8px 14px;border-radius:12px;border:none;'
+        + 'background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;cursor:pointer;'
+        + 'font-family:inherit">' + sanitize(tr("Itinéraire")) + '</button>');
+    }
+    g.addTo(exploreMap);
+    window._repereCouche = g;
+  } catch(e) {}
+}
+/* Ouvrir la carte SUR quelqu'un : on centre ET on montre. */
+function montrerPositionPartagee(lat, lng, qui){
+  poserRepere(lat, lng, qui || "", "#e0912f");
+  openExploreMap({ center: { lat: Number(lat), lng: Number(lng) }, z: 16 });
+}
+
+/* Ouvrir la carte SUR un magasin precis.
+   ----------------------------------------------------------------------------
+   Centrer ne suffit pas : a ce niveau de zoom la carte porte facilement trente
+   epingles, toutes identiques, et celle qu'on cherche se perd dedans. On la
+   nomme et on l'entoure.
+
+   POURQUOI PAS D'ITINERAIRE AUTOMATIQUE. showRouteToStore() incremente la
+   statistique « itineraires » du magasin — le signal le plus proche d'une
+   visite reelle, et celui qu'on montrera aux commercants. Le declencher a
+   chaque simple coup d'oeil sur la carte gonflerait ce chiffre de visites qui
+   n'ont jamais eu lieu. Le chemin reste donc a un geste, et la mesure reste
+   vraie. */
+function montrerMagasinSurCarte(lat, lng, nom){
+  poserRepere(lat, lng, nom || "", "#2e86c1", true);
+  openExploreMap({ center: { lat: Number(lat), lng: Number(lng) }, z: 17 });
+}
 function openExploreMap(opts){
   window._lastExploreOpts=opts;   // pour le bouton « Reessayer » en cas d'echec
   window._exploreMapFailed=false;
@@ -18334,7 +18482,10 @@ function openExploreMap(opts){
   window._exploreChips={instock:false,open:false,near:0};
   window._exploreBrand=null;
   window._exploreBrandQuery="";
-  window._exploreFocus=(opts&&opts.center)?{lat:Number(opts.center.lat),lng:Number(opts.center.lng)}:null;
+  /* Le zoom demande etait ignore : _exploreFocus ne retenait que les
+     coordonnees, et setView retombait toujours sur 17. Une position partagee
+     vaut d'etre vue un cran plus large, pour situer la rue autour. */
+  window._exploreFocus=(opts&&opts.center)?{lat:Number(opts.center.lat),lng:Number(opts.center.lng),z:(opts&&opts.z)||null}:null;
   window._explorePlace="";window._exploreFreeMove=false;
   // Reouverture : le champ gardait l'ancienne recherche ("Tokyo") alors que la
   // carte revenait autour de soi.
@@ -18524,8 +18675,10 @@ function openExploreMap(opts){
     }
     if(window._exploreFocus){exploreMap.setView([window._exploreFocus.lat,window._exploreFocus.lng],window._exploreFocus.z||17);}
     else exploreMap.setView([typeof userLat==="number"&&userLat?userLat:50.8466,typeof userLng==="number"&&userLng?userLng:4.3528],14);
+    try{appliquerRepere();}catch(e){}
     setTimeout(function(){try{exploreMap.invalidateSize();}catch(e){}exploreLoadStores();
       try{var _cc=exploreMap.getCenter();autoOsmForArea(_cc.lat,_cc.lng,exploreMap.getZoom());}catch(e){}
+      try{appliquerRepere();}catch(e){}
     },120);
   }
   // Le greffon de regroupement doit etre la AVANT de construire la couche,
@@ -18565,6 +18718,9 @@ function exploreOpenSheetFull(){
   try{ setExploreSheet("max"); }catch(e){}
 }
 function closeExploreMap(){
+  /* Le repere appartient a l'ouverture qui l'a demande : le garder ferait
+     reapparaitre la position d'hier sur la carte d'aujourd'hui. */
+  try{retirerRepere();}catch(e){}
   if(window._addStoreSurExplore){ try{exploreFermerAjout();}catch(e){} addStorePos=null; }
   if(window._choixMagasin){ window._choixMagasin=false; window._choixMagasinCb=null; try{_majBandeauChoix();}catch(e){} }
   clearRoute();
@@ -23979,11 +24135,27 @@ function msgEtatHTML(icone,titre,sous,btn,onclick){
     '<div class="msg-etat-t">'+titre+'</div>'+(sous?'<div class="msg-etat-s">'+sous+'</div>':'')+
     (btn?'<button class="msg-bs" style="flex:none;margin-top:14px;padding:0 18px" onclick="'+onclick+'">'+btn+'</button>':'')+'</div>';
 }
+/* Ouvrir la recherche de joueurs. Un seul endroit qui sait comment on y va :
+   l'en-tete et l'etat vide l'appellent tous les deux, et le jour ou ce chemin
+   change, il ne change qu'ici. */
+function msgNouveau(){
+  try{ navTo('search'); }catch(e){ try{ show('search'); }catch(e2){} }
+  try{ setSearchMode('users'); }catch(e){}
+  try{ var q=document.getElementById("q"); if(q){q.focus({preventScroll:true});} }catch(e){}
+}
 function renderMessages(){
   var body=document.getElementById("msg-body"),seg=document.getElementById("msg-seg");if(!body||!seg)return;
   var me=msgMe();
   var rows=MSG.rows||[];
-  var conv=rows.filter(function(c){return !(c.state==="request"&&c.requestBy!==me)&&!(c.state==="declined"&&c.requestBy!==me);});
+  /* Un fil masque quitte la liste — jusqu'a ce qu'il bouge. On compare la date
+     du masquage a celle du dernier message : des que l'autre ecrit, lastAt
+     repasse devant et le fil revient de lui-meme. Masquer n'est donc jamais un
+     moyen de ne plus jamais entendre quelqu'un ; pour ca, il y a « bloquer ». */
+  var masque=function(c){
+    var q=c.masque&&c.masque[me]; if(!q)return false;
+    return (msgMs(q)||0) >= (msgMs(c.lastAt)||0);
+  };
+  var conv=rows.filter(function(c){return !(c.state==="request"&&c.requestBy!==me)&&!(c.state==="declined"&&c.requestBy!==me)&&!masque(c);});
   var dem=rows.filter(function(c){return c.state==="request"&&c.requestBy!==me;});
   var nUnread=0;conv.forEach(function(c){nUnread+=nbSur(c.unread&&c.unread[me]);});
   seg.innerHTML='<button role="tab" aria-selected="'+(MSG.tab!=="dem")+'" class="'+(MSG.tab!=="dem"?"on":"")+'" onclick="msgOnglet(\'msgs\')">'+_tr("msgTabMsgs")+' · '+nbSur(conv.length)+'</button>'+
@@ -24001,7 +24173,7 @@ function renderMessages(){
     body.innerHTML=h;return;
   }
   if(!conv.length){
-    body.innerHTML=msgEtatHTML("mail",_tr("msgEmpty"),_tr("msgEmptySub"),_tr("msgFindPlayer"),"navTo('search');try{setSearchMode('users')}catch(e){}");
+    body.innerHTML=msgEtatHTML("mail",_tr("msgEmpty"),_tr("msgEmptySub"),_tr("msgFindPlayer"),"msgNouveau()");
     return;
   }
   var frag=document.createDocumentFragment();
@@ -24154,7 +24326,12 @@ function renderThreadFil(doux){
   var u=MSG.users[MSG.other]||{};
   var nom=u.pseudo||_tr("msgSomeone");
   var enBas=el.scrollHeight-el.scrollTop-el.clientHeight<80;
+  /* « absent » n'est pas une erreur : c'est un fil que personne n'a encore
+     ouvert. On tombe donc dans l'etat vide plus bas — « Dis bonjour a … » —
+     et le champ de saisie reste utilisable. Seul un vrai refus affiche le
+     cadenas. */
   if(MSG.msgErr==="permission-denied"){el.innerHTML=msgEtatHTML("lock",_tr("msgNotEnabled"),_tr("msgNotEnabledSub"));return;}
+  if(MSG.msgErr==="absent"){MSG.msgs=MSG.msgs||[];}
   if(MSG.conv&&MSG.msgs===null){el.innerHTML='<div style="margin:auto">'+magoLoader(true)+'</div>';return;}
   var rows=MSG.msgs||[];
   if(!rows.length){
@@ -24169,7 +24346,15 @@ function renderThreadFil(doux){
     var ms=msgMs(m.at)||Date.now();
     var k=msgJourKey(ms);
     if(k!==jour){jour=k;h+='<div class="th-day">'+msgJourLabel(k)+'</div>';}
-    h+=msgBulleHTML(m,m.by===me,ms,nom);
+    /* On pose l'identifiant du message sur SA PROPRE bulle, et seulement sur
+       la sienne : c'est ce qui rend l'appui long capable de savoir quoi
+       effacer. Les quatre formes de bulle (texte, photo, position, magasin)
+       commencent toutes par « <div » — on n'a donc pas a les modifier une par
+       une, ni a risquer d'en oublier une au prochain type ajoute. */
+    var _b=msgBulleHTML(m,m.by===me,ms,nom);
+    if(m.by===me&&m.mid&&_b.indexOf("<div ")===0)
+      _b='<div data-mien="1" data-mid="'+attr(m.mid)+'" '+_b.slice(5);
+    h+=_b;
   });
   el.innerHTML=h;
   if(!doux||enBas)el.scrollTop=el.scrollHeight;
@@ -24188,7 +24373,7 @@ function msgBulleHTML(m,mine,ms,nom){
     if(!isFinite(lat)||!isFinite(lng))return "";
     return '<div class="th-card '+side+'"><div style="display:flex;align-items:center;gap:10px"><div class="th-spot-ico" style="color:var(--s1)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6-5.2-6-10a6 6 0 0 1 12 0c0 4.8-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg></div>'+
       '<div style="flex:1;min-width:0"><div class="th-pos-t">'+_tr("msgPosOf").replace("{p}",qui)+'</div><div class="th-pos-s">'+_tr("msgPosOnce")+'</div></div></div>'+
-      '<div class="th-spot-btns"><button class="th-sec" data-act="map" data-lat="'+attr(lat)+'" data-lng="'+attr(lng)+'">'+_tr("msgOpenMap")+'</button></div>'+t+'</div>';
+      '<div class="th-spot-btns"><button class="th-sec" data-act="map" data-lat="'+attr(lat)+'" data-lng="'+attr(lng)+'" data-qui="'+attr(qui)+'">'+_tr("msgOpenMap")+'</button></div>'+t+'</div>';
   }
   if(m.type==="spot"){
     var d=(m.drinkId!=null)?(DRINKS||[]).find(function(x){return String(x.id)===String(m.drinkId);}):null;
@@ -24218,12 +24403,67 @@ function msgBulleHTML(m,mine,ms,nom){
   }
   return '<div class="th-b '+side+(m.pending?" pend":"")+'">'+sanitize(String(m.text||""))+t+'</div>';
 }
+/* EFFACER SON MESSAGE — l'appui long, le geste qu'on essaie d'instinct.
+   Les regles l'autorisaient depuis toujours pour l'auteur ; rien ne l'appelait.
+   On n'offre le geste que sur SES propres bulles : proposer « supprimer » sur
+   le message de quelqu'un d'autre, pour ensuite le refuser, serait une promesse
+   qu'on ne tient pas. */
+function msgMenuMessage(mid){
+  if(!mid||!MSG.cid)return;
+  var ov=msgFeuille("msg-menu-msg",
+    '<div class="claim-title" style="font-size:16px">'+tr("Ce message")+'</div>'+
+    '<button class="msg-opt" data-k="suppr"><span class="msg-opt-i"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></span><span class="msg-opt-t">'+tr("Supprimer ce message")+'</span></button>');
+  if(!ov)return;
+  ov.querySelectorAll(".msg-opt").forEach(function(b){
+    b.onclick=function(){
+      ov.fermer();
+      if(b.getAttribute("data-k")!=="suppr")return;
+      if(!window.fbSupprimerMessage){msgErreurToast("offline");return;}
+      if(!confirm(tr("Supprimer ce message ? Il disparaît aussi chez l'autre personne, et c'est définitif.")))return;
+      window.fbSupprimerMessage(MSG.cid,mid).then(function(r){
+        if(!r||!r.ok){msgErreurToast(r&&r.reason,r&&r.detail);return;}
+        try{playSound("pop");}catch(e){}
+        toast(tr("Message supprimé"));
+      });
+    };
+  });
+}
 /* Un seul ecouteur pour le fil : les cartes sont recreees a chaque rendu. */
 (function(){
+  /* L'appui long : 480 ms, annule des que le doigt bouge de plus de 10 px pour
+     ne pas se declencher pendant qu'on fait defiler le fil. */
+  var t=null, x0=0, y0=0, cible=null;
+  var stop=function(){ if(t){clearTimeout(t);t=null;} cible=null; };
+  document.addEventListener("pointerdown",function(ev){
+    var el=ev.target&&ev.target.closest&&ev.target.closest("[data-mien]");
+    if(!el)return;
+    cible=el; x0=ev.clientX; y0=ev.clientY;
+    t=setTimeout(function(){
+      t=null;
+      if(!cible)return;
+      try{if(navigator.vibrate)navigator.vibrate(12);}catch(e){}
+      msgMenuMessage(cible.getAttribute("data-mid"));
+      cible=null;
+    },480);
+  },{passive:true});
+  document.addEventListener("pointermove",function(ev){
+    if(!t)return;
+    if(Math.abs(ev.clientX-x0)>10||Math.abs(ev.clientY-y0)>10)stop();
+  },{passive:true});
+  ["pointerup","pointercancel","scroll"].forEach(function(n){
+    document.addEventListener(n,stop,{passive:true,capture:true});
+  });
+  /* Au clavier et a la souris : le menu contextuel fait le meme travail. */
+  document.addEventListener("contextmenu",function(ev){
+    var el=ev.target&&ev.target.closest&&ev.target.closest("[data-mien]");
+    if(!el)return;
+    ev.preventDefault();
+    msgMenuMessage(el.getAttribute("data-mid"));
+  });
   var agir=function(el){
     var act=el.getAttribute("data-act");
     if(act==="img"){msgPleinEcran(el.getAttribute("src"));return;}
-    if(act==="map"){try{showStoreOnMap(Number(el.getAttribute("data-lat")),Number(el.getAttribute("data-lng")));}catch(e){}return;}
+    if(act==="map"){try{montrerPositionPartagee(Number(el.getAttribute("data-lat")),Number(el.getAttribute("data-lng")),el.getAttribute("data-qui")||"");}catch(e){}return;}
     if(act==="go"){
       var sid=el.getAttribute("data-store");
       var s=(typeof STORES!=="undefined"?STORES:[]).find(function(x){return String(x.fbId)===sid||String(x.id)===sid;});
@@ -24350,6 +24590,15 @@ function msgEnvoyer(msg){
     if(!r||!r.ok){msgErreurToast(r&&r.reason,r&&r.detail);renderThreadFoot();return false;}
     try{playSound("pop");}catch(e){}
     if(MSG.conv&&MSG.conv.state==="request"){MSG.conv.reqCount=1;}
+    /* ON REBRANCHE AUSSI QUAND L'ECOUTE EXISTE MAIS A ECHOUE.
+       onSnapshot rend une fonction de desabonnement meme lorsqu'il tombe en
+       erreur : MSG.unsub etait donc renseigne, et « if(!MSG.unsub) » ne
+       rebranchait jamais. Une ecoute posee avant que la conversation n'existe
+       restait donc morte APRES l'envoi du premier message — le message partait
+       vraiment, mais le fil continuait d'afficher son erreur jusqu'a ce qu'on
+       revienne a l'accueil et qu'on rouvre la conversation. C'est exactement ce
+       que decrivait le rapport. */
+    if(MSG.msgErr){threadQuitter();MSG.msgErr=null;}
     if(!MSG.unsub&&msgEcranOn("thread"))threadReprendre();else renderThreadFoot();
     return true;
   }).catch(function(){MSG.sending=false;msgErreurToast("unknown");renderThreadFoot();return false;});
@@ -24684,6 +24933,22 @@ function msgOuvrirSpot(pre){
   });
 }
 /* ── Menu ⋯ du fil ── */
+/* MASQUER, PAS SUPPRIMER — et on le dit a la personne au lieu de le lui
+   laisser deviner. Le fil quitte SA boite ; l'autre garde la sienne, et le
+   moindre nouveau message le ramene. C'est ce que promet le texte ci-dessous,
+   et c'est exactement ce que fait la regle Firestore. */
+function msgMasquerFil(){
+  var cid=MSG.cid;
+  if(!cid||!window.fbMasquerConversation){msgErreurToast("offline");return;}
+  if(!confirm(tr("Masquer cette conversation ? Elle quitte ta liste. L'autre personne garde la sienne, et un nouveau message la fera revenir.")))return;
+  window.fbMasquerConversation(cid).then(function(r){
+    if(!r||!r.ok){msgErreurToast(r&&r.reason,r&&r.detail);return;}
+    try{playSound("pop");}catch(e){}
+    toast(tr("Conversation masquée"));
+    threadQuitter();MSG.cid=null;MSG.conv=null;
+    try{navBack()||show("messages");}catch(e){try{show("messages");}catch(e2){}}
+  });
+}
 function msgMenuThread(){
   var u=MSG.users[MSG.other]||{};
   var bloque=MSG.blocs.indexOf(String(MSG.other))!==-1;
@@ -24691,12 +24956,14 @@ function msgMenuThread(){
     '<div class="claim-title" style="font-size:16px">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</div>'+
     '<button class="msg-opt" data-k="profil"><span class="msg-opt-i"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M5 21c0-3.9 3.1-7 7-7s7 3.1 7 7"/></svg></span><span class="msg-opt-t">'+_tr("msgSeeProfile")+'</span></button>'+
     '<button class="msg-opt" data-k="bloc"><span class="msg-opt-i">'+msgIcoBloc(20)+'</span><span class="msg-opt-t">'+(bloque?_tr("msgUnblock"):_tr("msgBlock"))+'</span></button>'+
+    '<button class="msg-opt" data-k="masquer"><span class="msg-opt-i"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l18 18M10.6 10.6a3 3 0 004.2 4.2M9.4 5.2A9.9 9.9 0 0112 5c5 0 9 4.5 9 7a12 12 0 01-2.2 3.3M6.6 6.6A12.4 12.4 0 003 12c0 2.5 4 7 9 7 1 0 2-.2 2.9-.5"/></svg></span><span class="msg-opt-t">'+tr("Masquer cette conversation")+'</span></button>'+
     '<button class="msg-opt" data-k="sig"><span class="msg-opt-i"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V4h12l-1 4 1 4H4"/></svg></span><span class="msg-opt-t">'+_tr("msgReport")+'</span></button>');
   if(!ov)return;
   ov.querySelectorAll(".msg-opt").forEach(function(b){
     b.onclick=function(){
       var k=b.getAttribute("data-k");ov.fermer();
       if(k==="profil")msgVoirProfil();
+      else if(k==="masquer")msgMasquerFil();
       else if(k==="bloc")msgBloquer(MSG.other,!bloque);
       else if(k==="sig"){
         var dernier=((MSG.msgs||[]).filter(function(m){return m.by===MSG.other&&m.type==="text";}).slice(-1)[0]||{}).text||"";

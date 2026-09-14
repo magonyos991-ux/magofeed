@@ -432,12 +432,33 @@ service cloud.firestore {
         && apres().unread[apres().members[1]] == 0
         && apres().lastAt == request.time
         && (!('lastMsg' in apres()) || lastMsgValide());
+      /* MASQUER UN FIL, PLUTOT QUE L'EFFACER.
+         Le rapport demandait de pouvoir supprimer une conversation. On ne le
+         fait pas, et la raison est celle ecrite plus bas : effacer un fil
+         emporte la moitie de l'autre, et donnerait a un harceleur le moyen de
+         faire disparaitre ses traces avant d'etre signale.
+
+         « masque » range donc le fil DE SON COTE, sans rien detruire. Chacun
+         n'ecrit que sa propre cle — sinon on ferait disparaitre la boite de
+         reception de quelqu'un d'autre, ce qui serait bien pire que de ne pas
+         pouvoir ranger la sienne. La valeur est la date du masquage : un
+         nouveau message porte un lastAt plus recent et fait donc revenir le
+         fil tout seul. Personne ne peut etre fait taire definitivement. */
+      function masqueHonnete() {
+        let moi = request.auth.uid;
+        return !changed().hasAny(['masque'])
+          || (apres().masque is map
+              && apres().masque.keys().hasOnly(avant().members)
+              && apres().masque.diff(avant().get('masque', {})).affectedKeys().hasOnly([moi])
+              && (!(moi in apres().masque) || apres().masque[moi] == request.time));
+      }
       allow update: if estMembre()
-        && changed().hasOnly(['state','reqCount','lastAt','lastMsg','unread'])
+        && changed().hasOnly(['state','reqCount','lastAt','lastMsg','unread','masque'])
         && etatHonnete()
         && reqCountHonnete()
         && unreadHonnete()
-        && lastMsgHonnete();
+        && lastMsgHonnete()
+        && masqueHonnete();
       /* On n'efface pas un fil : l'autre membre en perdrait sa moitie, et un
          harceleur effacerait ses traces avant d'etre signale. L'administrateur
          garde la main pour purger. */

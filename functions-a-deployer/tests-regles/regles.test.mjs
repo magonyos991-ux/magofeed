@@ -758,6 +758,28 @@ await doit('legitime : Mallory refuse la demande',
 await filCalme(CONV2);
 await doit('bloque : ecrire dans une conversation refusee',
   ()=>assertFails(envoi(nv,CONV2,NOUVEAU,MALLORY,{},{reqCount:1})));
+/* ── MASQUER UN FIL ─────────────────────────────────────────────────────────
+   Le rapport demandait de pouvoir SUPPRIMER une conversation. Les regles s'y
+   refusent, et l'epreuve « bloque : effacer un fil » plus bas le verifie :
+   effacer emporterait la moitie de l'autre, et laisserait un harceleur nettoyer
+   ses traces avant d'etre signale. « masque » range le fil de son cote — chacun
+   n'ecrit que SA cle. C'est cette derniere ligne qui compte : sans elle, on
+   ferait disparaitre la boite de reception de quelqu'un d'autre. ── */
+await doit('legitime : Alice masque son fil avec Mallory',
+  ()=>assertSucceeds(updateDoc(doc(a,'conversations',CONV),{['masque.'+ALICE]:serverTimestamp()})));
+await doit('bloque : Alice masque le fil DU COTE DE MALLORY',
+  ()=>assertFails(updateDoc(doc(a,'conversations',CONV),{['masque.'+MALLORY]:serverTimestamp()})));
+await doit('bloque : Alice antidate son masquage',
+  ()=>assertFails(updateDoc(doc(a,'conversations',CONV),
+      {['masque.'+ALICE]:Timestamp.fromMillis(Date.now()-86400000)})));
+await doit('bloque : masquer un fil dont on n est pas membre',
+  ()=>assertFails(updateDoc(doc(nv,'conversations',CONV),{['masque.'+NOUVEAU]:serverTimestamp()})));
+await doit('legitime : Mallory masque le sien, sans toucher a celui d Alice',
+  ()=>assertSucceeds(updateDoc(doc(m,'conversations',CONV),{['masque.'+MALLORY]:serverTimestamp()})));
+await doit('bloque : une cle de masque qui n est pas un membre',
+  ()=>assertFails(updateDoc(doc(a,'conversations',CONV),{['masque.zoe']:serverTimestamp()})));
+
+
 await doit('bloque : rouvrir une conversation refusee',
   ()=>assertFails(updateDoc(doc(m,'conversations',CONV2),{state:'open'})));
 
