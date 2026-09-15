@@ -3457,7 +3457,89 @@ window.fbRecentReports = async function(n) {
 window.fbDeleteStore = async function(storeId) {
   await deleteDoc(doc(db, "stores", String(storeId)));
 };
-window.fbQueryZone = async function(lat, lng, radiusKm) {
+/* ============================================================================
+   LA CARTE N'A PAS BESOIN DES ASSORTIMENTS POUR DESSINER DES PINS
+   ----------------------------------------------------------------------------
+   Mesure faite sur la base de production, zone parisienne, 253 magasins :
+       tout le document            8 845 Ko
+       sans le champ « drinks »      166 Ko
+   Le champ drinks pese 98 % du telechargement. Un magasin porte en moyenne
+   351 identifiants de boissons, et jusqu'a 1 171 — poses en masse par le
+   remplissage d'enseignes, jamais confirmes par personne. Ouvrir la carte sur
+   Paris faisait donc descendre 18 Mo dans le telephone, d'un coup, pour
+   afficher des points sur une carte. C'est ce que l'application « qui se
+   relance toute seule » etait en train de faire : iOS tue l'onglet.
+
+   Le SDK web ne sait pas demander une partie d'un document. L'API REST de
+   Firestore, si (select.fields). On l'utilise UNIQUEMENT quand aucune boisson
+   n'est choisie — dans ce cas la liste des boissons ne sert a rien. Des qu'une
+   boisson est ciblee, on repasse par le chemin complet, qui lui en a besoin.
+
+   Les regles de securite s'appliquent de la meme facon sur REST : on ne
+   contourne rien, on demande moins. Et au moindre pepin, on retombe sur le
+   chemin d'origine plutot que de rendre une carte vide. */
+var MAGO_CHAMPS_PIN = ["name", "lat", "lng", "brand", "geohash", "hours", "certified", "type", "emoji", "owner"];
+async function _restPins(bornes) {
+  var url = "https://firestore.googleapis.com/v1/projects/" + firebaseConfig.projectId
+    + "/databases/(default)/documents:runQuery";
+  var out = [];
+  for (var i = 0; i < bornes.length; i++) {
+    var corps = { structuredQuery: {
+      from: [{ collectionId: "stores" }],
+      where: { compositeFilter: { op: "AND", filters: [
+        { fieldFilter: { field: { fieldPath: "geohash" }, op: "GREATER_THAN_OR_EQUAL", value: { stringValue: bornes[i][0] } } },
+        { fieldFilter: { field: { fieldPath: "geohash" }, op: "LESS_THAN_OR_EQUAL", value: { stringValue: bornes[i][1] } } } ] } },
+      orderBy: [{ field: { fieldPath: "geohash" } }],
+      select: { fields: MAGO_CHAMPS_PIN.map(function (f) { return { fieldPath: f }; }) },
+      limit: 3000 } };
+    var r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
+    if (!r.ok) throw new Error("REST " + r.status);
+    var rows = await r.json();
+    if (!Array.isArray(rows)) throw new Error("REST forme inattendue");
+    for (var j = 0; j < rows.length; j++) if (rows[j].document) out.push(rows[j].document);
+  }
+  return out;
+}
+function _valeurRest(v) {
+  if (!v) return null;
+  if (v.stringValue != null) return v.stringValue;
+  if (v.doubleValue != null) return Number(v.doubleValue);
+  if (v.integerValue != null) return Number(v.integerValue);
+  if (v.booleanValue != null) return !!v.booleanValue;
+  return null;
+}
+window.fbZonePins = async function(lat, lng, radiusKm) {
+  var bornes = geohashQueryBounds(lat, lng, radiusKm * 1000);
+  var docs = await _restPins(bornes);
+  var out = [], vus = {};
+  for (var i = 0; i < docs.length; i++) {
+    var d = docs[i];
+    var id = String(d.name || "").split("/").pop();
+    if (!id || vus[id]) continue;
+    vus[id] = 1;
+    var f = d.fields || {}, o = {};
+    for (var k = 0; k < MAGO_CHAMPS_PIN.length; k++) {
+      var nom = MAGO_CHAMPS_PIN[k];
+      if (f[nom] !== undefined) o[nom] = _valeurRest(f[nom]);
+    }
+    if (o.lat == null || o.lng == null) continue;
+    var dist = haversineKm(lat, lng, o.lat, o.lng);
+    if (dist > radiusKm) continue;          // le geohash deborde : on tranche ici
+    /* On ne SAIT PAS ce que ce magasin a en rayon : on ne l'a pas demande.
+       Le drapeau le dit, pour qu'aucun code ne prenne un tableau vide pour
+       « il n'a rien » — ce serait la carte qui ment. */
+    o._pins = true;
+    out.push(normalizeStore(o, id, dist));
+  }
+  return out;
+};
+window.fbQueryZone = async function(lat, lng, radiusKm, pinsSeuls) {
+  if (pinsSeuls && MAGO_GEOHASH_READY) {
+    try {
+      var legers = await window.fbZonePins(lat, lng, radiusKm);
+      if (legers && legers.length) return legers;
+    } catch (e) { console.warn("pins allèges indisponibles, chemin complet:", e); }
+  }
   return queryNearbyStores(lat, lng, radiusKm);
 };
 window.fbImportStores = async function(list, onProgress) {
@@ -19498,8 +19580,21 @@ function exploreLoadStores(useCache){
      requetes Firestore (window._fbQuerySeq) : on l'applique au rendu. */
   var _seq = (window._exploreSeq = (window._exploreSeq || 0) + 1);
   var q;
+  /* LE CACHE ALLEGE NE PEUT PAS REPONDRE A UNE QUESTION DE BOISSON.
+     Les magasins charges sans leur assortiment portent _pins : ils ne savent
+     pas ce qu'ils ont en rayon. Les reutiliser des qu'une boisson est ciblee
+     ferait repondre « il ne l'a pas » a chaque magasin, alors que la vraie
+     reponse est « on ne le lui a pas demande ». On recharge pour de vrai. */
+  if(useCache&&exploreFilter&&window._exploreRawList&&window._exploreRawList.some(function(s){return s&&s._pins;}))useCache=false;
   if(useCache&&window._exploreRawList){q=Promise.resolve(window._exploreRawList);}
-  else{if(status)status.innerHTML=ondeHTML(3)+'<span style="margin-left:8px">Chargement\u2026</span>';q=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12))):Promise.resolve(STORES||[]);}
+  else{
+    if(status)status.innerHTML=ondeHTML(3)+'<span style="margin-left:8px">'+tr("Chargement\u2026")+'</span>';
+    /* Aucune boisson ciblee : on ne demande PAS les assortiments. Mesure sur la
+       base : 8 845 Ko avec, 166 Ko sans, pour 253 magasins. C'est la difference
+       entre une carte qui s'ouvre et un telephone qui tue l'onglet. */
+    var _pinsSeuls=!exploreFilter;
+    q=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12),_pinsSeuls)):Promise.resolve(STORES||[]);
+  }
   q.then(function(list){
     if(_seq!==window._exploreSeq)return;      // un mouvement plus recent a pris la main
     list=list||[];
