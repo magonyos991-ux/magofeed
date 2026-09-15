@@ -162,7 +162,20 @@ exports.notifyHuntNearby = onDocumentWritten(
        toute la base, declenchable en boucle. Sans centre, on ne diffuse plus. */
     let center = null;
     newSeekers.forEach(function(u){ const s = aSeek[u]; if (s && s.lat != null && (!center || s.at > center.at)) center = s; });
-    if (!center) return;
+    if (!center) {
+      /* Sortie la plus frequente, et la plus invisible : une chasse lancee
+         avant que le GPS du telephone n'ait repondu n'a pas de position, donc
+         pas de centre, donc personne a prevenir. Le client la repositionne
+         desormais des que le GPS repond — ce qui repasse ici avec un centre. */
+      try {
+        await db.collection("alertesAdmin").add({
+          type: "hunt", etat: "sans-position", at: Date.now(),
+          drinkId: String(after.drinkId != null ? after.drinkId : event.params.drinkId),
+          drinkName: String(after.drinkName || ""), lanceur: String(newSeekers[0] || "")
+        });
+      } catch (e) {}
+      return;
+    }
     const seekerUids = new Set(Object.keys(aSeek).filter(function(u){ return aSeek[u]; }));
     const name = String(after.drinkName || "une boisson").slice(0, 40);
     /* Anti-spam. Il etait range dans le document des chasses, que le client
@@ -175,16 +188,52 @@ exports.notifyHuntNearby = onDocumentWritten(
     const now = Date.now();
     const _cle = function (v) { return String(v).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80); };
     const lanceur = newSeekers[0];
+    /* LE VERROU PAR PERSONNE ETAIT DE SIX HEURES, ET C'EST LUI QUI FAISAIT
+       TAIRE LA CHASSE.
+       -----------------------------------------------------------------------
+       Il existe pour une bonne raison : un compte s'obtient gratuitement, et
+       sans lui n'importe qui pourrait declencher vague sur vague vers toute la
+       base. Mais SIX HEURES veut dire qu'apres UNE SEULE chasse lancee, ce
+       compte ne previent plus personne du reste de la journee — meme sur une
+       autre boisson, meme depuis un autre endroit. Pour quelqu'un qui essaie
+       son app avec deux telephones, c'est le silence garanti, et rien a
+       l'ecran ne dit pourquoi.
+
+       On separe donc les deux roles :
+       - PAR BOISSON, on garde six heures. Personne ne veut etre reveille trois
+         fois pour le meme Mountain Dew.
+       - PAR PERSONNE, quarante-cinq minutes. Cela borne toujours l'abus (au
+         pire une trentaine de vagues par jour et par compte, quand la limite
+         par boisson laisse passer), sans transformer la premiere chasse de la
+         journee en interrupteur general.
+
+       ET SURTOUT : chaque sortie laisse desormais une ligne dans le journal.
+       « Aucune notification » et « je ne sais pas pourquoi » etaient jusqu'ici
+       la meme chose. */
+    const _tracer = async function (etat, extra) {
+      try {
+        await db.collection("alertesAdmin").add(Object.assign({
+          type: "hunt", etat: etat, at: now,
+          drinkId: String(after.drinkId != null ? after.drinkId : event.params.drinkId),
+          drinkName: name, lanceur: String(lanceur || "")
+        }, extra || {}));
+      } catch (e) { /* le journal ne doit jamais faire echouer l'envoi */ }
+    };
     const verrous = [
-      db.collection("_meta").doc("huntPush_d_" + _cle(after.drinkId != null ? after.drinkId : event.params.drinkId)),
-      db.collection("_meta").doc("huntPush_u_" + _cle(lanceur))
+      { ref: db.collection("_meta").doc("huntPush_d_" + _cle(after.drinkId != null ? after.drinkId : event.params.drinkId)),
+        ms: 6 * 3600 * 1000, nom: "boisson" },
+      { ref: db.collection("_meta").doc("huntPush_u_" + _cle(lanceur)),
+        ms: 45 * 60 * 1000, nom: "personne" }
     ];
-    for (const ref of verrous) {
-      const snap = await ref.get();
+    for (const v of verrous) {
+      const snap = await v.ref.get();
       const at = (snap.exists && Number(snap.data().at)) || 0;
-      if (now - at < 6 * 3600 * 1000) return;
+      if (now - at < v.ms) {
+        await _tracer("verrou", { verrou: v.nom, resteMin: Math.ceil((v.ms - (now - at)) / 60000) });
+        return;
+      }
     }
-    for (const ref of verrous) { try { await ref.set({ at: now }); } catch (e) {} }
+    for (const v of verrous) { try { await v.ref.set({ at: now }); } catch (e) {} }
     /* Diffusion aux tokens proches (hors chercheurs). Borne : sans limite, une
        vague lisait la collection entiere — le cout grandit avec la base. */
     const tokensSnap = await db.collection("pushTokens").limit(3000).get();
@@ -209,6 +258,8 @@ exports.notifyHuntNearby = onDocumentWritten(
       try { await getMessaging().sendEach(msgs.slice(i, i + 500)); } catch (e) { console.warn("hunt push batch:", e && e.message); }
     }
     console.log("Chasse « " + name + " » : " + msgs.length + " notifiés.");
+    await _tracer("envoye", { jetonsLus: tokensSnap.size, envoyes: msgs.length,
+      centre: { lat: center.lat, lng: center.lng } });
   }
 );
 

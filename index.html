@@ -4250,9 +4250,16 @@ window.fbLoadNearbyHunts = async function(lat, lng, radiusKm) {
   try {
     /* Lue a l'accueil ET dans La chasse : on garde la collection deux minutes
        en memoire plutot que de la relire a chaque onglet. */
+    /* DEUX MINUTES, C'ETAIT LE TEMPS D'UN TEST A DEUX TELEPHONES. Ce cache ne
+       se vidait que sur MES propres ecritures (fbJoinHunt/fbLeaveHunt) : quand
+       c'est quelqu'un d'AUTRE qui lance une chasse, mon telephone continuait de
+       servir l'etat d'avant. Ouvrir l'onglet juste apres ne montrait rien, et
+       rien ne disait pourquoi. Vingt secondes suffisent a economiser les
+       lectures d'un aller-retour entre deux onglets, sans mentir sur ce qui se
+       passe autour. L'ecran Decouvertes le vide en plus a chaque ouverture. */
     var cache = window._huntsCache;
     var snap;
-    if (cache && (Date.now() - cache.at) < 120000) snap = cache.snap;
+    if (cache && (Date.now() - cache.at) < 20000) snap = cache.snap;
     else { snap = await getDocs(query(collection(db, "hunts"), limit(200))); window._huntsCache = { at: Date.now(), snap: snap }; }
     var out = [], myUid = auth.currentUser ? auth.currentUser.uid : null;
     // PETITE BASE : on montre TOUTES les chasses actives. On n'exclut qu'un
@@ -6021,6 +6028,10 @@ function _showRaw(s){
   else{try{threadReprendre();}catch(e){}}
   if(s==="messages"){try{renderMessages();}catch(e){}}
   if(s==="amis"){try{renderAmis();}catch(e){}}
+  /* Arriver sur Decouvertes, c'est demander « qu'est-ce qu'on cherche autour de
+     moi MAINTENANT ». On jette donc le cache des chasses : le garder faisait
+     afficher l'etat d'avant a quelqu'un qui venait justement voir le nouveau. */
+  if(s==="discover"){try{window._huntsCache=null;}catch(e){}}
   if(s==="profile"){try{majLigneAmis();}catch(e){}try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}try{renderDonCard();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
   if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}}
@@ -6151,8 +6162,42 @@ function freshnessInfo(s,did){
    (confirmedBy/At) ou negative (absentBy/At). A l'affichage, la date est
    volontairement grossiere : le jour, jamais l'heure (on ne trace pas les
    allees et venues d'une personne a la minute). */
+/* ============================================================================
+   LA MISSION DU JOUR NE SE VALIDAIT QUE PAR UN SEUL CHEMIN
+   ----------------------------------------------------------------------------
+   Le bonus de +30 pts n'etait teste QUE dans le code qui AJOUTE une boisson a
+   un magasin. Or on peut prouver qu'on l'a trouvee de quatre autres facons :
+   confirmer « En stock » depuis la carte, depuis la fiche du magasin, « Je l'ai
+   vue en rayon » depuis la chasse, ou un scan rattache. Dans tous ces cas la
+   mission restait ouverte, la carte « Je vais la chercher » restait affichee,
+   et les 30 points n'arrivaient jamais — alors que la boisson venait d'etre
+   localisee. C'est le defaut rapporte mot pour mot.
+
+   ON L'ACCROCHE DONC AU POINT DE PASSAGE OBLIGE. _noterObservation(s,did,true)
+   est appele par TOUS ces chemins, et par eux seuls : c'est la fonction qui
+   ecrit « quelqu'un a vu cette boisson ici ». Une seule ligne a maintenir, et
+   plus aucun chemin ne peut l'oublier. ==================================== */
+function missionSiTrouvee(did,nomMagasin){
+  try{
+    var m=getMission();
+    if(!m||m.done||Number(m.drinkId)!==Number(did))return false;
+    var d=(DRINKS||[]).find(function(x){return Number(x.id)===Number(did);});
+    m.done=true;
+    try{localStorage.setItem("magoMission",JSON.stringify(m));}catch(e){}
+    userStats.pts+=30;
+    setTimeout(function(){
+      try{flyPts(30);playSound("win");confettiBurst();}catch(e){}
+      toast(trh("Mission accomplie ! Tu as rep\u00e9r\u00e9 \u00ab {b} \u00bb \u00b7 +30 pts",{b:(d&&d.name)||""}));
+    },700);
+    try{renderWantedDrink();}catch(e){}
+    try{updateProfileStats();}catch(e){}
+    try{if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);}catch(e){}
+    return true;
+  }catch(e){ return false; }
+}
 function _noterObservation(s,did,positif){
   if(!s)return;
+  if(positif)try{missionSiTrouvee(did,s.name||"");}catch(e){}
   // Arrondi a l'heure : la base ne dit jamais a la minute qui etait ou.
   var qui=_moiPseudo(),quand=Math.floor(Date.now()/3600000)*3600000;
   if(positif){
@@ -13519,7 +13564,22 @@ function toggleWatch(d){
     toast("Veille retir\u00e9e");
     if(window.fbLeaveHunt)window.fbLeaveHunt(d.id);
   }else{
-    try{refreshLocation();}catch(e){}   // position fra\u00eeche pour que la chasse soit g\u00e9olocalis\u00e9e
+    /* LA CHASSE PARTAIT SANS POSITION, ET PERSONNE N'ETAIT PREVENU.
+       refreshLocation() est ASYNCHRONE : la ligne suivante lisait userLat
+       AVANT que le GPS n'ait repondu. Au premier lancement de la journee, la
+       chasse s'ecrivait donc sans lat/lng — et la Cloud Function sort par
+       « if (!center) return » : aucune notification ne partait, jamais, sans
+       le moindre message d'erreur. On cree la chasse tout de suite avec ce
+       qu'on a (pour qu'elle existe), puis on la REPOSITIONNE des que le GPS
+       repond : cette deuxieme ecriture relance la fonction, cette fois avec un
+       vrai centre. */
+    try{refreshLocation(function(ok){
+      if(!ok||userLat==null)return;
+      try{ if(window.fbJoinHunt)window.fbJoinHunt(d.id,d.name,d.emoji,userLat,userLng); }catch(e){}
+      var _w=(drinkWatches||[]).find(function(x){return Number(x.id)===Number(d.id);});
+      if(_w){_w.lat=userLat;_w.lng=userLng;try{saveWatches();}catch(e){}}
+      try{ if(window.fbSyncWatch)window.fbSyncWatch(true,d.id,d.name,userLat,userLng); }catch(e){}
+    });}catch(e){}
     drinkWatches.push({id:d.id,name:d.name,emoji:d.emoji,lat:userLat||null,lng:userLng||null,created:Date.now(),triggered:false});
     playSound("pop");
     toast("Alerte activ\u00e9e \u00B7 rayon "+(Number(window.magoHuntRadius)||10)+" km \u00B7 chasse lanc\u00e9e pr\u00E8s de toi");
@@ -16648,16 +16708,8 @@ function addDrinkToStoreHere(d){
   var key="tag:"+did+":"+String(s.id);
   if(awardOnce(key,FOREVER)){
     userStats.pts+=3;flyPts(3);toast("« "+d.name+" » ajoutée chez "+sanitize(s.name)+" · +3 pts");
-    // Mission « boisson recherchée » accomplie ? (+30 pts bonus, une seule fois)
-    try{
-      var _mm=getMission();
-      if(_mm&&!_mm.done&&Number(_mm.drinkId)===Number(did)){
-        _mm.done=true;try{localStorage.setItem("magoMission",JSON.stringify(_mm));}catch(e){}
-        userStats.pts+=30;
-        setTimeout(function(){flyPts(30);playSound("win");try{confettiBurst();}catch(e){}toast("Mission accomplie ! Tu as repéré « "+d.name+" » · +30 pts");},700);
-        try{renderWantedDrink();}catch(e){}
-      }
-    }catch(e){}
+    /* La mission est validee par _noterObservation, que ce chemin appelle
+       quelques lignes plus haut : la refaire ici sonnait deux fois. */
   }
   else{toast("« "+d.name+" » est déjà chez "+sanitize(s.name));}
   try{trackStoreContribution(String(s.id));}catch(e){}
