@@ -4971,6 +4971,45 @@ window.fbGetStore = async function(storeId) {
     return normalizeStore(snap.data(), snap.id, null);
   } catch (e) { console.warn("fbGetStore:", e); return null; }
 };
+/* CHERCHER UN MAGASIN PAR SON NOM, DANS TOUTE LA BASE.
+   Le champ de la carte promet « un magasin, une enseigne, une ville », et il
+   n'interrogeait qu'un service de lieux (Nominatim) : il savait trouver Paris,
+   jamais « Panshi Sweets ». Ecrire le nom d'un magasin qui EST dans la base et
+   s'entendre repondre « introuvable » est la pire reponse possible — elle dit
+   que la donnee n'existe pas alors qu'elle est la.
+
+   Firestore ne sait pas chercher « contient ». Il sait chercher « commence
+   par », et ca suffit ici : on demande la plage [q, q + caractere le plus
+   haut]. Ce qui commence autrement — « La Bonbonniere » quand on tape
+   « bonbon » — est rattrape cote application sur les magasins deja charges.
+   Les deux ensemble couvrent l'essentiel sans index a deployer. */
+window.fbChercherMagasinsParNom = async function(texte, maxi) {
+  var q = String(texte || "").trim();
+  if (q.length < 2) return [];
+  maxi = maxi || 8;
+  /* La casse compte dans un tri Firestore : « bonbon » et « Bonbon » ne
+     tombent pas au meme endroit. On tente les deux ecritures plutot que
+     d'imposer a quelqu'un de deviner la majuscule. */
+  var essais = [q];
+  var cap = q.charAt(0).toUpperCase() + q.slice(1);
+  if (cap !== q) essais.push(cap);
+  var out = [], vus = {};
+  for (var i = 0; i < essais.length; i++) {
+    try {
+      var snap = await getDocs(query(collection(db, "stores"), orderBy("name"),
+        startAt(essais[i]), endAt(essais[i] + "\uf8ff"), limit(maxi)));
+      snap.forEach(function(d) {
+        if (vus[d.id]) return;
+        vus[d.id] = 1;
+        var data = d.data();
+        if (data.lat == null || data.lng == null) return;
+        out.push(normalizeStore(data, d.id, null));
+      });
+    } catch (e) { console.warn("fbChercherMagasinsParNom:", e); }
+    if (out.length >= maxi) break;
+  }
+  return out.slice(0, maxi);
+};
 window.fbCommunityAddDrinks = async function(storeId, ids) {
   const nums = ids.map(Number).filter(n => !isNaN(n));
   if (!nums.length) return 0;
@@ -19878,6 +19917,59 @@ function exploreCitySuggest(){
 /* Recherche mondiale (villes, pays, rues) via le geocodage OpenStreetMap.
    auto = frappe en cours : on reste discret (pas de son d'erreur, pas de
    message qui clignote a chaque lettre). */
+/* LES MAGASINS TROUVES PAR LEUR NOM, AU-DESSUS DES LIEUX.
+   Deux sources, parce qu'aucune ne suffit seule :
+   - ce qui est deja charge sur la carte, cherche en « contient » et sans tenir
+     compte des accents ni de la casse : « bonbon » trouve « La Bonbonniere » ;
+   - la base entiere, cherchee en « commence par » : ca sort de la zone
+     affichee, et ca trouve un magasin a l'autre bout de la ville.
+   On affiche la premiere tout de suite — elle est instantanee — et on complete
+   quand la seconde repond. */
+function _rechercheLocaleMagasins(q){
+  var n=normTxt(String(q||"").trim());
+  if(n.length<2)return [];
+  var vus={},out=[];
+  var lots=[window._exploreRawList||[],window.STORES||[]];
+  for(var i=0;i<lots.length;i++)for(var j=0;j<lots[i].length;j++){
+    var s=lots[i][j];
+    if(!s||!s.name||typeof s.lat!=="number")continue;
+    if(normTxt(String(s.name)+" "+String(s.brand||"")).indexOf(n)===-1)continue;
+    var cle=String(s.fbId||s.id);
+    if(vus[cle])continue;
+    vus[cle]=1;out.push(s);
+    if(out.length>=8)return out;
+  }
+  return out;
+}
+function _ligneMagasinTrouve(s){
+  var sid=String(s.fbId||s.id).replace(/'/g,"\\'");
+  var sous=[s.brand&&s.brand!==s.name?s.brand:"",(typeof userLat==="number"&&typeof s.lat==="number")?fmtDist(haversine(userLat,userLng,s.lat,s.lng)):""].filter(Boolean).join(" \u00b7 ");
+  return '<div role="button" tabindex="0" onclick="exploreAllerAuMagasin(\''+sid+'\')" onkeydown="if(event.key===\'Enter\'){exploreAllerAuMagasin(\''+sid+'\');}" '+
+    'style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;cursor:pointer;-webkit-tap-highlight-color:transparent">'+
+    '<span style="width:26px;height:26px;border-radius:9px;background:var(--bg2);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:12px;font-weight:800;color:var(--s1)">'+
+      sanitize(String(s.name||"?").trim().charAt(0).toUpperCase())+'</span>'+
+    '<span style="flex:1;min-width:0"><span style="display:block;font-size:13.5px;font-weight:700;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(s.name)+'</span>'+
+    (sous?'<span style="display:block;font-size:11px;color:var(--s2)">'+sanitize(sous)+'</span>':'')+'</span></div>';
+}
+/* Aller sur un magasin trouve : la carte s'y pose et sa fiche s'ouvre. Sans
+   l'ouverture de la fiche, on atterrissait sur un pin au milieu d'une carte
+   sans savoir lequel c'etait. */
+function exploreAllerAuMagasin(sid){
+  var box=document.getElementById("explore-city-results");if(box)box.innerHTML="";
+  var inp=document.getElementById("explore-city-q");if(inp)inp.blur();
+  try{exploreAbortCity();}catch(e){}
+  var s=(window._exploreRawList||[]).concat(window.STORES||[]).find(function(x){return String(x.fbId||x.id)===String(sid);});
+  var poser=function(st){
+    if(!st)return;
+    try{if(exploreMap)exploreMap.setView([st.lat,st.lng],Math.max(exploreMap.getZoom(),16));}catch(e){}
+    try{if(typeof STORES!=="undefined"&&!STORES.some(function(x){return String(x.fbId||x.id)===String(st.fbId||st.id);}))STORES.push(st);}catch(e){}
+    window._cameFromExplore=true;
+    setTimeout(function(){try{openStoreDetail(String(st.fbId||st.id));}catch(e){}},260);
+  };
+  try{playSound("pop");}catch(e){}
+  if(s){poser(s);return;}
+  if(window.fbGetStore)window.fbGetStore(sid).then(poser).catch(function(){});
+}
 function exploreGoCity(auto){
   var q=((document.getElementById("explore-city-q")||{}).value||"").trim();
   var box=document.getElementById("explore-city-results");
@@ -19888,7 +19980,32 @@ function exploreGoCity(auto){
   if(!auto)clearTimeout(window._cityTimer);
   if(!q){exploreCitySuggest();return;}
   var seq=(window._citySeq=(window._citySeq||0)+1);
-  if(!auto)box.innerHTML=_cityBoxCard(ondeHTML(3)+'<span style="margin-left:8px">Recherche de \u00AB '+sanitize(q)+' \u00BB\u2026</span>');
+  /* Les magasins d'abord, et tout de suite : c'est ce que le champ promet en
+     premier, et la reponse est deja en memoire. Les lieux arrivent apres. */
+  var _mags=_rechercheLocaleMagasins(q);
+  var _htmlMags=function(liste){
+    if(!liste.length)return "";
+    return '<div style="padding:6px 10px 2px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--s3)">'+
+      sanitize(tr("Magasins"))+'</div>'+liste.map(_ligneMagasinTrouve).join("");
+  };
+  if(_mags.length){
+    box.innerHTML='<div style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);max-height:46vh;overflow-y:auto">'+
+      _htmlMags(_mags)+'</div>';
+  } else if(!auto)box.innerHTML=_cityBoxCard(ondeHTML(3)+'<span style="margin-left:8px">Recherche de \u00AB '+sanitize(q)+' \u00BB\u2026</span>');
+  /* Et la base entiere, pour les magasins hors de la zone affichee. */
+  if(window.fbChercherMagasinsParNom){
+    window.fbChercherMagasinsParNom(q,8).then(function(loin){
+      if(seq!==window._citySeq||!loin||!loin.length)return;
+      var deja={};_mags.forEach(function(x){deja[String(x.fbId||x.id)]=1;});
+      var neufs=loin.filter(function(x){return !deja[String(x.fbId||x.id)];});
+      if(!neufs.length)return;
+      _mags=_mags.concat(neufs).slice(0,8);
+      var h=document.getElementById("explore-city-mags");
+      if(h){h.innerHTML=_htmlMags(_mags);return;}
+      box.innerHTML='<div id="explore-city-mags" style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);max-height:46vh;overflow-y:auto">'+
+        _htmlMags(_mags)+'</div>';
+    }).catch(function(){});
+  }
   /* addressdetails=1 : sans lui, le PAYS n'est pas renvoye separement et on ne
      pouvait que decouper display_name a l'aveugle — ce qui donnait « Oujda ·
      Pachalik d'Oujda, Prefecture d'Oujda-Angad », des noms administratifs que
@@ -19898,14 +20015,19 @@ function exploreGoCity(auto){
     .then(function(r){return r.json();})
     .then(function(rows){
       if(seq!==window._citySeq)return; // une frappe plus recente a pris la main
-      box.innerHTML="";
+      /* NE PAS EFFACER LES MAGASINS DEJA TROUVES. Les lieux arrivent apres eux,
+         pas a leur place : sinon taper le nom d'une boutique la faisait
+         apparaitre puis disparaitre une seconde plus tard, remplacee par des
+         villes qui n'ont rien a voir. */
       if(!rows||!rows.length){
-        if(auto)return;
+        if(_mags.length)return;          // on a deja mieux a montrer
+        if(auto){box.innerHTML="";return;}
         box.innerHTML=_cityBoxCard("Introuvable \u2014 essaie \u00AB "+sanitize(q)+" + pays \u00BB");
         playSound("err");
         setTimeout(function(){if(seq===window._citySeq)box.innerHTML="";},2500);
         return;
       }
+      box.innerHTML="";
       /* Nominatim renvoie souvent la meme ville plusieurs fois (la commune, le
          chef-lieu, la zone administrative...). Deux lignes « Oujda » a
          l'identique n'aident personne a choisir : on ne garde que la premiere
@@ -19918,6 +20040,11 @@ function exploreGoCity(auto){
         _vues[cle]=1; return true;
       }).slice(0,6);
       var wrap=document.createElement("div");
+      if(_mags.length){
+        var _tetePlaces='<div id="explore-city-mags" style="padding:0">'+_htmlMags(_mags)+'</div>'+
+          '<div style="padding:8px 10px 2px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--s3)">'+sanitize(tr("Lieux"))+'</div>';
+        wrap.innerHTML=_tetePlaces;
+      }
       wrap.style.cssText="background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);max-height:46vh;overflow-y:auto";
       rows.forEach(function(r){
         var parts=String(r.display_name||"").split(",");

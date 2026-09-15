@@ -200,7 +200,32 @@ const r = await page.evaluate(async () => {
     liste.remove();
   }
 
-  /* ── 8. Le chinois : atteignable, et il change vraiment l'ecran ─────── */
+  /* ── 8. Le champ de la carte cherche aussi les MAGASINS ────────────── */
+  {
+    const sauve = window._exploreRawList;
+    window._exploreRawList = [
+      { id: "s1", fbId: "s1", name: "La Bonbonnière", lat: 48.877, lng: 2.332, brand: "", drinks: [] },
+      { id: "s2", fbId: "s2", name: "Panshi Sweets", lat: 48.8785, lng: 2.3577, brand: "", drinks: [] },
+      { id: "s3", fbId: "s3", name: "Carrefour City", lat: 48.86, lng: 2.35, brand: "Carrefour", drinks: [] },
+    ];
+    const r1 = _rechercheLocaleMagasins("bonbon").map((x) => x.name);
+    dit("« bonbon » trouve « La Bonbonnière » sans accent ni majuscule", r1.indexOf("La Bonbonnière") !== -1);
+    const r2 = _rechercheLocaleMagasins("sweets").map((x) => x.name);
+    dit("« sweets » trouve la boutique par son nom", r2.indexOf("Panshi Sweets") !== -1);
+    const r3 = _rechercheLocaleMagasins("carrefour").map((x) => x.name);
+    dit("une enseigne se trouve toujours", r3.indexOf("Carrefour City") !== -1);
+    dit("une frappe d'une lettre ne declenche rien", _rechercheLocaleMagasins("b").length === 0);
+    const ligne = _ligneMagasinTrouve(window._exploreRawList[0]);
+    dit("la ligne proposee porte le nom du magasin", ligne.indexOf("La Bonbonnière") !== -1);
+    dit("et elle mene a ce magasin precis", ligne.indexOf("exploreAllerAuMagasin") !== -1 && ligne.indexOf("s1") !== -1);
+    /* On ne teste PAS ici la recherche dans la base entiere : le module
+       Firebase ne s'initialise pas sans reseau, donc aucune fonction fb* n'existe
+       dans cet essai. L'affirmer reviendrait a tester la connexion, pas le code.
+       Cette requete-la a ete verifiee directement contre la base de production. */
+    window._exploreRawList = sauve;
+  }
+
+  /* ── 9. Le chinois : atteignable, et il change vraiment l'ecran ─────── */
   dit("le chinois est propose", Object.keys(LANGS).indexOf("zh") !== -1);
   setLang("fr"); await pause(700);
   const fr1 = document.body.innerText.slice(0, 4000);
