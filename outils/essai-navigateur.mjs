@@ -109,7 +109,123 @@ const r = await page.evaluate(async () => {
   out.titreEn = titreEn;
   dit("la feuille se traduit", titreEn === "Send this shop");
 
-  /* ── 4. Le chinois : atteignable, et il change vraiment l'ecran ─────── */
+  /* ── 4. Revenir d'une fiche magasin ne doit pas perdre la boisson ───── */
+  window.exploreFilter = { drinkId: 200, name: "Mountain Dew Original" };
+  window._exploreFromDrink = true;
+  window.storeDetailReturn = "__explore__";
+  if (typeof exploreFilter !== "undefined") { try { eval("exploreFilter = window.exploreFilter"); } catch (e) {} }
+  const faux = { getBounds: () => ({ getNorthEast: () => ({lat:48.9,lng:2.4}), getSouthWest: () => ({lat:48.8,lng:2.3}) }),
+                 invalidateSize: () => {} };
+  const vraiMap = window.exploreMap;
+  try { eval("exploreMap = faux"); } catch (e) { window.exploreMap = faux; }
+  /* L'hote de la carte n'existe qu'une fois la carte ouverte. On le pose ici
+     pour emprunter le chemin QUI ETAIT CASSE — celui qui reaffiche la carte
+     deja construite. Sans lui, le test passait par la reouverture complete,
+     qui elle n'a jamais perdu le filtre : on aurait teste le mauvais chemin. */
+  let hote = document.getElementById("explore-map-host"), posePourLeTest = false;
+  if (!hote) { hote = document.createElement("div"); hote.id = "explore-map-host"; document.body.appendChild(hote); posePourLeTest = true; }
+  closeStoreDetail();
+  await pause(120);
+  const apres = (typeof exploreFilter !== "undefined") ? exploreFilter : window.exploreFilter;
+  dit("le filtre boisson survit au retour", !!apres && apres.drinkId === 200);
+  if (posePourLeTest) hote.remove();
+  dit("le nom de la boisson survit aussi", apres && apres.name === "Mountain Dew Original");
+  try { eval("exploreMap = vraiMap"); } catch (e) { window.exploreMap = vraiMap; }
+  try { eval("exploreFilter = null"); } catch (e) {}
+
+  /* ── 5. « En stock » veut dire confirme, dans la liste comme sur la carte ── */
+  const rattache = { drinks: [200], confirmations: {} };
+  const confirme = { drinks: [200], confirmations: { 200: 2 } };
+  const absent = { drinks: [], confirmations: { 200: 5 } };
+  const negatif = { drinks: [200], confirmations: { 200: -1 } };
+  dit("rattache seul n'est PAS en stock", magasinConfirmePour(rattache, 200) === false);
+  dit("confirme EST en stock", magasinConfirmePour(confirme, 200) === true);
+  dit("pas la boisson, pas de stock", magasinConfirmePour(absent, 200) === false);
+  dit("signale absent, pas de stock", magasinConfirmePour(negatif, 200) === false);
+
+  /* ── 6. Les fleches de bord pointent vers ce qu'on verra en arrivant ── */
+  {
+    const mapEl = document.createElement("div"); mapEl.id = "explore-map"; document.body.appendChild(mapEl);
+    const sauveMap = window.exploreMap, sauveListe = window._exploreRawList, sauveChips = window._exploreChips;
+    const hors = { getSize: () => ({ x: 400, y: 800 }),
+                   latLngToContainerPoint: () => ({ x: 900, y: 400 }),  /* toujours hors champ */
+                   setView: () => {}, getZoom: () => 14 };
+    try { eval("exploreMap = hors"); } catch (e) { window.exploreMap = hors; }
+    try { eval("exploreFilter = {drinkId:200,name:'Mountain Dew Original'}"); } catch (e) {}
+    window._routeLayer = null;
+    window._exploreRawList = [{ id: "x1", name: "Piste", lat: 48.88, lng: 2.35, brand: "", drinks: [200], confirmations: {} }];
+
+    window._exploreChips = { instock: true };
+    renderInStockArrows();
+    const avecPuce = document.querySelectorAll("#explore-edge-arrows [role=button]").length;
+    const bandeau = document.getElementById("explore-pistes");
+    dit("puce « En stock » : aucune fleche vers un magasin non confirme", avecPuce === 0);
+    dit("la carte vide s'explique au lieu de rester muette", !!bandeau && /1/.test(bandeau.textContent));
+
+    window._exploreChips = { instock: false };
+    renderInStockArrows();
+    const sansPuce = document.querySelectorAll("#explore-edge-arrows [role=button]").length;
+    dit("puce eteinte : la piste redevient signalee", sansPuce === 1);
+    dit("et le bandeau disparait", !document.getElementById("explore-pistes"));
+
+    try { eval("exploreMap = sauveMap"); } catch (e) { window.exploreMap = sauveMap; }
+    try { eval("exploreFilter = null"); } catch (e) {}
+    window._exploreRawList = sauveListe; window._exploreChips = sauveChips;
+    mapEl.remove();
+    const w = document.getElementById("explore-edge-arrows"); if (w) w.remove();
+  }
+
+  /* ── 7. Chercher « Bonbon » doit trouver les boutiques qui s'appellent ainsi ── */
+  {
+    /* Une epreuve precedente a bascule l'app en anglais. Sans remettre la
+       langue, on comparerait du francais attendu a de l'anglais affiche — et
+       l'echec parlerait de traduction alors qu'on teste une recherche. */
+    setLang("fr"); await pause(250);
+    const liste = document.createElement("div"); liste.id = "brand-picker-list"; document.body.appendChild(liste);
+    const sauve = window._exploreRawList;
+    window._exploreRawList = [
+      { id: "b1", name: "La Bonbonnière", lat: 48.87, lng: 2.31, brand: "", drinks: [] },
+      { id: "b2", name: "Bonbons De Montmarte", lat: 48.88, lng: 2.34, brand: "", drinks: [] },
+      { id: "b3", name: "Carrefour City", lat: 48.86, lng: 2.35, brand: "Carrefour", drinks: [] },
+    ];
+    renderBrandPickerList("bonbon");
+    const t = liste.textContent;
+    dit("« bonbon » trouve les boutiques qui portent ce nom", t.indexOf("Bonbonnière") !== -1 && t.indexOf("Bonbons De Montmarte") !== -1);
+    dit("et ne dit plus qu'il n'y a rien", t.indexOf("Aucune enseigne") === -1);
+    renderBrandPickerList("carref");
+    dit("une vraie enseigne reste proposee", liste.textContent.indexOf("Carrefour") !== -1);
+    renderBrandPickerList("zzzzqx");
+    dit("et quand il n'y a vraiment rien, on le dit", /Aucune enseigne ni magasin/.test(liste.textContent));
+    window._exploreRawList = sauve;
+    liste.remove();
+  }
+
+  /* ── 8. Le champ de la carte cherche aussi les MAGASINS ────────────── */
+  {
+    const sauve = window._exploreRawList;
+    window._exploreRawList = [
+      { id: "s1", fbId: "s1", name: "La Bonbonnière", lat: 48.877, lng: 2.332, brand: "", drinks: [] },
+      { id: "s2", fbId: "s2", name: "Panshi Sweets", lat: 48.8785, lng: 2.3577, brand: "", drinks: [] },
+      { id: "s3", fbId: "s3", name: "Carrefour City", lat: 48.86, lng: 2.35, brand: "Carrefour", drinks: [] },
+    ];
+    const r1 = _rechercheLocaleMagasins("bonbon").map((x) => x.name);
+    dit("« bonbon » trouve « La Bonbonnière » sans accent ni majuscule", r1.indexOf("La Bonbonnière") !== -1);
+    const r2 = _rechercheLocaleMagasins("sweets").map((x) => x.name);
+    dit("« sweets » trouve la boutique par son nom", r2.indexOf("Panshi Sweets") !== -1);
+    const r3 = _rechercheLocaleMagasins("carrefour").map((x) => x.name);
+    dit("une enseigne se trouve toujours", r3.indexOf("Carrefour City") !== -1);
+    dit("une frappe d'une lettre ne declenche rien", _rechercheLocaleMagasins("b").length === 0);
+    const ligne = _ligneMagasinTrouve(window._exploreRawList[0]);
+    dit("la ligne proposee porte le nom du magasin", ligne.indexOf("La Bonbonnière") !== -1);
+    dit("et elle mene a ce magasin precis", ligne.indexOf("exploreAllerAuMagasin") !== -1 && ligne.indexOf("s1") !== -1);
+    /* On ne teste PAS ici la recherche dans la base entiere : le module
+       Firebase ne s'initialise pas sans reseau, donc aucune fonction fb* n'existe
+       dans cet essai. L'affirmer reviendrait a tester la connexion, pas le code.
+       Cette requete-la a ete verifiee directement contre la base de production. */
+    window._exploreRawList = sauve;
+  }
+
+  /* ── 9. Le chinois : atteignable, et il change vraiment l'ecran ─────── */
   dit("le chinois est propose", Object.keys(LANGS).indexOf("zh") !== -1);
   setLang("fr"); await pause(700);
   const fr1 = document.body.innerText.slice(0, 4000);

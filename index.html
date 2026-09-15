@@ -3457,7 +3457,89 @@ window.fbRecentReports = async function(n) {
 window.fbDeleteStore = async function(storeId) {
   await deleteDoc(doc(db, "stores", String(storeId)));
 };
-window.fbQueryZone = async function(lat, lng, radiusKm) {
+/* ============================================================================
+   LA CARTE N'A PAS BESOIN DES ASSORTIMENTS POUR DESSINER DES PINS
+   ----------------------------------------------------------------------------
+   Mesure faite sur la base de production, zone parisienne, 253 magasins :
+       tout le document            8 845 Ko
+       sans le champ « drinks »      166 Ko
+   Le champ drinks pese 98 % du telechargement. Un magasin porte en moyenne
+   351 identifiants de boissons, et jusqu'a 1 171 — poses en masse par le
+   remplissage d'enseignes, jamais confirmes par personne. Ouvrir la carte sur
+   Paris faisait donc descendre 18 Mo dans le telephone, d'un coup, pour
+   afficher des points sur une carte. C'est ce que l'application « qui se
+   relance toute seule » etait en train de faire : iOS tue l'onglet.
+
+   Le SDK web ne sait pas demander une partie d'un document. L'API REST de
+   Firestore, si (select.fields). On l'utilise UNIQUEMENT quand aucune boisson
+   n'est choisie — dans ce cas la liste des boissons ne sert a rien. Des qu'une
+   boisson est ciblee, on repasse par le chemin complet, qui lui en a besoin.
+
+   Les regles de securite s'appliquent de la meme facon sur REST : on ne
+   contourne rien, on demande moins. Et au moindre pepin, on retombe sur le
+   chemin d'origine plutot que de rendre une carte vide. */
+var MAGO_CHAMPS_PIN = ["name", "lat", "lng", "brand", "geohash", "hours", "certified", "type", "emoji", "owner"];
+async function _restPins(bornes) {
+  var url = "https://firestore.googleapis.com/v1/projects/" + firebaseConfig.projectId
+    + "/databases/(default)/documents:runQuery";
+  var out = [];
+  for (var i = 0; i < bornes.length; i++) {
+    var corps = { structuredQuery: {
+      from: [{ collectionId: "stores" }],
+      where: { compositeFilter: { op: "AND", filters: [
+        { fieldFilter: { field: { fieldPath: "geohash" }, op: "GREATER_THAN_OR_EQUAL", value: { stringValue: bornes[i][0] } } },
+        { fieldFilter: { field: { fieldPath: "geohash" }, op: "LESS_THAN_OR_EQUAL", value: { stringValue: bornes[i][1] } } } ] } },
+      orderBy: [{ field: { fieldPath: "geohash" } }],
+      select: { fields: MAGO_CHAMPS_PIN.map(function (f) { return { fieldPath: f }; }) },
+      limit: 3000 } };
+    var r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
+    if (!r.ok) throw new Error("REST " + r.status);
+    var rows = await r.json();
+    if (!Array.isArray(rows)) throw new Error("REST forme inattendue");
+    for (var j = 0; j < rows.length; j++) if (rows[j].document) out.push(rows[j].document);
+  }
+  return out;
+}
+function _valeurRest(v) {
+  if (!v) return null;
+  if (v.stringValue != null) return v.stringValue;
+  if (v.doubleValue != null) return Number(v.doubleValue);
+  if (v.integerValue != null) return Number(v.integerValue);
+  if (v.booleanValue != null) return !!v.booleanValue;
+  return null;
+}
+window.fbZonePins = async function(lat, lng, radiusKm) {
+  var bornes = geohashQueryBounds(lat, lng, radiusKm * 1000);
+  var docs = await _restPins(bornes);
+  var out = [], vus = {};
+  for (var i = 0; i < docs.length; i++) {
+    var d = docs[i];
+    var id = String(d.name || "").split("/").pop();
+    if (!id || vus[id]) continue;
+    vus[id] = 1;
+    var f = d.fields || {}, o = {};
+    for (var k = 0; k < MAGO_CHAMPS_PIN.length; k++) {
+      var nom = MAGO_CHAMPS_PIN[k];
+      if (f[nom] !== undefined) o[nom] = _valeurRest(f[nom]);
+    }
+    if (o.lat == null || o.lng == null) continue;
+    var dist = haversineKm(lat, lng, o.lat, o.lng);
+    if (dist > radiusKm) continue;          // le geohash deborde : on tranche ici
+    /* On ne SAIT PAS ce que ce magasin a en rayon : on ne l'a pas demande.
+       Le drapeau le dit, pour qu'aucun code ne prenne un tableau vide pour
+       « il n'a rien » — ce serait la carte qui ment. */
+    o._pins = true;
+    out.push(normalizeStore(o, id, dist));
+  }
+  return out;
+};
+window.fbQueryZone = async function(lat, lng, radiusKm, pinsSeuls) {
+  if (pinsSeuls && MAGO_GEOHASH_READY) {
+    try {
+      var legers = await window.fbZonePins(lat, lng, radiusKm);
+      if (legers && legers.length) return legers;
+    } catch (e) { console.warn("pins allèges indisponibles, chemin complet:", e); }
+  }
   return queryNearbyStores(lat, lng, radiusKm);
 };
 window.fbImportStores = async function(list, onProgress) {
@@ -4977,6 +5059,45 @@ window.fbGetStore = async function(storeId) {
     if (!snap.exists()) return null;
     return normalizeStore(snap.data(), snap.id, null);
   } catch (e) { console.warn("fbGetStore:", e); return null; }
+};
+/* CHERCHER UN MAGASIN PAR SON NOM, DANS TOUTE LA BASE.
+   Le champ de la carte promet « un magasin, une enseigne, une ville », et il
+   n'interrogeait qu'un service de lieux (Nominatim) : il savait trouver Paris,
+   jamais « Panshi Sweets ». Ecrire le nom d'un magasin qui EST dans la base et
+   s'entendre repondre « introuvable » est la pire reponse possible — elle dit
+   que la donnee n'existe pas alors qu'elle est la.
+
+   Firestore ne sait pas chercher « contient ». Il sait chercher « commence
+   par », et ca suffit ici : on demande la plage [q, q + caractere le plus
+   haut]. Ce qui commence autrement — « La Bonbonniere » quand on tape
+   « bonbon » — est rattrape cote application sur les magasins deja charges.
+   Les deux ensemble couvrent l'essentiel sans index a deployer. */
+window.fbChercherMagasinsParNom = async function(texte, maxi) {
+  var q = String(texte || "").trim();
+  if (q.length < 2) return [];
+  maxi = maxi || 8;
+  /* La casse compte dans un tri Firestore : « bonbon » et « Bonbon » ne
+     tombent pas au meme endroit. On tente les deux ecritures plutot que
+     d'imposer a quelqu'un de deviner la majuscule. */
+  var essais = [q];
+  var cap = q.charAt(0).toUpperCase() + q.slice(1);
+  if (cap !== q) essais.push(cap);
+  var out = [], vus = {};
+  for (var i = 0; i < essais.length; i++) {
+    try {
+      var snap = await getDocs(query(collection(db, "stores"), orderBy("name"),
+        startAt(essais[i]), endAt(essais[i] + "\uf8ff"), limit(maxi)));
+      snap.forEach(function(d) {
+        if (vus[d.id]) return;
+        vus[d.id] = 1;
+        var data = d.data();
+        if (data.lat == null || data.lng == null) return;
+        out.push(normalizeStore(data, d.id, null));
+      });
+    } catch (e) { console.warn("fbChercherMagasinsParNom:", e); }
+    if (out.length >= maxi) break;
+  }
+  return out.slice(0, maxi);
 };
 window.fbCommunityAddDrinks = async function(storeId, ids) {
   const nums = ids.map(Number).filter(n => !isNaN(n));
@@ -12269,7 +12390,7 @@ function openAddDrinksSheet(){
   wrap.style.cssText="position:fixed;inset:0;z-index:8600;background:rgba(0,0,0,.45);display:flex;align-items:flex-end";
   wrap.innerHTML='<div style="background:var(--app-bg);border-radius:22px 22px 0 0;width:100%;max-height:82vh;display:flex;flex-direction:column;padding:18px 16px calc(16px + env(safe-area-inset-bottom))">'+
     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'+
-      '<div style="flex:1;font-size:15px;font-weight:800;color:var(--s1)">Qu\'as-tu vu chez '+sanitize(s.name)+' ?</div>'+
+      '<div style="flex:1;font-size:15px;font-weight:800;color:var(--s1)">'+trh("Qu'as-tu vu chez {s} ?",{s:sanitize(s.name)})+'</div>'+
       '<div onclick="document.getElementById(\'adddrinks-sheet\').remove()" role="button" tabindex="0" style="width:32px;height:32px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:13px;color:var(--s2)">\u2715</div></div>'+
     '<input id="adddrinks-q" type="text" placeholder="Cherche une boisson\u2026" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none;margin-bottom:10px">'+
     '<div id="adddrinks-list" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>'+
@@ -13221,7 +13342,7 @@ function populateClusterMarkers(cluster){
     // laisser croire qu'il a un Mountain Dew)
     var hasDrink=curSel?(s.drinks||[]).some(function(d){return Number(d)===Number(curSel.id);}):true;
     var conf=curSel?((s.confirmations||{})[curSel.id]||0):0;
-    var sure=curSel?(hasDrink&&(storeVerifiedFor(s,curSel.id)||conf>0)):false;
+    var sure=curSel?magasinConfirmePour(s,curSel.id):false;
     var status=(!hasDrink||conf<0)?"no":(sure?"sure":"maybe");
     // Filtre "en stock seulement" : on ne garde QUE les magasins qui l'ont vraiment
     // (vert coche), pour savoir ou ALLER a coup sur plutot qu'ou essayer.
@@ -15620,13 +15741,28 @@ function closeStoreDetail(){
   if(storeDetailReturn==="__explore__"){
     var h=document.getElementById("explore-map-host");
     if(h&&typeof exploreMap!=="undefined"&&exploreMap){
+      /* LE FILTRE BOISSON DOIT SURVIVRE AU RETOUR.
+         show("home") efface exploreFilter — et c'est voulu : sans ca, rouvrir
+         la carte depuis l'accueil la rouvrait toujours sur la derniere boisson
+         cherchee. Mais ici on n'atterrit pas sur l'accueil : on s'en sert
+         seulement comme fond sous la carte. Le nettoyage frappait donc a cote,
+         et revenir d'une fiche magasin ramenait une carte de Paris entiere,
+         sans la boisson, sans le bouton « en stock seulement », et avec des
+         pins qui ne savaient plus dire qui l'a. On met le filtre de cote, on
+         le remet, et on redessine ce qui en depend. */
+      var _filtreCarte=exploreFilter, _venaitDUneBoisson=window._exploreFromDrink;
       show("home"); // écran de base sous l'overlay (masqué par la carte)
+      exploreFilter=_filtreCarte; window._exploreFromDrink=_venaitDUneBoisson;
       // "flex", PAS "" : effacer le style en ligne faisait retomber l'hote en
       // display:block, la carte (flex:1) s'ecrasait a zero, et on revenait sur
       // un ecran noir. Le CSS porte desormais la meme valeur en secours.
       h.style.display="flex";
       requestAnimationFrame(function(){h.classList.add("in");});
       setTimeout(function(){try{exploreMap.invalidateSize();}catch(e){}},80);
+      if(_filtreCarte){
+        try{renderExploreChips();}catch(e){}
+        try{if(typeof exploreLoadStores==="function")exploreLoadStores(true);}catch(e){}
+      }
       return;
     }
     if(typeof openExploreMap==="function"){
@@ -18378,8 +18514,35 @@ function toggleExploreCheapSort(){window._exploreSortPrice=!window._exploreSortP
 function allKnownBrands(){
   var set={};
   (window.STORES||[]).forEach(function(s){if(s&&s.brand)set[s.brand]=1;});
+  /* Les magasins charges sur la carte ne sont pas tous dans STORES. Sans eux,
+     le selecteur ignorait les enseignes de la zone qu'on est en train de
+     regarder. */
+  (window._exploreRawList||[]).forEach(function(s){if(s&&s.brand)set[s.brand]=1;});
   try{Object.keys(BRAND_COLORS||{}).forEach(function(b){set[b]=1;});}catch(e){}
   return Object.keys(set).sort(function(a,b){return a.localeCompare(b,"fr");});
+}
+/* Les magasins dont le NOM contient ce qu'on tape, enseigne ou pas.
+   « Bonbon » ne renvoyait rien, alors que La Bonbonniere et Bonbons de
+   Montmartre sont dans la base : ce sont des independants, ils n'ont pas
+   d'enseigne, et le selecteur ne regardait que les enseignes. Le filtre, lui,
+   savait deja chercher dans le nom — c'est la LISTE qui ne le proposait pas.
+   Repondre « Aucune enseigne » quand des magasins correspondent, c'est faire
+   croire qu'il n'y a rien. */
+function magasinsParNom(q){
+  q=normTxt(String(q||"").trim());
+  if(q.length<2)return [];
+  var vus={},out=[];
+  var lots=[window._exploreRawList||[],window.STORES||[]];
+  for(var i=0;i<lots.length;i++)for(var j=0;j<lots[i].length;j++){
+    var s=lots[i][j];
+    if(!s||!s.name)continue;
+    var nom=String(s.name);
+    if(normTxt(nom).indexOf(q)===-1)continue;
+    if(vus[nom])continue;
+    vus[nom]=1;out.push(nom);
+    if(out.length>=40)return out;
+  }
+  return out;
 }
 function brandPickerRow(label,val,sel){
   var arg=(val===null?"null":"'"+String(val).replace(/'/g,"\\'")+"'");
@@ -18392,7 +18555,17 @@ function renderBrandPickerList(q){
   if(q)brands=brands.filter(function(b){return b.toLowerCase().indexOf(q)!==-1;});
   var html=q?"":brandPickerRow("Toutes les enseignes",null,!window._exploreBrand);
   html+=brands.slice(0,250).map(function(b){return brandPickerRow(b,b,window._exploreBrand===b);}).join("");
-  if(!brands.length)html+='<div style="padding:18px 4px;font-size:13px;color:var(--s2)">Aucune enseigne « '+sanitize(q)+' »</div>';
+  var parNom=q?magasinsParNom(q).filter(function(n){return brands.indexOf(n)===-1;}):[];
+  if(parNom.length){
+    html+='<div style="padding:12px 4px 6px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--s3)">'
+      +sanitize(tr("Magasins portant ce nom"))+'</div>';
+    html+=parNom.slice(0,40).map(function(n){
+      var arg="'"+String(n).replace(/'/g,"\\'")+"'";
+      return '<div onclick="exploreBrandApplyQuery('+arg+')" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){exploreBrandApplyQuery('+arg+');}" style="padding:14px 4px;font-size:14.5px;font-weight:700;color:var(--s1);cursor:pointer;border-bottom:1px solid var(--border)">'+sanitize(n)+'</div>';
+    }).join("");
+  }
+  if(!brands.length&&!parNom.length)html+='<div style="padding:18px 4px;font-size:13px;color:var(--s2)">'
+    +sanitize(trh("Aucune enseigne ni magasin « {q} »",{q:q}))+'</div>';
   el.innerHTML=html;
 }
 /* Une seule porte de sortie pour le choix d'enseigne : sans ca, trois chemins
@@ -18462,12 +18635,39 @@ function exploreBrandApplyQuery(q){
 /* Fleches de bord : quand une boisson est ciblee, les magasins qui l'ont mais qui
    sont HORS de l'ecran sont indiques par une fleche sur le bord de la carte,
    pointant vers eux. Tap sur la fleche -> la carte glisse jusqu'au magasin. */
+/* Bandeau « aucun stock confirme, mais des pistes ». Il n'apparait que dans un
+   seul cas : la puce « En stock » est allumee, rien n'est confirme, et des
+   magasins ont quand meme la boisson rattachee. Sans lui, la carte etait vide
+   et muette — on ne pouvait pas deviner qu'il suffisait de decocher. */
+function majBandeauPistes(nb){
+  var mapEl=document.getElementById("explore-map");if(!mapEl)return;
+  var b=document.getElementById("explore-pistes");
+  if(!nb){ if(b)b.remove(); return; }
+  if(!b){
+    b=document.createElement("div");
+    b.id="explore-pistes";
+    b.setAttribute("role","button");b.setAttribute("tabindex","0");
+    b.style.cssText="position:absolute;left:12px;right:12px;top:8px;z-index:1150;padding:10px 13px;"
+      +"border-radius:14px;background:var(--app-bg);border:1.5px solid var(--border);"
+      +"box-shadow:0 6px 20px rgba(0,0,0,.28);font-size:12.5px;font-weight:700;color:var(--s1);"
+      +"text-align:center;cursor:pointer";
+    b.onclick=function(){ try{ exploreToggleChip("instock"); }catch(e){} };
+    b.onkeydown=function(ev){ if(ev.key==="Enter")b.click(); };
+    mapEl.appendChild(b);
+  }
+  b.textContent=trh("Aucun stock confirmé — {n} piste(s) autour, touche pour les voir",{n:nb});
+}
 function renderInStockArrows(){
   var mapEl=document.getElementById("explore-map");
   if(!exploreMap||!mapEl)return;
   var wrap=document.getElementById("explore-edge-arrows");
   if(!wrap){wrap=document.createElement("div");wrap.id="explore-edge-arrows";wrap.style.cssText="position:absolute;inset:0;pointer-events:none;z-index:1140";mapEl.appendChild(wrap);}
   wrap.innerHTML="";
+  /* On efface le bandeau AVANT les sorties anticipees ci-dessous. Sinon il
+     survivait a la fermeture du mode boisson, au depliage de la liste ou au
+     trace d'un itineraire, et restait affiche par-dessus une carte a laquelle
+     il ne correspondait plus. */
+  try{ majBandeauPistes(0); }catch(e){}
   // Liste dépliée : NE PAS dessiner les flèches — elles passaient par-dessus la
   // liste (z-index supérieur) et bloquaient le défilement. On les réserve à la
   // vue carte (sheet réduite).
@@ -18475,7 +18675,18 @@ function renderInStockArrows(){
   if(_sh&&_sh.classList.contains("open"))return;
   if(!exploreFilter||window._routeLayer)return; // seulement en mode boisson, hors itineraire
   var did=exploreFilter.drinkId;
-  var vendors=(window._exploreRawList||[]).filter(function(s){return typeof s.lat==="number"&&(s.drinks||[]).some(function(id){return Number(id)===Number(did);});});
+  /* LES FLECHES DOIVENT POINTER VERS CE QU'ON VERRA EN ARRIVANT.
+     Elles listaient tout magasin ou la boisson est RATTACHEE, sans regarder la
+     puce « En stock ». Avec la puce allumee, on suivait donc une fleche, on
+     arrivait, et il n'y avait aucun pin : la carte hors-champ ne racontait pas
+     la meme chose que la carte a l'ecran. Meme filtre des deux cotes. */
+  var _pisteSeulement=!(window._exploreChips&&window._exploreChips.instock);
+  var _aLaBoisson=function(s){return typeof s.lat==="number"&&(s.drinks||[]).some(function(id){return Number(id)===Number(did);});};
+  var _tousVendeurs=(window._exploreRawList||[]).filter(_aLaBoisson);
+  var vendors=_pisteSeulement?_tousVendeurs:_tousVendeurs.filter(function(s){return magasinConfirmePour(s,did);});
+  /* Puce allumee, aucun stock confirme, mais des pistes autour : au lieu d'une
+     carte vide et muette, on le dit et on propose la sortie en un geste. */
+  try{ majBandeauPistes(!_pisteSeulement&&!vendors.length&&_tousVendeurs.length?_tousVendeurs.length:0); }catch(e){}
   if(!vendors.length)return;
   var size;try{size=exploreMap.getSize();}catch(e){return;}
   var W=size.x,H=size.y;if(!W||!H)return;var cx=W/2,cy=H/2,pad=30,placed=0;
@@ -18511,9 +18722,12 @@ function exploreApplyChips(list){
       return _distM(userLat,userLng,s.lat,s.lng)<=nearKm*1000+120; // +120 m de marge GPS
     });
   }
-  // "En stock" : ne garder que les magasins qui ONT la boisson (on masque le
-  // contexte gris alentour). Utile maintenant que la carte montre aussi les autres.
-  if(c.instock&&exploreFilter)arr=arr.filter(function(s){return s._hasDrink||(s.drinks||[]).some(function(id){return Number(id)===Number(exploreFilter.drinkId);});});
+  /* « En stock » : les magasins ou la boisson a VRAIMENT ete vue. La pastille
+     verte de cette puce est la meme que celle des pins surs de la carte — elle
+     doit donc tenir la meme promesse. Avant, elle gardait tout magasin ou la
+     boisson etait seulement rattachee : on cochait « en stock » et on obtenait
+     une liste de peut-etre, avec des pins gris. */
+  if(c.instock&&exploreFilter)arr=arr.filter(function(s){return magasinConfirmePour(s,exploreFilter.drinkId);});
   if(window._exploreBrand){
     arr=arr.filter(function(s){return s.brand===window._exploreBrand;});
   }else if(window._exploreBrandQuery){
@@ -18624,6 +18838,18 @@ function renderExploreSheet(list){
      l'annee derniere gagnerait la comparaison sans jamais avoir ete verifie,
      et enverrait quelqu'un a l'autre bout de la ville pour un prix qui
      n'existe plus. */
+  /* Liste vide parce que « En stock » est coche : il faut le DIRE. Une liste
+     vide sans explication laisse croire a une panne, ou pire, que la boisson
+     n'existe nulle part — alors que la reponse est « personne n'y est encore
+     alle ». Et on indique la sortie : decocher pour voir les pistes. */
+  if(!arr.length&&exploreFilter&&window._exploreChips&&window._exploreChips.instock){
+    el.innerHTML='<div style="padding:26px 18px;text-align:center">'+
+      '<div style="font-size:14px;font-weight:800;color:var(--s1);margin-bottom:7px">'+
+        sanitize(trh("Aucun stock confirmé pour {d} dans cette zone",{d:String(exploreFilter.name||"")}))+'</div>'+
+      '<div style="font-size:12.5px;color:var(--s2);line-height:1.5">'+
+        tr("Personne n\u2019y est encore allé. Décoche « En stock » pour voir les magasins qui l\u2019ont peut-être.")+'</div></div>';
+    return;
+  }
   var _prices=_did?arr.map(function(s){return prixPerime(prixVuLe(s,_did))?null:getStorePrice(s,_did);}).filter(function(p){return typeof p==="number"&&p>0;}):[];
   var _minP=_prices.length?Math.min.apply(null,_prices):null;
   // Tri "moins cher d'abord" (prix connus en tete, inconnus a la fin), sinon distance.
@@ -19406,8 +19632,21 @@ function exploreLoadStores(useCache){
      requetes Firestore (window._fbQuerySeq) : on l'applique au rendu. */
   var _seq = (window._exploreSeq = (window._exploreSeq || 0) + 1);
   var q;
+  /* LE CACHE ALLEGE NE PEUT PAS REPONDRE A UNE QUESTION DE BOISSON.
+     Les magasins charges sans leur assortiment portent _pins : ils ne savent
+     pas ce qu'ils ont en rayon. Les reutiliser des qu'une boisson est ciblee
+     ferait repondre « il ne l'a pas » a chaque magasin, alors que la vraie
+     reponse est « on ne le lui a pas demande ». On recharge pour de vrai. */
+  if(useCache&&exploreFilter&&window._exploreRawList&&window._exploreRawList.some(function(s){return s&&s._pins;}))useCache=false;
   if(useCache&&window._exploreRawList){q=Promise.resolve(window._exploreRawList);}
-  else{if(status)status.innerHTML=ondeHTML(3)+'<span style="margin-left:8px">Chargement\u2026</span>';q=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12))):Promise.resolve(STORES||[]);}
+  else{
+    if(status)status.innerHTML=ondeHTML(3)+'<span style="margin-left:8px">'+tr("Chargement\u2026")+'</span>';
+    /* Aucune boisson ciblee : on ne demande PAS les assortiments. Mesure sur la
+       base : 8 845 Ko avec, 166 Ko sans, pour 253 magasins. C'est la difference
+       entre une carte qui s'ouvre et un telephone qui tue l'onglet. */
+    var _pinsSeuls=!exploreFilter;
+    q=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12),_pinsSeuls)):Promise.resolve(STORES||[]);
+  }
   q.then(function(list){
     if(_seq!==window._exploreSeq)return;      // un mouvement plus recent a pris la main
     list=list||[];
@@ -19825,6 +20064,59 @@ function exploreCitySuggest(){
 /* Recherche mondiale (villes, pays, rues) via le geocodage OpenStreetMap.
    auto = frappe en cours : on reste discret (pas de son d'erreur, pas de
    message qui clignote a chaque lettre). */
+/* LES MAGASINS TROUVES PAR LEUR NOM, AU-DESSUS DES LIEUX.
+   Deux sources, parce qu'aucune ne suffit seule :
+   - ce qui est deja charge sur la carte, cherche en « contient » et sans tenir
+     compte des accents ni de la casse : « bonbon » trouve « La Bonbonniere » ;
+   - la base entiere, cherchee en « commence par » : ca sort de la zone
+     affichee, et ca trouve un magasin a l'autre bout de la ville.
+   On affiche la premiere tout de suite — elle est instantanee — et on complete
+   quand la seconde repond. */
+function _rechercheLocaleMagasins(q){
+  var n=normTxt(String(q||"").trim());
+  if(n.length<2)return [];
+  var vus={},out=[];
+  var lots=[window._exploreRawList||[],window.STORES||[]];
+  for(var i=0;i<lots.length;i++)for(var j=0;j<lots[i].length;j++){
+    var s=lots[i][j];
+    if(!s||!s.name||typeof s.lat!=="number")continue;
+    if(normTxt(String(s.name)+" "+String(s.brand||"")).indexOf(n)===-1)continue;
+    var cle=String(s.fbId||s.id);
+    if(vus[cle])continue;
+    vus[cle]=1;out.push(s);
+    if(out.length>=8)return out;
+  }
+  return out;
+}
+function _ligneMagasinTrouve(s){
+  var sid=String(s.fbId||s.id).replace(/'/g,"\\'");
+  var sous=[s.brand&&s.brand!==s.name?s.brand:"",(typeof userLat==="number"&&typeof s.lat==="number")?fmtDist(haversine(userLat,userLng,s.lat,s.lng)):""].filter(Boolean).join(" \u00b7 ");
+  return '<div role="button" tabindex="0" onclick="exploreAllerAuMagasin(\''+sid+'\')" onkeydown="if(event.key===\'Enter\'){exploreAllerAuMagasin(\''+sid+'\');}" '+
+    'style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;cursor:pointer;-webkit-tap-highlight-color:transparent">'+
+    '<span style="width:26px;height:26px;border-radius:9px;background:var(--bg2);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:12px;font-weight:800;color:var(--s1)">'+
+      sanitize(String(s.name||"?").trim().charAt(0).toUpperCase())+'</span>'+
+    '<span style="flex:1;min-width:0"><span style="display:block;font-size:13.5px;font-weight:700;color:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(s.name)+'</span>'+
+    (sous?'<span style="display:block;font-size:11px;color:var(--s2)">'+sanitize(sous)+'</span>':'')+'</span></div>';
+}
+/* Aller sur un magasin trouve : la carte s'y pose et sa fiche s'ouvre. Sans
+   l'ouverture de la fiche, on atterrissait sur un pin au milieu d'une carte
+   sans savoir lequel c'etait. */
+function exploreAllerAuMagasin(sid){
+  var box=document.getElementById("explore-city-results");if(box)box.innerHTML="";
+  var inp=document.getElementById("explore-city-q");if(inp)inp.blur();
+  try{exploreAbortCity();}catch(e){}
+  var s=(window._exploreRawList||[]).concat(window.STORES||[]).find(function(x){return String(x.fbId||x.id)===String(sid);});
+  var poser=function(st){
+    if(!st)return;
+    try{if(exploreMap)exploreMap.setView([st.lat,st.lng],Math.max(exploreMap.getZoom(),16));}catch(e){}
+    try{if(typeof STORES!=="undefined"&&!STORES.some(function(x){return String(x.fbId||x.id)===String(st.fbId||st.id);}))STORES.push(st);}catch(e){}
+    window._cameFromExplore=true;
+    setTimeout(function(){try{openStoreDetail(String(st.fbId||st.id));}catch(e){}},260);
+  };
+  try{playSound("pop");}catch(e){}
+  if(s){poser(s);return;}
+  if(window.fbGetStore)window.fbGetStore(sid).then(poser).catch(function(){});
+}
 function exploreGoCity(auto){
   var q=((document.getElementById("explore-city-q")||{}).value||"").trim();
   var box=document.getElementById("explore-city-results");
@@ -19835,7 +20127,32 @@ function exploreGoCity(auto){
   if(!auto)clearTimeout(window._cityTimer);
   if(!q){exploreCitySuggest();return;}
   var seq=(window._citySeq=(window._citySeq||0)+1);
-  if(!auto)box.innerHTML=_cityBoxCard(ondeHTML(3)+'<span style="margin-left:8px">Recherche de \u00AB '+sanitize(q)+' \u00BB\u2026</span>');
+  /* Les magasins d'abord, et tout de suite : c'est ce que le champ promet en
+     premier, et la reponse est deja en memoire. Les lieux arrivent apres. */
+  var _mags=_rechercheLocaleMagasins(q);
+  var _htmlMags=function(liste){
+    if(!liste.length)return "";
+    return '<div style="padding:6px 10px 2px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--s3)">'+
+      sanitize(tr("Magasins"))+'</div>'+liste.map(_ligneMagasinTrouve).join("");
+  };
+  if(_mags.length){
+    box.innerHTML='<div style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);max-height:46vh;overflow-y:auto">'+
+      _htmlMags(_mags)+'</div>';
+  } else if(!auto)box.innerHTML=_cityBoxCard(ondeHTML(3)+'<span style="margin-left:8px">Recherche de \u00AB '+sanitize(q)+' \u00BB\u2026</span>');
+  /* Et la base entiere, pour les magasins hors de la zone affichee. */
+  if(window.fbChercherMagasinsParNom){
+    window.fbChercherMagasinsParNom(q,8).then(function(loin){
+      if(seq!==window._citySeq||!loin||!loin.length)return;
+      var deja={};_mags.forEach(function(x){deja[String(x.fbId||x.id)]=1;});
+      var neufs=loin.filter(function(x){return !deja[String(x.fbId||x.id)];});
+      if(!neufs.length)return;
+      _mags=_mags.concat(neufs).slice(0,8);
+      var h=document.getElementById("explore-city-mags");
+      if(h){h.innerHTML=_htmlMags(_mags);return;}
+      box.innerHTML='<div id="explore-city-mags" style="background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);max-height:46vh;overflow-y:auto">'+
+        _htmlMags(_mags)+'</div>';
+    }).catch(function(){});
+  }
   /* addressdetails=1 : sans lui, le PAYS n'est pas renvoye separement et on ne
      pouvait que decouper display_name a l'aveugle — ce qui donnait « Oujda ·
      Pachalik d'Oujda, Prefecture d'Oujda-Angad », des noms administratifs que
@@ -19845,14 +20162,19 @@ function exploreGoCity(auto){
     .then(function(r){return r.json();})
     .then(function(rows){
       if(seq!==window._citySeq)return; // une frappe plus recente a pris la main
-      box.innerHTML="";
+      /* NE PAS EFFACER LES MAGASINS DEJA TROUVES. Les lieux arrivent apres eux,
+         pas a leur place : sinon taper le nom d'une boutique la faisait
+         apparaitre puis disparaitre une seconde plus tard, remplacee par des
+         villes qui n'ont rien a voir. */
       if(!rows||!rows.length){
-        if(auto)return;
+        if(_mags.length)return;          // on a deja mieux a montrer
+        if(auto){box.innerHTML="";return;}
         box.innerHTML=_cityBoxCard("Introuvable \u2014 essaie \u00AB "+sanitize(q)+" + pays \u00BB");
         playSound("err");
         setTimeout(function(){if(seq===window._citySeq)box.innerHTML="";},2500);
         return;
       }
+      box.innerHTML="";
       /* Nominatim renvoie souvent la meme ville plusieurs fois (la commune, le
          chef-lieu, la zone administrative...). Deux lignes « Oujda » a
          l'identique n'aident personne a choisir : on ne garde que la premiere
@@ -19865,6 +20187,11 @@ function exploreGoCity(auto){
         _vues[cle]=1; return true;
       }).slice(0,6);
       var wrap=document.createElement("div");
+      if(_mags.length){
+        var _tetePlaces='<div id="explore-city-mags" style="padding:0">'+_htmlMags(_mags)+'</div>'+
+          '<div style="padding:8px 10px 2px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--s3)">'+sanitize(tr("Lieux"))+'</div>';
+        wrap.innerHTML=_tetePlaces;
+      }
       wrap.style.cssText="background:var(--app-bg);border:1.5px solid var(--border);border-radius:16px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);max-height:46vh;overflow-y:auto";
       rows.forEach(function(r){
         var parts=String(r.display_name||"").split(",");
@@ -21559,6 +21886,24 @@ function openLabel(s){
   return sur?"Ferm\u00E9":"Sans doute ferm\u00E9";
 }
 function storeVerifiedFor(s,did){return !!(s&&s.drinksVerified&&s.drinksVerified.some(function(v){return Number(v)===Number(did);}));}
+/* « EN STOCK » N'A QU'UN SENS, ET C'EST CELUI-CI.
+   Le magasin a la boisson ET quelqu'un l'y a vue : rayon verifie, ou au moins
+   une confirmation positive. Une boisson simplement RATTACHEE au magasin (un
+   assortiment probable, pose en masse sans que personne n'y soit alle) n'est
+   pas du stock — c'est une piste.
+
+   Cette fonction existe parce que les deux commandes qui disent « en stock »
+   ne disaient pas la meme chose : la carte ne gardait que les magasins
+   confirmes, la puce de la liste gardait tout magasin ou la boisson etait
+   rattachee. Meme mot, meme pastille verte, deux reponses — celle de la liste
+   promettait un stock qui n'avait jamais ete vu par personne. */
+function magasinConfirmePour(s,did){
+  if(!s||did==null)return false;
+  var aLaBoisson=(s.drinks||[]).some(function(d){return Number(d)===Number(did);});
+  if(!aLaBoisson)return false;
+  var conf=Number((s.confirmations||{})[did]||0);
+  return storeVerifiedFor(s,did)||conf>0;
+}
 function sortedStores(stores){var arr=stores.slice();if(curSort==="distance")arr.sort(function(a,b){return(a.dist||999)-(b.dist||999);});else if(curSort==="open")arr.sort(function(a,b){return openScore(b)-openScore(a);});else if(curSort==="trust")arr.sort(function(a,b){var id=curSel?curSel.id:0;return confBornee(b,id)-confBornee(a,id);});
   // Ordre : SURS (catalogue verifie / confirmations positives) > probables > signalees absentes
   if(curSel){var did=curSel.id;arr.sort(function(a,b){
