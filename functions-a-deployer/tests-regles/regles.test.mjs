@@ -783,6 +783,78 @@ await doit('bloque : une cle de masque qui n est pas un membre',
 await doit('bloque : rouvrir une conversation refusee',
   ()=>assertFails(updateDoc(doc(m,'conversations',CONV2),{state:'open'})));
 
+/* ── LES AMIS ───────────────────────────────────────────────────────────────
+   L'amitie ouvre la porte de la messagerie : un ami ecrit sans passer par les
+   demandes. C'est donc exactement le chemin qu'un importun essaiera d'emprunter
+   pour contourner les demandes — d'ou ces epreuves. La plus importante est
+   « s'accepter soi-meme » : si elle passait, il suffirait de se declarer ami de
+   n'importe qui pour lui ecrire sans son accord. ── */
+const AMI='alice_nouveau1';
+const demande=(moi,autre,extra={})=>({members:[moi,autre].sort(),requestBy:moi,
+  state:'request',createdAt:serverTimestamp(),at:serverTimestamp(),...extra});
+
+await doit('legitime : Alice demande Nouveau en ami',
+  ()=>assertSucceeds(setDoc(doc(a,'amis',AMI),demande(ALICE,NOUVEAU))));
+await doit('bloque : un tiers lit le lien d amitie',
+  ()=>assertFails(getDoc(doc(m,'amis',AMI))));
+await doit('bloque : Alice accepte sa PROPRE demande d amitie',
+  ()=>assertFails(updateDoc(doc(a,'amis',AMI),{state:'ok',at:serverTimestamp()})));
+await doit('bloque : Alice remplace les membres du lien',
+  ()=>assertFails(updateDoc(doc(a,'amis',AMI),{members:[ALICE,MALLORY].sort(),at:serverTimestamp()})));
+await doit('bloque : Alice se designe destinataire de sa propre demande',
+  ()=>assertFails(updateDoc(doc(a,'amis',AMI),{requestBy:NOUVEAU,at:serverTimestamp()})));
+await doit('legitime : Nouveau accepte l amitie',
+  ()=>assertSucceeds(updateDoc(doc(nv,'amis',AMI),{state:'ok',at:serverTimestamp()})));
+
+/* Ce que l'amitie donne, et rien de plus : un fil qui naît deja ouvert. */
+await doit('legitime : entre amis, la conversation naît ouverte',
+  ()=>assertSucceeds(setDoc(doc(a,'conversations','alice_nouveau1'),
+      nouvelle(ALICE,NOUVEAU,{state:'open'}))));
+await doit('bloque : sans amitie, ouvrir une conversation d emblee',
+  ()=>assertFails(setDoc(doc(m,'conversations','admin1_mallory'),
+      nouvelle(MALLORY,ADMIN,{state:'open'}))));
+
+await doit('legitime : Nouveau retire Alice de ses amis',
+  ()=>assertSucceeds(deleteDoc(doc(nv,'amis',AMI))));
+
+/* Le refus, et l'impossibilite de le contourner en redemandant. */
+await doit('legitime : Nouveau demande Alice en ami',
+  ()=>assertSucceeds(setDoc(doc(nv,'amis',AMI),demande(NOUVEAU,ALICE))));
+await doit('legitime : Nouveau annule sa demande avant reponse',
+  ()=>assertSucceeds(deleteDoc(doc(nv,'amis',AMI))));
+await doit('legitime : Nouveau redemande',
+  ()=>assertSucceeds(setDoc(doc(nv,'amis',AMI),demande(NOUVEAU,ALICE))));
+await doit('legitime : Alice refuse',
+  ()=>assertSucceeds(updateDoc(doc(a,'amis',AMI),{state:'declined',at:serverTimestamp()})));
+await doit('bloque : le demandeur transforme le refus en amitie',
+  ()=>assertFails(updateDoc(doc(nv,'amis',AMI),{state:'ok',at:serverTimestamp()})));
+await doit('bloque : remettre un lien refuse en demande',
+  ()=>assertFails(updateDoc(doc(nv,'amis',AMI),{state:'request',at:serverTimestamp()})));
+await doit('legitime : Alice revient seule sur son refus',
+  ()=>assertSucceeds(updateDoc(doc(a,'amis',AMI),{state:'ok',at:serverTimestamp()})));
+await doit('legitime : Alice retire Nouveau a son tour',
+  ()=>assertSucceeds(deleteDoc(doc(a,'amis',AMI))));
+
+/* Les garde-fous de forme : un identifiant qui ment, une date antidatee, un
+   lien avec soi-meme, et le blocage. */
+await doit('bloque : un identifiant qui ne correspond pas aux membres',
+  ()=>assertFails(setDoc(doc(a,'amis','zoe_zorro'),demande(ALICE,NOUVEAU))));
+await doit('bloque : antidater la demande d amitie',
+  ()=>assertFails(setDoc(doc(a,'amis',AMI),
+      demande(ALICE,NOUVEAU,{createdAt:Timestamp.fromMillis(Date.now()-86400000)}))));
+await doit('bloque : se demander soi-meme en ami',
+  ()=>assertFails(setDoc(doc(a,'amis',ALICE+'_'+ALICE),demande(ALICE,ALICE))));
+await doit('bloque : un lien d amitie entre deux autres personnes',
+  ()=>assertFails(setDoc(doc(a,'amis',ADMIN+'_'+MALLORY),
+      {members:[ADMIN,MALLORY],requestBy:ADMIN,state:'request',
+       createdAt:serverTimestamp(),at:serverTimestamp()})));
+await doit('legitime : Alice bloque Mallory',
+  ()=>assertSucceeds(setDoc(doc(a,'blocks',ALICE),{list:[MALLORY],at:serverTimestamp()})));
+await doit('bloque : Mallory demande en ami quelqu un qui l a bloquee',
+  ()=>assertFails(setDoc(doc(m,'amis',ALICE+'_'+MALLORY),demande(MALLORY,ALICE))));
+await doit('legitime : Alice debloque Mallory',
+  ()=>assertSucceeds(setDoc(doc(a,'blocks',ALICE),{list:[],at:serverTimestamp()})));
+
 /* « Ses derniers gestes » sur le profil public : cinq au plus, type ferme,
    libelles courts, et jamais de coordonnees. */
 const geste=(i)=>({t:'confirm',d:'Ramune '+i,s:'Night Ixelles',j:'2026-09-0'+(i%9+1)});

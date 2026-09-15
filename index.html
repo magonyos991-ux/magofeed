@@ -554,6 +554,20 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <span id="profile-msg-count" class="msg-count" style="display:none" aria-hidden="true"></span>
         <span style="font-size:16px;color:var(--txt2)">›</span>
       </div>
+      <!-- MES AMIS, et non « inviter un ami » : la ligne du dessous est le
+           parrainage (faire venir quelqu'un de l'exterieur). Celle-ci est le
+           lien entre deux joueurs qui sont deja la. La pastille compte les
+           demandes en attente : c'est le seul endroit ou elles se voient sans
+           ouvrir l'ecran. -->
+      <div onclick="openAmis()" role="button" tabindex="0" aria-label="Mes amis" onkeydown="if(event.key==='Enter'){openAmis();}" style="display:flex;align-items:center;gap:12px;margin:6px 20px;padding:13px 16px;background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;cursor:pointer">
+        <span style="display:flex;color:var(--s1)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.6"/><path d="M2.5 20c0-3.6 2.9-6.5 6.5-6.5s6.5 2.9 6.5 6.5"/><path d="M16.5 5.4a3.6 3.6 0 0 1 0 6.9M18 14.2c2.2.7 3.8 2.7 3.8 5.1"/></svg></span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px;font-weight:800;color:var(--s1)">Mes amis</div>
+          <div id="profile-amis-sub" style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:1px">Personne pour l'instant — trouve des joueurs</div>
+        </div>
+        <span id="profile-amis-count" class="msg-count" style="display:none" aria-hidden="true"></span>
+        <span style="font-size:16px;color:var(--txt2)">›</span>
+      </div>
       <div onclick="inviteFriend()" role="button" tabindex="0" aria-label="Inviter un ami" onkeydown="if(event.key==='Enter'){inviteFriend();}" style="display:flex;align-items:center;gap:12px;margin:6px 20px;padding:14px 16px;background:linear-gradient(135deg,#0e7a4d,#14532d);border-radius:16px;cursor:pointer">
         <span style="display:flex;color:#fff"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></span>
         <div style="flex:1;min-width:0">
@@ -882,6 +896,17 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       </div>
       <div id="userprofile-body"></div>
     </div>
+    </div>
+  </div>
+  <!-- LES AMIS : les demandes d'un cote, la liste de l'autre -->
+  <div id="s-amis" class="screen">
+    <div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch">
+      <div class="msg-hd">
+        <div class="th-ico" onclick="if(!navBack())show('profile')" role="button" tabindex="0" aria-label="Retour" onkeydown="if(event.key==='Enter'){if(!navBack())show('profile');}">←</div>
+        <span class="t-section" style="margin:0;flex:1">Amis</span>
+        <div class="th-ico" onclick="amisNouveau()" role="button" tabindex="0" aria-label="Trouver un joueur" onkeydown="if(event.key==='Enter'){amisNouveau();}"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="10" cy="8" r="4"/><path d="M3 21c0-3.9 3.1-7 7-7 1.2 0 2.3.3 3.3.8"/><path d="M18 14v6M15 17h6"/></svg></div>
+      </div>
+      <div id="amis-body"></div>
     </div>
   </div>
   <!-- MESSAGERIE : la boite -->
@@ -2596,6 +2621,126 @@ window.fbBloquer = async function(uid, oui) {
   } catch (e) { return _msgErreur(e); }
 };
 
+/* ============================================================================
+   LES AMIS
+   ----------------------------------------------------------------------------
+   Meme identifiant que la conversation — les deux uid tries — donc le lien se
+   trouve sans requete, et il ne peut pas en exister deux pour une meme paire.
+
+   CE QUE L'AMITIE DONNE, CONCRETEMENT : le fil naît deja ouvert. Le premier
+   message d'un ami arrive dans Messages, pas dans Demandes. C'est pour cela
+   qu'elle se DEMANDE et s'accepte — sinon s'ajouter en ami serait devenu le
+   moyen de contourner les demandes de message.
+
+   ON ECOUTE EN DIRECT, sans orderBy : « array-contains » seul ne reclame aucun
+   index composite a creer a la main. La liste est courte, on la trie ici.
+   ======================================================================== */
+window.fbAmis = { liens: null, parUid: {} };
+function _amisRanger(rows) {
+  var me = _msgUid(), parUid = {};
+  (rows || []).forEach(function(l) {
+    var autre = (l.members && l.members[0] === me) ? l.members[1] : (l.members && l.members[0]);
+    if (autre) parUid[autre] = l;
+  });
+  window.fbAmis.liens = rows || [];
+  window.fbAmis.parUid = parUid;
+  try { window.dispatchEvent(new CustomEvent("fbAmisChanged", { detail: rows || [] })); } catch (e) {}
+}
+window.fbMesAmis = function(cb) {
+  var me = _msgUid();
+  if (!me) { cb && cb(null, "auth"); return function() {}; }
+  var q1 = query(collection(db, "amis"), where("members", "array-contains", me), limit(300));
+  return onSnapshot(q1, function(snap) {
+    var rows = [];
+    snap.forEach(function(d) { rows.push(Object.assign({ pid: d.id }, d.data({ serverTimestamps: "estimate" }))); });
+    rows.sort(function(x, y) { return (_msgMsBrut(y.at) || 0) - (_msgMsBrut(x.at) || 0); });
+    _amisRanger(rows);
+    cb && cb(rows);
+  }, function(e) { cb && cb(null, _msgErreur(e).reason); });
+};
+function _msgMsBrut(v) {
+  if (!v) return 0;
+  if (typeof v.toMillis === "function") { try { return v.toMillis(); } catch (e) { return 0; } }
+  if (v.seconds) return v.seconds * 1000;
+  return Number(v) || 0;
+}
+/* Sommes-nous amis ? Lu dans le cache de l'ecouteur : aucune lecture reseau au
+   moment d'ouvrir un fil. Si l'ecouteur n'a pas encore repondu, on repond non
+   — le fil naît alors en demande, ce qui est le comportement sur. */
+window.fbEstAmi = function(uid) {
+  var l = window.fbAmis.parUid[String(uid || "")];
+  return !!(l && l.state === "ok");
+};
+window.fbDemanderAmi = async function(uid) {
+  var me = _msgUid();
+  uid = String(uid || "");
+  if (!me) return { ok: false, reason: "auth" };
+  if (!uid || uid === me) return { ok: false, reason: "invalid" };
+  var pid = window.fbConvId(me, uid);
+  /* LE MEME BOUTON, QUEL QUE SOIT L'ETAT DU LIEN. Un lien existe deja ? On ne
+     peut pas le recreer, les regles le refusent — et l'ecran afficherait une
+     erreur incomprehensible. On fait donc ce que la personne voulait dire :
+     - demande recue -> on l'accepte ;
+     - refus que J'AI essuye -> on ne redemande pas (c'est la regle, et c'est
+       ce qui protege celui qui a refuse) ;
+     - refus que J'AI prononce -> j'ai change d'avis, et j'en ai le droit. */
+  var dejala = window.fbAmis.parUid[uid];
+  if (dejala && dejala.state === "ok") return { ok: true, deja: true };
+  if (dejala && dejala.state === "request") {
+    if (dejala.requestBy === me) return { ok: true, deja: true };
+    return await window.fbRepondreAmi(uid, true);
+  }
+  if (dejala && dejala.state === "declined") {
+    if (dejala.requestBy === me) return { ok: false, reason: "refuse" };
+    try {
+      await updateDoc(doc(db, "amis", pid), { state: "ok", at: serverTimestamp() });
+      return { ok: true };
+    } catch (e) { return _msgErreur(e); }
+  }
+  try {
+    await setDoc(doc(db, "amis", pid), {
+      members: [me, uid].sort(),
+      requestBy: me,
+      state: "request",
+      createdAt: serverTimestamp(),
+      at: serverTimestamp()
+    });
+    return { ok: true, pid: pid };
+  } catch (e) { return _msgErreur(e); }
+};
+window.fbRepondreAmi = async function(uid, oui) {
+  var me = _msgUid();
+  uid = String(uid || "");
+  if (!me || !uid) return { ok: false, reason: "invalid" };
+  try {
+    await updateDoc(doc(db, "amis", window.fbConvId(me, uid)),
+      { state: oui ? "ok" : "declined", at: serverTimestamp() });
+    /* Devenus amis : un fil qui attendait encore une reponse s'ouvre. Accepter
+       quelqu'un en ami, c'est accepter de lui parler — le laisser en
+       « demande » serait une contradiction visible a l'ecran. */
+    if (oui) {
+      try {
+        var cid = window.fbConvId(me, uid);
+        var c = _convCache[cid];
+        if (c && c.state === "request") await updateDoc(doc(db, "conversations", cid), { state: "open" });
+      } catch (e2) {}
+    }
+    return { ok: true };
+  } catch (e) { return _msgErreur(e); }
+};
+/* Retirer un ami, ou annuler sa propre demande : le meme geste, la meme
+   effacement. Contrairement a un fil de discussion, un lien d'amitie ne
+   contient rien — le supprimer ne prive personne de ses messages. */
+window.fbRetirerAmi = async function(uid) {
+  var me = _msgUid();
+  uid = String(uid || "");
+  if (!me || !uid) return { ok: false, reason: "invalid" };
+  try {
+    await deleteDoc(doc(db, "amis", window.fbConvId(me, uid)));
+    return { ok: true };
+  } catch (e) { return _msgErreur(e); }
+};
+
 /* Cree la conversation si elle n'existe pas encore. Etat initial impose par
    les regles : une demande, portee par celui qui ecrit le premier. */
 window.fbOuvrirConversation = async function(otherUid) {
@@ -2620,7 +2765,9 @@ window.fbOuvrirConversation = async function(otherUid) {
       members: [me, otherUid].sort(),
       createdBy: me,
       createdAt: serverTimestamp(),
-      state: "request",
+      /* ENTRE AMIS, LE FIL NAIT OUVERT : c'est tout ce que l'amitie change, et
+         les regles le verifient de leur cote (elles relisent le lien). */
+      state: window.fbEstAmi(otherUid) ? "open" : "request",
       requestBy: me,
       reqCount: 0,
       lastAt: serverTimestamp(),
@@ -2882,10 +3029,23 @@ window.fbDemarrerMessagerie = function() {
     window.dispatchEvent(new CustomEvent("fbConversations", { detail: window.fbMessagerie }));
   }
   window.fbMesBlocs().catch(function() {});
+  /* Les amis suivent la messagerie : c'est elle qu'ils ouvrent. Demarrer cet
+     ecouteur AVANT le premier fil compte — fbEstAmi() repond « non » tant qu'il
+     n'a pas repondu, et un fil naîtrait alors en demande entre deux amis. */
+  try {
+    if (_amisUnsub) { try { _amisUnsub(); } catch (e) {} }
+    _amisUnsub = window.fbMesAmis(function(rows, err) {
+      if (err) { window.fbAmis.err = err; }
+    });
+  } catch (e) {}
 };
+var _amisUnsub = null;
 window.fbArreterMessagerie = function() {
   if (_convUnsub) { try { _convUnsub(); } catch (e) {} }
+  if (_amisUnsub) { try { _amisUnsub(); } catch (e) {} }
   _convUnsub = null; _convUid = null; _convCache = {}; _blocsCache = null;
+  _amisUnsub = null;
+  window.fbAmis = { liens: null, parUid: {} };
   window.fbMessagerie = { rows: null, err: null, unread: 0 };
 };
 
@@ -5694,7 +5854,7 @@ function refreshLocation(cb,opts){
 /* ================================
    NAVIGATION
 ================================ */
-var NAV_SCREENS=["home","search","results","scan","discover","profile","rewards","settings","privacy","terms","storedetail","admin","userprofile","messages","thread"];
+var NAV_SCREENS=["home","search","results","scan","discover","profile","rewards","settings","privacy","terms","storedetail","admin","userprofile","messages","thread","amis"];
 /* ================================
    NAVIGATION "COMME LES APPS PRO"
    - Les 5 onglets (barre du bas) sont des racines : y aller vide la pile.
@@ -5849,7 +6009,8 @@ function _showRaw(s){
   if(s!=="thread"){try{threadQuitter();}catch(e){}}
   else{try{threadReprendre();}catch(e){}}
   if(s==="messages"){try{renderMessages();}catch(e){}}
-  if(s==="profile"){try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}try{renderDonCard();}catch(e){}}
+  if(s==="amis"){try{renderAmis();}catch(e){}}
+  if(s==="profile"){try{majLigneAmis();}catch(e){}try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}try{renderDonCard();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
   if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}}
   if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderChasseCodes();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{_verifierAides();}catch(e){}try{renderChasse();}catch(e){}    // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
@@ -9863,6 +10024,9 @@ function swipeDelete(row){
        moyen d'effacer ses traces avant d'etre signale. Le fond du glissement dit
        donc "Masquer" et non "Supprimer" — le geste tient sa promesse. */
     else if(genre==="conv"){ try{msgMasquerFil(val,true);}catch(e){} }
+    /* Un lien d'amitie, lui, s'efface pour de bon : il ne contient rien, et le
+       retirer ne prive personne de ses messages. D'ou le fond rouge. */
+    else if(genre==="ami"){ try{amisRetirer(val);}catch(e){} }
   },170);
 }
 function a11yCard(el,label){
@@ -23959,8 +24123,30 @@ function ppMajBoutons(u){
   if(!uid||uid===me){box.innerHTML="";box.style.display="none";return;}
   box.style.display="";
   var bloque=MSG.blocs.indexOf(uid)!==-1;
+  /* LE BOUTON D'AMITIE DIT L'ETAT DU LIEN, pas une action generique. « Ajouter
+     en ami » sur quelqu'un dont la demande est deja en attente ne veut rien
+     dire ; « Accepter » si c'est lui qui a demande, si. Le lien a quatre etats
+     possibles et le bouton en montre quatre. */
+  var lien=(window.fbAmis&&window.fbAmis.parUid[uid])||null;
+  var etatAmi=lien?lien.state:null;
+  var jaiDemande=!!(lien&&lien.requestBy===me);
+  var libelleAmi,actionAmi;
+  if(etatAmi==="ok"){ libelleAmi=tr("Retirer des amis"); actionAmi="retirer"; }
+  else if(etatAmi==="request"&&jaiDemande){ libelleAmi=tr("Annuler la demande"); actionAmi="annuler"; }
+  else if(etatAmi==="request"){ libelleAmi=tr("Accepter en ami"); actionAmi="accepter"; }
+  else if(etatAmi==="declined"&&jaiDemande){ libelleAmi=tr("Demande refus\u00e9e"); actionAmi=null; }
+  else { libelleAmi=tr("Ajouter en ami"); actionAmi="demander"; }
   box.innerHTML='<button class="msg-bp" id="pp-write"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7.5 8.5 6 8.5-6"/></svg>'+_tr("msgWrite")+'</button>'+
+    '<button class="msg-bs" id="pp-ami"'+(actionAmi?"":" disabled style=\"opacity:.55\"")+'>'+
+      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><circle cx="10" cy="8" r="4"/><path d="M3 21c0-3.9 3.1-7 7-7 1.2 0 2.3.3 3.3.8"/>'+
+      (actionAmi==="retirer"||actionAmi==="annuler"?'<path d="M16 17h6"/>':'<path d="M18 14v6M15 17h6"/>')+'</svg>'+libelleAmi+'</button>'+
     '<button class="msg-bs" id="pp-block">'+(bloque?_tr("msgUnblock"):_tr("msgBlock"))+'</button>';
+  var am=document.getElementById("pp-ami");
+  if(am&&actionAmi)am.onclick=function(){
+    if(bloque&&actionAmi!=="retirer"&&actionAmi!=="annuler"){msgErreurToast("blocked");return;}
+    if(actionAmi==="demander"||actionAmi==="accepter")amisDemander(uid);
+    else amisRetirer(uid,actionAmi==="annuler");
+  };
   var w=document.getElementById("pp-write"),b=document.getElementById("pp-block");
   if(w)w.onclick=function(){
     if(bloque){msgErreurToast("blocked");return;}
@@ -24131,6 +24317,10 @@ function msgRetenirUser(uid,x){
   }catch(e){}
 }
 function msgRerendre(){
+  /* Les pseudos arrivent en differe (msgUser charge en arriere-plan) : l'ecran
+     des amis doit se repeindre comme les autres, sinon il reste sur
+     « Quelqu'un » jusqu'au prochain passage. */
+  if(msgEcranOn("amis"))renderAmis();
   if(msgEcranOn("messages"))renderMessages();
   if(msgEcranOn("thread")){renderThreadHead();renderThreadFoot();renderThreadFil(true);}
 }
@@ -24232,6 +24422,159 @@ function msgNouveau(){
   try{ setSearchMode('users'); }catch(e){}
   try{ var q=document.getElementById("q"); if(q){q.focus({preventScroll:true});} }catch(e){}
 }
+/* ============================================================================
+   LES AMIS, A L'ECRAN
+   ----------------------------------------------------------------------------
+   Trois sections, dans l'ordre de ce qui demande une decision : les demandes
+   RECUES d'abord (quelqu'un attend une reponse), les demandes ENVOYEES ensuite
+   (on peut les annuler), la liste enfin.
+
+   TAPER SUR UN AMI OUVRE LA DISCUSSION, et pas son profil : c'est ce que
+   l'amitie sert a faire. Le profil reste a un geste, dans le menu.
+
+   RETIRER SE FAIT EN GLISSANT, avec le meme composant que les conversations —
+   mais en rouge, lui, parce qu'ici le lien est vraiment detruit. Il n'emporte
+   rien au passage : les messages echanges restent des deux cotes. C'est toute
+   la difference avec un fil, qu'on masque sans jamais l'effacer. */
+function amisListe(){ return (window.fbAmis&&window.fbAmis.liens)||null; }
+function amisAutre(l){ var me=msgMe(); return (l.members&&l.members[0]===me)?l.members[1]:(l.members&&l.members[0]); }
+function amisNb(){ var L=amisListe()||[]; return L.filter(function(l){return l.state==="ok";}).length; }
+function amisNbDemandes(){
+  var me=msgMe(),L=amisListe()||[];
+  return L.filter(function(l){return l.state==="request"&&l.requestBy!==me;}).length;
+}
+function openAmis(){ show("amis"); }
+function amisNouveau(){ msgNouveau(); }
+function amisLigne(l,uid,u,action){
+  var row=document.createElement("div");
+  row.className="msg-row";
+  row.innerHTML=msgAvatar(u)+
+    '<div style="flex:1;min-width:0"><div class="msg-name">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</div>'+
+    '<div class="msg-prev">'+action+'</div></div>';
+  return row;
+}
+function renderAmis(){
+  var body=document.getElementById("amis-body");if(!body)return;
+  var me=msgMe();
+  var L=amisListe();
+  if(L===null){
+    if(!navigator.onLine||!window.fbMesAmis){body.innerHTML=msgEtatHTML("off",_tr("msgOfflineT"),_tr("msgOfflineSub"));return;}
+    body.innerHTML='<div style="padding:30px 0">'+magoLoader(false,tr("On charge tes amis\u2026"))+'</div>';return;
+  }
+  var recues=L.filter(function(l){return l.state==="request"&&l.requestBy!==me;});
+  var envoyees=L.filter(function(l){return l.state==="request"&&l.requestBy===me;});
+  var amis=L.filter(function(l){return l.state==="ok";});
+  body.innerHTML="";
+  /* Un intitule de section, pas une carte : la classe msg-intro portait un
+     fond, et les trois titres se lisaient comme trois boutons vides. */
+  var titre=function(t){var d=document.createElement("div");d.style.cssText="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:1.1px;color:var(--s3);padding:16px 20px 6px";d.textContent=t;return d;};
+
+  if(recues.length){
+    body.appendChild(titre(tr("Demandes re\u00e7ues")));
+    recues.forEach(function(l){
+      var uid=amisAutre(l),u=msgUser(uid)||{pseudo:_tr("msgSomeone")};
+      var d=document.createElement("div");
+      d.className="req-card";
+      d.innerHTML='<div class="req-top">'+msgAvatar(u,"lg")+'<div style="flex:1;min-width:0"><div class="msg-name">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</div>'+
+        '<div class="req-meta">'+_tr("msgLevel").replace("{n}",(levelInfo(nbSur(u.points)).idx+1))+' \u00B7 '+_tr("msgConfirmsN").replace("{n}",nbSur(u.confirms))+'</div></div></div>'+
+        '<div class="req-actions">'+
+          '<button class="msg-bp" data-ami-ok="'+attr(uid)+'">'+tr("Accepter")+'</button>'+
+          '<button class="msg-bs" data-ami-non="'+attr(uid)+'">'+_tr("msgDecline")+'</button>'+
+        '</div>';
+      body.appendChild(d);
+    });
+  }
+  if(envoyees.length){
+    body.appendChild(titre(tr("Demandes envoy\u00e9es")));
+    envoyees.forEach(function(l){
+      var uid=amisAutre(l),u=msgUser(uid)||{pseudo:_tr("msgSomeone")};
+      var row=amisLigne(l,uid,u,tr("En attente"));
+      var b=document.createElement("button");
+      b.className="msg-bs";b.style.cssText="flex-shrink:0;min-height:36px;padding:0 14px";
+      b.textContent=tr("Annuler");
+      b.setAttribute("data-ami-annule",uid);
+      row.appendChild(b);
+      body.appendChild(row);
+    });
+  }
+  body.appendChild(titre(tr("Mes amis")+" \u00B7 "+amis.length));
+  if(!amis.length){
+    var v=document.createElement("div");
+    v.innerHTML=msgEtatHTML("mail",tr("Aucun ami pour l'instant"),
+      tr("Un ami t'\u00e9crit sans passer par les demandes, et tu vois ses derniers gestes."),
+      tr("Trouver un joueur"),"amisNouveau()");
+    body.appendChild(v);
+  }else{
+    amis.forEach(function(l){
+      var uid=amisAutre(l),u=msgUser(uid)||{pseudo:_tr("msgSomeone")};
+      var row=amisLigne(l,uid,u,tr("Appuie pour lui \u00e9crire"));
+      row.onclick=function(){ msgEcrire(uid,u); };
+      a11yCard(row,_tr("msgOpenWith").replace("{p}",u.pseudo||""));
+      var swp=document.createElement("div");
+      swp.className="swp swp-range swp-dur";
+      swp.setAttribute("data-del","ami:"+uid);
+      var bg=document.createElement("div");
+      bg.className="swp-bg";
+      bg.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10" cy="8" r="4"/><path d="M3 21c0-3.9 3.1-7 7-7 1.2 0 2.3.3 3.3.8"/><path d="M16 17h6"/></svg><span>'+sanitize(tr("Retirer"))+'</span>';
+      var fg=document.createElement("div");fg.className="swp-fg";fg.appendChild(row);
+      swp.appendChild(bg);swp.appendChild(fg);
+      body.appendChild(swp);
+    });
+    try{initSwipeToDelete(body);}catch(e){}
+  }
+  body.querySelectorAll("[data-ami-ok]").forEach(function(b){b.onclick=function(){amisRepondre(b.getAttribute("data-ami-ok"),true);};});
+  body.querySelectorAll("[data-ami-non]").forEach(function(b){b.onclick=function(){amisRepondre(b.getAttribute("data-ami-non"),false);};});
+  body.querySelectorAll("[data-ami-annule]").forEach(function(b){b.onclick=function(ev){ev.stopPropagation();amisRetirer(b.getAttribute("data-ami-annule"),true);};});
+  try{traduirePage();}catch(e){}
+}
+function amisRepondre(uid,oui){
+  if(!window.fbRepondreAmi){msgErreurToast("offline");return;}
+  window.fbRepondreAmi(uid,oui).then(function(r){
+    if(!r||!r.ok){msgErreurToast(r&&r.reason,r&&r.detail);return;}
+    try{playSound(oui?"win":"pop");}catch(e){}
+    toast(oui?tr("Vous \u00eates amis"):tr("Demande refus\u00e9e"));
+  });
+}
+function amisDemander(uid){
+  if(!window.fbDemanderAmi){msgErreurToast("offline");return;}
+  window.fbDemanderAmi(uid).then(function(r){
+    if(!r||!r.ok){
+      /* Un refus qu'on a deja essuye ne se redemande pas : c'est la regle, et
+         c'est elle qui protege la personne qui a refuse. On le dit clairement
+         plutot que d'afficher une erreur technique. */
+      if(r&&r.reason==="refuse"){toast(tr("Cette personne a refus\u00e9 ta demande"));return;}
+      msgErreurToast(r&&r.reason,r&&r.detail);return;
+    }
+    try{playSound("pop");}catch(e){}
+    toast(r.deja?tr("C'est d\u00e9j\u00e0 fait"):tr("Demande envoy\u00e9e"));
+  });
+}
+function amisRetirer(uid,annulation){
+  if(!window.fbRetirerAmi){msgErreurToast("offline");amisRerendre();return;}
+  window.fbRetirerAmi(uid).then(function(r){
+    if(!r||!r.ok){msgErreurToast(r&&r.reason,r&&r.detail);amisRerendre();return;}
+    try{playSound("pop");}catch(e){}
+    toast(annulation?tr("Demande annul\u00e9e"):tr("Ami retir\u00e9"));
+  });
+}
+function amisRerendre(){
+  if(msgEcranOn("amis"))renderAmis();
+  try{majLigneAmis();}catch(e){}
+  try{if(window._ppCourant)ppMajBoutons(window._ppCourant);}catch(e){}
+}
+/* La ligne du profil : le compte d'amis, et la pastille des demandes en
+   attente. C'est le seul endroit ou une demande d'ami se voit sans y aller. */
+function majLigneAmis(){
+  var sub=document.getElementById("profile-amis-sub");
+  var pc=document.getElementById("profile-amis-count");
+  var n=amisNb(),d=amisNbDemandes();
+  if(sub)sub.textContent=amisListe()===null?tr("On charge tes amis\u2026")
+    :(n?(n===1?trh("{n} ami",{n:n}):trh("{n} amis",{n:n}))
+       :tr("Personne pour l'instant \u2014 trouve des joueurs"));
+  if(pc){ if(d>0){pc.style.display="";pc.textContent=String(d);} else pc.style.display="none"; }
+}
+window.addEventListener("fbAmisChanged",function(){ amisRerendre(); });
+
 function renderMessages(){
   var body=document.getElementById("msg-body"),seg=document.getElementById("msg-seg");if(!body||!seg)return;
   var me=msgMe();
