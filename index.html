@@ -13176,7 +13176,7 @@ function populateClusterMarkers(cluster){
     // laisser croire qu'il a un Mountain Dew)
     var hasDrink=curSel?(s.drinks||[]).some(function(d){return Number(d)===Number(curSel.id);}):true;
     var conf=curSel?((s.confirmations||{})[curSel.id]||0):0;
-    var sure=curSel?(hasDrink&&(storeVerifiedFor(s,curSel.id)||conf>0)):false;
+    var sure=curSel?magasinConfirmePour(s,curSel.id):false;
     var status=(!hasDrink||conf<0)?"no":(sure?"sure":"maybe");
     // Filtre "en stock seulement" : on ne garde QUE les magasins qui l'ont vraiment
     // (vert coche), pour savoir ou ALLER a coup sur plutot qu'ou essayer.
@@ -15560,13 +15560,28 @@ function closeStoreDetail(){
   if(storeDetailReturn==="__explore__"){
     var h=document.getElementById("explore-map-host");
     if(h&&typeof exploreMap!=="undefined"&&exploreMap){
+      /* LE FILTRE BOISSON DOIT SURVIVRE AU RETOUR.
+         show("home") efface exploreFilter — et c'est voulu : sans ca, rouvrir
+         la carte depuis l'accueil la rouvrait toujours sur la derniere boisson
+         cherchee. Mais ici on n'atterrit pas sur l'accueil : on s'en sert
+         seulement comme fond sous la carte. Le nettoyage frappait donc a cote,
+         et revenir d'une fiche magasin ramenait une carte de Paris entiere,
+         sans la boisson, sans le bouton « en stock seulement », et avec des
+         pins qui ne savaient plus dire qui l'a. On met le filtre de cote, on
+         le remet, et on redessine ce qui en depend. */
+      var _filtreCarte=exploreFilter, _venaitDUneBoisson=window._exploreFromDrink;
       show("home"); // écran de base sous l'overlay (masqué par la carte)
+      exploreFilter=_filtreCarte; window._exploreFromDrink=_venaitDUneBoisson;
       // "flex", PAS "" : effacer le style en ligne faisait retomber l'hote en
       // display:block, la carte (flex:1) s'ecrasait a zero, et on revenait sur
       // un ecran noir. Le CSS porte desormais la meme valeur en secours.
       h.style.display="flex";
       requestAnimationFrame(function(){h.classList.add("in");});
       setTimeout(function(){try{exploreMap.invalidateSize();}catch(e){}},80);
+      if(_filtreCarte){
+        try{renderExploreChips();}catch(e){}
+        try{if(typeof exploreLoadStores==="function")exploreLoadStores(true);}catch(e){}
+      }
       return;
     }
     if(typeof openExploreMap==="function"){
@@ -18459,9 +18474,12 @@ function exploreApplyChips(list){
       return _distM(userLat,userLng,s.lat,s.lng)<=nearKm*1000+120; // +120 m de marge GPS
     });
   }
-  // "En stock" : ne garder que les magasins qui ONT la boisson (on masque le
-  // contexte gris alentour). Utile maintenant que la carte montre aussi les autres.
-  if(c.instock&&exploreFilter)arr=arr.filter(function(s){return s._hasDrink||(s.drinks||[]).some(function(id){return Number(id)===Number(exploreFilter.drinkId);});});
+  /* « En stock » : les magasins ou la boisson a VRAIMENT ete vue. La pastille
+     verte de cette puce est la meme que celle des pins surs de la carte — elle
+     doit donc tenir la meme promesse. Avant, elle gardait tout magasin ou la
+     boisson etait seulement rattachee : on cochait « en stock » et on obtenait
+     une liste de peut-etre, avec des pins gris. */
+  if(c.instock&&exploreFilter)arr=arr.filter(function(s){return magasinConfirmePour(s,exploreFilter.drinkId);});
   if(window._exploreBrand){
     arr=arr.filter(function(s){return s.brand===window._exploreBrand;});
   }else if(window._exploreBrandQuery){
@@ -18572,6 +18590,18 @@ function renderExploreSheet(list){
      l'annee derniere gagnerait la comparaison sans jamais avoir ete verifie,
      et enverrait quelqu'un a l'autre bout de la ville pour un prix qui
      n'existe plus. */
+  /* Liste vide parce que « En stock » est coche : il faut le DIRE. Une liste
+     vide sans explication laisse croire a une panne, ou pire, que la boisson
+     n'existe nulle part — alors que la reponse est « personne n'y est encore
+     alle ». Et on indique la sortie : decocher pour voir les pistes. */
+  if(!arr.length&&exploreFilter&&window._exploreChips&&window._exploreChips.instock){
+    el.innerHTML='<div style="padding:26px 18px;text-align:center">'+
+      '<div style="font-size:14px;font-weight:800;color:var(--s1);margin-bottom:7px">'+
+        sanitize(trh("Aucun stock confirmé pour {d} dans cette zone",{d:String(exploreFilter.name||"")}))+'</div>'+
+      '<div style="font-size:12.5px;color:var(--s2);line-height:1.5">'+
+        tr("Personne n\u2019y est encore allé. Décoche « En stock » pour voir les magasins qui l\u2019ont peut-être.")+'</div></div>';
+    return;
+  }
   var _prices=_did?arr.map(function(s){return prixPerime(prixVuLe(s,_did))?null:getStorePrice(s,_did);}).filter(function(p){return typeof p==="number"&&p>0;}):[];
   var _minP=_prices.length?Math.min.apply(null,_prices):null;
   // Tri "moins cher d'abord" (prix connus en tete, inconnus a la fin), sinon distance.
@@ -21507,6 +21537,24 @@ function openLabel(s){
   return sur?"Ferm\u00E9":"Sans doute ferm\u00E9";
 }
 function storeVerifiedFor(s,did){return !!(s&&s.drinksVerified&&s.drinksVerified.some(function(v){return Number(v)===Number(did);}));}
+/* « EN STOCK » N'A QU'UN SENS, ET C'EST CELUI-CI.
+   Le magasin a la boisson ET quelqu'un l'y a vue : rayon verifie, ou au moins
+   une confirmation positive. Une boisson simplement RATTACHEE au magasin (un
+   assortiment probable, pose en masse sans que personne n'y soit alle) n'est
+   pas du stock — c'est une piste.
+
+   Cette fonction existe parce que les deux commandes qui disent « en stock »
+   ne disaient pas la meme chose : la carte ne gardait que les magasins
+   confirmes, la puce de la liste gardait tout magasin ou la boisson etait
+   rattachee. Meme mot, meme pastille verte, deux reponses — celle de la liste
+   promettait un stock qui n'avait jamais ete vu par personne. */
+function magasinConfirmePour(s,did){
+  if(!s||did==null)return false;
+  var aLaBoisson=(s.drinks||[]).some(function(d){return Number(d)===Number(did);});
+  if(!aLaBoisson)return false;
+  var conf=Number((s.confirmations||{})[did]||0);
+  return storeVerifiedFor(s,did)||conf>0;
+}
 function sortedStores(stores){var arr=stores.slice();if(curSort==="distance")arr.sort(function(a,b){return(a.dist||999)-(b.dist||999);});else if(curSort==="open")arr.sort(function(a,b){return openScore(b)-openScore(a);});else if(curSort==="trust")arr.sort(function(a,b){var id=curSel?curSel.id:0;return confBornee(b,id)-confBornee(a,id);});
   // Ordre : SURS (catalogue verifie / confirmations positives) > probables > signalees absentes
   if(curSel){var did=curSel.id;arr.sort(function(a,b){

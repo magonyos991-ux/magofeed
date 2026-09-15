@@ -109,7 +109,41 @@ const r = await page.evaluate(async () => {
   out.titreEn = titreEn;
   dit("la feuille se traduit", titreEn === "Send this shop");
 
-  /* ── 4. Le chinois : atteignable, et il change vraiment l'ecran ─────── */
+  /* ── 4. Revenir d'une fiche magasin ne doit pas perdre la boisson ───── */
+  window.exploreFilter = { drinkId: 200, name: "Mountain Dew Original" };
+  window._exploreFromDrink = true;
+  window.storeDetailReturn = "__explore__";
+  if (typeof exploreFilter !== "undefined") { try { eval("exploreFilter = window.exploreFilter"); } catch (e) {} }
+  const faux = { getBounds: () => ({ getNorthEast: () => ({lat:48.9,lng:2.4}), getSouthWest: () => ({lat:48.8,lng:2.3}) }),
+                 invalidateSize: () => {} };
+  const vraiMap = window.exploreMap;
+  try { eval("exploreMap = faux"); } catch (e) { window.exploreMap = faux; }
+  /* L'hote de la carte n'existe qu'une fois la carte ouverte. On le pose ici
+     pour emprunter le chemin QUI ETAIT CASSE — celui qui reaffiche la carte
+     deja construite. Sans lui, le test passait par la reouverture complete,
+     qui elle n'a jamais perdu le filtre : on aurait teste le mauvais chemin. */
+  let hote = document.getElementById("explore-map-host"), posePourLeTest = false;
+  if (!hote) { hote = document.createElement("div"); hote.id = "explore-map-host"; document.body.appendChild(hote); posePourLeTest = true; }
+  closeStoreDetail();
+  await pause(120);
+  const apres = (typeof exploreFilter !== "undefined") ? exploreFilter : window.exploreFilter;
+  dit("le filtre boisson survit au retour", !!apres && apres.drinkId === 200);
+  if (posePourLeTest) hote.remove();
+  dit("le nom de la boisson survit aussi", apres && apres.name === "Mountain Dew Original");
+  try { eval("exploreMap = vraiMap"); } catch (e) { window.exploreMap = vraiMap; }
+  try { eval("exploreFilter = null"); } catch (e) {}
+
+  /* ── 5. « En stock » veut dire confirme, dans la liste comme sur la carte ── */
+  const rattache = { drinks: [200], confirmations: {} };
+  const confirme = { drinks: [200], confirmations: { 200: 2 } };
+  const absent = { drinks: [], confirmations: { 200: 5 } };
+  const negatif = { drinks: [200], confirmations: { 200: -1 } };
+  dit("rattache seul n'est PAS en stock", magasinConfirmePour(rattache, 200) === false);
+  dit("confirme EST en stock", magasinConfirmePour(confirme, 200) === true);
+  dit("pas la boisson, pas de stock", magasinConfirmePour(absent, 200) === false);
+  dit("signale absent, pas de stock", magasinConfirmePour(negatif, 200) === false);
+
+  /* ── 6. Le chinois : atteignable, et il change vraiment l'ecran ─────── */
   dit("le chinois est propose", Object.keys(LANGS).indexOf("zh") !== -1);
   setLang("fr"); await pause(700);
   const fr1 = document.body.innerText.slice(0, 4000);
