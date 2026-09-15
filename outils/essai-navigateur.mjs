@@ -143,7 +143,39 @@ const r = await page.evaluate(async () => {
   dit("pas la boisson, pas de stock", magasinConfirmePour(absent, 200) === false);
   dit("signale absent, pas de stock", magasinConfirmePour(negatif, 200) === false);
 
-  /* ── 6. Le chinois : atteignable, et il change vraiment l'ecran ─────── */
+  /* ── 6. Les fleches de bord pointent vers ce qu'on verra en arrivant ── */
+  {
+    const mapEl = document.createElement("div"); mapEl.id = "explore-map"; document.body.appendChild(mapEl);
+    const sauveMap = window.exploreMap, sauveListe = window._exploreRawList, sauveChips = window._exploreChips;
+    const hors = { getSize: () => ({ x: 400, y: 800 }),
+                   latLngToContainerPoint: () => ({ x: 900, y: 400 }),  /* toujours hors champ */
+                   setView: () => {}, getZoom: () => 14 };
+    try { eval("exploreMap = hors"); } catch (e) { window.exploreMap = hors; }
+    try { eval("exploreFilter = {drinkId:200,name:'Mountain Dew Original'}"); } catch (e) {}
+    window._routeLayer = null;
+    window._exploreRawList = [{ id: "x1", name: "Piste", lat: 48.88, lng: 2.35, brand: "", drinks: [200], confirmations: {} }];
+
+    window._exploreChips = { instock: true };
+    renderInStockArrows();
+    const avecPuce = document.querySelectorAll("#explore-edge-arrows [role=button]").length;
+    const bandeau = document.getElementById("explore-pistes");
+    dit("puce « En stock » : aucune fleche vers un magasin non confirme", avecPuce === 0);
+    dit("la carte vide s'explique au lieu de rester muette", !!bandeau && /1/.test(bandeau.textContent));
+
+    window._exploreChips = { instock: false };
+    renderInStockArrows();
+    const sansPuce = document.querySelectorAll("#explore-edge-arrows [role=button]").length;
+    dit("puce eteinte : la piste redevient signalee", sansPuce === 1);
+    dit("et le bandeau disparait", !document.getElementById("explore-pistes"));
+
+    try { eval("exploreMap = sauveMap"); } catch (e) { window.exploreMap = sauveMap; }
+    try { eval("exploreFilter = null"); } catch (e) {}
+    window._exploreRawList = sauveListe; window._exploreChips = sauveChips;
+    mapEl.remove();
+    const w = document.getElementById("explore-edge-arrows"); if (w) w.remove();
+  }
+
+  /* ── 7. Le chinois : atteignable, et il change vraiment l'ecran ─────── */
   dit("le chinois est propose", Object.keys(LANGS).indexOf("zh") !== -1);
   setLang("fr"); await pause(700);
   const fr1 = document.body.innerText.slice(0, 4000);

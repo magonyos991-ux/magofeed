@@ -18425,12 +18425,39 @@ function exploreBrandApplyQuery(q){
 /* Fleches de bord : quand une boisson est ciblee, les magasins qui l'ont mais qui
    sont HORS de l'ecran sont indiques par une fleche sur le bord de la carte,
    pointant vers eux. Tap sur la fleche -> la carte glisse jusqu'au magasin. */
+/* Bandeau « aucun stock confirme, mais des pistes ». Il n'apparait que dans un
+   seul cas : la puce « En stock » est allumee, rien n'est confirme, et des
+   magasins ont quand meme la boisson rattachee. Sans lui, la carte etait vide
+   et muette — on ne pouvait pas deviner qu'il suffisait de decocher. */
+function majBandeauPistes(nb){
+  var mapEl=document.getElementById("explore-map");if(!mapEl)return;
+  var b=document.getElementById("explore-pistes");
+  if(!nb){ if(b)b.remove(); return; }
+  if(!b){
+    b=document.createElement("div");
+    b.id="explore-pistes";
+    b.setAttribute("role","button");b.setAttribute("tabindex","0");
+    b.style.cssText="position:absolute;left:12px;right:12px;top:8px;z-index:1150;padding:10px 13px;"
+      +"border-radius:14px;background:var(--app-bg);border:1.5px solid var(--border);"
+      +"box-shadow:0 6px 20px rgba(0,0,0,.28);font-size:12.5px;font-weight:700;color:var(--s1);"
+      +"text-align:center;cursor:pointer";
+    b.onclick=function(){ try{ exploreToggleChip("instock"); }catch(e){} };
+    b.onkeydown=function(ev){ if(ev.key==="Enter")b.click(); };
+    mapEl.appendChild(b);
+  }
+  b.textContent=trh("Aucun stock confirmé — {n} piste(s) autour, touche pour les voir",{n:nb});
+}
 function renderInStockArrows(){
   var mapEl=document.getElementById("explore-map");
   if(!exploreMap||!mapEl)return;
   var wrap=document.getElementById("explore-edge-arrows");
   if(!wrap){wrap=document.createElement("div");wrap.id="explore-edge-arrows";wrap.style.cssText="position:absolute;inset:0;pointer-events:none;z-index:1140";mapEl.appendChild(wrap);}
   wrap.innerHTML="";
+  /* On efface le bandeau AVANT les sorties anticipees ci-dessous. Sinon il
+     survivait a la fermeture du mode boisson, au depliage de la liste ou au
+     trace d'un itineraire, et restait affiche par-dessus une carte a laquelle
+     il ne correspondait plus. */
+  try{ majBandeauPistes(0); }catch(e){}
   // Liste dépliée : NE PAS dessiner les flèches — elles passaient par-dessus la
   // liste (z-index supérieur) et bloquaient le défilement. On les réserve à la
   // vue carte (sheet réduite).
@@ -18438,7 +18465,18 @@ function renderInStockArrows(){
   if(_sh&&_sh.classList.contains("open"))return;
   if(!exploreFilter||window._routeLayer)return; // seulement en mode boisson, hors itineraire
   var did=exploreFilter.drinkId;
-  var vendors=(window._exploreRawList||[]).filter(function(s){return typeof s.lat==="number"&&(s.drinks||[]).some(function(id){return Number(id)===Number(did);});});
+  /* LES FLECHES DOIVENT POINTER VERS CE QU'ON VERRA EN ARRIVANT.
+     Elles listaient tout magasin ou la boisson est RATTACHEE, sans regarder la
+     puce « En stock ». Avec la puce allumee, on suivait donc une fleche, on
+     arrivait, et il n'y avait aucun pin : la carte hors-champ ne racontait pas
+     la meme chose que la carte a l'ecran. Meme filtre des deux cotes. */
+  var _pisteSeulement=!(window._exploreChips&&window._exploreChips.instock);
+  var _aLaBoisson=function(s){return typeof s.lat==="number"&&(s.drinks||[]).some(function(id){return Number(id)===Number(did);});};
+  var _tousVendeurs=(window._exploreRawList||[]).filter(_aLaBoisson);
+  var vendors=_pisteSeulement?_tousVendeurs:_tousVendeurs.filter(function(s){return magasinConfirmePour(s,did);});
+  /* Puce allumee, aucun stock confirme, mais des pistes autour : au lieu d'une
+     carte vide et muette, on le dit et on propose la sortie en un geste. */
+  try{ majBandeauPistes(!_pisteSeulement&&!vendors.length&&_tousVendeurs.length?_tousVendeurs.length:0); }catch(e){}
   if(!vendors.length)return;
   var size;try{size=exploreMap.getSize();}catch(e){return;}
   var W=size.x,H=size.y;if(!W||!H)return;var cx=W/2,cy=H/2,pad=30,placed=0;
