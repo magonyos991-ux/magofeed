@@ -41,7 +41,7 @@ dossier se remet à diverger. Elle sauvegarde ton `firebase.json` et ton
 `index.js` sous `.avant` avant de les remplacer.
 
 ```powershell
-cd C:\Users\ilias\magofeed-functions; $b="https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"; if (Test-Path firebase.json) { Copy-Item firebase.json firebase.json.avant -Force }; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firebase.json.modele") -OutFile "firebase.json"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.rules") -OutFile "firestore.rules"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.indexes.json") -OutFile "firestore.indexes.json"; cd functions; if (Test-Path index.js) { Copy-Item index.js index.js.avant -Force }; foreach ($f in @("index.js","points-et-parrainage.js","anti-farm.js","notifications-push.js","emails-brevo.js","reconnaissance-ia.js","scan-frigo.js","commerces-monde.js","remplir-enseignes.js","importer-horaires.js","partage.js","sauvegarde.js","don-notification.js","outils-admin.js","notif-admin.js","catalogue-ia.js","dons.js","verification-commercant.js","recap-fondateur.js","migration-geohash.js")) { Invoke-WebRequest -UseBasicParsing -Uri ($b+$f) -OutFile $f; Write-Host "ok $f" }; npm install @duckdb/node-api geofire-common @google-cloud/firestore @anthropic-ai/sdk; cd ..; firebase deploy --only firestore:indexes; firebase deploy --only firestore:rules; firebase deploy --only functions
+cd C:\Users\ilias\magofeed-functions; $b="https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"; if (Test-Path firebase.json) { Copy-Item firebase.json firebase.json.avant -Force }; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firebase.json.modele") -OutFile "firebase.json"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.rules") -OutFile "firestore.rules"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.indexes.json") -OutFile "firestore.indexes.json"; cd functions; if (Test-Path index.js) { Copy-Item index.js index.js.avant -Force }; foreach ($f in @("index.js","points-et-parrainage.js","anti-farm.js","notifications-push.js","emails-brevo.js","reconnaissance-ia.js","scan-frigo.js","commerces-monde.js","remplir-enseignes.js","importer-horaires.js","partage.js","sauvegarde.js","don-notification.js","outils-admin.js","notif-admin.js","catalogue-ia.js","messages-push.js","dons.js","verification-commercant.js","recap-fondateur.js","migration-geohash.js")) { Invoke-WebRequest -UseBasicParsing -Uri ($b+$f) -OutFile $f; Write-Host "ok $f" }; npm install @duckdb/node-api geofire-common @google-cloud/firestore @anthropic-ai/sdk; cd ..; firebase deploy --only firestore:indexes; firebase deploy --only firestore:rules; firebase deploy --only functions
 ```
 
 Le détail de ce que contient ce dossier, fichier par fichier, est dans
@@ -69,6 +69,31 @@ emoji à l'IA et l'inscrivait. Magofeed n'en affiche aucun, mais 39 des 65
 fiches du catalogue partagé en portaient un, et l'app les affichait vraiment.
 La fonction est corrigée ; ce bouton vide ce qu'elle a déjà écrit. Rejouable
 sans risque.
+
+## 0 ter. À déployer maintenant — les points et les demandes d'ami
+
+Trois fonctions changent, et il faut relancer la commande du 0 bis pour
+qu'elles montent. `messages-push.js` manquait dans la liste des fichiers
+téléchargés : il vient d'y être ajouté, donc la messagerie et les demandes
+d'ami partiront ensemble.
+
+- **`crediterContribution`** — un « je l'ai vue » signalé sans position
+  connue, ou à plus de 500 m, rapportait **zéro** pendant que l'app annonçait
+  « +3 pts ». Il rapporte maintenant **1 point** ; le plein tarif reste
+  réservé à ce qui est vérifiable. Une *rupture* garde le zéro.
+- **`rattraperSignalements`** (nouvelle, admin) — rend les points refusés
+  autrefois. Dans l'app : **Administration → « Rendre les points refusés pour
+  "trop loin" »**. Elle compte d'abord, elle ne verse qu'au second appui, et
+  la relancer ne paie jamais deux fois.
+- **`notifierDemandeAmi`** (nouvelle) — prévient le téléphone quand
+  quelqu'un demande à être ami, et prévient le demandeur quand c'est accepté.
+  Un refus ne notifie personne.
+- **`confirmAiDrink`** — la fiche créée par l'IA reçoit enfin le code-barre
+  qui avait échoué au scan. Sans ce changement, une boisson ajoutée par photo
+  reste introuvable au scanner, à vie.
+
+Aucune règle Firestore ne change : le banc d'essai (§1) n'a pas besoin d'être
+relancé pour ce lot.
 
 ## 1. Les règles Firestore — dans la commande de la section 0 bis
 

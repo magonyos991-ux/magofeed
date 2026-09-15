@@ -124,6 +124,9 @@ const BAREME_REPORT = {
   nouveau: 2,
   prix: 2          // un prix releve en rayon (note = le prix)
 };
+/* Ce que vaut un « je l'ai vue » quand on ne peut pas prouver qu'on y etait :
+   l'information reste vraie et utile, elle n'est simplement pas verifiable. */
+const MONTANT_DE_MEMOIRE = 1;
 const POINTS_DECOUVERTE = 20;   // proposer une decouverte
 const POINTS_PROMOTION = 50;    // elle entre au catalogue
 
@@ -273,13 +276,31 @@ exports.crediterContribution = onDocumentCreated(
     if (rep.counted === true) return;              // deja passe
     const montant = BAREME_REPORT[rep.type] || 0;
     if (!montant || !rep.by) { await snap.ref.set({ counted: true, credited: 0 }, { merge: true }); return; }
-    // Un stock ou une rupture declares de loin (ou sans position) ne rapportent rien.
-    if ((rep.type === "stock" || rep.type === "rupture") && !surPlace(rep)) {
-      await snap.ref.set({ counted: true, credited: 0, raison: "trop loin" }, { merge: true });
-      return;
-    }
     if (await dejaCompteAujourdhui(rep, snap.id)) {
       await snap.ref.set({ counted: true, credited: 0, raison: "rejeu" }, { merge: true });
+      return;
+    }
+    /* SIGNALER DE LOIN RAPPORTE MOINS, PAS RIEN.
+       Cette regle versait zero des que la position etait au-dela de 500 m —
+       ou simplement INCONNUE, ce qui est le cas de quiconque a refuse la
+       geolocalisation. L'app, elle, annoncait « +3 pts ». Une personne a donc
+       signale deux boissons, vu deux fois « +3 pts », et garde un profil a
+       zero point sans que rien ne le lui explique. Ce n'est pas defendable :
+       son signalement, lui, sert a tout le monde.
+       Un « je l'ai vue » rapporte donc un point meme sans preuve de presence.
+       Le plein tarif reste reserve a ce qui est verifiable — etre sur place —
+       et le plafond quotidien comme l'anti-farm continuent de s'appliquer.
+       Une RUPTURE garde le zero : retirer une boisson d'un rayon devant lequel
+       on ne se trouve pas, ca n'aide personne, et ca peut nuire. */
+    if ((rep.type === "stock" || rep.type === "rupture") && !surPlace(rep)) {
+      if (rep.type !== "stock") {
+        await snap.ref.set({ counted: true, credited: 0, raison: "trop loin" }, { merge: true });
+        return;
+      }
+      const verseLoin = await crediter(rep.by, MONTANT_DE_MEMOIRE, rep.type);
+      await snap.ref.set({ counted: true, credited: verseLoin, raison: "de memoire" }, { merge: true });
+      await recalculerScore(rep.by);
+      await evaluerParrainage(rep.by);
       return;
     }
     const verse = await crediter(rep.by, montant, rep.type);
@@ -674,6 +695,70 @@ exports.utiliserCodeParrain = onCall({ region: REGION }, async (req) => {
     throw new HttpsError("already-exists", "Tu as deja utilise un code de parrainage.");
   }
   return { ok: true, delaiJours: DELAI_JOURS, seuil: SEUIL_CONTRIBUTIONS };
+});
+
+/* RENDRE LES POINTS REFUSES PAR L'ANCIENNE REGLE.
+   Tant que « stock » ne payait qu'a moins de 500 metres, chaque signalement
+   fait sans position connue repartait avec {credited:0, raison:"trop loin"} —
+   en silence, alors que l'app venait d'annoncer « +3 pts ». Ces rapports sont
+   toujours la, horodates et nominatifs : on peut donc rendre ce qui etait du,
+   au lieu de demander aux gens de recommencer.
+   Elle ne paie que les « stock », relit chaque rapport avant d'ecrire, et
+   remplace le motif par « de memoire » — donc la relancer ne paie jamais deux
+   fois. Reservee a l'admin.
+
+   Deploiement : firebase deploy --only functions:rattraperSignalements */
+exports.rattraperSignalements = onCall({ region: REGION, timeoutSeconds: 120 }, async (req) => {
+  const uid = req.auth && req.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi.");
+  const moi = await db.doc(`admins/${uid}`).get();
+  if (!moi.exists) throw new HttpsError("permission-denied", "Reserve a l'administrateur.");
+
+  const jours = Math.min(365, Math.max(1, Number((req.data && req.data.jours) || 60)));
+  const depuis = Timestamp.fromMillis(Date.now() - jours * 86400000);
+  const appliquer = !!(req.data && req.data.appliquer);
+  const quiSeul = String((req.data && req.data.uid) || "");
+
+  let q = db.collection("reports")
+    .where("createdAt", ">=", depuis)
+    .orderBy("createdAt", "desc")
+    .limit(1000);
+  if (quiSeul) q = db.collection("reports").where("by", "==", quiSeul).limit(1000);
+  const snap = await q.get();
+
+  const touches = [];
+  const parPersonne = {};
+  snap.forEach((d) => {
+    const r = d.data() || {};
+    if (r.type !== "stock" || !r.by) return;
+    if (r.raison !== "trop loin") return;              // deja paye, ou refuse pour une autre raison
+    if (Number(r.credited) > 0) return;
+    touches.push({ ref: d.ref, by: r.by, pseudo: r.byPseudo || null });
+    parPersonne[r.by] = (parPersonne[r.by] || 0) + 1;
+  });
+
+  const res = {
+    ok: true,
+    examines: snap.size,
+    aRendre: touches.length,
+    personnes: Object.keys(parPersonne).length,
+    detail: Object.keys(parPersonne).slice(0, 20).map((u) => ({ uid: u, nb: parPersonne[u] })),
+    rendus: 0
+  };
+  if (!appliquer) return res;
+
+  const scores = new Set();
+  for (const t of touches) {
+    const verse = await crediter(t.by, MONTANT_DE_MEMOIRE, "stock");
+    await t.ref.set({ counted: true, credited: verse, raison: "de memoire" }, { merge: true });
+    res.rendus += verse;
+    scores.add(t.by);
+  }
+  for (const u of scores) {
+    await recalculerScore(u);
+    await evaluerParrainage(u);
+  }
+  return res;
 });
 
 /* Bascule : fige le solde actuel de chacun pour que PERSONNE ne perde ses

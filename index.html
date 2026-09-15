@@ -884,6 +884,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
            le bouton constate d'abord, il ne répare que si on le redemande. -->
       <div id="admin-rejouer" style="margin-bottom:18px"></div>
       <div id="admin-visibilite" style="margin-bottom:18px"></div>
+      <div id="admin-points-rendus" style="margin-bottom:18px"></div>
       <div id="admin-list"></div>
     </div>
     </div>
@@ -4636,6 +4637,20 @@ window.fbConfirmAiDrink = async function(discoveryId) {
     var fns = getFunctions(app, "europe-west1");
     var call = httpsCallable(fns, "confirmAiDrink");
     var res = await call({ discoveryId: String(discoveryId) });
+    return (res && res.data) || { ok: false, reason: "no-response" };
+  } catch (e) {
+    return { ok: false, reason: String((e && e.code) || (e && e.message) || e) };
+  }
+};
+/* Rendre les points que l'ancienne regle de distance avait refuses en silence.
+   Cote serveur : rattraperSignalements (points-et-parrainage.js). Sans
+   `appliquer`, elle ne fait que compter — on regarde avant d'ecrire. */
+window.fbRattraperSignalements = async function(jours, appliquer, uid) {
+  try {
+    await ensureAuthed();
+    var fns = getFunctions(app, "europe-west1");
+    var call = httpsCallable(fns, "rattraperSignalements");
+    var res = await call({ jours: Number(jours) || 60, appliquer: !!appliquer, uid: uid ? String(uid) : "" });
     return (res && res.data) || { ok: false, reason: "no-response" };
   } catch (e) {
     return { ok: false, reason: String((e && e.code) || (e && e.message) || e) };
@@ -8618,7 +8633,12 @@ function _ecrireRattachement(s,ctx){
       userStats.pts+=3;flyPts(3);
       toast("Rattach\u00E9 \u00E0 "+sanitize(s.name)+" \u00B7 +3 pts");
     }else{
-      toast("Sign\u00E9 chez "+sanitize(s.name)+" \u00B7 visible par tout le monde \u00B7 les points se gagnent sur place");
+      /* Le serveur verse 1 point a un « je l'ai vue » qu'il ne peut pas
+         verifier (MONTANT_DE_MEMOIRE). On annonce donc 1, pas 3 : promettre
+         ce que le serveur ne paiera pas, c'est exactement ce qui a fabrique
+         des profils a zero point apres deux signalements. */
+      userStats.pts+=1;flyPts(1);
+      toast("Sign\u00E9 chez "+sanitize(s.name)+" \u00B7 +1 pt \u00B7 visible par tout le monde (3 pts sur place)");
     }
   }
   trackStoreContribution(sid);
@@ -22126,9 +22146,45 @@ function renderReparerVisibilite(){
   btn.onkeydown=function(ev){ if(ev.key==="Enter")lancer(); };
   inp.onkeydown=function(ev){ if(ev.key==="Enter")lancer(); };
 }
+/* Les points que la distance avait refuses, rendus a ceux qui les ont gagnes. */
+function renderPointsRendus(){
+  var el=document.getElementById("admin-points-rendus");
+  if(!el)return;
+  el.innerHTML='<div id="pr-btn" role="button" tabindex="0" style="padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;font-size:13.5px;font-weight:700;color:var(--s1)">Rendre les points refusés pour « trop loin »</div>'+
+    '<div id="pr-res" style="font-size:12px;color:var(--s2);margin-top:8px"></div>';
+  var btn=document.getElementById("pr-btn"), res=document.getElementById("pr-res");
+  var aRendre=null;
+  function lancer(){
+    if(!window.fbRattraperSignalements){res.textContent="Outil indisponible (module hors ligne)";return;}
+    var appliquer=aRendre>0;
+    btn.style.opacity=".5";
+    res.textContent=appliquer?"Versement en cours…":"Lecture des signalements…";
+    window.fbRattraperSignalements(90,appliquer).then(function(r){
+      btn.style.opacity="";
+      if(!r||!r.ok){res.textContent="Échec : "+((r&&r.reason)||"fonction non déployée");try{playSound("err");}catch(e){}return;}
+      if(appliquer){
+        aRendre=null;btn.textContent="Rendre les points refusés pour « trop loin »";
+        res.textContent="✓ "+r.rendus+" point"+(r.rendus>1?"s":"")+" rendu"+(r.rendus>1?"s":"")+".";
+        try{playSound("win");}catch(e){}
+        return;
+      }
+      aRendre=r.aRendre;
+      if(!aRendre){res.textContent="Rien à rendre ("+r.examines+" signalements relus).";return;}
+      btn.textContent="Rendre ces "+aRendre+" signalement"+(aRendre>1?"s":"");
+      res.textContent=aRendre+" signalement"+(aRendre>1?"s":"")+" de "+r.personnes+" personne"+(r.personnes>1?"s":"")+" n'"+(aRendre>1?"ont":"a")+" rien rapporté alors que l'app avait annoncé des points.";
+    }).catch(function(e){
+      btn.style.opacity="";
+      res.textContent="Échec : "+((e&&e.message)||e);
+      try{playSound("err");}catch(_e){}
+    });
+  }
+  btn.onclick=lancer;
+  btn.onkeydown=function(ev){ if(ev.key==="Enter")lancer(); };
+}
 function renderAdmin(){
   try{ renderRejouerSignalements(); }catch(e){}
   try{ renderReparerVisibilite(); }catch(e){}
+  try{ renderPointsRendus(); }catch(e){}
   var el=document.getElementById("admin-list");if(!el)return;
   el.innerHTML="";
   renderFounderDash();
