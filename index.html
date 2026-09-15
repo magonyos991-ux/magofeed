@@ -280,7 +280,11 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <div style="display:flex;align-items:center;gap:10px">
           <div id="msg-btn" class="hd-ico" onclick="openMessages()" role="button" tabindex="0" aria-label="Messages" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openMessages();}"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7.5 8.5 6 8.5-6"/></svg><span id="msg-badge" class="hd-badge" aria-hidden="true"></span></div>
           <div id="bell-btn" class="hd-ico" onclick="openActivity()" role="button" tabindex="0" aria-label="Mes activités" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openActivity();}"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span id="bell-badge" style="display:none;position:absolute;top:-6px;right:-6px;min-width:16px;height:16px;padding:0 3px;box-sizing:border-box;border-radius:8px;background:#c8321a;color:#fff;font-size:10px;font-weight:800;align-items:center;justify-content:center;line-height:1;border:2px solid var(--app-bg)"></span></div>
-          <div class="avatar" onclick="show('profile')" role="button" tabindex="0" aria-label="Voir mon profil" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();show('profile');}"></div>
+          <!-- La pastille des demandes d'ami est un FRERE de l'avatar, pas un
+               enfant : le contenu de l'avatar est reecrit a chaque changement de
+               photo, et la pastille disparaitrait avec. -->
+
+          <div style="position:relative;display:flex;flex-shrink:0"><div class="avatar" onclick="show('profile')" role="button" tabindex="0" aria-label="Voir mon profil" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();show('profile');}"></div><span id="home-amis-badge" class="hd-badge" aria-hidden="true"></span></div>
         </div>
       </div>
       <div style="display:flex;align-items:stretch;gap:9px;margin-bottom:6px">
@@ -906,7 +910,14 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <span class="t-section" style="margin:0;flex:1">Amis</span>
         <div class="th-ico" onclick="amisNouveau()" role="button" tabindex="0" aria-label="Trouver un joueur" onkeydown="if(event.key==='Enter'){amisNouveau();}"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="10" cy="8" r="4"/><path d="M3 21c0-3.9 3.1-7 7-7 1.2 0 2.3.3 3.3.8"/><path d="M18 14v6M15 17h6"/></svg></div>
       </div>
-      <div id="amis-body"></div>
+      <div id="amis-seg" class="msg-seg" role="tablist" aria-label="Amis, demandes ou bloqués"></div>
+      <div id="amis-chercher" style="margin:0 20px 10px;display:none">
+        <div class="searchbox" style="margin-bottom:0">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--s3)" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="var(--s3)" stroke-width="2" stroke-linecap="round"/></svg>
+          <input id="amis-q" type="search" autocomplete="off" placeholder="Chercher un joueur par son pseudo" aria-label="Chercher un joueur par son pseudo" oninput="amisChercher()">
+        </div>
+      </div>
+      <div id="amis-body" style="padding-bottom:20px"></div>
     </div>
   </div>
   <!-- MESSAGERIE : la boite -->
@@ -24384,6 +24395,8 @@ function msgRafraichirPastilles(){
   if(pc){pc.textContent=txt;pc.style.display=n>0?"flex":"none";}
   var ps=document.getElementById("profile-msg-sub");
   if(ps)ps.textContent=n>0?_tr("msgUnreadN").replace("{n}",n):_tr("msgRowSub");
+  try{majPastilleAmis();}catch(e){}
+  try{majLigneAmis();}catch(e){}
 }
 function msgApercu(c){
   var m=c.lastMsg;if(!m)return "";
@@ -24436,6 +24449,28 @@ function msgNouveau(){
    mais en rouge, lui, parce qu'ici le lien est vraiment detruit. Il n'emporte
    rien au passage : les messages echanges restent des deux cotes. C'est toute
    la difference avec un fil, qu'on masque sans jamais l'effacer. */
+/* ============================================================================
+   LES AMIS, A L'ECRAN — TROIS LISTES, ET CHAQUE ETAT A SON INVERSE
+   ----------------------------------------------------------------------------
+   LE PRINCIPE QUI A MANQUE LA PREMIERE FOIS. Une relation entre deux personnes
+   a six etats, et chacun doit avoir : une liste ou on le voit, une action pour
+   en sortir, et le chemin retour.
+
+     inconnu        -> ajouter, ecrire, bloquer
+     demande envoyee-> annuler
+     demande recue  -> accepter, refuser, bloquer
+     ami            -> ecrire, voir le profil, retirer, bloquer
+     refus que j'ai prononce -> je peux revenir dessus
+     bloque         -> DEBLOQUER
+
+   Le dernier etat n'avait ni liste ni retour : on pouvait bloquer quelqu'un, et
+   plus rien ensuite ne permettait de le debloquer — il fallait retomber par
+   hasard sur son profil, alors meme qu'un blocage le fait disparaitre de
+   partout. C'est une impasse, et la voici fermee : l'onglet « Bloques ».
+
+   D'ou trois onglets plutot qu'une page qui defile : Amis, Demandes, Bloques.
+   Chacun porte son compte, et aucun etat ne reste sans porte de sortie. */
+var AMIS={tab:"amis",q:"",res:null,cherche:false};
 function amisListe(){ return (window.fbAmis&&window.fbAmis.liens)||null; }
 function amisAutre(l){ var me=msgMe(); return (l.members&&l.members[0]===me)?l.members[1]:(l.members&&l.members[0]); }
 function amisNb(){ var L=amisListe()||[]; return L.filter(function(l){return l.state==="ok";}).length; }
@@ -24443,110 +24478,297 @@ function amisNbDemandes(){
   var me=msgMe(),L=amisListe()||[];
   return L.filter(function(l){return l.state==="request"&&l.requestBy!==me;}).length;
 }
-function openAmis(){ show("amis"); }
-function amisNouveau(){ msgNouveau(); }
-function amisLigne(l,uid,u,action){
+function amisLien(uid){ return (window.fbAmis&&window.fbAmis.parUid[String(uid||"")])||null; }
+function amisBloque(uid){ return (MSG.blocs||[]).indexOf(String(uid))!==-1; }
+function openAmis(tab){ if(tab)AMIS.tab=tab; show("amis"); }
+function amisOnglet(t){ AMIS.tab=t; try{playSound("pop");}catch(e){} renderAmis(); }
+function amisNouveau(){
+  openAmis("amis");
+  setTimeout(function(){var q=document.getElementById("amis-q");if(q)try{q.focus({preventScroll:true});}catch(e){}},80);
+}
+/* L'ETAT DU LIEN, EN UN SEUL ENDROIT. Le bouton du profil public et celui de la
+   recherche disaient la meme chose de deux facons differentes : c'est ainsi
+   qu'on finit avec « Ajouter en ami » sur quelqu'un qu'on a deja bloque. */
+function amisEtat(uid){
+  var me=msgMe();
+  if(!uid||uid===me) return {cle:"moi"};
+  if(amisBloque(uid)) return {cle:"bloque",libelle:tr("Débloquer")};
+  var l=amisLien(uid);
+  if(!l) return {cle:"inconnu",libelle:tr("Ajouter en ami")};
+  if(l.state==="ok") return {cle:"ami",libelle:tr("Retirer des amis")};
+  if(l.state==="request"&&l.requestBy===me) return {cle:"envoyee",libelle:tr("Annuler la demande")};
+  if(l.state==="request") return {cle:"recue",libelle:tr("Accepter en ami")};
+  if(l.state==="declined"&&l.requestBy===me) return {cle:"refus-essuye",libelle:tr("Demande refusée")};
+  return {cle:"inconnu",libelle:tr("Ajouter en ami")};
+}
+/* Le meme bouton partout, et il fait toujours ce que son libelle annonce. */
+function amisAgir(uid){
+  var e=amisEtat(uid);
+  if(e.cle==="bloque"){ msgBloquer(uid,false); return; }
+  if(e.cle==="ami"){ amisRetirer(uid); return; }
+  if(e.cle==="envoyee"){ amisRetirer(uid,true); return; }
+  if(e.cle==="recue"||e.cle==="inconnu"){ amisDemander(uid); return; }
+  if(e.cle==="refus-essuye"){ toast(tr("Cette personne a refusé ta demande")); return; }
+}
+function amisIcoAjout(retrait){
+  return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><circle cx="10" cy="8" r="4"/><path d="M3 21c0-3.9 3.1-7 7-7 1.2 0 2.3.3 3.3.8"/>'+
+    (retrait?'<path d="M16 17h6"/>':'<path d="M18 14v6M15 17h6"/>')+'</svg>';
+}
+function amisLigne(uid,u,sous){
   var row=document.createElement("div");
   row.className="msg-row";
   row.innerHTML=msgAvatar(u)+
     '<div style="flex:1;min-width:0"><div class="msg-name">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</div>'+
-    '<div class="msg-prev">'+action+'</div></div>';
+    '<div class="msg-prev">'+sous+'</div></div>';
   return row;
 }
+/* LE MENU D'UNE LIGNE D'AMI : les quatre gestes qu'on peut vouloir faire sur
+   quelqu'un, au meme endroit. Sans lui, voir le profil d'un ami demandait de
+   ressortir le chercher, et le bloquer etait impossible depuis sa liste. */
+function amisMenu(uid){
+  var u=msgUser(uid)||{},nom=sanitize(u.pseudo||_tr("msgSomeone"));
+  var bl=amisBloque(uid);
+  var ov=msgFeuille("amis-menu",
+    '<div class="claim-title" style="font-size:16px">'+nom+'</div>'+
+    '<button class="msg-opt" data-k="ecrire"><span class="msg-opt-i"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7.5 8.5 6 8.5-6"/></svg></span><span class="msg-opt-t">'+_tr("msgWrite")+'</span></button>'+
+    '<button class="msg-opt" data-k="profil"><span class="msg-opt-i"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M5 21c0-3.9 3.1-7 7-7s7 3.1 7 7"/></svg></span><span class="msg-opt-t">'+_tr("msgSeeProfile")+'</span></button>'+
+    '<button class="msg-opt" data-k="bloc"><span class="msg-opt-i">'+msgIcoBloc(20)+'</span><span class="msg-opt-t">'+(bl?_tr("msgUnblock"):_tr("msgBlock"))+'</span></button>'+
+    '<button class="msg-opt" data-k="retirer"><span class="msg-opt-i"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10" cy="8" r="4"/><path d="M3 21c0-3.9 3.1-7 7-7 1.2 0 2.3.3 3.3.8"/><path d="M16 17h6"/></svg></span><span class="msg-opt-t">'+tr("Retirer des amis")+'</span></button>');
+  if(!ov)return;
+  ov.querySelectorAll(".msg-opt").forEach(function(b){
+    b.onclick=function(){
+      var k=b.getAttribute("data-k");ov.fermer();
+      if(k==="ecrire")msgEcrire(uid,u);
+      else if(k==="profil")amisVoirProfil(uid,u);
+      else if(k==="bloc")msgBloquer(uid,!bl);
+      else if(k==="retirer")amisRetirer(uid);
+    };
+  });
+}
+function amisVoirProfil(uid,u){
+  if(window.fbLoadUser){
+    window.fbLoadUser(uid).then(function(x){
+      if(x)openUserProfile(Object.assign({uid:uid},x));
+      else openUserProfile(Object.assign({uid:uid},u||{}));
+    }).catch(function(){openUserProfile(Object.assign({uid:uid},u||{}));});
+  }else openUserProfile(Object.assign({uid:uid},u||{}));
+}
+/* ── LA RECHERCHE, SANS QUITTER L'ECRAN ────────────────────────────────────
+   Le « + » envoyait vers l'ecran de recherche general : on perdait sa liste, et
+   il fallait revenir. Le champ vit maintenant au-dessus de la liste, et chaque
+   resultat porte le bouton correspondant a SON etat. ── */
+var _amisTimer=null;
+function amisChercher(){
+  var el=document.getElementById("amis-q");
+  var q=((el||{}).value||"").trim();
+  AMIS.q=q;
+  clearTimeout(_amisTimer);
+  if(q.length<2){ AMIS.res=null; AMIS.cherche=false; renderAmis(); return; }
+  AMIS.cherche=true; renderAmis();
+  _amisTimer=setTimeout(function(){
+    if(!window.fbSearchUsers){AMIS.cherche=false;AMIS.res=[];renderAmis();return;}
+    window.fbSearchUsers(q).then(function(rows){
+      if(AMIS.q!==q)return;                       // la frappe a continue
+      AMIS.cherche=false;
+      var me=msgMe();
+      AMIS.res=(rows||[]).filter(function(u){return String(u.uid||u.id||"")!==me;});
+      (AMIS.res||[]).forEach(function(u){ try{msgRetenirUser(String(u.uid||u.id||""),u);}catch(e){} });
+      renderAmis();
+    }).catch(function(){ if(AMIS.q!==q)return; AMIS.cherche=false; AMIS.res=[]; renderAmis(); });
+  },260);
+}
+function amisTitre(t){
+  var d=document.createElement("div");
+  d.style.cssText="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:1.1px;color:var(--s3);padding:16px 20px 6px";
+  d.textContent=t;return d;
+}
 function renderAmis(){
-  var body=document.getElementById("amis-body");if(!body)return;
+  var body=document.getElementById("amis-body"),seg=document.getElementById("amis-seg");
+  if(!body||!seg)return;
   var me=msgMe();
   var L=amisListe();
-  if(L===null){
-    if(!navigator.onLine||!window.fbMesAmis){body.innerHTML=msgEtatHTML("off",_tr("msgOfflineT"),_tr("msgOfflineSub"));return;}
-    body.innerHTML='<div style="padding:30px 0">'+magoLoader(false,tr("On charge tes amis\u2026"))+'</div>';return;
-  }
-  var recues=L.filter(function(l){return l.state==="request"&&l.requestBy!==me;});
-  var envoyees=L.filter(function(l){return l.state==="request"&&l.requestBy===me;});
-  var amis=L.filter(function(l){return l.state==="ok";});
-  body.innerHTML="";
-  /* Un intitule de section, pas une carte : la classe msg-intro portait un
-     fond, et les trois titres se lisaient comme trois boutons vides. */
-  var titre=function(t){var d=document.createElement("div");d.style.cssText="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:1.1px;color:var(--s3);padding:16px 20px 6px";d.textContent=t;return d;};
+  var recues=(L||[]).filter(function(l){return l.state==="request"&&l.requestBy!==me;});
+  var envoyees=(L||[]).filter(function(l){return l.state==="request"&&l.requestBy===me;});
+  var amis=(L||[]).filter(function(l){return l.state==="ok";});
+  var blocs=(MSG.blocs||[]).slice();
 
-  if(recues.length){
-    body.appendChild(titre(tr("Demandes re\u00e7ues")));
-    recues.forEach(function(l){
-      var uid=amisAutre(l),u=msgUser(uid)||{pseudo:_tr("msgSomeone")};
-      var d=document.createElement("div");
-      d.className="req-card";
-      d.innerHTML='<div class="req-top">'+msgAvatar(u,"lg")+'<div style="flex:1;min-width:0"><div class="msg-name">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</div>'+
-        '<div class="req-meta">'+_tr("msgLevel").replace("{n}",(levelInfo(nbSur(u.points)).idx+1))+' \u00B7 '+_tr("msgConfirmsN").replace("{n}",nbSur(u.confirms))+'</div></div></div>'+
-        '<div class="req-actions">'+
-          '<button class="msg-bp" data-ami-ok="'+attr(uid)+'">'+tr("Accepter")+'</button>'+
-          '<button class="msg-bs" data-ami-non="'+attr(uid)+'">'+_tr("msgDecline")+'</button>'+
-        '</div>';
-      body.appendChild(d);
-    });
+  seg.innerHTML=[["amis",tr("Amis"),amis.length],
+                 ["dem",tr("Demandes"),recues.length+envoyees.length],
+                 ["bl",tr("Bloqués"),blocs.length]].map(function(o){
+    return '<button role="tab" aria-selected="'+(AMIS.tab===o[0])+'" class="'+(AMIS.tab===o[0]?"on":"")+'" onclick="amisOnglet(\''+o[0]+'\')">'+o[1]+' · '+o[2]+'</button>';
+  }).join("");
+  var ch=document.getElementById("amis-chercher");
+  if(ch)ch.style.display=AMIS.tab==="amis"?"":"none";
+
+  body.innerHTML="";
+  if(L===null&&AMIS.tab!=="bl"){
+    if(!navigator.onLine||!window.fbMesAmis){body.innerHTML=msgEtatHTML("off",_tr("msgOfflineT"),_tr("msgOfflineSub"));return;}
+    body.innerHTML='<div style="padding:30px 0">'+magoLoader(false,tr("On charge tes amis…"))+'</div>';return;
   }
-  if(envoyees.length){
-    body.appendChild(titre(tr("Demandes envoy\u00e9es")));
-    envoyees.forEach(function(l){
-      var uid=amisAutre(l),u=msgUser(uid)||{pseudo:_tr("msgSomeone")};
-      var row=amisLigne(l,uid,u,tr("En attente"));
+
+  /* ── ONGLET BLOQUES : l'impasse d'hier, avec sa porte de sortie. ── */
+  if(AMIS.tab==="bl"){
+    if(!blocs.length){
+      body.innerHTML=msgEtatHTML("lock",tr("Personne n'est bloqué"),
+        tr("Une personne bloquée ne peut plus t'écrire ni te demander en ami. Tu peux la débloquer ici à tout moment."));
+      try{traduirePage();}catch(e){}return;
+    }
+    body.appendChild(amisTitre(tr("Bloqués")+" · "+blocs.length));
+    blocs.forEach(function(uid){
+      var u=msgUser(uid)||{pseudo:_tr("msgSomeone")};
+      var row=amisLigne(uid,u,tr("Ne peut plus t'écrire"));
       var b=document.createElement("button");
-      b.className="msg-bs";b.style.cssText="flex-shrink:0;min-height:36px;padding:0 14px";
-      b.textContent=tr("Annuler");
-      b.setAttribute("data-ami-annule",uid);
+      b.className="msg-bp";b.style.cssText="flex-shrink:0;min-height:36px;padding:0 14px";
+      b.textContent=_tr("msgUnblock");
+      b.onclick=function(ev){ev.stopPropagation();msgBloquer(uid,false);};
       row.appendChild(b);
+      row.onclick=function(){amisVoirProfil(uid,u);};
+      a11yCard(row,_tr("msgSeeProfile"));
       body.appendChild(row);
     });
+    try{traduirePage();}catch(e){}return;
   }
-  body.appendChild(titre(tr("Mes amis")+" \u00B7 "+amis.length));
-  if(!amis.length){
-    var v=document.createElement("div");
-    v.innerHTML=msgEtatHTML("mail",tr("Aucun ami pour l'instant"),
-      tr("Un ami t'\u00e9crit sans passer par les demandes, et tu vois ses derniers gestes."),
-      tr("Trouver un joueur"),"amisNouveau()");
-    body.appendChild(v);
-  }else{
-    amis.forEach(function(l){
-      var uid=amisAutre(l),u=msgUser(uid)||{pseudo:_tr("msgSomeone")};
-      var row=amisLigne(l,uid,u,tr("Appuie pour lui \u00e9crire"));
-      row.onclick=function(){ msgEcrire(uid,u); };
-      a11yCard(row,_tr("msgOpenWith").replace("{p}",u.pseudo||""));
-      var swp=document.createElement("div");
-      swp.className="swp swp-range swp-dur";
-      swp.setAttribute("data-del","ami:"+uid);
-      var bg=document.createElement("div");
-      bg.className="swp-bg";
-      bg.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10" cy="8" r="4"/><path d="M3 21c0-3.9 3.1-7 7-7 1.2 0 2.3.3 3.3.8"/><path d="M16 17h6"/></svg><span>'+sanitize(tr("Retirer"))+'</span>';
-      var fg=document.createElement("div");fg.className="swp-fg";fg.appendChild(row);
-      swp.appendChild(bg);swp.appendChild(fg);
-      body.appendChild(swp);
+
+  /* ── ONGLET DEMANDES : recues d'abord, c'est la qu'on attend une reponse. ── */
+  if(AMIS.tab==="dem"){
+    if(!recues.length&&!envoyees.length){
+      body.innerHTML=msgEtatHTML("inbox",tr("Aucune demande"),
+        tr("Les demandes d'amitié reçues et envoyées apparaissent ici."),
+        tr("Trouver un joueur"),"amisNouveau()");
+      try{traduirePage();}catch(e){}return;
+    }
+    if(recues.length){
+      body.appendChild(amisTitre(tr("Demandes reçues")));
+      recues.forEach(function(l){
+        var uid=amisAutre(l),u=msgUser(uid)||{pseudo:_tr("msgSomeone")};
+        var d=document.createElement("div");
+        d.className="req-card";
+        d.innerHTML='<div class="req-top">'+msgAvatar(u,"lg")+'<div style="flex:1;min-width:0"><div class="msg-name">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</div>'+
+          '<div class="req-meta">'+_tr("msgLevel").replace("{n}",(levelInfo(nbSur(u.points)).idx+1))+' · '+_tr("msgConfirmsN").replace("{n}",nbSur(u.confirms))+'</div></div></div>'+
+          '<div class="req-actions">'+
+            '<button class="msg-bp" data-ami-ok="'+attr(uid)+'">'+tr("Accepter")+'</button>'+
+            '<button class="msg-bs" data-ami-non="'+attr(uid)+'">'+_tr("msgDecline")+'</button>'+
+            '<button class="msg-bd" aria-label="'+attr(_tr("msgBlock"))+'" data-ami-bloc="'+attr(uid)+'">'+msgIcoBloc(18)+'</button>'+
+          '</div>';
+        body.appendChild(d);
+      });
+    }
+    if(envoyees.length){
+      body.appendChild(amisTitre(tr("Demandes envoyées")));
+      envoyees.forEach(function(l){
+        var uid=amisAutre(l),u=msgUser(uid)||{pseudo:_tr("msgSomeone")};
+        var row=amisLigne(uid,u,tr("En attente"));
+        var b=document.createElement("button");
+        b.className="msg-bs";b.style.cssText="flex-shrink:0;min-height:36px;padding:0 14px";
+        b.textContent=tr("Annuler");
+        b.setAttribute("data-ami-annule",uid);
+        row.appendChild(b);
+        body.appendChild(row);
+      });
+    }
+    amisBrancherBoutons(body);
+    try{traduirePage();}catch(e){}return;
+  }
+
+  /* ── ONGLET AMIS : la recherche prend la place de la liste quand on tape. ── */
+  if(AMIS.q.length>=2){
+    body.appendChild(amisTitre(tr("Résultats")));
+    if(AMIS.cherche){
+      body.innerHTML+='<div style="padding:22px 0">'+magoLoader(true,tr("Recherche…"))+'</div>';
+      try{traduirePage();}catch(e){}return;
+    }
+    if(!(AMIS.res||[]).length){
+      var v=document.createElement("div");
+      v.innerHTML=msgEtatHTML("inbox",trh("Aucun joueur « {q} »",{q:sanitize(AMIS.q)}),
+        tr("La recherche porte sur le début du pseudo."));
+      body.appendChild(v);try{traduirePage();}catch(e){}return;
+    }
+    AMIS.res.forEach(function(x){
+      var uid=String(x.uid||x.id||"");
+      var u=msgUser(uid)||x;
+      var et=amisEtat(uid);
+      var row=amisLigne(uid,u,nbSur(u.points)+" pts"+(nbSur(u.confirms)?" · "+_tr("msgConfirmsN").replace("{n}",nbSur(u.confirms)):""));
+      var b=document.createElement("button");
+      b.className=(et.cle==="inconnu"||et.cle==="recue")?"msg-bp":"msg-bs";
+      b.style.cssText="flex-shrink:0;min-height:36px;padding:0 13px;font-size:12px";
+      b.textContent=et.libelle||"";
+      if(et.cle==="refus-essuye")b.disabled=true,b.style.opacity=".55";
+      b.onclick=function(ev){ev.stopPropagation();amisAgir(uid);};
+      row.appendChild(b);
+      row.onclick=function(){amisVoirProfil(uid,u);};
+      a11yCard(row,_tr("msgSeeProfile"));
+      body.appendChild(row);
     });
-    try{initSwipeToDelete(body);}catch(e){}
+    try{traduirePage();}catch(e){}return;
   }
-  body.querySelectorAll("[data-ami-ok]").forEach(function(b){b.onclick=function(){amisRepondre(b.getAttribute("data-ami-ok"),true);};});
-  body.querySelectorAll("[data-ami-non]").forEach(function(b){b.onclick=function(){amisRepondre(b.getAttribute("data-ami-non"),false);};});
-  body.querySelectorAll("[data-ami-annule]").forEach(function(b){b.onclick=function(ev){ev.stopPropagation();amisRetirer(b.getAttribute("data-ami-annule"),true);};});
+
+  if(!amis.length){
+    var vide=document.createElement("div");
+    vide.innerHTML=msgEtatHTML("mail",tr("Aucun ami pour l'instant"),
+      tr("Un ami t'écrit sans passer par les demandes, et tu vois ses derniers gestes."),
+      tr("Trouver un joueur"),"amisNouveau()");
+    body.appendChild(vide);
+    try{traduirePage();}catch(e){}return;
+  }
+  body.appendChild(amisTitre(tr("Mes amis")+" · "+amis.length));
+  amis.forEach(function(l){
+    var uid=amisAutre(l),u=msgUser(uid)||{pseudo:_tr("msgSomeone")};
+    var row=amisLigne(uid,u,tr("Appuie pour lui écrire"));
+    row.onclick=function(){ msgEcrire(uid,u); };
+    a11yCard(row,_tr("msgOpenWith").replace("{p}",u.pseudo||""));
+    /* Les trois points : le menu doit etre atteignable autrement que par un
+       appui long, qu'aucun lecteur d'ecran ne peut faire. */
+    var pts=document.createElement("button");
+    pts.className="ami-plus";
+    pts.setAttribute("aria-label",trh("Actions pour {p}",{p:u.pseudo||""}));
+    pts.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
+    pts.onclick=function(ev){ev.stopPropagation();amisMenu(uid);};
+    row.appendChild(pts);
+    var swp=document.createElement("div");
+    swp.className="swp swp-range swp-dur";
+    swp.setAttribute("data-del","ami:"+uid);
+    var bg=document.createElement("div");
+    bg.className="swp-bg";
+    bg.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10" cy="8" r="4"/><path d="M3 21c0-3.9 3.1-7 7-7 1.2 0 2.3.3 3.3.8"/><path d="M16 17h6"/></svg><span>'+sanitize(tr("Retirer"))+'</span>';
+    var fg=document.createElement("div");fg.className="swp-fg";fg.appendChild(row);
+    swp.appendChild(bg);swp.appendChild(fg);
+    body.appendChild(swp);
+  });
+  try{initSwipeToDelete(body);}catch(e){}
   try{traduirePage();}catch(e){}
 }
-function amisRepondre(uid,oui){
+function amisBrancherBoutons(body){
+  body.querySelectorAll("[data-ami-ok]").forEach(function(b){b.onclick=function(){amisRepondre(b.getAttribute("data-ami-ok"),true);};});
+  body.querySelectorAll("[data-ami-non]").forEach(function(b){b.onclick=function(){amisRepondre(b.getAttribute("data-ami-non"),false);};});
+  body.querySelectorAll("[data-ami-bloc]").forEach(function(b){b.onclick=function(){amisBloquerDepuisDemande(b.getAttribute("data-ami-bloc"));};});
+  body.querySelectorAll("[data-ami-annule]").forEach(function(b){b.onclick=function(ev){ev.stopPropagation();amisRetirer(b.getAttribute("data-ami-annule"),true);};});
+}
+/* Bloquer depuis une demande : on bloque ET on refuse. Laisser la demande en
+   attente apres un blocage la ferait reapparaitre a chaque ouverture. */
+function amisBloquerDepuisDemande(uid){
+  msgBloquer(uid,true,function(ok){ if(ok)amisRepondre(uid,false,true); });
+}
+function amisRepondre(uid,oui,muet){
   if(!window.fbRepondreAmi){msgErreurToast("offline");return;}
   window.fbRepondreAmi(uid,oui).then(function(r){
-    if(!r||!r.ok){msgErreurToast(r&&r.reason,r&&r.detail);return;}
+    if(!r||!r.ok){if(!muet)msgErreurToast(r&&r.reason,r&&r.detail);return;}
     try{playSound(oui?"win":"pop");}catch(e){}
-    toast(oui?tr("Vous \u00eates amis"):tr("Demande refus\u00e9e"));
+    if(!muet)toast(oui?tr("Vous êtes amis"):tr("Demande refusée"));
   });
 }
 function amisDemander(uid){
   if(!window.fbDemanderAmi){msgErreurToast("offline");return;}
+  if(amisBloque(uid)){toast(tr("Débloque cette personne d'abord"));return;}
   window.fbDemanderAmi(uid).then(function(r){
     if(!r||!r.ok){
       /* Un refus qu'on a deja essuye ne se redemande pas : c'est la regle, et
          c'est elle qui protege la personne qui a refuse. On le dit clairement
          plutot que d'afficher une erreur technique. */
-      if(r&&r.reason==="refuse"){toast(tr("Cette personne a refus\u00e9 ta demande"));return;}
+      if(r&&r.reason==="refuse"){toast(tr("Cette personne a refusé ta demande"));return;}
       msgErreurToast(r&&r.reason,r&&r.detail);return;
     }
     try{playSound("pop");}catch(e){}
-    toast(r.deja?tr("C'est d\u00e9j\u00e0 fait"):tr("Demande envoy\u00e9e"));
+    toast(r.deja?tr("C'est déjà fait"):tr("Demande envoyée"));
   });
 }
 function amisRetirer(uid,annulation){
@@ -24554,7 +24776,7 @@ function amisRetirer(uid,annulation){
   window.fbRetirerAmi(uid).then(function(r){
     if(!r||!r.ok){msgErreurToast(r&&r.reason,r&&r.detail);amisRerendre();return;}
     try{playSound("pop");}catch(e){}
-    toast(annulation?tr("Demande annul\u00e9e"):tr("Ami retir\u00e9"));
+    toast(annulation?tr("Demande annulée"):tr("Ami retiré"));
   });
 }
 function amisRerendre(){
@@ -24568,12 +24790,19 @@ function majLigneAmis(){
   var sub=document.getElementById("profile-amis-sub");
   var pc=document.getElementById("profile-amis-count");
   var n=amisNb(),d=amisNbDemandes();
-  if(sub)sub.textContent=amisListe()===null?tr("On charge tes amis\u2026")
+  if(sub)sub.textContent=amisListe()===null?tr("On charge tes amis…")
     :(n?(n===1?trh("{n} ami",{n:n}):trh("{n} amis",{n:n}))
-       :tr("Personne pour l'instant \u2014 trouve des joueurs"));
+       :tr("Personne pour l'instant — trouve des joueurs"));
   if(pc){ if(d>0){pc.style.display="";pc.textContent=String(d);} else pc.style.display="none"; }
 }
-window.addEventListener("fbAmisChanged",function(){ amisRerendre(); });
+window.addEventListener("fbAmisChanged",function(){ amisRerendre(); try{majPastilleAmis();}catch(e){} });
+/* La pastille des demandes d'ami sur l'icone du profil, en haut de l'accueil :
+   une demande doit se voir sans aller la chercher. */
+function majPastilleAmis(){
+  var d=amisNbDemandes();
+  var el=document.getElementById("home-amis-badge");
+  if(el){ el.textContent=d>9?"9+":String(d); el.classList.toggle("on",d>0); }
+}
 
 function renderMessages(){
   var body=document.getElementById("msg-body"),seg=document.getElementById("msg-seg");if(!body||!seg)return;
@@ -24688,6 +24917,10 @@ function msgBloquer(uid,oui,done){
   window.fbBloquer(uid,oui).then(function(r){
     if(!r||!r.ok){msgErreurToast(r&&r.reason);if(done)done(false);return;}
     MSG.blocs=(r.list||[]).map(String);
+    /* BLOQUER ROMPT LE LIEN. On ne peut pas etre bloque ET ami : l'ami garderait
+       le droit d'ouvrir un fil d'emblee, et reapparaitrait dans une liste qu'on
+       croyait nettoyee. Une demande en attente part avec, pour la meme raison. */
+    if(oui){ try{ if(window.fbRetirerAmi&&amisLien(uid))window.fbRetirerAmi(uid); }catch(e){} }
     try{playSound("pop");}catch(e){}
     toast(oui?_tr("msgBlocked").replace("{p}",nom):_tr("msgUnblocked").replace("{p}",nom));
     msgRerendre();
@@ -24997,8 +25230,10 @@ function renderThreadFoot(){
   var ph=attente?_tr("msgWaiting"):(c&&c.state==="open")?_tr("msgWriteTo").replace("{p}",u.pseudo||""):_tr("msgFirstOnly").replace("{p}",u.pseudo||"");
   var bande=attente?'<div class="th-band" style="margin-bottom:8px"><b>'+_tr("msgWaiting")+'</b> · '+_tr("msgWaitingSub").replace("{p}",nom)+'</div>':
     horsLigne?'<div class="th-band warn" style="margin-bottom:8px">'+_tr("msgOfflineSub")+'</div>':'';
-  _rendre(bande+'<div class="th-comp">'+
+  _rendre(bande+'<div id="th-emo" class="th-emo" role="group" aria-label="'+attr(tr("\u00c9mojis"))+'"></div>'+
+    '<div class="th-comp">'+
     '<button class="th-plus" aria-label="'+attr(_tr("msgAttach"))+'" onclick="msgOuvrirPlus()"'+(off?' disabled':'')+'><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>'+
+    '<button class="th-plus" id="th-emo-btn" aria-label="'+attr(tr("\u00c9mojis"))+'" aria-expanded="false" onclick="msgEmojiBascule()"'+(off?' disabled':'')+'><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M8.2 14.6a4.6 4.6 0 0 0 7.6 0"/></svg></button>'+
     '<textarea id="th-in" class="th-in" rows="1" maxlength="2000" placeholder="'+attr(ph)+'" aria-label="'+attr(_tr("msgYourMessage"))+'"'+(off?' disabled':'')+'></textarea>'+
     '<button id="th-send" class="th-send" aria-label="'+attr(_tr("msgSend"))+'" onclick="msgEnvoyerTexte()" disabled><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg></button></div>'+
     '<input id="th-photo" type="file" accept="image/*" style="display:none" onchange="msgPhotoChoisie(this)">');
@@ -25013,10 +25248,76 @@ function renderThreadFoot(){
   /* Image ou position envoyee : le lecteur d'ecran doit savoir que ca part. */
   el.setAttribute("aria-busy",MSG.sending?"true":"false");
 }
+/* ============================================================================
+   LE CLAVIER D'EMOJIS
+   ----------------------------------------------------------------------------
+   POURQUOI IL EXISTE. Le clavier du telephone en a un — mais dans une PWA
+   installee, l'ouvrir referme souvent la vue et fait perdre le brouillon. Et
+   surtout : sur l'ecran d'un ordinateur, il n'y en a aucun.
+
+   TROIS DECISIONS. Il s'ouvre AU-DESSUS du composeur et non par-dessus : un
+   panneau qui couvre le message qu'on ecrit cache justement ce qu'on relit.
+   Les emojis recemment utilises remontent en tete, parce que chacun en emploie
+   toujours les memes dix. Et l'insertion se fait A LA POSITION DU CURSEUR, pas
+   a la fin : on ajoute souvent un emoji au milieu d'une phrase.
+
+   Aucune image, aucune police a telecharger : ce sont des caracteres. Le
+   panneau ne pese donc rien et fonctionne hors ligne. ======================= */
+var EMOJIS=["\ud83d\ude00","\ud83d\ude02","\ud83d\ude05","\ud83d\ude09","\ud83d\ude0a","\ud83d\ude0d","\ud83d\ude18","\ud83d\ude1c",
+  "\ud83d\ude17","\ud83e\udd14","\ud83d\ude10","\ud83d\ude44","\ud83d\ude2c","\ud83d\ude0f","\ud83d\ude12","\ud83d\ude1e",
+  "\ud83d\ude2d","\ud83d\ude31","\ud83d\ude20","\ud83d\ude07","\ud83e\udd29","\ud83d\ude0e","\ud83e\udd75","\ud83e\udd76",
+  "\ud83d\udc4d","\ud83d\udc4e","\ud83d\udc4c","\ud83d\ude4f","\ud83d\udc4f","\ud83d\udcaa","\u270c\ufe0f","\ud83e\udd1d",
+  "\u2764\ufe0f","\ud83d\udd25","\u2728","\ud83c\udf89","\ud83d\udc40","\ud83d\udca1","\u2705","\u274c",
+  "\ud83e\udd64","\ud83e\uddc3","\ud83e\udd6b","\ud83c\udf7e","\ud83c\udf75","\u2615","\ud83e\uddcb","\ud83c\udf79",
+  "\ud83c\udfea","\ud83d\uded2","\ud83d\udccd","\ud83d\uddfa\ufe0f","\ud83d\ude97","\ud83d\udeb6","\ud83c\udfc3","\u23f0",
+  "\ud83d\udcf8","\ud83d\udcac","\ud83d\udc4b","\ud83c\udf1f","\ud83e\udde0","\ud83c\udfaf","\ud83d\udc80","\ud83e\udd21"];
+function msgEmojiRecents(){
+  try{ var r=JSON.parse(localStorage.getItem("magoEmoRecents")||"[]");
+       return Array.isArray(r)?r.filter(function(x){return typeof x==="string";}).slice(0,16):[]; }
+  catch(e){ return []; }
+}
+function msgEmojiRetenir(e){
+  try{ var r=msgEmojiRecents().filter(function(x){return x!==e;});
+       r.unshift(e); localStorage.setItem("magoEmoRecents",JSON.stringify(r.slice(0,16))); }catch(x){}
+}
+function msgEmojiBascule(){
+  var p=document.getElementById("th-emo"),b=document.getElementById("th-emo-btn");
+  if(!p)return;
+  var ouvert=p.classList.contains("on");
+  if(ouvert){ p.classList.remove("on"); p.innerHTML=""; if(b)b.setAttribute("aria-expanded","false"); return; }
+  var rec=msgEmojiRecents();
+  var grille=function(liste){
+    return '<div class="th-emo-g">'+liste.map(function(e){
+      return '<button type="button" data-emo="'+attr(e)+'" aria-label="'+attr(e)+'">'+e+'</button>';
+    }).join("")+'</div>';
+  };
+  p.innerHTML=(rec.length?'<div class="th-emo-t">'+sanitize(tr("R\u00e9cents"))+'</div>'+grille(rec):'')
+    +'<div class="th-emo-t">'+sanitize(tr("\u00c9mojis"))+'</div>'+grille(EMOJIS);
+  p.classList.add("on");
+  if(b)b.setAttribute("aria-expanded","true");
+  p.querySelectorAll("[data-emo]").forEach(function(bt){
+    bt.onclick=function(){ msgEmojiInserer(bt.getAttribute("data-emo")); };
+  });
+  try{playSound("pop");}catch(e){}
+}
+function msgEmojiInserer(e){
+  var ta=document.getElementById("th-in"); if(!ta||!e)return;
+  /* A LA POSITION DU CURSEUR. Coller a la fin obligeait a tout retaper quand on
+     voulait un emoji au milieu d'une phrase. */
+  var d=ta.selectionStart==null?ta.value.length:ta.selectionStart;
+  var f=ta.selectionEnd==null?d:ta.selectionEnd;
+  ta.value=ta.value.slice(0,d)+e+ta.value.slice(f);
+  var pos=d+e.length;
+  try{ ta.focus({preventScroll:true}); ta.setSelectionRange(pos,pos); }catch(x){}
+  try{ ta.style.height="auto"; ta.style.height=Math.min(120,ta.scrollHeight)+"px"; }catch(x){}
+  var sb=document.getElementById("th-send"); if(sb)sb.disabled=!ta.value.trim();
+  msgEmojiRetenir(e);
+}
 function msgEnvoyerTexte(){
   var ta=document.getElementById("th-in");if(!ta)return;
   var t=ta.value.trim();if(!t)return;
   ta.value="";ta.style.height="auto";var sb=document.getElementById("th-send");if(sb)sb.disabled=true;
+  try{var _p=document.getElementById("th-emo");if(_p&&_p.classList.contains("on"))msgEmojiBascule();}catch(e){}
   msgEnvoyer({type:"text",text:t}).then(function(ok){if(!ok&&ta&&!ta.value){ta.value=t;if(sb)sb.disabled=false;}});
 }
 /* Envoi commun a tous les types : cree la conversation au premier message,

@@ -108,7 +108,9 @@ const trAbsents = [];
   const vus = new Set();
   /* tr("..."), tr('...') et tr(`...`) — sans interpolation : une phrase
      composee a l'execution n'a pas de cle fixe a verifier. */
-  const re = /(?<![\w$.])tr\s*\(\s*(["'`])((?:\\.|(?!\1)[^\\])*)\1\s*[,)]/g;
+  /* tr() ET trh() : la seconde prend un modele a trous (« {n} ami ») et cherche
+     la MEME table. L'oublier laissait passer une phrase sur deux. */
+  const re = /(?<![\w$.])trh?\s*\(\s*(["'`])((?:\\.|(?!\1)[^\\])*)\1\s*[,)]/g;
   let m;
   while ((m = re.exec(lisibleCode))) {
     const brut = m[2];
@@ -162,7 +164,7 @@ ko += bloc("TRADUCTIONS MANQUANTES", vides,
   "une langue proposée par l'app n'a rien à afficher.");
 ko += bloc("TRADUCTIONS IDENTIQUES AU FRANÇAIS PARTOUT", suspectes,
   "la source a sans doute été recopiée au lieu d'être traduite.");
-ko += bloc("tr() SUR UNE PHRASE ABSENTE DE LA TABLE", trAbsents,
+ko += bloc("tr()/trh() SUR UNE PHRASE ABSENTE DE LA TABLE", trAbsents,
   "le code la demande traduite ; elle restera en français dans les dix langues, sans rien signaler.");
 
 if (!ko) console.log("\nrien de bloquant : la table est complète et atteignable."
