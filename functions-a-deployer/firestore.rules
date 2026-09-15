@@ -357,6 +357,14 @@ service cloud.firestore {
        gonfler. unread[autre] : je ne peux que l'augmenter de un, et seulement
        en envoyant un message (lastMsg change dans la meme ecriture) — sinon il
        suffisait d'une boucle pour faire clignoter la pastille de quelqu'un. */
+    /* DEUX PERSONNES SONT-ELLES AMIES ? Le lien porte pour identifiant les deux
+       uid tries : on le trouve sans requete, en une lecture. Relu au moment ou
+       une conversation nait, et au moment ou un fil en attente s'ouvre. */
+    function sontAmis(m) {
+      return exists(/databases/$(database)/documents/amis/$(m[0] + '_' + m[1]))
+        && get(/databases/$(database)/documents/amis/$(m[0] + '_' + m[1])).data.state == 'ok';
+    }
+
     function lastMsgValide() {
       let lm = request.resource.data.lastMsg;
       return lm is map
@@ -365,6 +373,91 @@ service cloud.firestore {
         && lm.type in ['text','image','pos','spot']
         && (!('text' in lm) || (lm.text is string && lm.text.size() <= 80));
     }
+    /* ========================================================================
+       LES AMIS
+       ------------------------------------------------------------------------
+       Meme forme que la conversation, et pour les memes raisons : l'identifiant
+       est « a_b », les deux uid tries. Il ne peut donc exister qu'UN SEUL lien
+       entre deux personnes, par construction — pas de doublon a nettoyer, pas
+       de course entre deux demandes simultanees, et le trouver ne demande
+       aucune requete.
+
+       L'AMITIE SE DEMANDE, ELLE NE S'IMPOSE PAS. Le lien nait en « request » et
+       seul le DESTINATAIRE peut le passer a « ok » ou a « declined ». Sans
+       cette ligne, il suffisait de s'ecrire dans la liste d'amis de quelqu'un
+       — et l'amitie ouvre la porte de sa messagerie (voir plus bas). C'est donc
+       exactement la ligne qui empeche de contourner les demandes de message.
+
+       ON NE REVIENT JAMAIS A « request ». Un refus serait sinon un simple
+       detour : refuser, puis se voir redemander, indefiniment. Celui qui a
+       refuse peut en revanche changer d'avis tout seul (declined vers ok) :
+       c'est sa decision, pas celle du demandeur.
+
+       RETIRER UN AMI EFFACE VRAIMENT. C'est la difference avec un fil de
+       discussion, qu'on masque sans jamais le detruire : un fil contient la
+       moitie de quelqu'un d'autre, un lien d'amitie ne contient rien. Le
+       supprimer ne prive personne de ses messages — ils restent. Les deux
+       membres peuvent donc l'effacer, et le demandeur peut annuler sa demande
+       avant reponse.
+
+       PAS DE SPAM POSSIBLE, MEME EN ANNULANT ET REDEMANDANT : l'identifiant
+       etant fige, la personne visee ne verra jamais qu'UNE demande a la fois.
+       Et un blocage ferme la porte, comme pour les messages.
+       ==================================================================== */
+    match /amis/{pid} {
+      function apres() { return request.resource.data; }
+      function avant() { return resource.data; }
+      function estMembre() {
+        return isSignedIn() && request.auth.uid in resource.data.members;
+      }
+      function autreMembre() {
+        return apres().members[0] == request.auth.uid
+          ? apres().members[1] : apres().members[0];
+      }
+      /* La liste de blocage de la personne visee, relue a la demande. Elle est
+         absente pour la plupart des gens, d'ou le exists() d'abord. */
+      function bloqueParLautre() {
+        return exists(/databases/$(database)/documents/blocks/$(autreMembre()))
+          && request.auth.uid in
+             get(/databases/$(database)/documents/blocks/$(autreMembre())).data.get('list', []);
+      }
+      /* Le lien ne se lit que par ses deux membres. Savoir qui a demande
+         l'amitie de qui ne regarde personne d'autre. */
+      allow read: if estMembre();
+      allow create: if isSignedIn()
+        && apres().keys().hasOnly(['members','requestBy','state','createdAt','at'])
+        && apres().members is list
+        && apres().members.size() == 2
+        && apres().members[0] is string
+        && apres().members[1] is string
+        && apres().members[0] < apres().members[1]
+        && request.auth.uid in apres().members
+        && pid == apres().members[0] + '_' + apres().members[1]
+        && apres().state == 'request'
+        && apres().requestBy == request.auth.uid
+        && apres().createdAt == request.time
+        && apres().at == request.time
+        && !bloqueParLautre();
+      /* Seuls l'etat et sa date bougent. members et requestBy sont figes : sans
+         ca, on acceptait une demande puis on remplacait le demandeur. */
+      allow update: if estMembre()
+        && changed().hasOnly(['state','at'])
+        && apres().at == request.time
+        && apres().members == avant().members
+        && apres().requestBy == avant().requestBy
+        && (
+             /* le destinataire tranche */
+             (avant().state == 'request'
+              && apres().state in ['ok','declined']
+              && request.auth.uid != avant().requestBy)
+             /* ou il revient sur son refus, seul */
+             || (avant().state == 'declined'
+                 && apres().state == 'ok'
+                 && request.auth.uid != avant().requestBy)
+           );
+      allow delete: if estMembre() || isAdmin();
+    }
+
     match /conversations/{cid} {
       function estMembre() {
         return isSignedIn() && request.auth.uid in resource.data.members;
@@ -381,7 +474,13 @@ service cloud.firestore {
         return !changed().hasAny(['state'])
           || (avant().state == 'request'
               && apres().state in ['open','declined']
-              && request.auth.uid != avant().requestBy);
+              && request.auth.uid != avant().requestBy)
+          /* DEVENUS AMIS ENTRE-TEMPS : le fil reste en attente pour toujours
+             sinon. Une demande d'amitie acceptee vaut acceptation de se
+             parler — c'est le geste le plus explicite des deux. */
+          || (avant().state == 'request'
+              && apres().state == 'open'
+              && sontAmis(avant().members));
       }
       /* reqCount ne fait qu'un seul pas, 0 vers 1, par le demandeur, tant que
          la demande n'est pas tranchee. C'est ce compteur que la regle des
@@ -422,7 +521,12 @@ service cloud.firestore {
         && apres().members[0] < apres().members[1]
         && request.auth.uid in apres().members
         && cid == apres().members[0] + '_' + apres().members[1]
-        && apres().state == 'request'
+        /* UN AMI N'A PAS A DEMANDER LA PERMISSION D'ECRIRE. Le fil nait
+           ouvert : son premier message arrive dans Messages, pas dans
+           Demandes. C'est ce que l'amitie donne concretement — et la raison
+           pour laquelle elle doit elle-meme etre acceptee (voir /amis). */
+        && (apres().state == 'request'
+            || (apres().state == 'open' && sontAmis(apres().members)))
         && apres().requestBy == request.auth.uid
         && apres().createdBy == request.auth.uid
         && apres().reqCount == 0
