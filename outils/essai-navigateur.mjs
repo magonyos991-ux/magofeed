@@ -175,7 +175,32 @@ const r = await page.evaluate(async () => {
     const w = document.getElementById("explore-edge-arrows"); if (w) w.remove();
   }
 
-  /* ── 7. Le chinois : atteignable, et il change vraiment l'ecran ─────── */
+  /* ── 7. Chercher « Bonbon » doit trouver les boutiques qui s'appellent ainsi ── */
+  {
+    /* Une epreuve precedente a bascule l'app en anglais. Sans remettre la
+       langue, on comparerait du francais attendu a de l'anglais affiche — et
+       l'echec parlerait de traduction alors qu'on teste une recherche. */
+    setLang("fr"); await pause(250);
+    const liste = document.createElement("div"); liste.id = "brand-picker-list"; document.body.appendChild(liste);
+    const sauve = window._exploreRawList;
+    window._exploreRawList = [
+      { id: "b1", name: "La Bonbonnière", lat: 48.87, lng: 2.31, brand: "", drinks: [] },
+      { id: "b2", name: "Bonbons De Montmarte", lat: 48.88, lng: 2.34, brand: "", drinks: [] },
+      { id: "b3", name: "Carrefour City", lat: 48.86, lng: 2.35, brand: "Carrefour", drinks: [] },
+    ];
+    renderBrandPickerList("bonbon");
+    const t = liste.textContent;
+    dit("« bonbon » trouve les boutiques qui portent ce nom", t.indexOf("Bonbonnière") !== -1 && t.indexOf("Bonbons De Montmarte") !== -1);
+    dit("et ne dit plus qu'il n'y a rien", t.indexOf("Aucune enseigne") === -1);
+    renderBrandPickerList("carref");
+    dit("une vraie enseigne reste proposee", liste.textContent.indexOf("Carrefour") !== -1);
+    renderBrandPickerList("zzzzqx");
+    dit("et quand il n'y a vraiment rien, on le dit", /Aucune enseigne ni magasin/.test(liste.textContent));
+    window._exploreRawList = sauve;
+    liste.remove();
+  }
+
+  /* ── 8. Le chinois : atteignable, et il change vraiment l'ecran ─────── */
   dit("le chinois est propose", Object.keys(LANGS).indexOf("zh") !== -1);
   setLang("fr"); await pause(700);
   const fr1 = document.body.innerText.slice(0, 4000);

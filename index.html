@@ -18341,8 +18341,35 @@ function toggleExploreCheapSort(){window._exploreSortPrice=!window._exploreSortP
 function allKnownBrands(){
   var set={};
   (window.STORES||[]).forEach(function(s){if(s&&s.brand)set[s.brand]=1;});
+  /* Les magasins charges sur la carte ne sont pas tous dans STORES. Sans eux,
+     le selecteur ignorait les enseignes de la zone qu'on est en train de
+     regarder. */
+  (window._exploreRawList||[]).forEach(function(s){if(s&&s.brand)set[s.brand]=1;});
   try{Object.keys(BRAND_COLORS||{}).forEach(function(b){set[b]=1;});}catch(e){}
   return Object.keys(set).sort(function(a,b){return a.localeCompare(b,"fr");});
+}
+/* Les magasins dont le NOM contient ce qu'on tape, enseigne ou pas.
+   « Bonbon » ne renvoyait rien, alors que La Bonbonniere et Bonbons de
+   Montmartre sont dans la base : ce sont des independants, ils n'ont pas
+   d'enseigne, et le selecteur ne regardait que les enseignes. Le filtre, lui,
+   savait deja chercher dans le nom — c'est la LISTE qui ne le proposait pas.
+   Repondre « Aucune enseigne » quand des magasins correspondent, c'est faire
+   croire qu'il n'y a rien. */
+function magasinsParNom(q){
+  q=normTxt(String(q||"").trim());
+  if(q.length<2)return [];
+  var vus={},out=[];
+  var lots=[window._exploreRawList||[],window.STORES||[]];
+  for(var i=0;i<lots.length;i++)for(var j=0;j<lots[i].length;j++){
+    var s=lots[i][j];
+    if(!s||!s.name)continue;
+    var nom=String(s.name);
+    if(normTxt(nom).indexOf(q)===-1)continue;
+    if(vus[nom])continue;
+    vus[nom]=1;out.push(nom);
+    if(out.length>=40)return out;
+  }
+  return out;
 }
 function brandPickerRow(label,val,sel){
   var arg=(val===null?"null":"'"+String(val).replace(/'/g,"\\'")+"'");
@@ -18355,7 +18382,17 @@ function renderBrandPickerList(q){
   if(q)brands=brands.filter(function(b){return b.toLowerCase().indexOf(q)!==-1;});
   var html=q?"":brandPickerRow("Toutes les enseignes",null,!window._exploreBrand);
   html+=brands.slice(0,250).map(function(b){return brandPickerRow(b,b,window._exploreBrand===b);}).join("");
-  if(!brands.length)html+='<div style="padding:18px 4px;font-size:13px;color:var(--s2)">Aucune enseigne « '+sanitize(q)+' »</div>';
+  var parNom=q?magasinsParNom(q).filter(function(n){return brands.indexOf(n)===-1;}):[];
+  if(parNom.length){
+    html+='<div style="padding:12px 4px 6px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--s3)">'
+      +sanitize(tr("Magasins portant ce nom"))+'</div>';
+    html+=parNom.slice(0,40).map(function(n){
+      var arg="'"+String(n).replace(/'/g,"\\'")+"'";
+      return '<div onclick="exploreBrandApplyQuery('+arg+')" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'){exploreBrandApplyQuery('+arg+');}" style="padding:14px 4px;font-size:14.5px;font-weight:700;color:var(--s1);cursor:pointer;border-bottom:1px solid var(--border)">'+sanitize(n)+'</div>';
+    }).join("");
+  }
+  if(!brands.length&&!parNom.length)html+='<div style="padding:18px 4px;font-size:13px;color:var(--s2)">'
+    +sanitize(trh("Aucune enseigne ni magasin « {q} »",{q:q}))+'</div>';
   el.innerHTML=html;
 }
 /* Une seule porte de sortie pour le choix d'enseigne : sans ca, trois chemins
