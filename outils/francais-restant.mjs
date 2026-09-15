@@ -68,6 +68,9 @@ function estTechnique(s) {
      chaque icone dessinee etait signalee comme du francais a traduire. Une
      pile de polices n'est pas une phrase. */
   if (/font-family|sans-serif|monospace/.test(s)) return true;
+  /* "{quoi}", "{n}", "{p}" : le NOM d'un trou, donne a .replace(). Ce n'est
+     pas une phrase, et le signaler ferait revenir chaque modele a trous. */
+  if (/^\{\w+\}$/.test(s)) return true;
   if (/^[A-Za-z_$][\w$]*$/.test(s)) return true;                  /* identifiant */
   /* Un seul mot, sans espace, sans accent, fait de lettres et de tirets :
      c'est une classe CSS ou un identifiant ("th-on", "map-wrap"), pas une
@@ -125,7 +128,7 @@ const FONCTIONS_ADMIN = new Set([
   "admCertifierUn", "admReprendrePhotos", "admApproveClaim", "admRevokeClaim",
   "renderPhotoSuggestions", "promoteDiscovery", "rejectDiscovery",
   "rejectDiscoveryPhoto", "renderFounderDash", "renderDemandAdmin",
-  "renderFeedbackAdmin",
+  "renderFeedbackAdmin", "renderRejouerSignalements",
   /* Cas a part, et pour une tout autre raison : generatePseudo tire au sort un
      surnom dans deux listes de mots. Ce ne sont pas des phrases d'interface,
      ce sont des noms de personnes. Traduire « Panthere » ferait qu'un meme
