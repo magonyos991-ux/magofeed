@@ -9348,8 +9348,15 @@ function onBarcodeDetected(r){
      JAMAIS redemander son vrai nom a OpenFoodFacts. Rejeter ne voulait rien
      dire ici. Une decouverte promue non plus : elle vit desormais au
      catalogue, c'est la fiche catalogue qu'il faut montrer. */
+  /* L'IDENTIFIANT VAUT CODE-BARRE. Une proposition nee d'une PHOTO prend pour
+     identifiant le code qui vient d'echouer au scan — c'est tout l'interet du
+     dispositif — mais elle n'a jamais porte de champ `barcode`. Cette ligne ne
+     regardait que ce champ : on rescannait la canette qu'on venait de proposer,
+     et l'app repondait « Produit inconnu », en redemandant son nom. On accepte
+     donc les deux, comme le fait deja le cache des scans. */
   var foundDiscovery=DISCOVERIES.find(function(d){
-    return String(d.barcode)===String(code)&&!d.rejected&&!d.promoted;
+    if(d.rejected||d.promoted)return false;
+    return String(d.barcode)===String(code)||String(d.id)===String(code);
   });
   res.style.display="block";
   // Nettoie les liens injectes par un scan precedent (« deja au catalogue ? »,
@@ -13664,7 +13671,9 @@ var ACT_META={
   tipOk:        {label:"Confirmée",   col:"#16a34a"},
   tipKo:        {label:"Pas trouvée", col:"#dc2626"},
   penalty:      {label:"Points retirés", col:"#dc2626"},
-  msg:          {label:"Message",      col:"var(--s1)"}
+  msg:          {label:"Message",      col:"var(--s1)"},
+  ami:          {label:"Demande d'ami",col:"#c69a57"},
+  amiOk:        {label:"Ami accepté",  col:"#16a34a"}
 };
 function _actMeta(type){ return ACT_META[type]||{label:"Info",col:"var(--s2)"}; }
 /* Vignette : la VRAIE photo du produit quand on connait la boisson, sinon le
@@ -13692,6 +13701,7 @@ function _activityIcon(type){
   // Sanction : une etoile barree. Le meme trait que le reste, aucun emoji.
   else if(type==="penalty")p='<path d="M12 3.6l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 16l-4.8 2.5.9-5.4-3.9-3.8 5.4-.8L12 3.6z"/><path d="M4 20 20 4"/>';
   else if(type==="msg")p='<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7.5 8.5 6 8.5-6"/>';
+  else if(type==="ami"||type==="amiOk")p='<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>';
   else p='<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>';
   return '<span style="width:34px;height:34px;border-radius:11px;background:color-mix(in srgb,'+col+' 14%,transparent);display:flex;align-items:center;justify-content:center;color:'+col+'"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+p+'</svg></span>';
 }
@@ -13710,6 +13720,7 @@ function _runActivityAction(act){
   if(act.kind==="storeMap"&&act.lat!=null){try{showStoreOnMap(Number(act.lat),Number(act.lng));}catch(e){}return;}
   if(act.kind==="drink"&&act.drinkId!=null){var d=DRINKS.find(function(x){return Number(x.id)===Number(act.drinkId);});if(d){try{pick(d);}catch(e){}}return;}
   if(act.kind==="conv"&&act.cid){try{openThread(String(act.cid),act.uid?String(act.uid):null);}catch(e){}return;}
+  if(act.kind==="amis"){ try{ show("amis"); }catch(e){} return; }
   if(act.kind==="hunts"){
     /* Ce lien faisait defiler l'accueil vers #hunts-card, un conteneur qui
        n'existe plus : il ne se passait donc rien du tout. Les chasses vivent
@@ -17780,7 +17791,10 @@ function submitProposal(){
     id=String(_orphelin.code);
     window._lastUnknownCode=null;
   }
-  var d={id:id,name:sanitize(name),brand:sanitize(brand),votes:1,cat:(ai&&ai.cat)||"",foundIn:[],hasPhoto:true,manualProposal:true};
+  /* Le code devient aussi le champ `barcode` : tout le reste de l'app (cache
+     des scans, rattachement a un magasin, vote) cherche la par habitude. */
+  var _codeLie=/^[0-9]{8,14}$/.test(String(id))?String(id):"";
+  var d={id:id,name:sanitize(name),brand:sanitize(brand),votes:1,cat:(ai&&ai.cat)||"",foundIn:[],hasPhoto:true,manualProposal:true,barcode:_codeLie};
   DISCOVERIES.unshift(d);
   markVotedDiscovery(id);
   var extra={hasPhoto:true,manualProposal:true};
@@ -17812,7 +17826,26 @@ function submitProposal(){
     Promise.all([pDisc,pPhoto||Promise.resolve()]).then(function(){
       return window.fbConfirmAiDrink(id);
     }).then(function(res){
-      if(!res||!res.ok||!res.entry)return;
+      /* CE QUI RATE DOIT SE DIRE. Ce « return » muet est la cause exacte du
+         plus gros malentendu de l'app : on annonce « validation par l'IA en
+         cours… », le serveur refuse (verification expiree, nom modifie,
+         proposition deja tranchee), et plus rien n'arrive. La personne croit
+         sa boisson au catalogue, la rescanne, ne la trouve pas, la cherche
+         par son nom, ne la trouve pas non plus — et ne saura jamais pourquoi.
+         La proposition n'est pas perdue pour autant : elle part au vote
+         communautaire. On le dit, c'est tout ce qui manquait. */
+      if(!res||!res.ok||!res.entry){
+        var pourquoi={
+          "no-verification":"L\u2019analyse a expir\u00E9 (15 min) \u2014 reprends la photo pour une validation directe.",
+          "name-mismatch":"Le nom a \u00E9t\u00E9 modifi\u00E9 apr\u00E8s l\u2019analyse : la communaut\u00E9 va voter.",
+          "already-decided":"Cette proposition a d\u00E9j\u00E0 \u00E9t\u00E9 trait\u00E9e.",
+          "not-owner":"Cette proposition n\u2019est pas la tienne.",
+          "no-discovery":"La proposition n\u2019est pas encore enregistr\u00E9e \u2014 r\u00E9essaie dans un instant."
+        }[(res&&res.reason)||""]||"La validation directe n\u2019a pas abouti.";
+        toast(pourquoi+" Ta proposition reste en vote \u00B7 +2 pts");
+        try{playSound("pop");}catch(e){}
+        return;
+      }
       d.promoted=true;
       try{mergeCatalog([res.entry]);}catch(e){console.warn(e);}
       if(photoData){
@@ -17824,7 +17857,27 @@ function submitProposal(){
       try{renderDiscoveries();}catch(e){}
       playSound("win");
       toast("\u00AB "+res.entry.name+" \u00BB valid\u00E9e par l'IA \u2014 d\u00E9j\u00E0 dans le catalogue !");
-    }).catch(function(e){console.warn("Confirm AI error:",e);});
+      /* LE GESTE QUI EVITE TOUT LE RESTE. La fiche vient de naitre sans
+         code-barre (aucun code n'avait echoue au scan avant la photo) : sans
+         lui, elle restera introuvable au scan pour toujours, et la personne
+         devra retaper son nom a chaque fois. Elle tient la canette en main a
+         cet instant precis — c'est le seul moment ou le geste coute deux
+         secondes. On le propose, on ne l'impose pas. */
+      if(!(res.entry.barcodes&&res.entry.barcodes.length)){
+        setTimeout(function(){
+          if(!confirm("\u00AB "+res.entry.name+" \u00BB n'a pas encore de code-barre.\n\nLe scanner maintenant ? Sans lui, un scan ne la retrouvera jamais."))return;
+          window._lienCodePour=res.entry.id;
+          show("scan");
+          try{ resetScanUI(); }catch(e){}
+          var h2=document.getElementById("scan-hint");
+          if(h2)h2.textContent=tr("Vise le code-barre de {b}").replace("{b}",res.entry.name);
+          try{ startScan(); }catch(e){}
+        },900);
+      }
+    }).catch(function(e){
+      console.warn("Confirm AI error:",e);
+      toast("Validation directe indisponible \u2014 ta proposition part au vote \u00B7 +2 pts");
+    });
   }else{
     toast("Proposition envoy\u00E9e \u00B7 +2 pts \u2014 \u00E0 la communaut\u00E9 de voter !");
   }
@@ -20063,6 +20116,22 @@ function handleDeepLink(){
       else if(n<6){setTimeout(function(){goTab(n+1);},400);}
     };
     goTab(0);
+    return;
+  }
+  /* Le tap sur une notification de demande d'ami ouvre l'ecran des amis,
+     la ou l'on accepte. Sans ce lien, la notification deposait la personne
+     sur l'accueil, a elle de deviner ou aller. */
+  if(/#amis\b/.test(location.hash||"")){
+    if(_deepLinkSealed())return;
+    _deepLinkSeal();
+    try{history.replaceState(null,"",location.pathname);}catch(e){}
+    var goAm=function(n){
+      var me=(window._fbUser&&window._fbUser.uid)||null;
+      if(me&&typeof show==="function"){try{show("amis");}catch(e){}}
+      else if(n<150){setTimeout(function(){goAm(n+1);},400);}
+    };
+    if(window._fbAuthReady&&window._fbAuthReady.then)window._fbAuthReady.then(function(){goAm(0);},function(){goAm(0);});
+    else goAm(0);
     return;
   }
   /* Le tap sur une notification de message ouvre le fil (#thread=<cid>). On
@@ -24662,7 +24731,48 @@ function majLigneAmis(){
        :tr("Personne pour l'instant \u2014 trouve des joueurs"));
   if(pc){ if(d>0){pc.style.display="";pc.textContent=String(d);} else pc.style.display="none"; }
 }
-window.addEventListener("fbAmisChanged",function(){ amisRerendre(); });
+/* UNE DEMANDE D'AMI DOIT SE VOIR, PAS SE DECOUVRIR.
+   Jusqu'ici, une demande n'existait que sur l'ecran des amis et sur une
+   pastille du profil : personne ne va verifier un ecran qu'il n'a aucune
+   raison d'ouvrir. On la fait donc sonner comme un message — cloche, son, et
+   un tap qui mene droit a l'ecran ou l'on accepte.
+   Le telephone eteint est prevenu par le serveur (notifierDemandeAmi). */
+var _amisEtatVu = null;
+function amisDetecterNouveaux(rows){
+  var me = msgMe();
+  if(!me || !rows) return;
+  var etat = {};
+  rows.forEach(function(l){ etat[l.pid] = l.state + "|" + (l.requestBy || ""); });
+  if(_amisEtatVu === null){ _amisEtatVu = etat; return; }   // premier chargement : la pastille suffit
+  var sonne = false;
+  rows.forEach(function(l){
+    var avant = _amisEtatVu[l.pid];
+    if(avant === (l.state + "|" + (l.requestBy || ""))) return;
+    var autre = amisAutre(l);
+    if(!autre) return;
+    /* La fiche publique n'est peut-etre pas encore chargee : msgUser la
+       demande et re-rend l'ecran a l'arrivee. Sans cet appel, la premiere
+       demande d'un inconnu s'annonce comme « Quelqu'un ». */
+    try{ msgUser(autre); }catch(e){}
+    var nom = msgPseudo(autre);
+    if(l.state === "request" && l.requestBy !== me){
+      sonne = pushActivity({ type:"ami", title:nom+" veut devenir ton ami",
+        body:"Ouvre pour accepter ou refuser.", key:"ami:"+l.pid,
+        ts:_msgMsRow(l) || Date.now(), action:{ kind:"amis" } }) || sonne;
+    } else if(l.state === "ok" && avant && avant.indexOf("request|") === 0 && avant.indexOf(me) > 0){
+      sonne = pushActivity({ type:"amiOk", title:nom+" a accepté ta demande",
+        body:"Vous pouvez vous écrire.", key:"amiok:"+l.pid,
+        ts:_msgMsRow(l) || Date.now(), action:{ kind:"conv", cid:l.pid, uid:autre } }) || sonne;
+    }
+  });
+  _amisEtatVu = etat;
+  if(sonne){ try{ playSound("pop"); }catch(e){} }
+}
+function _msgMsRow(l){ try{ return msgMs(l.at); }catch(e){ return 0; } }
+window.addEventListener("fbAmisChanged",function(e){
+  try{ amisDetecterNouveaux((e && e.detail) || amisListe()); }catch(err){}
+  amisRerendre();
+});
 
 function renderMessages(){
   var body=document.getElementById("msg-body"),seg=document.getElementById("msg-seg");if(!body||!seg)return;

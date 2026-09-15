@@ -14,9 +14,9 @@
  *  - le tap ouvre l'app directement sur le fil (#thread=<cid>).
  * Aucun point, aucune écriture : la fonction ne fait que prévenir.
  *
- * Déploiement : firebase deploy --only functions:notifierNouveauMessage
+ * Déploiement : firebase deploy --only functions:notifierNouveauMessage,functions:notifierDemandeAmi
  */
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
@@ -89,5 +89,61 @@ exports.notifierNouveauMessage = onDocumentCreated(
     const title = demande ? (pseudo + " veut t'écrire") : pseudo;
     const body = demande ? "Ouvre Magofeed pour lire sa demande et décider." : apercu(m);
     await pushToUser(dest, title, body, { type: "msg", cid: cid }, APP_URL + "#thread=" + encodeURIComponent(cid));
+  }
+);
+
+/* ── UNE DEMANDE D'AMI PREVIENT LA PERSONNE ──────────────────────────────
+   Le lien d'ami vit dans `amis/{pid}` : `members` (les deux uid, tries),
+   `requestBy` (qui demande) et `state` — "request", puis "ok" ou "declined".
+   L'app affiche la pastille quand elle est ouverte. Ce que seul le serveur
+   peut faire : reveiller le telephone quand elle est fermee.
+   Deux moments valent une notification, et deux seulement :
+     - la demande arrive -> on previent CELUI QUI LA RECOIT ;
+     - la demande est acceptee -> on previent CELUI QUI L'AVAIT FAITE.
+   Un refus ne notifie personne : dire « X a refuse » n'aide personne et
+   transforme un non en camouflet.
+   Aucun point, aucune ecriture : la fonction ne fait que prevenir.
+
+   Deploiement : firebase deploy --only functions:notifierDemandeAmi */
+exports.notifierDemandeAmi = onDocumentWritten(
+  { document: "amis/{pid}", region: REGION },
+  async (event) => {
+    const avant = event.data && event.data.before && event.data.before.exists
+      ? event.data.before.data() : null;
+    const apres = event.data && event.data.after && event.data.after.exists
+      ? event.data.after.data() : null;
+    if (!apres) return;                                   // lien supprime
+    const membres = Array.isArray(apres.members) ? apres.members : [];
+    const auteur = String(apres.requestBy || "");
+    const autre = membres.find((u) => u !== auteur);
+    if (!auteur || !autre) return;
+
+    const etatAvant = avant ? String(avant.state || "") : null;
+    const etat = String(apres.state || "");
+    let dest = null; let titre = null; let corps = null; let qui = null;
+
+    if (etat === "request" && etatAvant !== "request") {
+      dest = autre; qui = auteur;
+      corps = "Ouvre Magofeed pour accepter ou refuser.";
+    } else if (etat === "ok" && etatAvant === "request") {
+      dest = auteur; qui = autre;
+      corps = "Vous pouvez vous écrire.";
+    } else {
+      return;
+    }
+    /* Bloque : meme precaution que pour les messages. On ne reveille jamais
+       le telephone de quelqu'un pour une personne qu'il a bloquee. */
+    try {
+      const b = await db.collection("blocks").doc(dest).get();
+      if (b.exists && Array.isArray(b.data().list) && b.data().list.includes(qui)) return;
+    } catch (_) {}
+    let pseudo = "Quelqu'un";
+    try {
+      const u = await db.collection("users").doc(qui).get();
+      if (u.exists && u.data().pseudo) pseudo = String(u.data().pseudo).slice(0, 24);
+    } catch (_) {}
+    titre = etat === "ok" ? (pseudo + " a accepté ta demande") : (pseudo + " veut devenir ton ami");
+    await pushToUser(dest, titre, corps, { type: "ami", pid: event.params.pid },
+      APP_URL + (etat === "ok" ? "#thread=" + encodeURIComponent(event.params.pid) : "#amis"));
   }
 );

@@ -243,6 +243,29 @@ exports.confirmAiDrink = onCall(
       return { ok: false, reason: "name-mismatch" };
     }
 
+    /* LE CODE-BARRE SUIT LA BOISSON.
+       Quand un code echoue au scan et que la personne passe par la proposition
+       PHOTO dans le quart d'heure, le client donne ce code pour identifiant a
+       la decouverte : c'est tout l'interet du dispositif. Ce code n'arrivait
+       pourtant jamais jusqu'a la fiche du catalogue (barcodes: []). La boisson
+       entrait donc au catalogue INTROUVABLE AU SCAN, a vie : on rescannait la
+       canette que l'on venait de faire entrer, et l'app repondait qu'elle ne
+       la connaissait pas. Un identifiant purement numerique EST un code-barre
+       (les propositions sans code portent un identifiant « m<horodatage> »). */
+    const codeLie = /^[0-9]{8,14}$/.test(discId) ? discId : "";
+
+    /* Ce code appartient-il deja a une fiche ? Alors la boisson existe : on
+       n'en cree pas une deuxieme, on renvoie celle-la. */
+    if (codeLie) {
+      const parCode = await db.collection("catalog")
+        .where("barcodes", "array-contains", codeLie).limit(1).get();
+      if (!parCode.empty) {
+        const exist = parCode.docs[0].data() || {};
+        await dRef.update({ promoted: true, decidedAt: FieldValue.serverTimestamp() });
+        return { ok: true, entry: exist, deja: true };
+      }
+    }
+
     const style = CAT_STYLE[v.category] || CAT_STYLE["Autre"];
     const entry = {
       id: Date.now(),
@@ -252,13 +275,13 @@ exports.confirmAiDrink = onCall(
       emoji: "", color: style.color, light: style.light,
       tag: String(v.name).toUpperCase().slice(0, 20),
       stars: 4.0,
-      barcodes: [],            // proposition photo : pas de code-barres scanné
+      barcodes: codeLie ? [codeLie] : [],   // le code qui a echoue au scan, s'il y en a un
       aiVerified: true,
       aiConfidence: v.confidence
     };
 
     await db.collection("catalog").doc(String(entry.id)).set(
-      Object.assign({}, entry, { createdAt: FieldValue.serverTimestamp(), fromBarcode: "" })
+      Object.assign({}, entry, { createdAt: FieldValue.serverTimestamp(), fromBarcode: codeLie })
     );
 
     /* La photo de la proposition devient l'image publique de la boisson —
@@ -293,7 +316,7 @@ exports.confirmAiDrink = onCall(
         to: uid, read: false, type: "promoted",
         title: "Ta découverte est dans Magofeed !",
         body: "« " + entry.name + " » a été reconnue et validée par l'IA : elle fait déjà partie du catalogue. Merci d'agrandir la carte des boissons !",
-        drinkId: entry.id, barcode: "",
+        drinkId: entry.id, barcode: codeLie,
         createdAt: FieldValue.serverTimestamp()
       });
     } catch (e) { console.warn("Notify error:", e && e.message); }
