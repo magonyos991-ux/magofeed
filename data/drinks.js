@@ -38,10 +38,37 @@ var DRINKS=[
   {id:18,name:"Tropicana Orange",brand:"Tropicana",emoji:"",color:"#e67e22",light:"#fef3e2",cat:"Jus",tag:"TROPICANA",barcodes:[],stars:4.4},
 
   // ── MOUNTAIN DEW ──
-  {id:200,name:"Mountain Dew Original",brand:"Mountain Dew",emoji:"",color:"#39b54a",light:"#eafaf1",cat:"Soda",tag:"MTN DEW",barcodes:["4006381333061"],stars:4.5},
-  {id:2001,name:"Mountain Dew Code Red",brand:"Mountain Dew",emoji:"",color:"#c0392b",light:"#fdecea",cat:"Soda",tag:"MTN DEW",barcodes:["4006381333078"],stars:4.3},
-  {id:2002,name:"Mountain Dew Baja Blast",brand:"Mountain Dew",emoji:"",color:"#0097a7",light:"#e0f7fa",cat:"Soda",tag:"MTN DEW",barcodes:["4006381333085"],stars:4.6},
-  {id:2003,name:"Mountain Dew Voltage",brand:"Mountain Dew",emoji:"",color:"#6c3483",light:"#f5eef8",cat:"Soda",tag:"MTN DEW",barcodes:["4006381333092"],stars:4.4},
+  /* LES QUATRE CODES-BARRES D'ORIGINE DE MOUNTAIN DEW ETAIENT FABRIQUES.
+     4006381333061 / 078 / 085 / 092 : quatre parfums, quatre references qui se
+     suivent, un prefixe allemand qui n'appartient pas a PepsiCo, et aucune
+     fiche dans Open Food Facts — ni pour ces codes, ni pour AUCUN code
+     commencant par 4006381 (base de plusieurs millions de produits). C'est la
+     meme serie que le 4006381333030 deja demasque plus haut pour Pepsi ; elle
+     n'avait ete nettoyee qu'a moitie.
+
+     Ce que ca coutait, concretement : quelqu'un scanne une vraie Mountain Dew,
+     l'app ne la reconnait pas, et cree un doublon. Ou pire, un jour, ce code
+     tombe sur un autre produit et l'app affiche la mauvaise boisson.
+
+     Les codes ci-dessous ont ete verifies un par un dans Open Food Facts le
+     15/09/2026, avec le pays ou le produit est signale vendu :
+       4060800175472  Mountain Dew 33 cl        France, Allemagne
+       5410188027389  Mountain Dew 0,5 L        Belgique, France
+       5900497017909  Mountain Dew              France
+       0012000105425  Code Red                  Suisse, Etats-Unis
+       0012000130311  Baja Blast Tropical Lime  France, Etats-Unis
+       0012000028632  Voltage Raspberry Citrus  France
+       0012000028625  Voltage Raspberry         France
+       4060800168412  Citrus Flavour Sugar Free France (la version sans sucre)
+       8710398519269  Citrus Blast 50 cl        Belgique
+       8715600232028  Citrus Blast 33 cl        France
+     A RETENIR POUR LA RECHERCHE : en Belgique et aux Pays-Bas, Mountain Dew se
+     vend souvent sous le nom CITRUS BLAST. Qui cherche « Mountain Dew » en
+     rayon a Bruxelles doit regarder cette etiquette-la. */
+  {id:200,name:"Mountain Dew Original",barcodes:["4060800175472","5410188027389","5900497017909"],brand:"Mountain Dew",emoji:"",color:"#39b54a",light:"#eafaf1",cat:"Soda",tag:"MTN DEW",stars:4.5},
+  {id:2001,name:"Mountain Dew Code Red",barcodes:["0012000105425"],brand:"Mountain Dew",emoji:"",color:"#c0392b",light:"#fdecea",cat:"Soda",tag:"MTN DEW",stars:4.3},
+  {id:2002,name:"Mountain Dew Baja Blast",barcodes:["0012000130311"],brand:"Mountain Dew",emoji:"",color:"#0097a7",light:"#e0f7fa",cat:"Soda",tag:"MTN DEW",stars:4.6},
+  {id:2003,name:"Mountain Dew Voltage",barcodes:["0012000028632","0012000028625"],brand:"Mountain Dew",emoji:"",color:"#6c3483",light:"#f5eef8",cat:"Soda",tag:"MTN DEW",stars:4.4},
 
   // ── PRIME ──
   {id:300,name:"Prime Tropical Punch",brand:"Prime",emoji:"",color:"#e67e22",light:"#fef3e2",cat:"Sport",tag:"PRIME",barcodes:["32085761","850003560717","4270000233340","850003560441"],stars:4.7,formats:[{type:"bouteille",cl:50}]},
@@ -393,7 +420,7 @@ var DRINKS=[
   {id:11347,name:"Mogu Mogu Bubblegum",brand:"Mogu Mogu",emoji:"",color:"#f1948a",light:"#fdedec",cat:"Exotique",tag:"MOGU",stars:4.2,formats:[{type:"bouteille",cl:32}]},
   {id:11348,name:"Ayran",brand:"Gazi",emoji:"",color:"#f8f9f9",light:"#fdfefe",cat:"Autre",tag:"AYRAN",barcodes:["4002566004191"],stars:4.3,formats:[{type:"bouteille",cl:25}],img:"https://images.openfoodfacts.org/images/products/400/256/600/4191/front_de.58.400.jpg"},
   {id:11349,name:"Cara\u00efbos Nectar Mangue",brand:"Cara\u00efbos",emoji:"",color:"#e67e22",light:"#fef3e2",cat:"Jus",tag:"CARAIBOS",stars:4.2,formats:[{type:"bouteille",cl:75}]},
-  {id:11350,name:"Mountain Dew Sans Sucre",brand:"Mountain Dew",emoji:"",color:"#39b54a",light:"#eafaf1",cat:"Soda",tag:"MTN DEW",stars:4.2,formats:[{type:"bouteille",cl:50}]},
+  {id:11350,name:"Mountain Dew Sans Sucre",barcodes:["4060800168412"],brand:"Mountain Dew",emoji:"",color:"#39b54a",light:"#eafaf1",cat:"Soda",tag:"MTN DEW",stars:4.2,formats:[{type:"bouteille",cl:50}]},
   {id:11351,name:"Red Bull Sakura Edition",brand:"Red Bull",emoji:"",color:"#f1948a",light:"#fdedec",cat:"Energy",tag:"RED BULL",barcodes:["611269003789"],stars:4.5,formats:[{type:"canette",cl:25}],imp:1,img:"https://images.openfoodfacts.org/images/products/061/126/900/3789/front_en.20.400.jpg"},
   {id:11465,name:"Hell Ice Coffee Latte",brand:"Hell",emoji:"",color:"#a9746e",light:"#f6ede9",cat:"Autre",tag:"HELL COFFEE",barcodes:["5940577000322"],stars:4.3,formats:[{type:"canette",cl:25}]},
   {id:11466,name:"Hell Ice Coffee Double Espresso",brand:"Hell",emoji:"",color:"#6e4a3a",light:"#f3e9e4",cat:"Autre",tag:"HELL COFFEE",barcodes:["5999860497646"],stars:4.3,formats:[{type:"canette",cl:25}],img:"https://images.openfoodfacts.org/images/products/599/986/049/7646/front_en.26.400.jpg"},
@@ -719,7 +746,7 @@ var DRINKS=[
   {id:13104,name:"Tango Raspberry Blast",brand:"Tango",emoji:"",color:"#e74c3c",light:"#fdecea",cat:"Soda",tag:"TANGO RASPBERRY BLAST",barcodes:["5010102342507"],stars:4.2,formats:[{type:"canette",cl:33}],imp:1,img:"https://images.openfoodfacts.org/images/products/501/010/234/2507/front_en.4.400.jpg"},
   {id:13105,name:"Tango Cherry Blast",brand:"Tango",emoji:"",color:"#c0392b",light:"#f9ebea",cat:"Soda",tag:"TANGO CHERRY BLAST",barcodes:["5038026904076"],stars:4.2,formats:[{type:"canette",cl:33}],imp:1,img:"https://images.openfoodfacts.org/images/products/503/802/690/4076/front_en.3.400.jpg"},
   {id:13106,name:"Tango Thirst Trap",brand:"Tango",emoji:"",color:"#e67e22",light:"#fdf2e9",cat:"Soda",tag:"TANGO THIRST TRAP",stars:4.2,formats:[{type:"canette",cl:33}],imp:1},
-  {id:13107,name:"Mountain Dew Citrus Blast",brand:"Mountain Dew",emoji:"",color:"#e67e22",light:"#fdf2e9",cat:"Soda",tag:"MOUNTAIN DEW CITRUS BLAST",barcodes:["4062139015672"],stars:4.2,formats:[{type:"canette",cl:33}],img:"https://images.openfoodfacts.org/images/products/406/213/901/5672/front_en.7.400.jpg"},
+  {id:13107,name:"Mountain Dew Citrus Blast",barcodes:["4062139015672","8710398519269","8715600232028","4060800302076"],brand:"Mountain Dew",emoji:"",color:"#e67e22",light:"#fdf2e9",cat:"Soda",tag:"MOUNTAIN DEW CITRUS BLAST",stars:4.2,formats:[{type:"canette",cl:33}],img:"https://images.openfoodfacts.org/images/products/406/213/901/5672/front_en.7.400.jpg"},
   {id:13108,name:"Mountain Dew Major Melon",brand:"Mountain Dew",emoji:"",color:"#58d68d",light:"#eafaf1",cat:"Soda",tag:"MOUNTAIN DEW MAJOR MELON",barcodes:["9414789953586"],stars:4.2,formats:[{type:"canette",cl:33}],imp:1,img:"https://images.openfoodfacts.org/images/products/941/478/995/3586/front_en.3.400.jpg"},
   {id:13109,name:"Mountain Dew Spark",brand:"Mountain Dew",emoji:"",color:"#e67e22",light:"#fdf2e9",cat:"Soda",tag:"MOUNTAIN DEW SPARK",barcodes:["5900497045377"],stars:4.2,formats:[{type:"canette",cl:33}],imp:1},
   {id:13110,name:"Mountain Dew Pitch Black",brand:"Mountain Dew",emoji:"",color:"#1a1714",light:"#f0eee9",cat:"Soda",tag:"MOUNTAIN DEW PITCH BLACK",barcodes:["9556404116836"],stars:4.2,formats:[{type:"canette",cl:33}],imp:1,img:"https://images.openfoodfacts.org/images/products/955/640/411/6836/front_en.4.400.jpg"},
