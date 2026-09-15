@@ -2175,8 +2175,16 @@ function fusionnerRayonEnseigne(stores) {
     var vus = {};
     (s.drinks || []).forEach(function(id) { vus[Number(id)] = 1; });
     var out = (s.drinks || []).slice();
-    r.ids.forEach(function(id) { if (!vus[Number(id)]) { vus[Number(id)] = 1; out.push(Number(id)); } });
+    /* On MARQUE ce que le rayon d'enseigne ajoute. Sans cette marque, la garde
+       anti-inventaire-invente (_stripAutoDrinks) les effacait aussitot : elle
+       ne garde, sur un magasin importe d'OpenStreetMap, que ce qui porte une
+       confirmation — et le rayon d'enseigne, pose a la lecture, n'en a aucune.
+       Les deux mecanismes se contredisaient en silence, et le rayon d'enseigne
+       ne s'affichait donc nulle part. */
+    var marque = {};
+    r.ids.forEach(function(id) { if (!vus[Number(id)]) { vus[Number(id)] = 1; out.push(Number(id)); marque[Number(id)] = 1; } });
     s.drinks = out;
+    s._rayon = marque;
   });
   return stores;
 }
@@ -17157,10 +17165,18 @@ var _autoImportBusy=false;
    (id commençant par "o") avaient reçu des boissons supposées (jusqu'à ~101).
    On ne garde QUE les boissons réellement confirmées (confirmations > 0). Appelé
    à chaque rendu -> les "101 boissons" fantômes disparaissent, sans rien inventer. */
+/* Les magasins importes d'OpenStreetMap ont recu, a l'import, un rayon DEVINE
+   d'apres leur categorie. On ne montre donc d'eux que ce que quelqu'un a
+   reellement confirme — sinon l'app affiche des stocks que personne n'a vus.
+   Deux exceptions, et deux seulement : ce que la communaute a confirme, et le
+   rayon d'enseigne pose a la lecture (marque par fusionnerRayonEnseigne), qui
+   vient du catalogue de la chaine et non d'une heuristique sur un nom. */
 function _stripAutoDrinks(s){
   if(!s||typeof s.id!=="string"||s.id.charAt(0)!=="o")return s;
   var conf=s.confirmations||{};
-  var real=(s.drinks||[]).filter(function(id){return (conf[id]||0)>0;});
+  var rayon=s._rayon||{};
+  var garde=function(id){ return (conf[id]||0)>0 || rayon[Number(id)]===1; };
+  var real=(s.drinks||[]).filter(garde);
   if(real.length!==(s.drinks||[]).length){
     s.drinks=real;
     if(s.drinksVerified)s.drinksVerified=(s.drinksVerified||[]).filter(function(id){return (conf[id]||0)>0;});
