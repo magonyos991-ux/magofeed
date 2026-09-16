@@ -13994,6 +13994,27 @@ function ouvrirZoneChasse(){
   }
 }
 function updateHuntRadiusUI(){_hrPaint(_hrClamp(window.magoHuntRadius));}
+/* « Elle est deja la » : on montre le magasin plutot que de lancer une chasse.
+   Trois sorties, et aucune n'est un cul-de-sac : y aller, chercher quand meme
+   (le magasin ne convient pas, on veut un autre rayon ou un autre prix), ou
+   simplement fermer. */
+function chasseDejaTrouvee(d,trouve){
+  var st=trouve.store;
+  var m=(typeof trouve.dist==="number")?trouve.dist:null;
+  var loin=(m==null)?"":(m<1000?(Math.round(m)+" m"):((m/1000).toFixed(1)+" km"));
+  try{playSound("win");}catch(e){}
+  var ov=msgFeuille("chasse-deja",
+    '<div class="claim-title" style="font-size:16px">'+sanitize(trh("{b} est d\u00e9j\u00e0 l\u00e0",{b:d.name}))+'</div>'+
+    '<div class="claim-lead">'+sanitize(trh("Quelqu\'un l\'a confirm\u00e9e chez {s}{d}. Pas besoin de d\u00e9ranger tout le monde \u2014 tu peux y aller maintenant.",
+        {s:st.name,d:(loin?" \u00b7 "+loin:"")}))+'</div>'+
+    '<button class="msg-bp" id="cd-go" style="width:100%;min-height:46px;margin-top:6px">'+sanitize(tr("Voir le magasin"))+'</button>'+
+    '<button class="msg-bs" id="cd-quand" style="width:100%;min-height:44px;margin-top:8px">'+sanitize(tr("Lancer la chasse quand m\u00eame"))+'</button>');
+  if(!ov)return;
+  var g=document.getElementById("cd-go");
+  if(g)g.onclick=function(){ov.fermer();try{openStoreDetail(String(st.fbId||st.id));}catch(e){}};
+  var q=document.getElementById("cd-quand");
+  if(q)q.onclick=function(){ov.fermer();lancerChasse(d);};
+}
 function toggleWatch(d){
   var i=drinkWatches.findIndex(function(w){return Number(w.id)===Number(d.id);});
   if(i!==-1){
@@ -14001,6 +14022,37 @@ function toggleWatch(d){
     toast("Veille retir\u00e9e");
     if(window.fbLeaveHunt)window.fbLeaveHunt(d.id);
   }else{
+    /* ======================================================================
+       ON NE LANCE PAS UNE CHASSE POUR CE QUI EST DEJA TROUVABLE
+       ----------------------------------------------------------------------
+       Reveiller toute une ville pour une boisson qu'un magasin a 400 m garde en
+       rayon, c'est le meilleur moyen de faire couper les notifications a tout le
+       monde — et le jour ou une vraie chasse part, plus personne ne l'ouvre. La
+       chasse a de la valeur parce qu'elle est rare.
+
+       Alors on regarde d'abord. Si quelqu'un l'a deja confirmee dans la zone, on
+       ne previent personne : on DIT OU ELLE EST. C'est ce que la personne
+       voulait vraiment, et elle l'a tout de suite. Elle garde le choix de
+       chercher quand meme — pour un autre magasin, un meilleur prix, ou parce
+       que le rayon d'a cote l'interesse davantage. ======================== */
+    var _dejaLa=null;
+    try{ _dejaLa=magasinProcheAvec(d.id); }catch(e){}
+    if(_dejaLa&&_dejaLa.store){
+      chasseDejaTrouvee(d,_dejaLa);
+      return;
+    }
+    lancerChasse(d);
+  }
+  if(window.fbSyncWatch)window.fbSyncWatch(i===-1,d.id,d.name,userLat,userLng);
+  saveWatches();
+  try{renderStoreList();}catch(e){}
+  try{renderAlertsCard();}catch(e){}
+  try{renderChasse();}catch(e){}
+}
+/* LE LANCEMENT PROPREMENT DIT, sorti de toggleWatch : la feuille « elle est
+   deja la » doit pouvoir l'appeler quand la personne choisit de chercher quand
+   meme. Deux copies de ce code auraient diverge au premier correctif. */
+function lancerChasse(d){
     /* LA CHASSE PARTAIT SANS POSITION, ET PERSONNE N'ETAIT PREVENU.
        refreshLocation() est ASYNCHRONE : la ligne suivante lisait userLat
        AVANT que le GPS n'ait repondu. Au premier lancement de la journee, la
@@ -14048,13 +14100,18 @@ function toggleWatch(d){
     // n'est pas le cas, on lui montre le guide d'installation UNE seule fois,
     // apres un court delai pour ne pas couper son geste en cours.
     try{maybePromptIOSInstall();}catch(e){}
-  }
-  if(window.fbSyncWatch)window.fbSyncWatch(i===-1,d.id,d.name,userLat,userLng);
-  saveWatches();
-  try{renderStoreList();}catch(e){}
-  try{renderAlertsCard();}catch(e){}
-  try{renderChasse();}catch(e){}
+
+  /* LA QUEUE DE toggleWatch NE S'EXECUTE PLUS QUAND ON PASSE PAR ICI : la
+     feuille « elle est deja la » sort par un return, et « chercher quand meme »
+     rappelle cette fonction seule. Sans ces trois lignes, la veille vivait en
+     memoire et disparaissait a la fermeture de l'app. */
+  try{ if(window.fbSyncWatch)window.fbSyncWatch(true,d.id,d.name,userLat,userLng); }catch(e){}
+  try{ saveWatches(); }catch(e){}
+  try{ renderStoreList(); }catch(e){}
+  try{ renderAlertsCard(); }catch(e){}
+  try{ renderChasse(); }catch(e){}
 }
+
 function resetWatchTrigger(drinkId,storeId){
   var changed=false;
   drinkWatches.forEach(function(w){
@@ -14469,7 +14526,36 @@ function _moiPseudo(){return (localStorage.getItem("magopseudo")||"Explorateur")
 /* Provenance d'un rapport, dans son champ note : "source|distance en m" (ou
    "?" sans position). Le serveur s'en sert pour ne rien crediter a un rapport
    fait de loin : personne ne voit un rayon depuis son canape. */
-function _provenance(src,s){var d=(s&&typeof s.dist==="number"&&isFinite(s.dist))?Math.round(s.dist):null;return String(src||"?")+"|"+(d==null?"?":d);}
+/* ============================================================================
+   CE CHAMP DECIDE SI TES POINTS EXISTENT
+   ----------------------------------------------------------------------------
+   Le serveur ne credite un « vu en rayon » que si le rapport porte une distance
+   INFERIEURE A 500 m (crediterContribution / DIST_MAX_M) : personne ne voit un
+   rayon depuis son canape, et c'est ce qui protege le classement.
+
+   Or cette fonction se contentait de relire s.dist — un champ pose par le calcul
+   des magasins proches. Quand le magasin ne venait PAS de cette liste (choisi
+   dans le selecteur, ouvert depuis un message, trouve par la recherche), s.dist
+   etait absent : on ecrivait « ? », le serveur lisait « distance inconnue », et
+   il ne creditait RIEN. L'app, elle, affichait « +3 pts » et gonflait le
+   compteur local — que le score serveur ecrase a la prochaine ouverture du
+   profil. D'ou des points annonces, puis disparus, sans une explication.
+
+   On calcule donc la distance ICI quand elle manque, a partir des coordonnees
+   qu'on a sous la main. Un magasin sans coordonnees, ou une position refusee,
+   restent « ? » — et dans ce cas le signalement ne rapporte rien, ce que l'app
+   dit maintenant avant le serveur. ======================================= */
+function _provenance(src,s){
+  var d=(s&&typeof s.dist==="number"&&isFinite(s.dist))?Math.round(s.dist):null;
+  if(d==null&&s&&typeof s.lat==="number"&&isFinite(s.lat)
+     &&typeof userLat==="number"&&userLat&&typeof userLng==="number"){
+    try{
+      var m=Math.round(haversine(userLat,userLng,s.lat,s.lng));
+      if(isFinite(m))d=m;
+    }catch(e){}
+  }
+  return String(src||"?")+"|"+(d==null?"?":d);
+}
 
 /* Registre LOCAL des points en attente d'une validation (par une autre
    personne, ou par le serveur). Separe de userStats.pts : ce compteur-la est
