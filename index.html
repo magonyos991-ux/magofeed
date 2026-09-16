@@ -3484,7 +3484,7 @@ window.fbDeleteStore = async function(storeId) {
    meme facon : on ne contourne rien, on demande moins. Au moindre pepin, on
    retombe sur le chemin d'origine plutot que de rendre une carte vide.
    ============================================================================ */
-var MAGO_CHAMPS_PIN = ["name", "lat", "lng", "brand", "geohash", "hours", "certified", "type", "emoji", "owner"];
+var MAGO_CHAMPS_PIN = ["name", "lat", "lng", "brand", "geohash", "hours", "certified", "type", "emoji", "owner", "osmId"];
 /* confirmations pese 106 Ko sur les 4 745 magasins de la bande parisienne —
    et c'est LUI qui dit ce qui est vraiment en stock. On le prend toujours.
    drinksVerified, lui, pese 5,4 Mo : voir _marquerBoisson plus bas. */
@@ -3633,7 +3633,10 @@ async function _clesPourBoisson(champ, did, latMin, latMax) {
    allege pour Mountain Dew et complet pour autre chose. */
 async function _marquerBoisson(liste, box, did) {
   var parId = {};
-  liste.forEach(function (s) { parId[String(s.fbId || s.id)] = s; });
+  liste.forEach(function (s) {
+    var ids = s._idsFusionnes || [String(s.fbId || s.id)];
+    ids.forEach(function (id) { parId[id] = s; });
+  });
   var reponses = await Promise.all([
     _clesPourBoisson("drinks", did, box.latMin, box.latMax),
     _clesPourBoisson("drinksVerified", did, box.latMin, box.latMax)
@@ -3653,6 +3656,82 @@ async function _marquerBoisson(liste, box, did) {
     s._boissonSue = s._boissonSue || {};
     s._boissonSue[Number(did)] = true;
   });
+}
+
+/* ============================================================================
+   DEUX FICHES POUR UN SEUL MAGASIN
+   ----------------------------------------------------------------------------
+   Mesure sur la base, 16 septembre 2026 : 981 lieux portent DEUX fiches au
+   meme nom et aux memes coordonnees, soit 982 fiches en trop. Le motif est
+   toujours le meme (977 cas sur 981) : une fiche ancienne, a identifiant
+   Firestore, qui garde le champ osmId ; et une fiche recente, dont
+   l'identifiant EST « o » suivi du numero OpenStreetMap, et qui ne garde pas
+   ce champ. Le dedoublonnage a l'import comparait l'identifiant du document
+   et le numero OSM, jamais le champ osmId : il ne pouvait donc pas voir que
+   l'ancienne fiche etait le meme magasin. Deux pins l'un sur l'autre.
+
+   ON NE JETTE RIEN. Les deux fiches portent des donnees : 978 types et 978
+   horaires du cote ancien, 473 horaires du cote recent, et 17 confirmations
+   humaines reparties sur les deux. On les ADDITIONNE a la lecture et on
+   n'affiche qu'un magasin. Rien n'est ecrit, rien n'est perdu, et le jour ou
+   les fiches en trop seront vraiment supprimees, ce code ne fera plus rien.
+
+   Le magasin garde la liste de ses identifiants (_idsFusionnes) : c'est par
+   la que « qui a cette boisson ? » retrouve la reponse, quel que soit le
+   document sur lequel elle a ete enregistree. */
+function _cleLieu(o) {
+  var n = String(o.name || "").trim().toLowerCase();
+  if (!n || o.lat == null || o.lng == null) return null;
+  return n + "@" + Number(o.lat).toFixed(5) + "," + Number(o.lng).toFixed(5);
+}
+/* Laquelle des deux fiches en sait le plus ? Une confirmation humaine pese
+   plus que tout le reste : c'est la seule donnee que personne ne peut
+   recalculer. */
+function _richesseFiche(s) {
+  var n = 0, c = s.confirmations || {};
+  for (var k in c) if (Number(c[k]) > 0) n += 10;
+  if (s.certified) n += 20;
+  if (s.owner) n += 20;
+  if (s.type) n += 2;
+  if (s.hours) n += 1;
+  return n;
+}
+function _absorber(garde, autre) {
+  garde._idsFusionnes.push(String(autre.fbId || autre.id));
+  var c = garde.confirmations = garde.confirmations || {}, c2 = autre.confirmations || {};
+  for (var k in c2) c[k] = (Number(c[k]) || 0) + (Number(c2[k]) || 0);
+  ["brand", "hours", "type", "emoji", "geohash", "osmId"].forEach(function (f) {
+    if (garde[f] == null || garde[f] === "") if (autre[f] != null && autre[f] !== "") garde[f] = autre[f];
+  });
+  if (!garde.certified && autre.certified) garde.certified = autre.certified;
+  if (!garde.owner && autre.owner) garde.owner = autre.owner;
+  var d2 = autre.drinks || [];
+  if (d2.length) {
+    var vus = {};
+    (garde.drinks || []).forEach(function (x) { vus[Number(x)] = 1; });
+    garde.drinks = (garde.drinks || []).slice();
+    d2.forEach(function (x) { if (!vus[Number(x)]) { vus[Number(x)] = 1; garde.drinks.push(Number(x)); } });
+  }
+  return garde;
+}
+function fusionnerDoublons(list) {
+  var groupes = {}, ordre = [], hors = [];
+  for (var i = 0; i < (list || []).length; i++) {
+    var s = list[i], k = _cleLieu(s);
+    if (!k) { hors.push(s); continue; }
+    if (!groupes[k]) { groupes[k] = []; ordre.push(k); }
+    groupes[k].push(s);
+  }
+  var out = [];
+  for (var j = 0; j < ordre.length; j++) {
+    var g = groupes[ordre[j]];
+    var garde = g[0];
+    for (var m = 1; m < g.length; m++) if (_richesseFiche(g[m]) > _richesseFiche(garde)) garde = g[m];
+    garde._idsFusionnes = [String(garde.fbId || garde.id)];
+    for (var n = 0; n < g.length; n++) if (g[n] !== garde) _absorber(garde, g[n]);
+    out.push(garde);
+  }
+  return out.concat(hors);
 }
 
 /* Le chemin allege de la carte. did != null : une boisson est ciblee. */
@@ -3678,6 +3757,10 @@ window.fbZoneLegere = async function (lat, lng, radiusKm, did) {
     o._pins = true;
     out.push(normalizeStore(o, id, dist));
   }
+  /* Deux fiches pour un seul magasin : on les additionne avant tout le reste,
+     sinon la carte pose deux pins l'un sur l'autre et la question « qui a
+     cette boisson ? » se pose deux fois pour le meme commerce. */
+  out = fusionnerDoublons(out);
   /* Le rayon d'enseigne se reconstruit ici GRATUITEMENT, a partir du seul nom
      du magasin : c'est exactement ce que fait applyStores sur l'autre chemin.
      L'essentiel du champ « drinks » qu'on vient de ne pas telecharger, c'est
@@ -3715,7 +3798,7 @@ window.fbQueryZone = async function (lat, lng, radiusKm, did) {
     var legers = await window.fbZoneLegere(lat, lng, radiusKm, did);
     if (legers && legers.length) return legers;
   } catch (e) { console.warn("chemin allégé indisponible, chemin complet:", e); }
-  return queryNearbyStores(lat, lng, radiusKm);
+  return fusionnerDoublons(await queryNearbyStores(lat, lng, radiusKm));
 };
 window.fbImportStores = async function(list, onProgress) {
   await ensureAuthed();
@@ -9864,7 +9947,7 @@ function onBarcodeDetected(r){
           lnk2.textContent=tr("C'est une boisson d\u00E9j\u00E0 au catalogue ?");
           lnk2.onclick=function(){openCatalogLinkPicker(code);};
           lnk2.onkeydown=function(ev){if(ev.key==="Enter")openCatalogLinkPicker(code);};
-          btn.parentNode.insertBefore(lnk2,btn.nextSibling);
+          res.appendChild(lnk2);    // sous le resultat, pas sous le bouton
           window._lastUnknownCode={code:String(code),ts:Date.now()};
           renderWhereFound({pendingBarcode:code});
           playSound("win");
@@ -9876,6 +9959,15 @@ function onBarcodeDetected(r){
             '<input id="unknown-name-input" type="text" placeholder="Nom du produit (ex : Hell Watermelon)" style="width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg3);color:var(--s1);font-size:13px;font-weight:600;font-family:\'Space Grotesk\',sans-serif;outline:none;text-align:center">'+
           '</div>';
           renderWhereFound({pendingBarcode:code});
+          /* LE SCAN EST ENREGISTRE TOUT DE SUITE, AVANT MEME QU'ON SACHE CE
+             QUE C'EST. Avant, le journal n'etait ecrit que dans le clic du
+             bouton « Ajouter aux decouvertes » : scanner un produit inconnu
+             sans taper son nom ne laissait donc AUCUNE trace — ni dans « Mes
+             trouvailles », ni dans le journal serveur. On avait scanne, on
+             voyait le code a l'ecran, et il disparaissait au rechargement.
+             Le nom provisoire « Produit <code> » est deja prevu ailleurs :
+             addDiscovery() sait le remplacer des que la personne le nomme. */
+          recordScan(code,"Produit "+code,"","","inconnu");
           btn.textContent=tr("Ajouter aux découvertes");btn.style.background="#e67e22";btn.style.display="block";
           btn.onclick=function(){
             var input=document.getElementById("unknown-name-input");
@@ -9892,7 +9984,12 @@ function onBarcodeDetected(r){
           lnk.textContent=tr("C'est une boisson d\u00E9j\u00E0 au catalogue ?");
           lnk.onclick=function(){openCatalogLinkPicker(code);};
           lnk.onkeydown=function(ev){if(ev.key==="Enter")openCatalogLinkPicker(code);};
-          btn.parentNode.insertBefore(lnk,btn.nextSibling);
+          /* SOUS LE RESULTAT, PAS SOUS LE BOUTON. Insere apres #scan-btn, ce
+             raccourci se retrouvait apres « Ou l'as-tu trouve ? » et apres le
+             bouton orange, donc sous la ligne de flottaison : personne ne le
+             voyait. Or c'est LA bonne reponse pour un produit qui existe deja
+             au catalogue sous un autre code-barre. */
+          res.appendChild(lnk);
           /* On retient ce code orphelin : si la personne passe par la
              proposition PHOTO dans le quart d'heure, il deviendra l'identite
              de la decouverte — et son prochain scan la reconnaitra. */
@@ -10512,8 +10609,21 @@ function offlineFallbackCheck(){
   idbGet("discoveries:last",function(data){
     if(!data||!data.list||!data.list.length)return;
     if(DISCOVERIES&&DISCOVERIES.length>4)return;
-    DISCOVERIES=data.list;
+    DISCOVERIES=fusionnerDecouvertes(data.list);
     renderDiscoveries();
+  });
+  /* Les trouvailles de la personne, rangees a chaque ajout. Elles remontent
+     meme si le serveur ne repond pas et meme si l'ecriture avait echoue. */
+  idbGet("discoveries:mine",function(data){
+    if(!data||!data.list||!data.list.length)return;
+    var vus={};
+    (DISCOVERIES||[]).forEach(function(d){ if(d&&d.barcode!=null)vus[String(d.barcode)]=1; });
+    var ajoutees=0;
+    data.list.forEach(function(d){
+      if(!d||d.barcode==null||vus[String(d.barcode)])return;
+      vus[String(d.barcode)]=1;DISCOVERIES.unshift(d);ajoutees++;
+    });
+    if(ajoutees)renderDiscoveries();
   });
 }
 
@@ -17507,6 +17617,34 @@ function openDiscPhotoSheet(discId,discName){
   if(take){take.disabled=false;take.textContent="Ajoute une photo du produit";}
   host.style.display="block";
 }
+/* UNE TROUVAILLE AJOUTEE ICI DOIT SURVIVRE A LA FERMETURE DE L'APP.
+   Elle ne survivait pas : DISCOVERIES n'etait sauve QUE lorsque Firestore
+   renvoyait la liste de la communaute (fbDiscoveriesLoaded). Entre deux
+   synchronisations, une trouvaille ajoutee n'existait que dans la memoire de
+   l'onglet — et la synchronisation suivante REMPLACAIT la liste entiere, donc
+   l'effacait meme quand l'ecriture serveur avait reussi. « Je ne la retrouve
+   pas dans mes trouvailles » : elle n'y avait jamais ete rangee.
+   On ne garde que ce que la personne a ajoute elle-meme : le reste vient du
+   serveur et se recharge tout seul. */
+function decouvertesLocales(){
+  return (DISCOVERIES||[]).filter(function(d){return d&&d._mienne;});
+}
+function sauverDecouvertes(){
+  try{ idbSet("discoveries:mine",{ts:Date.now(),list:decouvertesLocales()}); }catch(e){}
+}
+/* Remet les trouvailles personnelles dans une liste venue du serveur, sans
+   creer de doublon : le serveur fait foi quand il connait deja le code. */
+function fusionnerDecouvertes(liste){
+  var out=(liste||[]).slice();
+  var vus={};
+  out.forEach(function(d){ if(d&&d.barcode!=null)vus[String(d.barcode)]=1; });
+  decouvertesLocales().forEach(function(d){
+    if(d.barcode!=null&&vus[String(d.barcode)])return;
+    out.unshift(d);
+  });
+  return out;
+}
+window.fusionnerDecouvertes=fusionnerDecouvertes;
 function addDiscovery(name,brand,barcode,cat){
   // Garde anti-alcool universelle : ce point de passage centralise TOUTES les
   // creations de decouverte (scan OFF, cache local, nom tape a la main pour un
@@ -17552,7 +17690,7 @@ function addDiscovery(name,brand,barcode,cat){
       return;
     }
     var pendingStore=pendingFoundIn[String(barcode)]||null;
-    DISCOVERIES.unshift({id:barcode,name:name,brand:brand,votes:1,barcode:barcode,cat:cat||"",foundIn:pendingStore?[pendingStore]:[]});
+    DISCOVERIES.unshift({id:barcode,name:name,brand:brand,votes:1,barcode:barcode,cat:cat||"",foundIn:pendingStore?[pendingStore]:[],_mienne:true});
     if(pendingStore){
       delete pendingFoundIn[String(barcode)];
       if(window.fbTagDiscoveryStore)window.fbTagDiscoveryStore(barcode,pendingStore).catch(function(e){console.warn(e);});
@@ -17563,6 +17701,7 @@ function addDiscovery(name,brand,barcode,cat){
     contribute=true;
   }
   bumpStreak();
+  sauverDecouvertes();
   updateProfileStats();renderDiscoveries();
   stopScan();playSound("win");show("discover");
   if(!already)setTimeout(function(){openDiscPhotoSheet(barcode,name);},450);
@@ -17802,7 +17941,7 @@ function osmAnalyze(){
       return zone.then(function(existing){
         var news=found.filter(function(c){
           return !existing.some(function(s){
-            if(String(s.id)===c.id||String(s.id)===String(c.osm))return true;
+            if(memeMagasinOsm(s,c))return true;
             if(typeof s.lat!=="number")return false;
             var dLa=(s.lat-c.lat)*111000,dLo=(s.lng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
             var dist=Math.sqrt(dLa*dLa+dLo*dLo);
@@ -17830,6 +17969,29 @@ function osmAnalyze(){
 /* Devine la categorie d'un magasin depuis son nom/enseigne, dans n'importe
    quelle ville du monde -> boissons probables (pins "?"). Volontairement
    conservateur : pas d'indice = pas de probable (la communaute remplira). */
+/* MEME MAGASIN OPENSTREETMAP ?
+   Trois ecritures possibles pour un seul commerce, selon l'epoque de l'import :
+     - l'identifiant du document EST « o » + le numero OSM (import actuel) ;
+     - le document porte le numero dans un champ osmId (imports anciens) ;
+     - l'objet local porte osm (candidat qu'on vient de lire chez OSM).
+   Le dedoublonnage ne comparait que les deux premieres formes contre
+   l'identifiant, jamais le CHAMP osmId. Resultat mesure sur la base : 981
+   magasins existent en double, dont 977 sur ce seul motif. */
+function memeMagasinOsm(existant,candidat){
+  if(!existant||!candidat)return false;
+  var numero=String(candidat.osm||"");
+  if(!numero)return false;
+  var ids=[String(existant.id)];
+  if(existant.fbId)ids.push(String(existant.fbId));
+  if(existant._idsFusionnes)existant._idsFusionnes.forEach(function(x){ids.push(String(x));});
+  for(var i=0;i<ids.length;i++){
+    if(ids[i]===String(candidat.id))return true;       // « o12345 » des deux cotes
+    if(ids[i]===numero)return true;
+    if(ids[i]==="o"+numero)return true;
+  }
+  return String(existant.osmId||"")===numero;          // la forme qui manquait
+}
+window.memeMagasinOsm=memeMagasinOsm;
 function guessStoreCat(name){
   var n=normTxt(name||"");
   if(/candy|american|sweet|usa|us shop|bonbon/.test(n))return "americain";
@@ -17971,7 +18133,7 @@ function autoImportZone(cLat,cLng){
       return zone.then(function(existing){
         var news=found.filter(function(c){
           return !existing.some(function(s){
-            if(String(s.id)===c.id||String(s.id)===String(c.osm))return true;
+            if(memeMagasinOsm(s,c))return true;
             if(typeof s.lat!=="number")return false;
             var dLa=(s.lat-c.lat)*111000,dLo=(s.lng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
             return Math.sqrt(dLa*dLa+dLo*dLo)<60&&(normTxt(s.name)===normTxt(c.name)||fuzzyIncludes(c.name,s.name)||fuzzyIncludes(s.name,c.name));
@@ -18084,7 +18246,7 @@ function autoOsmForArea(lat,lng,zoom){
         }).filter(Boolean);
         var news=found.filter(function(c){
           return !(STORES||[]).some(function(s){
-            if(String(s.id)===c.id||String(s.id)===String(c.osm))return true;
+            if(memeMagasinOsm(s,c))return true;
             if(typeof s.lat!=="number")return false;
             var dLa=(s.lat-c.lat)*111000,dLo=(s.lng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
             var dist=Math.sqrt(dLa*dLa+dLo*dLo);
@@ -26996,7 +27158,9 @@ try{
   });
   // Données communautaires partagées (découvertes, tendances, notes) chargées depuis Firestore
   window.addEventListener("fbDiscoveriesLoaded", function(e) {
-    if(e.detail && e.detail.length) DISCOVERIES=e.detail;
+    /* On FUSIONNE au lieu de remplacer : sinon une trouvaille ajoutee il y a
+       trente secondes disparait de l'ecran des que le serveur repond. */
+    if(e.detail && e.detail.length) DISCOVERIES=fusionnerDecouvertes(e.detail);
     renderDiscoveries();
   });
   window.addEventListener("fbScanCountsLoaded", function(e) {
