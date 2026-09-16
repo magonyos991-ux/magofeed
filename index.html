@@ -3525,14 +3525,25 @@ async function _restQuery(sq) {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ structuredQuery: sq })
   });
-  if (!r.ok) throw new Error("REST " + r.status);
-  var rows = await r.json();
-  if (!Array.isArray(rows)) throw new Error("REST forme inattendue");
-  if (rows[0] && rows[0].error) {
-    var e = new Error(rows[0].error.message || "REST erreur");
-    e.statutFirestore = rows[0].error.status || "";
+  /* ON LIT LE CORPS MEME QUAND LE CODE HTTP EST UNE ERREUR.
+     « Cet index n'existe pas » arrive en HTTP 400, avec le motif
+     FAILED_PRECONDITION dans le corps. Jeter la reponse sur le seul code HTTP
+     perdait ce motif : le repli sans index ne se declenchait jamais, et la
+     carte revenait sans aucun magasin marque « en stock » — exactement le
+     bug qu'on corrige. */
+  var texte = await r.text();
+  var rows = null;
+  try { rows = JSON.parse(texte); } catch (eJson) { rows = null; }
+  var err = null;
+  if (rows && Array.isArray(rows) && rows[0] && rows[0].error) err = rows[0].error;
+  else if (rows && !Array.isArray(rows) && rows.error) err = rows.error;
+  if (err) {
+    var e = new Error(err.message || "REST erreur");
+    e.statutFirestore = err.status || "";
     throw e;
   }
+  if (!r.ok) throw new Error("REST " + r.status);
+  if (!Array.isArray(rows)) throw new Error("REST forme inattendue");
   var out = [];
   for (var i = 0; i < rows.length; i++) if (rows[i].document) out.push(rows[i].document);
   return out;
