@@ -46,6 +46,16 @@ for (const cle of cles) {
   if (/\\u[0-9A-Fa-f]{4}|\\n|\\t/.test(cle))
     echecs.push("clé encore échappée : " + JSON.stringify(cle).slice(0, 70));
   const e = neuf[cle] || {};
+  /* UN CODE DE LANGUE INCONNU ECRIT UNE CLE EN DOUBLE, SANS RIEN DIRE.
+     Une espace en trop dans le fichier proposé — « " ar" » au lieu de « "ar" » —
+     donnait une entrée avec DEUX clés ar dans la table livrée : la première
+     ignorée, la seconde gardée, et un fichier que le contrôle de syntaxe accepte
+     très bien. C'est ESLint qui l'a trouvé, à l'étape d'après. On refuse
+     desormais ici tout code qui n'est pas exactement l'un des neuf. */
+  const inconnues = Object.keys(e).filter((l) => LANGUES.indexOf(l) === -1);
+  if (inconnues.length)
+    echecs.push(JSON.stringify(cle).slice(0, 52) + " — code de langue inconnu : "
+      + inconnues.map((x) => JSON.stringify(x)).join(", "));
   const manque = LANGUES.filter((l) => !e[l] || !String(e[l]).trim());
   if (manque.length)
     echecs.push(JSON.stringify(cle).slice(0, 52) + " — manque : " + manque.join(", "));

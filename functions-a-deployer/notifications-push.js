@@ -268,10 +268,21 @@ exports.notifyHuntNearby = onDocumentWritten(
       if (seekerUids.has(d.id)) return;         // pas le(s) chercheur(s)
       const t = d.data();
       if (!t.token) return;
-      // On EXCLUT seulement quand on est SÛR que c'est trop loin (centre connu ET
-      // position du destinataire connue ET distance > 15 km). Sinon on notifie
-      // quand même (position manquante d'un côté = on ne cache pas la chasse).
-      if (center && t.lat != null && _dist(center.lat, center.lng, t.lat, t.lng) > 15) return;
+      /* LE RAYON EST CELUI DU DESTINATAIRE, PAS UN CHIFFRE EN DUR.
+         C'etait 15 km pour tout le monde, decide ici, et le reglage « Ta zone »
+         de chaque personne ne pesait sur rien. Desormais chacun ecrit son
+         propre rayon dans son document pushTokens, et c'est lui qui decide
+         jusqu'ou on a le droit de le deranger — pas celui qui lance la chasse.
+         15 km reste la valeur de repli pour les comptes qui n'ont pas encore
+         ecrit le leur.
+
+         POSITION INCONNUE : on notifie quand meme. On ne peut pas honorer un
+         rayon sans savoir ou se trouve la personne, et se taire ferait
+         disparaitre la fonctionnalite pour tous ceux qui n'ont jamais bouge
+         depuis leur installation. L'app ecrit la position a chaque reponse du
+         GPS, donc ce cas se resorbe de lui-meme. */
+      const rayon = Math.max(1, Math.min(50, Number(t.rayon) || 15));
+      if (center && t.lat != null && _dist(center.lat, center.lng, t.lat, t.lng) > rayon) return;
       msgs.push({
         token: t.token,
         notification: { title: "Chasse pres de toi", body: "Quelqu'un cherche « " + name + " ». Si tu la vois en magasin, signale-la et gagne des points." },
@@ -289,7 +300,7 @@ exports.notifyHuntNearby = onDocumentWritten(
       msgs.length
         ? (msgs.length + " personne(s) pr\u00e9venue(s) autour de " + center.lat + ", " + center.lng
            + " \u00b7 " + tokensSnap.size + " appareil(s) enregistr\u00e9(s) au total.")
-        : ("Aucun appareil \u00e0 moins de 15 km du centre (" + center.lat + ", " + center.lng + "). "
+        : ("Aucun appareil dans sa propre zone autour du centre (" + center.lat + ", " + center.lng + "). "
            + tokensSnap.size + " appareil(s) enregistr\u00e9(s) au total, tous trop loin ou d\u00e9j\u00e0 chasseurs."),
       tokensSnap.size, msgs.length);
   }
