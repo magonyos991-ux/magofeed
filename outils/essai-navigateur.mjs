@@ -30,6 +30,27 @@ const NAVIGATEUR = process.env.CHROMIUM || "/opt/pw-browsers/chromium";
 const TYPES = { ".html":"text/html", ".js":"text/javascript", ".css":"text/css", ".json":"application/json",
   ".png":"image/png", ".svg":"image/svg+xml", ".webmanifest":"application/manifest+json", ".ico":"image/x-icon" };
 
+/* LU SUR LA SOURCE, PAS DANS LE NAVIGATEUR.
+   La liste des champs demandes a Firestore vit dans le script de module, qui
+   ne s'execute pas sans reseau (il importe le SDK depuis un CDN). On la lit
+   donc dans le fichier. C'est le coeur du correctif anti-plantage : si
+   « drinks » revenait dans cette projection, la carte de Paris repasserait de
+   2,8 Mo a 65,7 Mo et le telephone tuerait l'onglet. */
+const statiques = [];
+{
+  const src = await readFile(join(process.cwd(), "index.html"), "utf8");
+  const m = src.match(/var MAGO_CHAMPS_LEGER = ([^;]+);/);
+  const champs = m ? m[1] : "";
+  statiques.push(["la projection allegee est declaree", !!m]);
+  statiques.push(["elle ne demande pas les assortiments",
+    !!m && !/"drinks"/.test(champs) && !/"drinksVerified"/.test(champs)]);
+  statiques.push(["elle demande les confirmations", /"confirmations"/.test(champs)]);
+  statiques.push(["la carte ne passe plus par le drapeau geohash jamais leve",
+    !/pinsSeuls && MAGO_GEOHASH_READY/.test(src)]);
+  statiques.push(["un magasin allege est complete avant d'annoncer son rayon",
+    /window\.magasinCompleter/.test(src) && /window\.fbMagasinComplet/.test(src)]);
+}
+
 const srv = createServer(async (q, r) => {
   try {
     const u = decodeURIComponent(q.url.split("?")[0]);
@@ -225,6 +246,41 @@ const r = await page.evaluate(async () => {
     window._exploreRawList = sauve;
   }
 
+  /* ── 9. La carte allegee : un magasin sans son rayon ne ment pas ───── */
+  {
+    /* Le chemin allege (fbZoneLegere) charge les magasins SANS le champ
+       « drinks » — 65,7 Mo contre 2,8 Mo sur Paris. Un magasin ainsi charge
+       porte la reponse « il a cette boisson » dans _aBoisson, pas dans
+       drinks. Tout code qui interroge drinks en direct repond « il ne l'a
+       pas » a un magasin a qui on n'a rien demande : c'est le bug qui faisait
+       disparaitre les pins « en stock ». */
+    dit("le point unique de verite existe", typeof magasinALaBoisson === "function");
+    const leger = { id: "L1", fbId: "L1", name: "Epicerie du coin", lat: 48.85, lng: 2.35,
+                    _pins: true, drinks: [], confirmations: {}, _aBoisson: { 200: true } };
+    dit("un magasin allege sait qu'il a la boisson", magasinALaBoisson(leger, 200) === true);
+    dit("et qu'il n'a pas les autres", magasinALaBoisson(leger, 11350) === false);
+    dit("sans le drapeau, il ne l'a pas", magasinALaBoisson({ drinks: [] }, 200) === false);
+    dit("le tableau drinks marche toujours", magasinALaBoisson({ drinks: [200] }, 200) === true);
+
+    dit("rattache ne veut pas dire en stock", magasinConfirmePour(leger, 200) === false);
+    leger.confirmations = { 200: 1 };
+    dit("une confirmation, et c'est du stock", magasinConfirmePour(leger, 200) === true);
+    const verifie = { id: "L2", fbId: "L2", name: "Night shop", lat: 48.85, lng: 2.35,
+                      _pins: true, drinks: [], confirmations: {}, _aBoisson: { 200: true }, _rayonVerifie: { 200: true } };
+    dit("un rayon verifie compte aussi", magasinConfirmePour(verifie, 200) === true);
+    dit("mais pas pour une autre boisson", magasinConfirmePour(verifie, 11350) === false);
+
+    /* La fiche ne doit jamais annoncer « 0 boisson » a un magasin dont on n'a
+       pas demande le rayon. */
+    const sauveS = window.STORES;
+    window.STORES = [ { id: "L3", fbId: "L3", name: "Proxy Delhaize", lat: 48.85, lng: 2.35, _pins: true, drinks: [], confirmations: {} } ];
+    try { openStoreSheet("L3"); } catch (e) {}
+    const txt = (document.getElementById("map-sheet-content") || {}).innerText || "";
+    dit("la fiche d'un magasin allege n'annonce pas 0 boisson", txt.indexOf("0 boisson") === -1);
+    try { closeStoreSheet(); } catch (e) {}
+    window.STORES = sauveS;
+  }
+
   /* ── 9. Le chinois : atteignable, et il change vraiment l'ecran ─────── */
   dit("le chinois est propose", Object.keys(LANGS).indexOf("zh") !== -1);
   setLang("fr"); await pause(700);
@@ -241,7 +297,8 @@ console.log("carte rendue : " + JSON.stringify(r.carte));
 console.log("titre en anglais : " + JSON.stringify(r.titreEn));
 console.log("caracteres chinois a l'ecran : " + r.han + "\n");
 let ko = 0;
-for (const [nom, ok] of r.etapes) { if (!ok) ko++; console.log((ok ? "ok   " : "ECHEC") + " | " + nom); }
-console.log("\n" + (r.etapes.length - ko) + "/" + r.etapes.length + " conformes");
+const toutes = statiques.concat(r.etapes);
+for (const [nom, ok] of toutes) { if (!ok) ko++; console.log((ok ? "ok   " : "ECHEC") + " | " + nom); }
+console.log("\n" + (toutes.length - ko) + "/" + toutes.length + " conformes");
 await nav.close(); srv.close();
 process.exit(ko ? 1 : 0);
