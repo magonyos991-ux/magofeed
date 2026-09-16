@@ -7968,7 +7968,18 @@ function nameLooksAlcoholic(name,brand){
   for(var i=0;i<scripts.length;i++)if(brut.indexOf(scripts[i])!==-1)return true;
   // 2. Degre ecrit : « 5 % vol », « 12,5 % alc », « 40° », « 80 proof ».
   var bas=brut.toLowerCase();
-  if(/\d+([.,]\d+)?\s*%\s*(vol|alc|abv)|\d{1,2}([.,]\d)?\s*°(\s*(vol|alc|gl))?(?![a-z])|\b\d+\s*proof\b/.test(bas)&&!/\b0[.,]0\s*%/.test(bas))return true;
+  /* LA MENTION « 0,0 % » N'EXCUSE QUE LE 0,0 %, PAS LE RESTE DE L'ETIQUETTE.
+     L'ancienne condition annulait TOUTE la detection de degre des que « 0,0 % »
+     apparaissait quelque part. « Coffret 0,0 % + 40 % vol » et « Duo
+     degustation 0.0% et 12% vol » passaient donc entiers — exactement les
+     coffrets mixtes que la regle du projet interdit. On regarde maintenant
+     CHAQUE degre trouve, et un seul degre non nul suffit a refuser. */
+  var _reDeg=/(\d+(?:[.,]\d+)?)\s*%\s*(?:vol|alc|abv)|(\d{1,2}(?:[.,]\d)?)\s*°(?:\s*(?:vol|alc|gl))?(?![a-z])|\b(\d+)\s*proof\b/g;
+  var _m;
+  while((_m=_reDeg.exec(bas))!==null){
+    var _d=parseFloat(String(_m[1]||_m[2]||_m[3]||"0").replace(",","."));
+    if(_d>0)return true;
+  }
   // 3. Texte normalise (minuscules, sans accents), faux amis retires.
   var t=" "+normTxt(brut).replace(/[\u2019']/g," ")+" ";
   var faux=(typeof ALCOOL_FAUX!=="undefined")?ALCOOL_FAUX:[];
