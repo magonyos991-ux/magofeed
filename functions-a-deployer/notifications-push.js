@@ -18,7 +18,12 @@
 const { onDocumentUpdated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { initializeApp, getApps } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
+/* FieldValue vient d'etre ajoute a cet import : le journal des chasses s'en
+   sert pour dater ses lignes. Sans lui, chaque ecriture levait une
+   ReferenceError — avalee par le try/catch qui protege le journal, donc
+   parfaitement muette. Un journal qui n'ecrit rien et ne le dit pas est pire
+   que pas de journal du tout. */
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 
 if (!getApps().length) initializeApp();
@@ -162,7 +167,24 @@ exports.notifyHuntNearby = onDocumentWritten(
        toute la base, declenchable en boucle. Sans centre, on ne diffuse plus. */
     let center = null;
     newSeekers.forEach(function(u){ const s = aSeek[u]; if (s && s.lat != null && (!center || s.at > center.at)) center = s; });
-    if (!center) return;
+    if (!center) {
+      /* Sortie la plus frequente, et la plus invisible : une chasse lancee
+         avant que le GPS du telephone n'ait repondu n'a pas de position, donc
+         pas de centre, donc personne a prevenir. Le client la repositionne
+         desormais des que le GPS repond — ce qui repasse ici avec un centre. */
+      try {
+        await db.collection("alertesAdmin").add({
+          titre: "Chasse \u00ab " + String(after.drinkName || "?").slice(0, 40) + " \u00bb : rien envoy\u00e9",
+          corps: "La chasse a \u00e9t\u00e9 lanc\u00e9e sans position (GPS pas encore pr\u00eat). "
+               + "Sans centre, on ne sait pas qui pr\u00e9venir. L'app la repositionne d\u00e8s que le GPS r\u00e9pond.",
+          at: FieldValue.serverTimestamp(),
+          pousseesEnvoyees: 0, jetonsTrouves: 0, courrielEnvoye: false,
+          type: "hunt",
+          drinkId: String(after.drinkId != null ? after.drinkId : event.params.drinkId)
+        });
+      } catch (e) {}
+      return;
+    }
     const seekerUids = new Set(Object.keys(aSeek).filter(function(u){ return aSeek[u]; }));
     const name = String(after.drinkName || "une boisson").slice(0, 40);
     /* Anti-spam. Il etait range dans le document des chasses, que le client
@@ -175,16 +197,69 @@ exports.notifyHuntNearby = onDocumentWritten(
     const now = Date.now();
     const _cle = function (v) { return String(v).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80); };
     const lanceur = newSeekers[0];
+    /* LE VERROU PAR PERSONNE ETAIT DE SIX HEURES, ET C'EST LUI QUI FAISAIT
+       TAIRE LA CHASSE.
+       -----------------------------------------------------------------------
+       Il existe pour une bonne raison : un compte s'obtient gratuitement, et
+       sans lui n'importe qui pourrait declencher vague sur vague vers toute la
+       base. Mais SIX HEURES veut dire qu'apres UNE SEULE chasse lancee, ce
+       compte ne previent plus personne du reste de la journee — meme sur une
+       autre boisson, meme depuis un autre endroit. Pour quelqu'un qui essaie
+       son app avec deux telephones, c'est le silence garanti, et rien a
+       l'ecran ne dit pourquoi.
+
+       On separe donc les deux roles :
+       - PAR BOISSON, on garde six heures. Personne ne veut etre reveille trois
+         fois pour le meme Mountain Dew.
+       - PAR PERSONNE, quarante-cinq minutes. Cela borne toujours l'abus (au
+         pire une trentaine de vagues par jour et par compte, quand la limite
+         par boisson laisse passer), sans transformer la premiere chasse de la
+         journee en interrupteur general.
+
+       ET SURTOUT : chaque sortie laisse desormais une ligne dans le journal.
+       « Aucune notification » et « je ne sais pas pourquoi » etaient jusqu'ici
+       la meme chose. */
+    /* LE JOURNAL A DEJA UN FORMAT, ET L'ECRAN QUI LE LIT L'ATTEND.
+       Ecrire des champs a moi aurait affiche une ligne sans titre, marquee
+       « aucun appareil enregistre » — un journal qui ment est pire que pas de
+       journal. On ecrit donc titre/corps/pousseesEnvoyees/jetonsTrouves comme
+       outils-admin, et la RAISON va dans le corps, en francais. */
+    const _tracer = async function (titre, corps, jetons, poussees) {
+      try {
+        await db.collection("alertesAdmin").add({
+          titre: String(titre).slice(0, 120),
+          corps: String(corps).slice(0, 400),
+          at: FieldValue.serverTimestamp(),
+          pousseesEnvoyees: Number(poussees) || 0,
+          jetonsTrouves: Number(jetons) || 0,
+          courrielEnvoye: false,
+          type: "hunt",
+          drinkId: String(after.drinkId != null ? after.drinkId : event.params.drinkId)
+        });
+      } catch (e) { /* le journal ne doit jamais faire echouer l'envoi */ }
+    };
     const verrous = [
-      db.collection("_meta").doc("huntPush_d_" + _cle(after.drinkId != null ? after.drinkId : event.params.drinkId)),
-      db.collection("_meta").doc("huntPush_u_" + _cle(lanceur))
+      { ref: db.collection("_meta").doc("huntPush_d_" + _cle(after.drinkId != null ? after.drinkId : event.params.drinkId)),
+        ms: 6 * 3600 * 1000, nom: "boisson" },
+      { ref: db.collection("_meta").doc("huntPush_u_" + _cle(lanceur)),
+        ms: 45 * 60 * 1000, nom: "personne" }
     ];
-    for (const ref of verrous) {
-      const snap = await ref.get();
+    for (const v of verrous) {
+      const snap = await v.ref.get();
       const at = (snap.exists && Number(snap.data().at)) || 0;
-      if (now - at < 6 * 3600 * 1000) return;
+      if (now - at < v.ms) {
+        const reste = Math.ceil((v.ms - (now - at)) / 60000);
+        await _tracer(
+          "Chasse \u00ab " + name + " \u00bb : rien envoy\u00e9",
+          "Verrou anti-spam par " + v.nom + " : encore " + reste + " min. "
+          + (v.nom === "boisson"
+             ? "Quelqu'un a d\u00e9j\u00e0 lanc\u00e9 une vague pour cette boisson r\u00e9cemment."
+             : "Ce compte a d\u00e9j\u00e0 d\u00e9clench\u00e9 une vague r\u00e9cemment. Essaie depuis l'autre t\u00e9l\u00e9phone, ou attends."),
+          0, 0);
+        return;
+      }
     }
-    for (const ref of verrous) { try { await ref.set({ at: now }); } catch (e) {} }
+    for (const v of verrous) { try { await v.ref.set({ at: now }); } catch (e) {} }
     /* Diffusion aux tokens proches (hors chercheurs). Borne : sans limite, une
        vague lisait la collection entiere — le cout grandit avec la base. */
     const tokensSnap = await db.collection("pushTokens").limit(3000).get();
@@ -193,10 +268,21 @@ exports.notifyHuntNearby = onDocumentWritten(
       if (seekerUids.has(d.id)) return;         // pas le(s) chercheur(s)
       const t = d.data();
       if (!t.token) return;
-      // On EXCLUT seulement quand on est SÛR que c'est trop loin (centre connu ET
-      // position du destinataire connue ET distance > 15 km). Sinon on notifie
-      // quand même (position manquante d'un côté = on ne cache pas la chasse).
-      if (center && t.lat != null && _dist(center.lat, center.lng, t.lat, t.lng) > 15) return;
+      /* LE RAYON EST CELUI DU DESTINATAIRE, PAS UN CHIFFRE EN DUR.
+         C'etait 15 km pour tout le monde, decide ici, et le reglage « Ta zone »
+         de chaque personne ne pesait sur rien. Desormais chacun ecrit son
+         propre rayon dans son document pushTokens, et c'est lui qui decide
+         jusqu'ou on a le droit de le deranger — pas celui qui lance la chasse.
+         15 km reste la valeur de repli pour les comptes qui n'ont pas encore
+         ecrit le leur.
+
+         POSITION INCONNUE : on notifie quand meme. On ne peut pas honorer un
+         rayon sans savoir ou se trouve la personne, et se taire ferait
+         disparaitre la fonctionnalite pour tous ceux qui n'ont jamais bouge
+         depuis leur installation. L'app ecrit la position a chaque reponse du
+         GPS, donc ce cas se resorbe de lui-meme. */
+      const rayon = Math.max(1, Math.min(50, Number(t.rayon) || 15));
+      if (center && t.lat != null && _dist(center.lat, center.lng, t.lat, t.lng) > rayon) return;
       msgs.push({
         token: t.token,
         notification: { title: "Chasse pres de toi", body: "Quelqu'un cherche « " + name + " ». Si tu la vois en magasin, signale-la et gagne des points." },
@@ -209,6 +295,14 @@ exports.notifyHuntNearby = onDocumentWritten(
       try { await getMessaging().sendEach(msgs.slice(i, i + 500)); } catch (e) { console.warn("hunt push batch:", e && e.message); }
     }
     console.log("Chasse « " + name + " » : " + msgs.length + " notifiés.");
+    await _tracer(
+      "Chasse \u00ab " + name + " \u00bb",
+      msgs.length
+        ? (msgs.length + " personne(s) pr\u00e9venue(s) autour de " + center.lat + ", " + center.lng
+           + " \u00b7 " + tokensSnap.size + " appareil(s) enregistr\u00e9(s) au total.")
+        : ("Aucun appareil dans sa propre zone autour du centre (" + center.lat + ", " + center.lng + "). "
+           + tokensSnap.size + " appareil(s) enregistr\u00e9(s) au total, tous trop loin ou d\u00e9j\u00e0 chasseurs."),
+      tokensSnap.size, msgs.length);
   }
 );
 
