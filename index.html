@@ -2284,9 +2284,7 @@ window.fbEnsureStoresForDrink = async function(drinkId, lat, lng) {
   var centerLat = lat != null ? lat : DEFAULT_CENTER.lat;
   var centerLng = lng != null ? lng : DEFAULT_CENTER.lng;
   function hasMatch() {
-    return (window.STORES || []).some(function(s) {
-      return s.drinks && s.drinks.some(function(d) { return Number(d) === Number(drinkId); });
-    });
+    return (window.STORES || []).some(function(s) { return window.magasinALaBoisson(s, drinkId); });
   }
   if (hasMatch()) return true;
   // Cache negatif 24h : si l'elargissement 25/50km n'a rien donne hier pour
@@ -3460,86 +3458,252 @@ window.fbDeleteStore = async function(storeId) {
 /* ============================================================================
    LA CARTE N'A PAS BESOIN DES ASSORTIMENTS POUR DESSINER DES PINS
    ----------------------------------------------------------------------------
-   Mesure faite sur la base de production, zone parisienne, 253 magasins :
-       tout le document            8 845 Ko
-       sans le champ « drinks »      166 Ko
-   Le champ drinks pese 98 % du telechargement. Un magasin porte en moyenne
-   351 identifiants de boissons, et jusqu'a 1 171 — poses en masse par le
-   remplissage d'enseignes, jamais confirmes par personne. Ouvrir la carte sur
-   Paris faisait donc descendre 18 Mo dans le telephone, d'un coup, pour
-   afficher des points sur une carte. C'est ce que l'application « qui se
-   relance toute seule » etait en train de faire : iOS tue l'onglet.
+   MESURE, base de production, Paris, rayon 12 km, le 16 septembre 2026 :
+
+       bande de latitude interrogee par l'app        4 745 magasins
+       documents entiers (ce qu'elle telechargeait)     ~39 Mo
+       memes magasins, champs utiles seulement          2,6 Mo
+       dont le champ « drinks » a lui seul               96 %
+
+   Un magasin porte en moyenne 76 identifiants de boissons, et jusqu'a 1 170 —
+   poses en masse par le remplissage d'enseignes, jamais confirmes par personne.
+   Ouvrir la carte sur Paris faisait donc descendre des dizaines de mega-octets
+   dans le telephone, d'un coup, pour afficher des points. iOS tue l'onglet :
+   c'est l'application « qui se relance toute seule ».
+
+   POURQUOI LA PREMIERE VERSION DE CE CORRECTIF N'A RIEN CHANGE.
+   Elle passait par le geohash, derriere le drapeau MAGO_GEOHASH_READY — qui
+   vaut false, parce que la migration n'a jamais ete lancee. Le code allege
+   n'etait donc JAMAIS appele. Et il n'aurait pas suffi : 7 288 magasins sur
+   34 137 portent un geohash. Les 26 849 autres sont invisibles a une requete
+   geohash. On allege donc la requete que l'app fait VRAIMENT — la bande de
+   latitude — qui, elle, les voit tous.
 
    Le SDK web ne sait pas demander une partie d'un document. L'API REST de
-   Firestore, si (select.fields). On l'utilise UNIQUEMENT quand aucune boisson
-   n'est choisie — dans ce cas la liste des boissons ne sert a rien. Des qu'une
-   boisson est ciblee, on repasse par le chemin complet, qui lui en a besoin.
-
-   Les regles de securite s'appliquent de la meme facon sur REST : on ne
-   contourne rien, on demande moins. Et au moindre pepin, on retombe sur le
-   chemin d'origine plutot que de rendre une carte vide. */
+   Firestore, si (select.fields). Les regles de securite s'appliquent de la
+   meme facon : on ne contourne rien, on demande moins. Au moindre pepin, on
+   retombe sur le chemin d'origine plutot que de rendre une carte vide.
+   ============================================================================ */
 var MAGO_CHAMPS_PIN = ["name", "lat", "lng", "brand", "geohash", "hours", "certified", "type", "emoji", "owner"];
-async function _restPins(bornes) {
-  var url = "https://firestore.googleapis.com/v1/projects/" + firebaseConfig.projectId
-    + "/databases/(default)/documents:runQuery";
-  var out = [];
-  for (var i = 0; i < bornes.length; i++) {
-    var corps = { structuredQuery: {
-      from: [{ collectionId: "stores" }],
-      where: { compositeFilter: { op: "AND", filters: [
-        { fieldFilter: { field: { fieldPath: "geohash" }, op: "GREATER_THAN_OR_EQUAL", value: { stringValue: bornes[i][0] } } },
-        { fieldFilter: { field: { fieldPath: "geohash" }, op: "LESS_THAN_OR_EQUAL", value: { stringValue: bornes[i][1] } } } ] } },
-      orderBy: [{ field: { fieldPath: "geohash" } }],
-      select: { fields: MAGO_CHAMPS_PIN.map(function (f) { return { fieldPath: f }; }) },
-      limit: 3000 } };
-    var r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
-    if (!r.ok) throw new Error("REST " + r.status);
-    var rows = await r.json();
-    if (!Array.isArray(rows)) throw new Error("REST forme inattendue");
-    for (var j = 0; j < rows.length; j++) if (rows[j].document) out.push(rows[j].document);
-  }
-  return out;
+/* confirmations pese 106 Ko sur les 4 745 magasins de la bande parisienne —
+   et c'est LUI qui dit ce qui est vraiment en stock. On le prend toujours.
+   drinksVerified, lui, pese 5,4 Mo : voir _marquerBoisson plus bas. */
+var MAGO_CHAMPS_LEGER = MAGO_CHAMPS_PIN.concat(["confirmations"]);
+
+function _urlRest(suffixe) {
+  return "https://firestore.googleapis.com/v1/projects/" + firebaseConfig.projectId
+    + "/databases/(default)/documents" + (suffixe || "");
 }
 function _valeurRest(v) {
-  if (!v) return null;
-  if (v.stringValue != null) return v.stringValue;
-  if (v.doubleValue != null) return Number(v.doubleValue);
-  if (v.integerValue != null) return Number(v.integerValue);
-  if (v.booleanValue != null) return !!v.booleanValue;
+  if (!v || typeof v !== "object") return null;
+  if (v.nullValue !== undefined) return null;
+  if (v.stringValue !== undefined) return v.stringValue;
+  if (v.doubleValue !== undefined) return Number(v.doubleValue);
+  if (v.integerValue !== undefined) return Number(v.integerValue);
+  if (v.booleanValue !== undefined) return !!v.booleanValue;
+  if (v.timestampValue !== undefined) return v.timestampValue;
+  if (v.arrayValue !== undefined) return ((v.arrayValue.values) || []).map(_valeurRest);
+  if (v.mapValue !== undefined) {
+    var o = {}, f = v.mapValue.fields || {};
+    Object.keys(f).forEach(function (k) { o[k] = _valeurRest(f[k]); });
+    return o;
+  }
   return null;
 }
-window.fbZonePins = async function(lat, lng, radiusKm) {
-  var bornes = geohashQueryBounds(lat, lng, radiusKm * 1000);
-  var docs = await _restPins(bornes);
+function _docRest(d) {
+  var f = d.fields || {}, o = {};
+  Object.keys(f).forEach(function (k) { o[k] = _valeurRest(f[k]); });
+  return o;
+}
+/* Une requete REST. Firestore repond 200 avec un tableau qui contient un objet
+   « error » quand l'index manque : on le transforme en vraie exception, sinon
+   l'appelant croit avoir recu zero resultat — et une carte vide est un
+   mensonge, pas une reponse. */
+async function _restQuery(sq) {
+  var r = await fetch(_urlRest(":runQuery"), {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ structuredQuery: sq })
+  });
+  if (!r.ok) throw new Error("REST " + r.status);
+  var rows = await r.json();
+  if (!Array.isArray(rows)) throw new Error("REST forme inattendue");
+  if (rows[0] && rows[0].error) {
+    var e = new Error(rows[0].error.message || "REST erreur");
+    e.statutFirestore = rows[0].error.status || "";
+    throw e;
+  }
+  var out = [];
+  for (var i = 0; i < rows.length; i++) if (rows[i].document) out.push(rows[i].document);
+  return out;
+}
+function _filtresBande(latMin, latMax) {
+  return [
+    { fieldFilter: { field: { fieldPath: "lat" }, op: "GREATER_THAN_OR_EQUAL", value: { doubleValue: latMin } } },
+    { fieldFilter: { field: { fieldPath: "lat" }, op: "LESS_THAN_OR_EQUAL", value: { doubleValue: latMax } } }
+  ];
+}
+/* Pagination par curseur (lat, __name__), exactement comme queryLatBand du SDK.
+   Le tri a deux cles evite le piege des latitudes ex aequo : sans __name__,
+   deux magasins a la meme latitude se sautent l'un l'autre entre deux pages. */
+async function _restPages(sq, champs, parPage, maxPages) {
+  var docs = [], curseur = null;
+  for (var p = 0; p < (maxPages || 20); p++) {
+    var page = JSON.parse(JSON.stringify(sq));
+    page.orderBy = [{ field: { fieldPath: "lat" } }, { field: { fieldPath: "__name__" } }];
+    page.select = { fields: champs.map(function (f) { return { fieldPath: f }; }) };
+    page.limit = parPage;
+    if (curseur) page.startAt = { values: curseur, before: false };
+    var lot = await _restQuery(page);
+    for (var i = 0; i < lot.length; i++) docs.push(lot[i]);
+    if (lot.length < parPage) break;
+    var dernier = lot[lot.length - 1];
+    var laDer = _valeurRest((dernier.fields || {}).lat);
+    if (laDer == null) break;                 // sans latitude, pas de curseur sur
+    curseur = [{ doubleValue: laDer }, { referenceValue: dernier.name }];
+  }
+  return docs;
+}
+
+/* ---------------------------------------------------------------------------
+   QUI A CETTE BOISSON ? — reponse exacte, sans telecharger les assortiments.
+   On demande les CLES des magasins qui contiennent la boisson (projection
+   __name__ + lat : 0,26 Ko par magasin au lieu de 8). Deux ensembles :
+     - drinks         : la boisson est rattachee au magasin (piste)
+     - drinksVerified : quelqu'un a vu le rayon (stock)
+   Avec l'index composite (voir firestore.indexes.json), la requete est bornee
+   a la bande de latitude et ne coute que les magasins du coin. Sans l'index,
+   on retombe sur la meme requete SANS borne geographique — plus lourde, mais
+   exacte — et on met le resultat en cache pour la session.
+   --------------------------------------------------------------------------- */
+var _MAGO_INDEX_BOISSON = { drinks: null, drinksVerified: null }; // null = pas encore su
+window._cacheIdsBoisson = window._cacheIdsBoisson || {};
+async function _clesPourBoisson(champ, did, latMin, latMax) {
+  var base = { from: [{ collectionId: "stores" }] };
+  var contient = { fieldFilter: { field: { fieldPath: champ }, op: "ARRAY_CONTAINS", value: { integerValue: String(did) } } };
+  if (_MAGO_INDEX_BOISSON[champ] !== false) {
+    try {
+      var sq = JSON.parse(JSON.stringify(base));
+      sq.where = { compositeFilter: { op: "AND", filters: [contient].concat(_filtresBande(latMin, latMax)) } };
+      var bornes = await _restPages(sq, ["lat"], 1000, 20);
+      _MAGO_INDEX_BOISSON[champ] = true;
+      return { ids: bornes.map(function (d) { return String(d.name).split("/").pop(); }), borne: true };
+    } catch (e) {
+      if (String(e.statutFirestore) !== "FAILED_PRECONDITION") throw e;
+      _MAGO_INDEX_BOISSON[champ] = false;     // index absent : on ne reessaiera pas
+    }
+  }
+  /* Sans l'index, on ne PEUT pas borner la requete a la bande de latitude :
+     Firestore refuse array-contains + plage sur un autre champ. On demande donc
+     les cles de tous les magasins du monde qui ont la boisson — 8 217 pour un
+     Mountain Dew, soit 2,1 Mo de pures cles, une fois par boisson et par
+     session. C'est lourd, mais c'est exact ; et l'index (une minute de mise en
+     place, voir firestore.indexes.json) fait tomber ca a quelques kilo-octets.
+     Le tri se fait sur __name__ : c'est le seul qui ne demande aucun index. */
+  var cle = champ + ":" + did;
+  if (window._cacheIdsBoisson[cle]) return { ids: window._cacheIdsBoisson[cle], borne: false };
+  var ids = [], curseur = null;
+  for (var p = 0; p < 20; p++) {
+    var sq2 = JSON.parse(JSON.stringify(base));
+    sq2.where = contient;
+    sq2.orderBy = [{ field: { fieldPath: "__name__" } }];
+    sq2.select = { fields: [{ fieldPath: "__name__" }] };
+    sq2.limit = 1000;
+    if (curseur) sq2.startAt = { values: [{ referenceValue: curseur }], before: false };
+    var lot = await _restQuery(sq2);
+    for (var i = 0; i < lot.length; i++) ids.push(String(lot[i].name).split("/").pop());
+    if (lot.length < 1000) break;
+    curseur = lot[lot.length - 1].name;
+  }
+  window._cacheIdsBoisson[cle] = ids;
+  return { ids: ids, borne: false };
+}
+/* Pose sur chaque magasin allege ce qu'on vient d'apprendre de la boisson
+   ciblee. Les drapeaux sont par identifiant de boisson : un magasin peut etre
+   allege pour Mountain Dew et complet pour autre chose. */
+async function _marquerBoisson(liste, box, did) {
+  var parId = {};
+  liste.forEach(function (s) { parId[String(s.fbId || s.id)] = s; });
+  var reponses = await Promise.all([
+    _clesPourBoisson("drinks", did, box.latMin, box.latMax),
+    _clesPourBoisson("drinksVerified", did, box.latMin, box.latMax)
+  ]);
+  ["_aBoisson", "_rayonVerifie"].forEach(function (drapeau, i) {
+    reponses[i].ids.forEach(function (id) {
+      var s = parId[id];
+      if (!s) return;
+      s[drapeau] = s[drapeau] || {};
+      s[drapeau][Number(did)] = true;
+    });
+  });
+  /* On a interroge la base pour CETTE boisson : l'absence est desormais une
+     vraie absence, et non « on n'a pas demande ». On le note, pour que le
+     reste de l'app sache qu'il peut afficher « il ne l'a pas » sans mentir. */
+  liste.forEach(function (s) {
+    s._boissonSue = s._boissonSue || {};
+    s._boissonSue[Number(did)] = true;
+  });
+}
+
+/* Le chemin allege de la carte. did != null : une boisson est ciblee. */
+window.fbZoneLegere = async function (lat, lng, radiusKm, did) {
+  var box = boundingBox(lat, lng, radiusKm);
+  var docs = await _restPages(
+    { from: [{ collectionId: "stores" }], where: { compositeFilter: { op: "AND", filters: _filtresBande(box.latMin, box.latMax) } } },
+    MAGO_CHAMPS_LEGER, 1000, 20);
   var out = [], vus = {};
   for (var i = 0; i < docs.length; i++) {
     var d = docs[i];
     var id = String(d.name || "").split("/").pop();
     if (!id || vus[id]) continue;
     vus[id] = 1;
-    var f = d.fields || {}, o = {};
-    for (var k = 0; k < MAGO_CHAMPS_PIN.length; k++) {
-      var nom = MAGO_CHAMPS_PIN[k];
-      if (f[nom] !== undefined) o[nom] = _valeurRest(f[nom]);
-    }
+    var o = _docRest(d);
     if (o.lat == null || o.lng == null) continue;
+    if (o.lng < box.lngMin || o.lng > box.lngMax) continue;
     var dist = haversineKm(lat, lng, o.lat, o.lng);
-    if (dist > radiusKm) continue;          // le geohash deborde : on tranche ici
+    if (dist > radiusKm) continue;            // la boite deborde le cercle : on tranche ici
     /* On ne SAIT PAS ce que ce magasin a en rayon : on ne l'a pas demande.
        Le drapeau le dit, pour qu'aucun code ne prenne un tableau vide pour
        « il n'a rien » — ce serait la carte qui ment. */
     o._pins = true;
     out.push(normalizeStore(o, id, dist));
   }
+  /* Le rayon d'enseigne se reconstruit ici GRATUITEMENT, a partir du seul nom
+     du magasin : c'est exactement ce que fait applyStores sur l'autre chemin.
+     L'essentiel du champ « drinks » qu'on vient de ne pas telecharger, c'est
+     ca — et on le retrouve sans un octet de reseau. */
+  try { fusionnerRayonEnseigne(out); } catch (e) { console.warn("rayon d'enseigne:", e); }
+  if (did != null) {
+    try { await _marquerBoisson(out, box, did); }
+    catch (e) { console.warn("marquage boisson indisponible:", e); }
+  }
   return out;
 };
-window.fbQueryZone = async function(lat, lng, radiusKm, pinsSeuls) {
-  if (pinsSeuls && MAGO_GEOHASH_READY) {
-    try {
-      var legers = await window.fbZonePins(lat, lng, radiusKm);
-      if (legers && legers.length) return legers;
-    } catch (e) { console.warn("pins allèges indisponibles, chemin complet:", e); }
-  }
+/* Fiche magasin ouverte depuis un pin allege : on va chercher le document
+   complet avant d'annoncer quoi que ce soit sur son rayon. Un « 0 boisson »
+   affiche parce qu'on n'a pas demande serait un mensonge. */
+window.fbMagasinComplet = async function (fbId) {
+  var r = await fetch(_urlRest("/stores/" + encodeURIComponent(String(fbId))));
+  if (!r.ok) throw new Error("REST " + r.status);
+  var d = await r.json();
+  if (!d || !d.fields) throw new Error("document vide");
+  return normalizeStore(_docRest(d), String(fbId), null);
+};
+/* Complete un magasin allege EN PLACE et rend true si quelque chose a change. */
+window.magasinCompleter = async function (s) {
+  if (!s || !s._pins || !window.fbMagasinComplet) return false;
+  var plein = await window.fbMagasinComplet(s.fbId || s.id);
+  var dist = s.dist;
+  Object.keys(plein).forEach(function (k) { s[k] = plein[k]; });
+  if (dist != null) s.dist = dist;
+  delete s._pins;
+  try { fusionnerRayonEnseigne([s]); } catch (e) {}
+  return true;
+};
+window.fbQueryZone = async function (lat, lng, radiusKm, did) {
+  try {
+    var legers = await window.fbZoneLegere(lat, lng, radiusKm, did);
+    if (legers && legers.length) return legers;
+  } catch (e) { console.warn("chemin allégé indisponible, chemin complet:", e); }
   return queryNearbyStores(lat, lng, radiusKm);
 };
 window.fbImportStores = async function(list, onProgress) {
@@ -13275,7 +13439,7 @@ function initLeafletMap(lat,lng){
 function populateClusterMarkers(cluster){
   cluster.clearLayers();
   if(!curSel)return[];
-  var stores=STORES.filter(function(s){return s.drinks&&s.drinks.some(function(d){return Number(d)===curSel.id;});});
+  var stores=STORES.filter(function(s){return magasinALaBoisson(s,curSel.id);});
   if(!stores.length&&window._nearbyFallback&&window._nearbyFallback[curSel.id]){
     stores=(STORES||[]).filter(function(s){return typeof s.lat==="number";})
       .slice().sort(function(a,b){return(a.dist||9e9)-(b.dist||9e9);}).slice(0,30);
@@ -13295,7 +13459,7 @@ function populateClusterMarkers(cluster){
     // ROUGE barre = elle n'y est PAS (signalee absente, ou magasin affiche en mode
     // "autour de moi" alors qu'il ne l'a pas — un Lidl a cote ne doit jamais
     // laisser croire qu'il a un Mountain Dew)
-    var hasDrink=curSel?(s.drinks||[]).some(function(d){return Number(d)===Number(curSel.id);}):true;
+    var hasDrink=curSel?magasinALaBoisson(s,curSel.id):true;
     var conf=curSel?((s.confirmations||{})[curSel.id]||0):0;
     var sure=curSel?magasinConfirmePour(s,curSel.id):false;
     var status=(!hasDrink||conf<0)?"no":(sure?"sure":"maybe");
@@ -15015,11 +15179,7 @@ function logDemand(drink, trouve){
 function renderStoreList(){
   if(!curSel)return;
   sanitizeAutoStores();
-  var allStores=STORES.filter(function(s){
-    // Support drinks comme tableau d'IDs (nombres ou strings)
-    if(!s.drinks||!s.drinks.length)return false;
-    return s.drinks.some(function(did){return Number(did)===curSel.id||did===curSel.id;});
-  });
+  var allStores=STORES.filter(function(s){return magasinALaBoisson(s,curSel.id);});
   // Rien trouvé dans le rayon courant : élargit la recherche Firestore (25km puis 50km) une seule fois par boisson
   if(allStores.length===0 && window.fbEnsureStoresForDrink && !(window._fbExpandedFor&&window._fbExpandedFor[curSel.id])){
     window._fbExpandedFor=window._fbExpandedFor||{};
@@ -15327,6 +15487,15 @@ function openBudgetFilterSheet(){
 function openStoreSheet(storeId){
   var s=STORES.find(function(x){return x.id===storeId||x.fbId===storeId;});
   if(!s)return;
+  /* Le rayon n'a pas ete telecharge (chemin allege de la carte) : on le
+     demande, et en attendant on ecrit « rayon en cours de lecture » au lieu
+     d'un « 0 boisson » qui serait faux. */
+  if(s._pins&&window.magasinCompleter){
+    window.magasinCompleter(s).then(function(){
+      var m=document.getElementById("map-sheet-modal");
+      if(m&&m.style.display!=="none")openStoreSheet(storeId);
+    }).catch(function(e){console.warn("rayon du magasin indisponible:",e);});
+  }
   var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):"";
   var drinkIds=(s.drinks||[]).map(Number);
   var drinkCount=DRINKS.filter(function(d){return drinkIds.indexOf(d.id)!==-1;}).length;
@@ -15341,7 +15510,7 @@ function openStoreSheet(storeId){
       '</div>'+
       '<span onclick="closeStoreSheet()" style="font-size:22px;cursor:pointer;flex-shrink:0" class="c3" role="button" tabindex="0" aria-label="Fermer" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();closeStoreSheet();}">✕</span>'+
     '</div>'+
-    '<div style="font-size:12.5px;color:var(--s2);margin-bottom:16px">'+drinkCount+' boisson'+(drinkCount>1?"s":"")+' référencée'+(drinkCount>1?"s":"")+' dans ce magasin</div>'+
+    '<div style="font-size:12.5px;color:var(--s2);margin-bottom:16px">'+(s._pins?tr("Lecture du rayon\u2026"):(drinkCount+' boisson'+(drinkCount>1?"s":"")+' référencée'+(drinkCount>1?"s":"")+' dans ce magasin'))+'</div>'+
     '<div style="display:flex;gap:10px">'+
       '<button onclick="openAddDrinksSheet()" style="flex:1;padding:12px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">Boissons</button>'+
       '<button onclick="showStoreOnMap('+s.lat+','+s.lng+')" style="flex:1;padding:12px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">Carte</button>'+
@@ -15392,6 +15561,16 @@ function openStoreDetail(storeId){
      gonflait son audience avec ses propres visites, et ce chiffre est celui
      qu'on lui montre comme valeur de l'app. */
   if(!estProprietaire(s))bumpStoreStat(s,"vues");
+  /* Magasin arrive par le chemin allege de la carte : on n'a JAMAIS demande son
+     rayon. Afficher la fiche telle quelle annoncerait « 0 boisson » a un
+     magasin a qui on n'a rien demande. On ouvre tout de suite (la fiche sert
+     aussi a l'adresse et aux horaires) et on va chercher le rayon en fond ;
+     renderStoreDetail() repeint des qu'il arrive. */
+  if(s._pins&&window.magasinCompleter){
+    window.magasinCompleter(s).then(function(){
+      if(curStoreDetail===s){try{_stripAutoDrinks(s);renderStoreDetail();}catch(e){}}
+    }).catch(function(e){console.warn("rayon du magasin indisponible:",e);});
+  }
   _stripAutoDrinks(s);
   // Ouvert depuis la carte Explorer : le "retour" doit REVENIR sur la carte, pas
   // sauter à l'accueil (l'écran sous l'overlay). On mémorise ce contexte et on
@@ -19585,15 +19764,18 @@ function exploreLoadStores(useCache){
      pas ce qu'ils ont en rayon. Les reutiliser des qu'une boisson est ciblee
      ferait repondre « il ne l'a pas » a chaque magasin, alors que la vraie
      reponse est « on ne le lui a pas demande ». On recharge pour de vrai. */
-  if(useCache&&exploreFilter&&window._exploreRawList&&window._exploreRawList.some(function(s){return s&&s._pins;}))useCache=false;
+  if(useCache&&exploreFilter&&window._exploreRawList&&window._exploreRawList.some(function(s){
+    return s&&s._pins&&!(s._boissonSue&&s._boissonSue[Number(exploreFilter.drinkId)]);
+  }))useCache=false;
   if(useCache&&window._exploreRawList){q=Promise.resolve(window._exploreRawList);}
   else{
     if(status)status.innerHTML=ondeHTML(3)+'<span style="margin-left:8px">'+tr("Chargement\u2026")+'</span>';
-    /* Aucune boisson ciblee : on ne demande PAS les assortiments. Mesure sur la
-       base : 8 845 Ko avec, 166 Ko sans, pour 253 magasins. C'est la difference
-       entre une carte qui s'ouvre et un telephone qui tue l'onglet. */
-    var _pinsSeuls=!exploreFilter;
-    q=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12),_pinsSeuls)):Promise.resolve(STORES||[]);
+    /* On ne demande JAMAIS les assortiments complets : 39 Mo sur Paris, contre
+       2,6 Mo pour les memes magasins sans eux. Quand une boisson est ciblee, on
+       la designe ici : fbZoneLegere demande alors separement QUI l'a, par une
+       requete qui ne rapporte que des identifiants de magasins. */
+    var _boissonCiblee=exploreFilter?exploreFilter.drinkId:null;
+    q=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12),_boissonCiblee)):Promise.resolve(STORES||[]);
   }
   q.then(function(list){
     if(_seq!==window._exploreSeq)return;      // un mouvement plus recent a pris la main
@@ -19626,7 +19808,7 @@ function exploreLoadStores(useCache){
       // ont vraiment la boisson : eux sont mis en avant, les autres restent
       // visibles en gris efface (l'utilisateur voit aussi ou essayer a cote).
       list.forEach(function(s){
-        s._hasDrink=(s.drinks||[]).some(function(id){return Number(id)===Number(_did);});
+        s._hasDrink=magasinALaBoisson(s,_did);
         if(s._hasDrink)withDrink++;
       });
       // Vendeurs (et ouverts) d'abord, contexte ensuite.
@@ -21833,7 +22015,24 @@ function openLabel(s){
   if(i.open===true)return sur?"Ouvert":"Sans doute ouvert";
   return sur?"Ferm\u00E9":"Sans doute ferm\u00E9";
 }
-function storeVerifiedFor(s,did){return !!(s&&s.drinksVerified&&s.drinksVerified.some(function(v){return Number(v)===Number(did);}));}
+/* « CE MAGASIN A-T-IL CETTE BOISSON ? » N'A QU'UNE REPONSE, ET C'EST ICI.
+   Depuis que la carte charge les magasins sans leur assortiment (voir
+   fbZoneLegere), un magasin peut savoir qu'il a la boisson ciblee SANS porter
+   le tableau drinks : la reponse est arrivee par une requete separee, qui ne
+   rapportait que des identifiants de magasins. Le drapeau _aBoisson porte
+   cette reponse-la. Tout code qui interrogeait drinks directement repondait
+   « il ne l'a pas » a un magasin a qui on n'avait rien demande. */
+function magasinALaBoisson(s,did){
+  if(!s||did==null)return false;
+  if(s._aBoisson&&s._aBoisson[Number(did)])return true;
+  return (s.drinks||[]).some(function(d){return Number(d)===Number(did);});
+}
+window.magasinALaBoisson=magasinALaBoisson;
+function storeVerifiedFor(s,did){
+  if(!s||did==null)return false;
+  if(s._rayonVerifie&&s._rayonVerifie[Number(did)])return true;
+  return !!(s.drinksVerified&&s.drinksVerified.some(function(v){return Number(v)===Number(did);}));
+}
 /* « EN STOCK » N'A QU'UN SENS, ET C'EST CELUI-CI.
    Le magasin a la boisson ET quelqu'un l'y a vue : rayon verifie, ou au moins
    une confirmation positive. Une boisson simplement RATTACHEE au magasin (un
@@ -21847,8 +22046,7 @@ function storeVerifiedFor(s,did){return !!(s&&s.drinksVerified&&s.drinksVerified
    promettait un stock qui n'avait jamais ete vu par personne. */
 function magasinConfirmePour(s,did){
   if(!s||did==null)return false;
-  var aLaBoisson=(s.drinks||[]).some(function(d){return Number(d)===Number(did);});
-  if(!aLaBoisson)return false;
+  if(!magasinALaBoisson(s,did))return false;
   var conf=Number((s.confirmations||{})[did]||0);
   return storeVerifiedFor(s,did)||conf>0;
 }
