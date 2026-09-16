@@ -4531,6 +4531,17 @@ window.fbWipeAllHunts = async function() {
    cherchent » restait faux, et la Cloud Function notifyHuntNearby, qui surveille
    cette carte, ne voyait jamais arriver un vrai chercheur. Trouve par le banc
    d'essai des regles, pas a la lecture. */
+/* ============================================================================
+   CETTE FONCTION MENTAIT PAR OMISSION
+   ----------------------------------------------------------------------------
+   Elle se terminait par « catch (e) { console.warn } » : TOUTE panne etait
+   avalee. Regles pas deployees, hors ligne, quota depasse, document refuse —
+   dans chaque cas l'app affichait quand meme « chasse lancee pres de toi », et
+   la personne repartait convaincue que ca marchait. C'est la pire facon
+   d'echouer, et c'est celle qui a coute le plus de temps ici : impossible de
+   distinguer « personne n'a repondu » de « rien n'est jamais parti ».
+
+   Elle rend desormais un resultat. Celui qui l'appelle DOIT le lire. */
 window.fbJoinHunt = async function(drinkId, drinkName, emoji, lat, lng) {
   try {
     window._huntsCache = null;
@@ -4563,7 +4574,23 @@ window.fbJoinHunt = async function(drinkId, drinkName, emoji, lat, lng) {
         }, commun));
       }
     }
-  } catch (e) { console.warn("join hunt:", e); }
+    /* On relit ce qui est REELLEMENT en base : c'est la seule preuve que
+       l'ecriture a pris, et ca donne le nombre de chercheurs a annoncer. */
+    var verif = null;
+    try { verif = await getDoc(ref); } catch (e0) {}
+    var inscrit = !!(verif && verif.exists() && (verif.data().seekers || {})[user.uid]);
+    var total = 0;
+    if (verif && verif.exists()) {
+      var sk = verif.data().seekers || {};
+      Object.keys(sk).forEach(function(u) { if (sk[u]) total++; });
+    }
+    return { ok: inscrit, chercheurs: total, position: pos.lat != null,
+             reason: inscrit ? null : "non-inscrit" };
+  } catch (e) {
+    console.warn("join hunt:", e);
+    return { ok: false, reason: _msgErreur(e).reason,
+             detail: String((e && (e.code || e.message)) || e).slice(0, 140) };
+  }
 };
 window.fbLeaveHunt = async function(drinkId) {
   try {
@@ -14333,9 +14360,30 @@ function lancerChasse(d){
     });}catch(e){}
     drinkWatches.push({id:d.id,name:d.name,emoji:d.emoji,lat:userLat||null,lng:userLng||null,created:Date.now(),triggered:false});
     playSound("pop");
-    toast("Alerte activ\u00e9e \u00B7 rayon "+(Number(window.magoHuntRadius)||10)+" km \u00B7 chasse lanc\u00e9e pr\u00E8s de toi");
-    // Chasse de zone : les gens autour verront que cette boisson est recherch\u00e9e
-    if(window.fbJoinHunt)window.fbJoinHunt(d.id,d.name,d.emoji,userLat,userLng);
+    /* ON N'ANNONCE PLUS UNE CHASSE AVANT DE SAVOIR SI ELLE EST PARTIE.
+       Le message s'affichait AVANT l'ecriture, et quelle qu'en soit l'issue. On
+       dit d'abord ce qui est sur — l'alerte est posee sur CE telephone — puis la
+       verite sur la chasse des qu'on la connait. */
+    toast(trh("Alerte activ\u00e9e \u00b7 zone de {n} km",{n:(Number(window.magoHuntRadius)||10)}));
+    if(window.fbJoinHunt){
+      window.fbJoinHunt(d.id,d.name,d.emoji,userLat,userLng).then(function(r){
+        if(!r||!r.ok){
+          /* Echouer en silence etait le defaut le plus couteux de cette app :
+             impossible de distinguer « personne n'a repondu » de « rien n'est
+             jamais parti ». On le dit, et on garde le motif sous la main. */
+          try{playSound("err");}catch(e){}
+          toast(tr("La chasse n'est pas partie \u2014 v\u00e9rifie ta connexion, puis relance-la"));
+          window._chasseEchec={id:d.id,reason:(r&&r.reason)||"?",detail:(r&&r.detail)||"",at:Date.now()};
+          return;
+        }
+        window._chasseEchec=null;
+        var n=Number(r.chercheurs)||1;
+        toast(n>1?trh("Chasse lanc\u00e9e \u00b7 vous \u00eates {n} \u00e0 la chercher",{n:n})
+                 :tr("Chasse lanc\u00e9e \u00b7 tu es le premier \u00e0 la chercher"));
+        if(!r.position)toast(tr("Position pas encore connue \u2014 on pr\u00e9viendra les gens d\u00e8s que le GPS r\u00e9pond"));
+        try{renderChasse();}catch(e){}
+      }).catch(function(){});
+    }
     /* Le bouton flottant etait masque ? Lancer une chasse le reaffiche : c'est
        lui qui porte le compteur des chasses actives, le laisser cache rendrait
        invisible la chasse qu'on vient de lancer. Ici et seulement ici — sur le
@@ -15053,7 +15101,23 @@ function checkWatches(){
       });
     }
   });
-  if(fired){saveWatches();try{renderAlertsCard();}catch(e){}}
+  if(fired){
+    saveWatches();
+    try{renderAlertsCard();}catch(e){}
+    /* LA CARTE DISAIT ENCORE « 0 MAGASIN » PENDANT QUE L'ALERTE ANNONCAIT
+       « signalee chez Librairie Fransman (727 m) ».
+       Les deux lisaient deux sources differentes : l'alerte regarde STORES
+       (a jour), l'en-tete de la carte compte la liste que la carte a chargee
+       (parfois plus ancienne). Sur le meme ecran, une annonce et son dementi.
+       Une alerte qui se declenche est exactement le moment ou la carte doit
+       relire : on la force. */
+    try{ window._huntsCache=null; }catch(e){}
+    try{
+      var _h=document.getElementById("explore-map-host");
+      if(_h&&_h.style.display!=="none"&&typeof exploreLoadStores==="function")exploreLoadStores();
+    }catch(e){}
+    try{ renderChasse(); }catch(e){}
+  }
   try{_rappelsIndications();}catch(e){}
 }
 /* Depuis la notif de veille : ouvrir la fiche du magasin (position + rayon complet).
@@ -19497,7 +19561,16 @@ function exploreSetHeader(shown,sure){
       ? "Carte indisponible \u2014 la liste reste accessible"
       : ((shown==null)
         ? "Recherche des magasins\u2026"
-        : (shown+" magasin"+(shown>1?"s":"")+(typeof sure==="number"?" · "+sure+" en stock":"")+" · voir la fiche"));
+        /* « 8 magasins · 0 en stock » se lisait comme une contradiction : rien
+           ne disait que le premier chiffre compte les magasins qui la
+           REFERENCENT, et le second ceux ou quelqu'un l'a VUE recemment. On
+           l'ecrit en toutes lettres, et quand aucune n'est confirmee on le dit
+           franchement plutot que d'aligner un « 0 » sibyllin. */
+        : (sure===0&&shown>0
+             ? trh("{n} magasin(s) la r\u00e9f\u00e9rencent \u00b7 aucune vue en rayon",{n:shown})
+             : (shown+" magasin"+(shown>1?"s":"")
+                +(typeof sure==="number"?" \u00b7 "+sure+" vue"+(sure>1?"s":"")+" en rayon":"")
+                +" \u00b7 voir la fiche")));
     if(thumb){thumb.style.display="flex";try{if(curSel)thumb.innerHTML=drinkIconHTML(curSel);}catch(e){}
       /* Tap sur la vignette = la photo, tout de suite. Le reste de la barre
          continue d'ouvrir la fiche. Sans photo en cache, on laisse le tap
@@ -20485,11 +20558,18 @@ function exploreLoadStores(useCache){
        qui mentait. On recompte donc ici, sur la liste filtree. */
     if(exploreFilter){
       var _did2=exploreFilter.drinkId;
+      /* ON NE COMPTE QUE CE QU'ON PEUT MONTRER.
+         L'en-tete annoncait « 8 magasins » pendant que la liste en affichait 7 :
+         la liste ecarte les magasins sans coordonnees (elle ne peut pas les
+         placer), pas ce compteur. Deux chiffres contradictoires sur le meme
+         ecran, et aucun moyen de savoir lequel croire. Un magasin qu'on est
+         incapable de situer n'est une reponse pour personne. */
+      var _placable=function(s){return typeof s.lat==="number"&&isFinite(s.lat);};
       withDrink=list.filter(function(s){
-        return s._hasDrink||(s.drinks||[]).some(function(id){return Number(id)===Number(_did2);});
+        return _placable(s)&&(s._hasDrink||(s.drinks||[]).some(function(id){return Number(id)===Number(_did2);}));
       }).length;
       _sureCount=list.filter(function(s){
-        return storeVerifiedFor(s,_did2)||((s.confirmations||{})[_did2]||0)>0;
+        return _placable(s)&&(storeVerifiedFor(s,_did2)||((s.confirmations||{})[_did2]||0)>0);
       }).length;
     }
     /* ── Ce qu'on compte doit etre ce qu'on voit ──────────────────────────
