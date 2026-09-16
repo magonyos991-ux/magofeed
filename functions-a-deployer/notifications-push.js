@@ -18,7 +18,12 @@
 const { onDocumentUpdated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { initializeApp, getApps } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
+/* FieldValue vient d'etre ajoute a cet import : le journal des chasses s'en
+   sert pour dater ses lignes. Sans lui, chaque ecriture levait une
+   ReferenceError — avalee par le try/catch qui protege le journal, donc
+   parfaitement muette. Un journal qui n'ecrit rien et ne le dit pas est pire
+   que pas de journal du tout. */
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 
 if (!getApps().length) initializeApp();
@@ -169,9 +174,13 @@ exports.notifyHuntNearby = onDocumentWritten(
          desormais des que le GPS repond — ce qui repasse ici avec un centre. */
       try {
         await db.collection("alertesAdmin").add({
-          type: "hunt", etat: "sans-position", at: Date.now(),
-          drinkId: String(after.drinkId != null ? after.drinkId : event.params.drinkId),
-          drinkName: String(after.drinkName || ""), lanceur: String(newSeekers[0] || "")
+          titre: "Chasse \u00ab " + String(after.drinkName || "?").slice(0, 40) + " \u00bb : rien envoy\u00e9",
+          corps: "La chasse a \u00e9t\u00e9 lanc\u00e9e sans position (GPS pas encore pr\u00eat). "
+               + "Sans centre, on ne sait pas qui pr\u00e9venir. L'app la repositionne d\u00e8s que le GPS r\u00e9pond.",
+          at: FieldValue.serverTimestamp(),
+          pousseesEnvoyees: 0, jetonsTrouves: 0, courrielEnvoye: false,
+          type: "hunt",
+          drinkId: String(after.drinkId != null ? after.drinkId : event.params.drinkId)
         });
       } catch (e) {}
       return;
@@ -210,13 +219,23 @@ exports.notifyHuntNearby = onDocumentWritten(
        ET SURTOUT : chaque sortie laisse desormais une ligne dans le journal.
        « Aucune notification » et « je ne sais pas pourquoi » etaient jusqu'ici
        la meme chose. */
-    const _tracer = async function (etat, extra) {
+    /* LE JOURNAL A DEJA UN FORMAT, ET L'ECRAN QUI LE LIT L'ATTEND.
+       Ecrire des champs a moi aurait affiche une ligne sans titre, marquee
+       « aucun appareil enregistre » — un journal qui ment est pire que pas de
+       journal. On ecrit donc titre/corps/pousseesEnvoyees/jetonsTrouves comme
+       outils-admin, et la RAISON va dans le corps, en francais. */
+    const _tracer = async function (titre, corps, jetons, poussees) {
       try {
-        await db.collection("alertesAdmin").add(Object.assign({
-          type: "hunt", etat: etat, at: now,
-          drinkId: String(after.drinkId != null ? after.drinkId : event.params.drinkId),
-          drinkName: name, lanceur: String(lanceur || "")
-        }, extra || {}));
+        await db.collection("alertesAdmin").add({
+          titre: String(titre).slice(0, 120),
+          corps: String(corps).slice(0, 400),
+          at: FieldValue.serverTimestamp(),
+          pousseesEnvoyees: Number(poussees) || 0,
+          jetonsTrouves: Number(jetons) || 0,
+          courrielEnvoye: false,
+          type: "hunt",
+          drinkId: String(after.drinkId != null ? after.drinkId : event.params.drinkId)
+        });
       } catch (e) { /* le journal ne doit jamais faire echouer l'envoi */ }
     };
     const verrous = [
@@ -229,7 +248,14 @@ exports.notifyHuntNearby = onDocumentWritten(
       const snap = await v.ref.get();
       const at = (snap.exists && Number(snap.data().at)) || 0;
       if (now - at < v.ms) {
-        await _tracer("verrou", { verrou: v.nom, resteMin: Math.ceil((v.ms - (now - at)) / 60000) });
+        const reste = Math.ceil((v.ms - (now - at)) / 60000);
+        await _tracer(
+          "Chasse \u00ab " + name + " \u00bb : rien envoy\u00e9",
+          "Verrou anti-spam par " + v.nom + " : encore " + reste + " min. "
+          + (v.nom === "boisson"
+             ? "Quelqu'un a d\u00e9j\u00e0 lanc\u00e9 une vague pour cette boisson r\u00e9cemment."
+             : "Ce compte a d\u00e9j\u00e0 d\u00e9clench\u00e9 une vague r\u00e9cemment. Essaie depuis l'autre t\u00e9l\u00e9phone, ou attends."),
+          0, 0);
         return;
       }
     }
@@ -258,8 +284,14 @@ exports.notifyHuntNearby = onDocumentWritten(
       try { await getMessaging().sendEach(msgs.slice(i, i + 500)); } catch (e) { console.warn("hunt push batch:", e && e.message); }
     }
     console.log("Chasse « " + name + " » : " + msgs.length + " notifiés.");
-    await _tracer("envoye", { jetonsLus: tokensSnap.size, envoyes: msgs.length,
-      centre: { lat: center.lat, lng: center.lng } });
+    await _tracer(
+      "Chasse \u00ab " + name + " \u00bb",
+      msgs.length
+        ? (msgs.length + " personne(s) pr\u00e9venue(s) autour de " + center.lat + ", " + center.lng
+           + " \u00b7 " + tokensSnap.size + " appareil(s) enregistr\u00e9(s) au total.")
+        : ("Aucun appareil \u00e0 moins de 15 km du centre (" + center.lat + ", " + center.lng + "). "
+           + tokensSnap.size + " appareil(s) enregistr\u00e9(s) au total, tous trop loin ou d\u00e9j\u00e0 chasseurs."),
+      tokensSnap.size, msgs.length);
   }
 );
 
