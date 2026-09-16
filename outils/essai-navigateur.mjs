@@ -281,6 +281,53 @@ const r = await page.evaluate(async () => {
     window.STORES = sauveS;
   }
 
+  /* ── 9 bis. Les independants ont un rayon probable, jamais un stock ── */
+  {
+    const coca = DRINKS.find((d) => /coca-cola/i.test(d.brand || "") && !d.imp);
+    const dew = DRINKS.find((d) => /mountain dew/i.test(d.brand || "") && /original/i.test(d.name || ""));
+    dit("le catalogue a bien un Coca et un Mountain Dew Original", !!coca && !!dew);
+
+    const nuit = { id: "N1", name: "Night-Shop Flagey", brand: "", type: "", drinks: [], confirmations: {} };
+    const boul = { id: "N2", name: "Boulangerie Paul", brand: "", type: "boulangerie", drinks: [], confirmations: {} };
+    const muet = { id: "N3", name: "Chez M.", brand: "", type: "", drinks: [], confirmations: {} };
+    const usa  = { id: "N4", name: "Randy American Market", brand: "", type: "", drinks: [], confirmations: {} };
+
+    dit("un night shop est une piste pour le Coca", magasinALaBoisson(nuit, coca.id));
+    dit("une epicerie americaine est une piste pour le Mountain Dew", magasinALaBoisson(usa, dew.id));
+    dit("une boulangerie ne promet rien", !magasinALaBoisson(boul, coca.id));
+    dit("un magasin dont on ne sait rien ne promet rien", !magasinALaBoisson(muet, coca.id));
+
+    /* LE POINT CRITIQUE. Un rayon probable ne doit JAMAIS devenir un stock :
+       sinon la carte promet une boisson que personne n'a vue. */
+    dit("mais une piste n'est PAS un stock", !magasinConfirmePour(nuit, coca.id));
+    dit("ni pour l'epicerie americaine", !magasinConfirmePour(usa, dew.id));
+    nuit.confirmations = {}; nuit.confirmations[coca.id] = 1;
+    dit("il faut qu'un humain l'ait vue", magasinConfirmePour(nuit, coca.id));
+
+    /* Le rayon probable ne doit pas etre recopie dans chaque magasin : c'est
+       ce qui coutait 7,2 Mo de memoire sur la seule bande parisienne.
+       Des objets NEUFS : ceux du dessus ont deja ete etiquetes par les
+       appels precedents, et une deuxieme etiquette ne recopie plus rien —
+       on ne verrait donc pas la recopie si elle revenait. */
+    const neufs = [
+      { id: "M1", name: "Night-Shop Flagey", brand: "", type: "", drinks: [], confirmations: {} },
+      { id: "M2", name: "Randy American Market", brand: "", type: "", drinks: [], confirmations: {} },
+      { id: "M3", name: "Carrefour Market", brand: "Carrefour", type: "", drinks: [], confirmations: {} },
+    ];
+    neufs.forEach((x) => window.rayonProbableCle(x));
+    dit("etiqueter un magasin ne lui recopie aucune boisson",
+        neufs.every((x) => x.drinks.length === 0));
+    dit("mais l'etiquette est bien posee",
+        neufs[0]._cleRayon === "t:nightshop" && neufs[1]._cleRayon === "t:americain" && neufs[2]._cleRayon.indexOf("e:Carrefour") === 0);
+    dit("et rien n'est pose sur ce qu'on ne connait pas", muet._cleRayon === "" && boul._cleRayon === "");
+
+    /* Ouvrir une fiche, la, il faut bien lister le rayon. */
+    window.rayonAppliquer(usa);
+    dit("ouvrir une fiche materialise le rayon de CE magasin", usa.drinks.length > 100);
+    dit("et le Mountain Dew y figure", usa.drinks.indexOf(dew.id) !== -1);
+    dit("cela ne cree toujours pas de stock", !magasinConfirmePour(usa, dew.id));
+  }
+
   /* ── 9. Le chinois : atteignable, et il change vraiment l'ecran ─────── */
   dit("le chinois est propose", Object.keys(LANGS).indexOf("zh") !== -1);
   setLang("fr"); await pause(700);

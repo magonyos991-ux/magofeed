@@ -2174,20 +2174,19 @@ function slimStores(stores) {
    mise a jour du catalogue est visible au rechargement suivant.
    Les confirmations de la communaute ne sont pas touchees : elles vivent dans
    confirmations/drinksVerified, et ce sont elles qui font foi. */
+/* Rayon PROBABLE d'un magasin : celui de son enseigne s'il en a une, sinon
+   celui de son type de commerce (night shop, epicerie americaine, superette...).
+   Le nom de la fonction reste historique ; elle couvre desormais les 25 936
+   independants, pas seulement les 8 201 magasins d'enseigne. */
 function rayonEnseigne(s) {
-  if (typeof window.chainIdsForStore !== "function") return null;
-  try { return window.chainIdsForStore(s.name, s.brand); } catch (e) { return null; }
+  if (typeof window.rayonProbableForStore !== "function") return null;
+  try { return window.rayonProbableForStore(s.name, s.brand, s.type); } catch (e) { return null; }
 }
+/* Ne recopie plus rien : etiquette chaque magasin avec le rayon probable qui
+   le concerne (voir rayonProbableCle). Le nom reste, les appelants aussi. */
 function fusionnerRayonEnseigne(stores) {
-  (stores || []).forEach(function(s) {
-    var r = rayonEnseigne(s);
-    if (!r || !r.ids || !r.ids.length) return;
-    var vus = {};
-    (s.drinks || []).forEach(function(id) { vus[Number(id)] = 1; });
-    var out = (s.drinks || []).slice();
-    r.ids.forEach(function(id) { if (!vus[Number(id)]) { vus[Number(id)] = 1; out.push(Number(id)); } });
-    s.drinks = out;
-  });
+  if (typeof window.rayonProbableCle !== "function") return stores;
+  (stores || []).forEach(function(s) { try { window.rayonProbableCle(s); } catch (e) {} });
   return stores;
 }
 function applyStores(stores, banner, fromCache) {
@@ -11436,7 +11435,12 @@ function donRetour(){
    et engage. Cible déterministe sur la journée (stable), stockée en local. */
 function pickMissionDrink(){
   var have={};
-  (window.STORES||[]).forEach(function(s){(s.drinks||[]).forEach(function(id){have[Number(id)]=1;});});
+  (window.STORES||[]).forEach(function(s){
+    (s.drinks||[]).forEach(function(id){have[Number(id)]=1;});
+    /* Sans ca, une boisson presente dans le rayon probable d'un magasin d'a
+       cote passait pour « introuvable » et devenait la mission du jour. */
+    try{ (window.rayonProbableIds?window.rayonProbableIds(s):[]).forEach(function(id){have[Number(id)]=1;}); }catch(e){}
+  });
   var cands=DRINKS.filter(function(d){return !have[Number(d.id)]&&!(typeof nameLooksAlcoholic==="function"&&nameLooksAlcoholic(d.name,d.brand));});
   if(!cands.length)cands=DRINKS.slice();
   var day=_dailyKey(),h=0;
@@ -13235,6 +13239,154 @@ function chainIdsForStore(name,brand){
   return r;
 }
 window.chainIdsForStore=chainIdsForStore;
+/* ============================================================================
+   LES INDEPENDANTS AUSSI ONT UN RAYON PROBABLE
+   ----------------------------------------------------------------------------
+   Mesure sur la base, 16 septembre 2026 : 34 137 magasins, dont 8 201 portent
+   une enseigne reconnue et 25 936 sont des independants — night shops,
+   epiceries, superettes. Les enseignes recevaient un rayon probable
+   (buildChainSets, fusionne a la lecture) ; les independants ne recevaient
+   RIEN. Chercher une boisson n'allumait donc jamais l'epicerie d'en face,
+   meme quand elle l'avait a coup sur.
+
+   Ici on fait pour eux exactement ce qu'on fait pour les enseignes, ni plus ni
+   moins : un rayon PROBABLE, fusionne a la lecture, jamais ecrit dans la base,
+   et qui ne vaut JAMAIS « en stock » — il faut toujours qu'un humain confirme
+   (voir magasinConfirmePour). Un pin gris qui dit « essaie ici » n'est pas un
+   mensonge ; un pin vert qui dit « il l'a » sans que personne n'y soit alle en
+   est un.
+
+   D'OU VIENNENT CES LISTES. Pas de moi : de M4_CATS, la table deja etablie
+   par la mission epiceries specialisees de Bruxelles, et de PACK_BRANDS, les
+   marques qu'on trouve vraiment partout. On ne les applique qu'a l'import ;
+   desormais on les applique aussi a la lecture, aux 25 936 magasins deja en
+   base qui n'en avaient jamais profite.
+
+   CE QU'ON NE FAIT PAS. 19 416 magasins ne portent ni type ni nom
+   reconnaissable : on ne sait pas ce qu'ils vendent, et on ne leur met rien.
+   Les boulangeries, glaciers, magasins bio et maisons de la presse non plus :
+   leur rayon boissons n'est pas previsible. Mieux vaut un magasin muet qu'un
+   magasin qui raconte. */
+var TYPE_MOTS=[
+  /* Les bornes de mot ne sont pas une coquetterie : sans elles, « Podlasiak »
+     (une epicerie polonaise) etait classee asiatique parce que son nom
+     contient « asia », et « La Machine » contenait « chine ». */
+  /* Ni « bonbon » ni « confiserie » : une confiserie belge n'est pas une
+     epicerie americaine. Les vraies (La Bonbonniere a Paris) portent deja le
+     type « epicerie americain » et sont reconnues par la. */
+  ["americain",/\b(candy|american|americain|sweets?|usa|us shop)/],
+  ["asiatique",/\b(asia|asiat|chin(a|e|ois)|jap(on|an)|nippon|korea|coree|viet|thai|oriental market|k-?mart)/],
+  ["turc",/\b(turk|turc|istanbul|anatol|ankara|bosphor)/],
+  ["maghrebin",/\b(maroc|alger|tunis|orient(al)?\b|halal|souk|maghreb)/],
+  ["africain",/\b(afric|afro|matonge|exotic|exotique)/],
+  ["latino",/\b(latino|latin\b|mex(ic|ique)|colombi|bresil|brasil)/],
+  ["nightshop",/night\s*-?\s*shop/],
+  ["general",/\b(epicerie|alimentation|superette|supermarche|supermarkt|mini\s*-?\s*market|convenience|buurtwinkel|kruidenier|grocer)/],
+  ["station",/station[-\s]service|tankstation|\bessence\b/]
+];
+/* Ces commerces-la existent et vendent parfois des boissons, mais leur rayon
+   n'est pas previsible : on ne leur invente pas d'assortiment. */
+var TYPE_EXCLUS=/boulanger|patisser|bakker|bakery|\bpain\b|glacier|fleur|pharmac|librairie|presse|tabac|\bbio\b|biocoop|naturalia|organic|\bvrac\b|traiteur|restaurant|friterie/;
+function typeDeCommerce(name,brand,type){
+  var t=normTxt((type||"")+" "+(brand||"")+" "+(name||""));
+  if(!t.trim())return "";
+  if(TYPE_EXCLUS.test(t))return "";
+  for(var i=0;i<TYPE_MOTS.length;i++)if(TYPE_MOTS[i][1].test(t))return TYPE_MOTS[i][0];
+  return "";
+}
+var _typeSets=null;
+function buildTypeSets(){
+  if(_typeSets)return _typeSets;
+  var pack=packDrinkIds();
+  function cat(k){return brandIds(M4_CATS[k]||[]);}
+  _typeSets={
+    general:pack,
+    station:pack,
+    /* Un night shop belge, c'est le socle plus les energisantes et les sodas
+       d'import qu'on y voit partout (Nalu et AA Drink sont des marques du
+       Benelux, pas une supposition). */
+    nightshop:pack.concat(brandIds(["nalu","aa drink","arizona","dr pepper","vimto"])),
+    americain:pack.concat(cat("americain")),
+    asiatique:pack.concat(cat("asiatique")),
+    turc:pack.concat(cat("turc")),
+    maghrebin:pack.concat(cat("maghrebin")),
+    africain:pack.concat(cat("africain")),
+    latino:pack.concat(cat("latino"))
+  };
+  Object.keys(_typeSets).forEach(function(k){
+    _typeSets[k]=_typeSets[k].filter(function(v,i,a){return a.indexOf(v)===i;});
+  });
+  return _typeSets;
+}
+function rayonTypeForStore(name,brand,type){
+  var k=typeDeCommerce(name,brand,type);
+  if(!k)return null;
+  var ids=buildTypeSets()[k];
+  if(!ids||!ids.length)return null;
+  return {ids:ids,key:k,parType:true};
+}
+window.rayonTypeForStore=rayonTypeForStore;
+window.typeDeCommerce=typeDeCommerce;
+/* LE SEUL POINT D'ENTREE. L'enseigne d'abord (sa liste est plus precise), le
+   type de commerce ensuite, rien sinon. */
+window.rayonProbableForStore=function(name,brand,type){
+  return chainIdsForStore(name,brand)||rayonTypeForStore(name,brand,type);
+};
+/* ----------------------------------------------------------------------------
+   ON NE RECOPIE PAS 500 IDENTIFIANTS DANS CHAQUE MAGASIN.
+   Mesure : fusionner le rayon probable dans le champ drinks de la bande
+   parisienne materialisait 785 702 identifiants et coutait 7,2 Mo de memoire
+   vive. C'est exactement la faute qu'on vient de corriger sur le
+   telechargement, refaite dans la memoire — et c'est la memoire qui fait
+   « l'app se relance toute seule » sur iPhone.
+
+   Il n'y a que vingt-deux rayons possibles (treize enseignes, neuf types de
+   commerce). On garde donc VINGT-DEUX ensembles, et chaque magasin ne porte
+   qu'une petite chaine qui dit lequel le concerne. Repondre « ce magasin
+   a-t-il cette boisson ? » devient une lecture directe, sans copie.
+
+   rayonAppliquer() recopie vraiment les identifiants, mais sur UN magasin a la
+   fois, quand on ouvre sa fiche : la ou il faut bien lister le rayon.
+   ---------------------------------------------------------------------------- */
+var _setsRayon={};
+window.rayonProbableCle=function(s){
+  if(!s)return "";
+  if(s._cleRayon!==undefined)return s._cleRayon;
+  var r=null;
+  try{ r=window.rayonProbableForStore(s.name,s.brand,s.type); }catch(e){ r=null; }
+  var cle=r&&r.ids&&r.ids.length?((r.parType?"t:":"e:")+r.key+(r.petit?":p":"")):"";
+  if(cle&&!_setsRayon[cle]){
+    var S={};
+    for(var i=0;i<r.ids.length;i++)S[Number(r.ids[i])]=1;
+    _setsRayon[cle]=S;
+  }
+  s._cleRayon=cle;
+  return cle;
+};
+window.rayonProbableContient=function(s,did){
+  var c=window.rayonProbableCle(s);
+  return !!(c&&_setsRayon[c]&&_setsRayon[c][Number(did)]);
+};
+window.rayonProbableIds=function(s){
+  var c=window.rayonProbableCle(s);
+  if(!c||!_setsRayon[c])return [];
+  var out=[];
+  for(var k in _setsRayon[c])out.push(Number(k));
+  return out;
+};
+window.rayonAppliquer=function(s){
+  if(!s||s._rayonApplique)return s;
+  var ids=window.rayonProbableIds(s);
+  if(ids.length){
+    var vus={};
+    (s.drinks||[]).forEach(function(x){vus[Number(x)]=1;});
+    var out=(s.drinks||[]).slice();
+    ids.forEach(function(id){ if(!vus[id]){vus[id]=1;out.push(id);} });
+    s.drinks=out;
+  }
+  s._rayonApplique=true;
+  return s;
+};
 function adminFillEnseignes(){
   if(!isAdmin)return;
   var sets=buildChainSets();
@@ -14907,7 +15059,12 @@ function storeLikelihood(s,d){
   var isImport=SHOP_IMPORT_KW.test(txt),isBig=SHOP_BIG_KW.test(txt),score=0;
   if(drinkIsNiche(d)){ score+=isImport?50:0; score+=isBig?8:6; }
   else { score+=isBig?30:0; score+=isImport?14:4; }
-  score+=Math.min((s.drinks||[]).length,20);
+  /* Le rayon n'est plus recopie dans chaque magasin : un magasin d'enseigne
+     comptait 500 boissons et plafonnait a 20, il en compte zero aujourd'hui.
+     On lit donc l'etiquette plutot que la longueur du tableau. */
+  var _aUnRayon=false;
+  try{ _aUnRayon=!!(window.rayonProbableCle&&window.rayonProbableCle(s)); }catch(e){}
+  score+=Math.min((s.drinks||[]).length+(_aUnRayon?20:0),20);
   if(typeof s.dist==="number")score+=Math.max(0,20-s.dist/500);
   return score;
 }
@@ -15665,6 +15822,7 @@ function openStoreSheet(storeId){
       if(m&&m.style.display!=="none")openStoreSheet(storeId);
     }).catch(function(e){console.warn("rayon du magasin indisponible:",e);});
   }
+  try{ if(window.rayonAppliquer)window.rayonAppliquer(s); }catch(eR){}
   var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):"";
   var drinkIds=(s.drinks||[]).map(Number);
   var drinkCount=DRINKS.filter(function(d){return drinkIds.indexOf(d.id)!==-1;}).length;
@@ -16259,6 +16417,10 @@ function renderStoreDetail(){
   try{renderStoreMission();}catch(e){}
   try{renderMerchantCard(s);}catch(e){}
 
+  /* Ici, et seulement ici, on recopie le rayon probable dans CE magasin : une
+     fiche doit lister ce qu'on s'attend a y trouver. Un magasin a la fois,
+     pas les quatre mille de la carte. */
+  try{ if(window.rayonAppliquer)window.rayonAppliquer(s); }catch(eR){}
   var drinkIds=(s.drinks||[]).map(Number);
   var allDrinks=DRINKS.filter(function(d){return drinkIds.indexOf(d.id)!==-1;});
   renderStoreDetailCats(allDrinks);
@@ -16698,6 +16860,7 @@ function renderStoreAudience(s){
 function renderMerchantBoard(s){
   var host=merchantBoardHost(); if(!host||!s)return;
   host.innerHTML='<div class="mb-card"><div class="mb-load">'+magoLoader(true,"Lecture de la demande du quartier…")+'</div></div>';
+  try{ if(window.rayonAppliquer)window.rayonAppliquer(s); }catch(eR){}
   var rayon=(s.drinks||[]).map(Number);
   var lat=(typeof s.lat==="number")?s.lat:userLat;
   var lng=(typeof s.lng==="number")?s.lng:userLng;
@@ -22204,7 +22367,10 @@ function openLabel(s){
 function magasinALaBoisson(s,did){
   if(!s||did==null)return false;
   if(s._aBoisson&&s._aBoisson[Number(did)])return true;
-  return (s.drinks||[]).some(function(d){return Number(d)===Number(did);});
+  if((s.drinks||[]).some(function(d){return Number(d)===Number(did);}))return true;
+  /* Rayon PROBABLE de l'enseigne ou du type de commerce. C'est une piste, pas
+     un stock : magasinConfirmePour exige toujours qu'un humain l'ait vue. */
+  return typeof window.rayonProbableContient==="function"&&window.rayonProbableContient(s,did);
 }
 window.magasinALaBoisson=magasinALaBoisson;
 function storeVerifiedFor(s,did){
