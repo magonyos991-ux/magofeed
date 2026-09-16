@@ -49,6 +49,23 @@ const statiques = [];
     !/pinsSeuls && MAGO_GEOHASH_READY/.test(src)]);
   statiques.push(["un magasin allege est complete avant d'annoncer son rayon",
     /window\.magasinCompleter/.test(src) && /window\.fbMagasinComplet/.test(src)]);
+  /* Le journal du scanner est ecrit AVANT de savoir ce qu'est le produit :
+     sinon un code inconnu qu'on ne nomme pas ne laisse aucune trace. */
+  statiques.push(["un code inconnu est journalise des le scan",
+    /recordScan\(code,"Produit "\+code,"","","inconnu"\)/.test(src)]);
+  statiques.push(["le raccourci catalogue est sous le resultat, pas sous le bouton",
+    /res\.appendChild\(lnk\)/.test(src) && !/btn\.parentNode\.insertBefore\(lnk,/.test(src)]);
+  /* On vise l'APPEL dans addDiscovery, pas la definition : « function
+     sauverDecouvertes(){ } » contient deja « sauverDecouvertes() », donc un
+     motif nu passait meme quand plus personne n'appelait la fonction. */
+  statiques.push(["une trouvaille personnelle est rangee a chaque ajout",
+    /bumpStreak\(\);\s*sauverDecouvertes\(\);/.test(src)
+    && /idbGet\("discoveries:mine"/.test(src)
+    && /idbSet\("discoveries:mine"/.test(src)]);
+  statiques.push(["la synchronisation serveur ne remplace plus les trouvailles",
+    /DISCOVERIES=fusionnerDecouvertes\(e\.detail\)/.test(src)]);
+  statiques.push(["le dedoublonnage a l'import regarde le champ osmId",
+    /String\(existant\.osmId\|\|""\)===numero/.test(src)]);
 }
 
 const srv = createServer(async (q, r) => {
@@ -279,6 +296,86 @@ const r = await page.evaluate(async () => {
     dit("la fiche d'un magasin allege n'annonce pas 0 boisson", txt.indexOf("0 boisson") === -1);
     try { closeStoreSheet(); } catch (e) {}
     window.STORES = sauveS;
+  }
+
+  /* ── 9 bis. Les independants ont un rayon probable, jamais un stock ── */
+  {
+    const coca = DRINKS.find((d) => /coca-cola/i.test(d.brand || "") && !d.imp);
+    const dew = DRINKS.find((d) => /mountain dew/i.test(d.brand || "") && /original/i.test(d.name || ""));
+    dit("le catalogue a bien un Coca et un Mountain Dew Original", !!coca && !!dew);
+
+    const nuit = { id: "N1", name: "Night-Shop Flagey", brand: "", type: "", drinks: [], confirmations: {} };
+    const boul = { id: "N2", name: "Boulangerie Paul", brand: "", type: "boulangerie", drinks: [], confirmations: {} };
+    const muet = { id: "N3", name: "Chez M.", brand: "", type: "", drinks: [], confirmations: {} };
+    const usa  = { id: "N4", name: "Randy American Market", brand: "", type: "", drinks: [], confirmations: {} };
+
+    dit("un night shop est une piste pour le Coca", magasinALaBoisson(nuit, coca.id));
+    dit("une epicerie americaine est une piste pour le Mountain Dew", magasinALaBoisson(usa, dew.id));
+    dit("une boulangerie ne promet rien", !magasinALaBoisson(boul, coca.id));
+    dit("un magasin dont on ne sait rien ne promet rien", !magasinALaBoisson(muet, coca.id));
+
+    /* LE POINT CRITIQUE. Un rayon probable ne doit JAMAIS devenir un stock :
+       sinon la carte promet une boisson que personne n'a vue. */
+    dit("mais une piste n'est PAS un stock", !magasinConfirmePour(nuit, coca.id));
+    dit("ni pour l'epicerie americaine", !magasinConfirmePour(usa, dew.id));
+    nuit.confirmations = {}; nuit.confirmations[coca.id] = 1;
+    dit("il faut qu'un humain l'ait vue", magasinConfirmePour(nuit, coca.id));
+
+    /* Le rayon probable ne doit pas etre recopie dans chaque magasin : c'est
+       ce qui coutait 7,2 Mo de memoire sur la seule bande parisienne.
+       Des objets NEUFS : ceux du dessus ont deja ete etiquetes par les
+       appels precedents, et une deuxieme etiquette ne recopie plus rien —
+       on ne verrait donc pas la recopie si elle revenait. */
+    const neufs = [
+      { id: "M1", name: "Night-Shop Flagey", brand: "", type: "", drinks: [], confirmations: {} },
+      { id: "M2", name: "Randy American Market", brand: "", type: "", drinks: [], confirmations: {} },
+      { id: "M3", name: "Carrefour Market", brand: "Carrefour", type: "", drinks: [], confirmations: {} },
+    ];
+    neufs.forEach((x) => window.rayonProbableCle(x));
+    dit("etiqueter un magasin ne lui recopie aucune boisson",
+        neufs.every((x) => x.drinks.length === 0));
+    dit("mais l'etiquette est bien posee",
+        neufs[0]._cleRayon === "t:nightshop" && neufs[1]._cleRayon === "t:americain" && neufs[2]._cleRayon.indexOf("e:Carrefour") === 0);
+    dit("et rien n'est pose sur ce qu'on ne connait pas", muet._cleRayon === "" && boul._cleRayon === "");
+
+    /* Ouvrir une fiche, la, il faut bien lister le rayon. */
+    window.rayonAppliquer(usa);
+    dit("ouvrir une fiche materialise le rayon de CE magasin", usa.drinks.length > 100);
+    dit("et le Mountain Dew y figure", usa.drinks.indexOf(dew.id) !== -1);
+    dit("cela ne cree toujours pas de stock", !magasinConfirmePour(usa, dew.id));
+  }
+
+  /* ── 9 ter. Deux fiches pour un magasin, et le journal du scanner ──── */
+  {
+    /* Mesure sur la base : 981 lieux portent deux fiches au meme nom et aux
+       memes coordonnees. La carte posait deux pins l'un sur l'autre — c'est
+       le « deux ALDI » signale. On additionne au lieu de choisir. */
+    /* La fusion elle-meme vit dans le script de module, qui ne demarre pas
+       sans reseau : elle est verifiee par outils/essai-zone-reelle.mjs, qui
+       fait tourner ce code-la contre la base de production. Ici on verifie
+       ce qui est a notre portee : la reconnaissance du meme magasin. */
+    /* Le champ osmId etait le chainon manquant du dedoublonnage a l'import. */
+    dit("une fiche ancienne est reconnue par son champ osmId",
+        window.memeMagasinOsm({ id: "5DoQ", osmId: "254636773" }, { id: "o254636773", osm: 254636773 }));
+    dit("une fiche recente est reconnue par son identifiant",
+        window.memeMagasinOsm({ id: "o254636773" }, { id: "o254636773", osm: 254636773 }));
+    dit("un autre magasin n'est pas confondu",
+        !window.memeMagasinOsm({ id: "5DoQ", osmId: "999" }, { id: "o254636773", osm: 254636773 }));
+
+    /* Une trouvaille ajoutee doit survivre a la synchronisation serveur. */
+    const sauveD = DISCOVERIES.slice();
+    DISCOVERIES.length = 0;
+    DISCOVERIES.push({ id: "4068261006076", name: "River Ice Cold", barcode: "4068261006076", votes: 1, _mienne: true });
+    const duServeur = [{ id: 1, name: "Poms Pomme", barcode: "111", votes: 12 }];
+    const fusion = window.fusionnerDecouvertes(duServeur);
+    dit("la trouvaille personnelle survit a la liste du serveur",
+        fusion.some((d) => String(d.barcode) === "4068261006076"));
+    dit("et la liste du serveur est gardee", fusion.some((d) => String(d.barcode) === "111"));
+    const deuxFois = window.fusionnerDecouvertes([{ id: "4068261006076", name: "River", barcode: "4068261006076", votes: 4 }]);
+    dit("le serveur fait foi quand il connait deja le code",
+        deuxFois.filter((d) => String(d.barcode) === "4068261006076").length === 1);
+    DISCOVERIES.length = 0;
+    sauveD.forEach((d) => DISCOVERIES.push(d));
   }
 
   /* ── 9. Le chinois : atteignable, et il change vraiment l'ecran ─────── */

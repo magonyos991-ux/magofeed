@@ -38,8 +38,8 @@ const prelude = `
   }
   function fusionnerRayonEnseigne(l) { return l; }   /* teste ailleurs */
 `;
-const code = prelude + morceaux.join("\n") + "\n};\nreturn { fbZoneLegere: window.fbZoneLegere, MAGO_CHAMPS_LEGER: MAGO_CHAMPS_LEGER };";
-const { fbZoneLegere, MAGO_CHAMPS_LEGER } = new Function(code)();
+const code = prelude + morceaux.join("\n") + "\n};\nreturn { fbZoneLegere: window.fbZoneLegere, MAGO_CHAMPS_LEGER: MAGO_CHAMPS_LEGER, fusionnerDoublons: fusionnerDoublons };";
+const { fbZoneLegere, MAGO_CHAMPS_LEGER, fusionnerDoublons } = new Function(code)();
 
 const etapes = [];
 const dit = (n, ok) => { etapes.push([n, !!ok]); };
@@ -47,6 +47,28 @@ const dit = (n, ok) => { etapes.push([n, !!ok]); };
 console.log("code lu dans : " + fichier);
 dit("la projection n'embarque pas les assortiments",
   MAGO_CHAMPS_LEGER.indexOf("drinks") === -1 && MAGO_CHAMPS_LEGER.indexOf("drinksVerified") === -1);
+
+/* ── Deux fiches pour un seul magasin ─────────────────────── */
+{
+  /* Mesure sur la base : 981 lieux portent deux fiches au meme nom et aux
+     memes coordonnees. La carte posait deux pins l'un sur l'autre. */
+  const a = { id: "o254636773", fbId: "o254636773", name: "ALDI", lat: 50.880876, lng: 4.341298,
+              hours: "8-20", confirmations: {}, drinks: [7] };
+  const b = { id: "5DoQTbfiAVQkxMw4BFdv", fbId: "5DoQTbfiAVQkxMw4BFdv", name: "ALDI", lat: 50.880876, lng: 4.341298,
+              type: "supermarché", osmId: "254636773", confirmations: { 42: 3 }, drinks: [9] };
+  const loin = { id: "z", fbId: "z", name: "ALDI", lat: 50.9, lng: 4.4, confirmations: {}, drinks: [] };
+  const r = fusionnerDoublons([a, b, loin]);
+  dit("deux fiches au meme endroit ne font qu'un magasin", r.length === 2);
+  const aldi = r.find((x) => Math.abs(x.lat - 50.880876) < 1e-6) || {};
+  dit("le magasin garde ses deux identifiants",
+      (aldi._idsFusionnes || []).length === 2 && (aldi._idsFusionnes || []).indexOf("o254636773") !== -1);
+  dit("la confirmation humaine n'est pas perdue", Number((aldi.confirmations || {})[42]) === 3);
+  dit("les horaires d'une fiche et le type de l'autre sont gardes",
+      aldi.hours === "8-20" && aldi.type === "supermarché");
+  dit("les rayons des deux fiches sont additionnes",
+      (aldi.drinks || []).indexOf(7) !== -1 && (aldi.drinks || []).indexOf(9) !== -1);
+  dit("un ALDI a un kilometre reste un magasin distinct", r.some((x) => x.id === "z"));
+}
 
 /* ── Paris, sans boisson ciblee ─────────────────────────────────────────── */
 const t0 = Date.now();
@@ -58,6 +80,16 @@ dit("tous portent un nom et une position",
 dit("tous sont marques comme alleges", paris.every((s) => s._pins === true));
 dit("aucun n'est hors du rayon demande", paris.every((s) => s.dist <= 5000));
 dit("les confirmations sont bien la", paris.every((s) => s.confirmations && typeof s.confirmations === "object"));
+{
+  const vus = {};
+  let jumeaux = 0;
+  for (const s of paris) {
+    const k = String(s.name || "").trim().toLowerCase() + "@" + Number(s.lat).toFixed(5) + "," + Number(s.lng).toFixed(5);
+    if (vus[k]) jumeaux++; else vus[k] = 1;
+  }
+  console.log("   fiches en double restantes dans la zone : " + jumeaux);
+  dit("la zone ne rend plus deux fiches pour un meme magasin", jumeaux === 0);
+}
 
 /* ── Paris, Mountain Dew Original ───────────────────────────────────────── */
 const t1 = Date.now();
