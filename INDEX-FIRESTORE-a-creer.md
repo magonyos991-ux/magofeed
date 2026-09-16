@@ -35,10 +35,20 @@ rien a surveiller.
 
 ### Ou, en ligne de commande
 
-Le fichier `firestore.indexes.json` a la racine du depot decrit exactement les
-memes deux index :
+Les deux index sont declares dans **`functions-a-deployer/firestore.indexes.json`**,
+avec les huit autres index deja en service (points, parrainage, signalements,
+conversations). C'est le SEUL fichier d'index du depot, et ce n'est pas un detail :
+
+> Un `firebase deploy --only firestore:indexes` remplace la liste COMPLETE des
+> index du projet par celle du fichier qu'il lit. Deployer un fichier qui ne
+> contiendrait que ces deux index supprimerait les huit autres — et avec eux les
+> points, le parrainage, la liste des signalements et la messagerie.
+> Il ne doit donc jamais y avoir deux fichiers d'index dans ce depot.
 
     firebase deploy --only firestore:indexes --project magofeed-7f621
+
+en ayant copie `functions-a-deployer/firestore.indexes.json` a cote de ton
+`firebase.json`, la ou la commande va le chercher.
 
 ## Rien d'autre a faire
 
