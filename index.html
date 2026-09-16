@@ -6544,6 +6544,12 @@ function maybeRewardHuntHelp(drinkId,store,code,mode){
       userStats.pts+=5;try{flyPts(5);}catch(e){}updateProfileStats();
       if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
       playSound("win");
+      /* AIDER QUELQU'UN MERITE D'ETRE VU. C'est le geste le plus utile de
+         l'app — deux personnes cherchaient, tu viens de leur repondre — et il
+         ne produisait qu'un petit « +5 » discret, identique a un rattachement
+         ordinaire. Sans retour franc, on doute d'avoir reussi et on recommence.
+         Meme celebration que la mission du jour : on sait que c'est parti. */
+      try{confettiBurst();}catch(e){}
       // +15 de plus quand un chercheur confirme sur place : en attente, pas promis.
       pendingAdd("hunt:"+drinkId+":"+sid,15,"« "+(d?d.name:"")+" » "+_tr("atStore")+" "+((store&&store.name)||""));
       toast(_tr("huntHelped").replace("{n}",n).replace("{s}",n>1?"s":"").replace("{v}",n>1?"ent":"t"));
@@ -7522,12 +7528,23 @@ function toggleManualCode(){
   if(open){var i=document.getElementById("scan-manual-input");if(i){i.value="";setTimeout(function(){try{i.focus();}catch(e){}},60);}}
   try{playSound("pop");}catch(e){}
 }
+/* LE SEUIL DE VOTES, EN UN SEUL ENDROIT.
+   Il etait ecrit « 3 » en dur dans onBarcodeDetected et « 1 » en dur ici : la
+   saisie manuelle pre-chargeait un vote, l'appel en ajoutait un deuxieme, et on
+   n'atteignait jamais trois. Taper un code-barre a la main et valider ne faisait
+   donc RIEN — sauf afficher « Presque... ne bouge plus », un conseil absurde
+   quand il n'y a pas de camera. Le seuil etait a deux quand ce code a ete
+   ecrit ; il est passe a trois, et cette fonction n'a pas suivi. Une constante
+   partagee empeche les deux de diverger a nouveau. */
+var SCAN_VOTES_MIN=3;
 function submitManualCode(code){
   code=String(code||"").replace(/\D/g,"");
   if(!validGTIN(code)){toast("Code-barre invalide (8 à 13 chiffres)");playSound("err");return;}
   var row=document.getElementById("scan-manual-row");if(row)row.style.display="none";
-  _scanVotes={code:code,count:1};                 // pré-charge un vote
-  try{onBarcodeDetected({codeResult:{code:code}});}catch(e){} // 2e "lecture" -> résolution
+  /* Un code tape a la main ne souffre d'aucune incertitude de lecture : on
+     pre-charge tout ce qu'il faut pour que l'appel suivant conclue. */
+  _scanVotes={code:code,count:SCAN_VOTES_MIN-1};
+  try{onBarcodeDetected({codeResult:{code:code}});}catch(e){}
 }
 function submitManualCodeFromInput(){
   var i=document.getElementById("scan-manual-input");if(!i)return;
@@ -9446,7 +9463,7 @@ function onBarcodeDetected(r){
      mais fausses, ca arrive: un code mal eclaire se lit souvent de travers
      TOUJOURS DE LA MEME FACON. C'est la troisieme qui separe une vraie lecture
      stable d'une erreur stable. */
-  if(_scanVotes.count<3){
+  if(_scanVotes.count<SCAN_VOTES_MIN){
     // Premiere lecture : retour visuel immediat, le scan "reflechit"
     var h=document.getElementById("scan-hint");
     if(h)h.textContent=_scanVotes.count>=2?"Presque\u2026 ne bouge plus":"Lecture\u2026 garde le code stable";
@@ -11268,6 +11285,26 @@ function pickMissionDrink(){
   for(var i=0;i<day.length;i++)h=(h*31+day.charCodeAt(i))>>>0;
   return cands[h%cands.length];
 }
+/* Une boisson deja presente dans un magasin connu n'est plus « a trouver ». */
+function missionDejaTrouvee(id){
+  return (window.STORES||[]).some(function(s){
+    return (s.drinks||[]).some(function(x){return Number(x)===Number(id);});
+  });
+}
+/* ============================================================================
+   LA MISSION DU JOUR SE CHOISIT UNE FOIS, ET NE DOIT PAS ENVOYER CHERCHER CE
+   QUI EST DEJA TROUVE
+   ----------------------------------------------------------------------------
+   pickMissionDrink() ecarte les boissons qu'un magasin connu possede deja. Mais
+   au demarrage de l'app, STORES est ENCORE VIDE : la mission se figeait donc
+   souvent sur une boisson que tout le monde a en rayon, et la carte annoncait
+   « On ne sait pas encore ou la trouver » sur un produit qu'on trouve partout.
+   La personne partait chercher pour rien.
+
+   On revoit donc la mission des que les magasins sont la : tant qu'elle n'est
+   pas accomplie, si sa cible est devenue trouvable, on en designe une autre. Une
+   mission ACCOMPLIE ne bouge plus — elle a ete gagnee, elle reste affichee
+   jusqu'a demain. ========================================================= */
 function getMission(){
   var m=null;try{m=JSON.parse(localStorage.getItem("magoMission")||"null");}catch(e){}
   var day=_dailyKey();
@@ -11276,6 +11313,12 @@ function getMission(){
     if(!d)return null;
     m={date:day,drinkId:d.id,done:false};
     try{localStorage.setItem("magoMission",JSON.stringify(m));}catch(e){}
+  }else if(!m.done&&(window.STORES||[]).length&&missionDejaTrouvee(m.drinkId)){
+    var d2=pickMissionDrink();
+    if(d2&&Number(d2.id)!==Number(m.drinkId)&&!missionDejaTrouvee(d2.id)){
+      m={date:day,drinkId:d2.id,done:false};
+      try{localStorage.setItem("magoMission",JSON.stringify(m));}catch(e){}
+    }
   }
   return m;
 }
