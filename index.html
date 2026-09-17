@@ -15008,7 +15008,15 @@ function repondreIndication(did,sid,ok){
     s.confirmations[did]=Math.max(1,(s.confirmations[did]||0)+1);_noterObservation(s,did,true);
     if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||storeId,did,1);
     if(window.fbAddReport)try{window.fbAddReport(s.fbId||storeId,did,"stock",{note:_provenance("reponse",s)});}catch(e){}
-    if(w){w.verdict="ok";w.verdictAt=Date.now();}
+    if(w){
+      w.verdict="ok";w.verdictAt=Date.now();
+      /* VOILA la validation : la personne y est allee, la boisson y etait. La
+         chasse a rempli son office, on retire son chercheur du document
+         partage — sinon elle continue d'annoncer « on la cherche » et de
+         mobiliser le quartier pour une boisson deja trouvee. Une reponse
+         « non » (verdict ko) ne retire rien : la chasse continue. */
+      try{ if(window.fbLeaveHunt)window.fbLeaveHunt(did); }catch(eH){}
+    }
   }else{
     s.confirmations[did]=Math.min(-1,(s.confirmations[did]||0)-1);_noterObservation(s,did,false);
     if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||storeId,did,-1);
@@ -15150,13 +15158,13 @@ function checkWatches(){
       if(w.by==="Explorateur")w.by=null;
       w.verdict=null;w.reminders=0;
       fired=true;
-      /* LA CHASSE S'ARRETE QUAND LA BOISSON EST TROUVEE.
-         Elle ne s'arretait jamais : w.triggered etait pose ici, mais personne
-         ne retirait le chercheur du document hunts/. Resultat mesure sur
-         l'emulateur : la chasse annonce encore « 1 personne cherche » alors
-         que la boisson a ete confirmee en magasin, et elle continue a faire
-         partir des alertes vers le quartier pour une boisson deja trouvee. */
-      try{ if(window.fbLeaveHunt)window.fbLeaveHunt(w.id); }catch(eH){}
+      /* ON NE RETIRE PAS LA CHASSE ICI. Ce point-ci n'est qu'un SIGNALEMENT :
+         quelqu'un dit avoir vu la boisson quelque part. L'app demande ensuite
+         « elle y etait ? » et c'est la reponse qui fait foi. Arreter la chasse
+         des le signalement, c'est l'arreter avant que la personne ait eu la
+         boisson en main — et si la reponse est « non, elle n'y etait pas », on
+         l'aurait arretee pour rien. La chasse s'arrete a la validation, dans
+         repondreVeille. */
       playSound("win");
       toast(""+w.name+" signal\u00E9e chez "+sanitize(best.store.name)+(best.dist!=null?" ("+fmtDist(best.dist)+")":"")+" !");
       pushActivity({
@@ -21928,11 +21936,19 @@ function renderChasse(){
   }
   _peindreChasse(demande);
   if(window.fbLoadNearbyHunts&&window.STORES&&STORES.length){
-    /* LE MEME CHIFFRE QUE LES NOTIFICATIONS. On demandait 15 — valeur que
-       fbLoadNearbyHunts traitait comme « pas de limite utile » et remplacait
-       par 100 km. La liste montrait donc des chasses pour lesquelles on n'avait
-       jamais ete prevenu, et ou l'on n'irait jamais. */
-    window.fbLoadNearbyHunts(userLat,userLng,_hrClamp(window.magoHuntRadius)).then(function(hunts){
+    /* VOIR UNE CHASSE NE COUTE RIEN ; ETRE REVEILLE, SI.
+       -----------------------------------------------------------------------
+       Le rayon choisi dans « Ta zone » gouvernait les trois choses a la fois :
+       qui te notifie, et ce que tu vois. C'etait cohérent, mais ca fermait la
+       porte a l'entraide : une chasse lancee a 30 km n'existait pour personne
+       d'autre que son quartier, alors qu'il suffit parfois de passer devant le
+       bon magasin. Quelqu'un qui OUVRE l'onglet a choisi de regarder — on lui
+       montre tout, la plus proche d'abord.
+       Le rayon continue de gouverner ce qui compte vraiment : les
+       notifications. Il vit dans pushTokens/{uid}.rayon et c'est le serveur qui
+       le relit, destinataire par destinataire. Personne n'est reveille au-dela
+       de sa zone ; personne n'est empeche d'aider. */
+    window.fbLoadNearbyHunts(userLat,userLng,20000).then(function(hunts){
       (hunts||[]).forEach(function(h){
         var k=String(h.drinkId);
         var n=h.seekers||0;
@@ -21970,14 +21986,22 @@ function _peindreChasse(demande){
     .filter(function(x){
       var d=(DRINKS||[]).find(function(y){return Number(y.id)===Number(x.id);});
       if(!d)return false;                       // fiche inconnue de cet appareil
-      if(magasinProcheAvec(x.id))return false;  // quelqu'un l'a deja trouvee ici
+      /* « Je l'ai deja dans un magasin d'a cote » est une bonne raison de
+         retirer MA propre chasse : je n'ai plus a la chercher. C'en est une
+         tres mauvaise pour celle de quelqu'un d'AUTRE — c'est meme exactement
+         la personne que je peux aider, puisque je passe devant le magasin. La
+         chasse des autres reste donc affichee. */
+      if(x.moi&&magasinProcheAvec(x.id))return false;
       x.d=d;return true;
     })
     .sort(function(a,b){
       if(b.chercheurs!==a.chercheurs)return b.chercheurs-a.chercheurs;
       return (a.distKm==null?99:a.distKm)-(b.distKm==null?99:b.distKm);
     })
-    .slice(0,8);
+    /* Huit, c'etait assez quand la liste s'arretait a ta zone. Maintenant
+       qu'elle porte toutes les chasses, huit couperait les plus lointaines
+       sans rien dire. Trente : la base entiere en compte vingt aujourd'hui. */
+    .slice(0,30);
   var autres=lignes.filter(function(x){return !x.moi;}).length;
   if(cnt)cnt.textContent=lignes.length?_tr("huntCount").replace("{n}",lignes.length):"";
   /* LE BADGE DE L'ONGLET vient du MEME calcul que la liste, et pas du compteur

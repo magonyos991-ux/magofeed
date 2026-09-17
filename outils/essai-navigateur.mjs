@@ -64,6 +64,19 @@ const statiques = [];
     && /idbSet\("discoveries:mine"/.test(src)]);
   statiques.push(["la synchronisation serveur ne remplace plus les trouvailles",
     /DISCOVERIES=fusionnerDecouvertes\(e\.detail\)/.test(src)]);
+  /* LA CHASSE DOIT ALLER JUSQU'A LA VALIDATION, ET ETRE VUE DE TOUS.
+     Ces quatre-la se lisent sur la source : la premiere touche une fonction du
+     module Firebase (absente sans reseau), les trois autres tiennent a l'ordre
+     exact des lignes, qu'un rendu ne montrerait pas. */
+  statiques.push(["la chasse ne s'arrete PAS au simple signalement",
+    !/w\.triggeredAt=Date\.now\(\);[\s\S]{0,600}?fbLeaveHunt/.test(src)]);
+  statiques.push(["elle s'arrete quand la personne valide (verdict ok)",
+    /w\.verdict="ok";[\s\S]{0,500}?window\.fbLeaveHunt\)window\.fbLeaveHunt\(did\)/.test(src)]);
+  statiques.push(["une reponse « non » ne retire pas la chasse",
+    !/w\.verdict="ko";[\s\S]{0,300}?fbLeaveHunt/.test(src)]);
+  statiques.push(["la liste des chasses n'est plus bornee par la zone personnelle",
+    /fbLoadNearbyHunts\(userLat,userLng,20000\)/.test(src)
+    && !/fbLoadNearbyHunts\(userLat,userLng,_hrClamp/.test(src)]);
   statiques.push(["le dedoublonnage a l'import regarde le champ osmId",
     /String\(existant\.osmId\|\|""\)===numero/.test(src)]);
 }
@@ -296,6 +309,31 @@ const r = await page.evaluate(async () => {
     dit("la fiche d'un magasin allege n'annonce pas 0 boisson", txt.indexOf("0 boisson") === -1);
     try { closeStoreSheet(); } catch (e) {}
     window.STORES = sauveS;
+  }
+
+  /* ── 9 quater. La chasse de quelqu'un d'autre reste visible ────────── */
+  {
+    /* On ne cache une chasse « parce que je l'ai deja a cote » que si elle est
+       LA MIENNE. Pour celle d'un autre, avoir la boisson a cote est justement
+       ce qui me permet de l'aider. */
+    const sauveS = window.STORES, sauveW = window.drinkWatches;
+    const boisson = DRINKS[0];
+    window.STORES = [{ id: "P1", fbId: "P1", name: "Epicerie d'a cote", lat: 50.8466, lng: 4.3528,
+                       dist: 300, drinks: [boisson.id], confirmations: {}, drinksVerified: [boisson.id] }];
+    window.drinkWatches = [];
+    const host = document.getElementById("chasse-list");
+    dit("l'ecran de la chasse existe", !!host);
+    if (host) {
+      _peindreChasse({ [String(boisson.id)]: { id: boisson.id, chercheurs: 2, moi: false, distKm: 40, lastAt: Date.now() } });
+      const txtAutre = host.innerText || "";
+      dit("la chasse d'un autre reste affichee meme si j'ai la boisson a cote",
+          txtAutre.indexOf(boisson.name) !== -1);
+      _peindreChasse({ [String(boisson.id)]: { id: boisson.id, chercheurs: 1, moi: true, distKm: 0, lastAt: Date.now() } });
+      const txtMienne = host.innerText || "";
+      dit("la mienne disparait, elle : je n'ai plus a la chercher",
+          txtMienne.indexOf(boisson.name) === -1);
+    }
+    window.STORES = sauveS; window.drinkWatches = sauveW;
   }
 
   /* ── 9 bis. Les independants ont un rayon probable, jamais un stock ── */
