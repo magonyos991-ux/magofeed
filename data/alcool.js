@@ -123,7 +123,19 @@ var ALCOOL_MOTS = [
   /* mentions legales / degre */
   "abus dalcool", "l'abus d'alcool", "abus d'alcool", "consommer avec moderation", "consommer avec modération",
   "drink responsibly", "alcohol by volume", "vol. alc", "alc. vol", "alc/vol", "18+", "interdit aux mineurs",
-  "verboden onder 18", "verboden onder de 18", "geen 18 geen alcohol", "nix18"
+  "verboden onder 18", "verboden onder de 18", "geen 18 geen alcohol", "nix18",
+  /* NI « mojito », NI « pina colada », NI « bavaria ». Ces trois-la ont ete
+     essayes et RETIRES : ils refusaient treize fiches bien reelles et bien
+     sans alcool du catalogue — Finley Mojito, 7UP Mojito, Andros Mojito sans
+     alcool, Materne Pina Colada, Granini Pina Colada, et Pony Malta, qui est
+     une boisson maltee de la brasserie Bavaria. Un cocktail donne son nom a
+     un PARFUM ; l'app refuse l'alcool, pas les parfums. Une fiche bloquee ne
+     s'affiche nulle part et personne ne peut la corriger : le faux positif y
+     coute plus cher qu'ailleurs.
+     La liste des treize se retrouve en une commande : voir le commentaire de
+     outils/controle-catalogue.mjs. */
+  /* Cocktails et liqueurs qui passaient, trouves par le parcours catalogue-et-anti-alcool. « hugo », « aperol », « veneziano » et « campari » sont la parce que ALCOOL_FAUX efface « spritz » — il l'efface pour Hell Lime Spritz et Finley Spritz, qui eux sont sans alcool. Sans ces quatre mots, « Hugo Spritz » et « Spritz Veneziano » passaient entiers. */
+  "margarita", "daiquiri", "caipirinha", "caipiroska", "cosmopolitan", "long island iced tea", "michelada", "negroni", "boulevardier", "bloody mary", "white russian", "black russian", "tom collins", "gin tonic", "rhum arrange", "punch coco", "ponche crema", "triple sec", "creme de cassis", "creme de peche", "creme de mure", "schnaps", "schnapps", "sambuca", "limoncello", "amaretto", "irish cream", "aguardiente", "cachaca", "pisco", "makgeolli", "raki", "ouzo", "grappa", "slivovitz", "palinka", "tsipouro", "veneziano", "hugo", "aperol", "campari"
 ];
 
 /* Racines cherchees SANS frontiere de mot a gauche : elles collent a
@@ -197,5 +209,7 @@ var ALCOOL_MARQUES = [
   "marques de caceres", "marqués de cáceres", "campo viejo", "faustino", "protos", "pata negra", "ramon bilbao", "ramón bilbao",
   "somersby", "strongbow", "magners", "bulmers", "kopparberg", "rekorderlig", "savanna", "thatchers", "aspall", /* alcopops */ "smirnoff ice", "bacardi breezer", "wkd", "hooch", "mike's hard lemonade", "white claw", "vodka cruiser", "eristoff ice",
   "flirt vodka", "jillz", "cava spritz", "hugo spritz", "aperol spritz", "moscow mule", "bloody mary", "negroni", "whisky sour", "gin tonic", "gin-tonic", "gin & tonic", "cuba libre", "black russian", "white russian", "b52", "jagerbomb", "jägerbomb",
-  "irish coffee", "kir royal", "sangria"
+  "irish coffee", "kir royal", "sangria",
+  /* Marques qui passaient, y compris les bieres SANS ALCOOL : la regle du projet les refuse aussi (Tourtel, Buckler, Moussy, Free Damm). Verifie avant ajout : aucune de ces chaines n'apparait dans une fiche du catalogue actuel. */
+  "sheridans", "dewars", "sir edwards", "peachtree", "fireball", "stroh", "bavaria 8.6", "bavaria 8,6", "bavaria premium", "bavaria original", "perlenbacher", "hollandia", "oettinger", "tourtel", "buckler", "moussy", "free damm", "damm", "goldschlager", "malibu", "passoa", "get 27", "get 31", "suze", "picon", "martini", "cinzano", "ricard", "pernod", "label 5", "clan campbell", "william peel", "jack daniels", "johnnie walker", "chivas", "ballantines", "famous grouse", "glenfiddich"
 ];

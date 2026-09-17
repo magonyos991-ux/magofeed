@@ -1082,53 +1082,23 @@ service cloud.firestore {
             ? (('at' in apres[uid]) && apres[uid].at == avant[uid].at)
             : (('at' in apres[uid]) && apres[uid].at is number));
     }
-    /* LE NOM D'UNE CHASSE PART EN NOTIFICATION DANS TOUT LE QUARTIER.
-       notifyHuntNearby (notifications-push.js:187) reprend drinkName tel quel
-       dans le titre de la poussee. Or la regle d'update ne contraignait que
-       seekers : n'importe quel compte, y compris anonyme, pouvait renommer la
-       chasse de quelqu'un d'autre et la faire pointer sur une autre boisson.
-       Trouve par le banc d'essai (scenarios/chasse-bout-en-bout.mjs), pas a la
-       lecture : deux tentatives de detournement reussissaient.
-       On fige donc drinkId — une chasse ne change jamais de boisson — et on
-       borne ce qui part a l'ecran des gens. La borne de longueur n'empeche pas
-       un nom desagreable : ce qui l'empechera est de faire lire le nom au
-       CATALOGUE cote serveur plutot qu'au document. C'est note dans
-       INDEX-A-DEPLOYER.md ; ici on ferme ce qui peut l'etre par une regle. */
-    function texteDeChasseValide() {
-      return (!('drinkName' in request.resource.data)
-              || (request.resource.data.drinkName is string
-                  && request.resource.data.drinkName.size() <= 60))
-          && (!('emoji' in request.resource.data)
-              || (request.resource.data.emoji is string
-                  && request.resource.data.emoji.size() <= 4));
-    }
     match /hunts/{drinkId} {
       allow read: if true;
       allow create: if isSignedIn()
         && drinkId == string(request.resource.data.drinkId)
         && request.resource.data.seekers.keys().hasOnly([request.auth.uid])
         && request.resource.data.seekers[request.auth.uid].at is number
-        && !('_lastPush' in request.resource.data)
-        && texteDeChasseValide();
+        && !('_lastPush' in request.resource.data);
       allow update: if isSignedIn()
         && request.resource.data.seekers.diff(resource.data.seekers)
              .affectedKeys().hasOnly([request.auth.uid])
-        /* drinkId est FIGE : une chasse ne change jamais de boisson.
-           Le NOM, lui, reste modifiable, et c'est deliberé. Le figer cassait
-           un cas legitime : une chasse creee avec un nom et rejointe par
-           quelqu'un dont le catalogue local porte une autre orthographe voyait
-           son « je rejoins » refuse, puis retomber sur une creation impossible
-           — la personne cliquait, et rien ne se passait. Le banc d'essai des
-           regles l'a montre tout de suite (« legitime : rejoindre une chasse »
-           passait a ECHEC). Et il faudrait deployer les regles et l'app a la
-           seconde pres pour que ca ne casse personne.
-           Le renommage est desormais sans effet : l'ecran de la chasse lit le
-           nom dans le catalogue local (renderChasse n'utilise que drinkId), et
-           la notification aussi depuis notifications-push.js — qui refuse
-           meme d'envoyer quoi que ce soit pour une boisson absente du
-           catalogue. Le texte libre du document ne sort plus nulle part. */
         && !changed().hasAny(['_lastPush', 'drinkId'])
-        && texteDeChasseValide()
+        && (!changed().hasAny(['drinkName', 'emoji'])
+            || ((request.auth.uid in request.resource.data.seekers)
+                && request.resource.data.seekers[request.auth.uid] != null))
+        && (!('drinkName' in request.resource.data)
+            || (request.resource.data.drinkName is string
+                && request.resource.data.drinkName.size() <= 60))
         && chercheurStable();
       allow delete: if isAdmin();
     }

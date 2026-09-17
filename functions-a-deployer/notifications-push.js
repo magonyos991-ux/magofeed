@@ -186,7 +186,33 @@ exports.notifyHuntNearby = onDocumentWritten(
       return;
     }
     const seekerUids = new Set(Object.keys(aSeek).filter(function(u){ return aSeek[u]; }));
-    const name = String(after.drinkName || "une boisson").slice(0, 40);
+    /* LE NOM QUI PART DANS LA POUSSEE VIENT DU CATALOGUE, PAS DU DOCUMENT.
+       drinkName est ecrit par le client. N'importe quel compte pouvait donc
+       creer hunts/123456 avec « GAGNE 500 EUR : ouvre ... » et faire partir ce
+       texte vers tous les telephones du quartier — la chasse etant ensuite
+       invisible dans l'app (le client masque les chasses dont l'identifiant
+       n'est pas au catalogue), personne ne pouvait meme la signaler.
+       On lit donc le nom dans catalog/{drinkId}, ecrit par l'administration.
+       Et si la boisson n'existe pas au catalogue, on n'envoie RIEN : une chasse
+       qui ne designe aucune boisson connue n'a personne a mobiliser. */
+    let name = null;
+    try {
+      const idBoisson = String(after.drinkId != null ? after.drinkId : event.params.drinkId);
+      const fiche = await db.collection("catalog").doc(idBoisson).get();
+      if (fiche.exists) {
+        const f = fiche.data() || {};
+        name = String((f.brand ? f.brand + " " : "") + (f.name || "")).trim().slice(0, 40);
+      }
+      if (!name) name = null;
+    } catch (e) { name = null; }
+    if (!name) {
+      await _tracer(
+        "Chasse sur une boisson inconnue : rien envoye",
+        "Le document hunts/" + String(event.params.drinkId) + " ne designe aucune fiche du catalogue. "
+        + "Le nom qu'il porte (\u00ab " + String(after.drinkName || "").slice(0, 40) + " \u00bb) vient du client : on ne le diffuse pas.",
+        0, 0);
+      return;
+    }
     /* Anti-spam. Il etait range dans le document des chasses, que le client
        ecrit : creer un document neuf le sautait, et y ecrire une date lointaine
        eteignait definitivement les alertes d'une boisson. Le verrou vit
@@ -317,7 +343,30 @@ exports.notifyStockToWatchers = onDocumentUpdated(
     const before = event.data.before.data() || {};
     const after = event.data.after.data() || {};
     const bd = new Set((before.drinks || []).map(String));
-    const added = (after.drinks || []).map(String).filter(function(x){ return !bd.has(x); });
+    const ajoutees = (after.drinks || []).map(String).filter(function(x){ return !bd.has(x); });
+    /* CONFIRMER N'EST PAS AJOUTER, ET C'ETAIT LE TROU.
+       -----------------------------------------------------------------------
+       Ce declencheur ne regardait que le tableau `drinks` : on n'etait prevenu
+       que si la boisson ENTRAIT dans le magasin. Or le cas le plus frequent est
+       l'inverse — la boisson est deja rattachee au magasin (rayon d'enseigne,
+       import, remplissage), et ce que fait la personne en rayon, c'est la
+       CONFIRMER : « oui, je l'ai vue ici ». Le tableau ne bouge alors pas d'un
+       pouce, et personne n'etait prevenu.
+       Sur Mountain Dew Original, 8 217 magasins de la base la rattachent deja :
+       aucune confirmation n'aurait jamais alerte qui que ce soit.
+       Une confirmation qui passe de zero (ou d'un signalement d'absence) a un
+       nombre positif est exactement ce que la chasse attend : quelqu'un l'a vue
+       de ses yeux. On la traite comme une arrivee. */
+    const cAvant = before.confirmations || {}, cApres = after.confirmations || {};
+    const confirmees = Object.keys(cApres).filter(function (id) {
+      return (Number(cApres[id]) || 0) > 0 && (Number(cAvant[id]) || 0) <= 0;
+    });
+    const vus = new Set(ajoutees);
+    const added = ajoutees.concat(confirmees.filter(function (id) {
+      if (vus.has(String(id))) return false;   // deja compte : une seule alerte par boisson
+      vus.add(String(id));
+      return true;
+    }).map(String));
     /* GARDE-FOU CONTRE LA TEMPETE. Une vraie observation en rayon ajoute une
        boisson, parfois deux. Un remplissage d'enseigne en ajoute jusqu'a mille
        deux cents, sur des milliers de magasins : ce declencheur partait alors
@@ -342,8 +391,16 @@ exports.notifyStockToWatchers = onDocumentUpdated(
            « uid_boisson » (fbSyncWatch), on recoupe donc le champ avec le nom du
            document. Une veille repointee sur quelqu'un d'autre ne passe plus. */
         if (!wd.uid || !String(w.id).startsWith(String(wd.uid) + "_")) continue;
-        // Rayon choisi par la personne (curseur 1 → 20 km) ; 10 par défaut.
-        const radius = (typeof wd.radius === "number" && wd.radius >= 1 && wd.radius <= 20) ? wd.radius : 10;
+        /* LE RAYON CHOISI PAR LA PERSONNE, PAS UN AUTRE.
+           Le curseur de l'app va de 1 a 50 km (index.html, HR_MAX). Ici la
+           borne etait restee a 20, si bien qu'un choix de 30 ou 50 km
+           retombait silencieusement sur 10. Mesure du banc d'essai : « Alice a
+           choisi 30 km, le serveur en retient 10 ». Quelqu'un reglait sa zone,
+           voyait le chiffre changer a l'ecran, et n'etait pas prevenu pour
+           autant — sans que rien ne le dise. La valeur par defaut passe de 10 a
+           15, celle qu'utilise deja notifyHuntNearby : une seule regle pour les
+           deux chemins. */
+        const radius = (typeof wd.radius === "number" && wd.radius >= 1 && wd.radius <= 50) ? wd.radius : 15;
         if (sLat != null && wd.lat != null && _dist(sLat, sLng, wd.lat, wd.lng) > radius) continue;
         const dName = String(wd.drinkName || "Ta boisson").slice(0, 40);
         const storeId = String(event.params.id);

@@ -4503,6 +4503,17 @@ window.fbCountOnline = async function() {
    dans quelle ville chercher, ce que le filtre des chasses proches demande, et
    rien de plus. */
 function _coarse(x){ return Math.round(x * 10) / 10; }
+/* De combien une position arrondie par _coarse peut-elle etre eloignee de la
+   vraie ? Au pire d'une demi-case dans chaque direction : 0,05 degre de
+   latitude (5,5 km) et 0,05 degre de longitude (5,6 km x cos(latitude)).
+   A Bruxelles cela fait 6,6 km, a Paris 6,7 km. C'est la marge qu'il faut
+   accorder a un rayon de recherche, sans quoi le voisin d'a cote disparait. */
+function _margeArrondiKm(lat){
+  var dLa = 0.05 * 110.574;
+  var dLo = 0.05 * 111.320 * Math.cos((Number(lat) || 0) * Math.PI / 180);
+  return Math.sqrt(dLa * dLa + dLo * dLo);
+}
+window._margeArrondiKm = _margeArrondiKm;
 /* fbSimulateHunt a ete RETIRE. C'etait un outil de test expose sur window,
    dans le code livre a tout le monde : il inscrivait un chercheur factice sans
    position dans un document neuf, ce qui — cote serveur — faisait partir une
@@ -4549,10 +4560,16 @@ window.fbJoinHunt = async function(drinkId, drinkName, emoji, lat, lng) {
     var pos = { lat: lat != null ? _coarse(lat) : null, lng: lng != null ? _coarse(lng) : null };
     var moi = { lat: pos.lat, lng: pos.lng, at: Date.now() };
     var ref = doc(db, "hunts", String(drinkId));
-    var commun = {
+    /* LE NOM N'EST ECRIT QU'A LA CREATION. Le renvoyer a chaque « je rejoins »
+       ouvrait la porte au renommage de la chasse de quelqu'un d'autre — et ce
+       nom part tel quel dans la notification de tout le quartier. Les regles le
+       figent desormais ; le client cesse donc de l'envoyer sur ce chemin, sinon
+       rejoindre une chasse echouerait a chaque fois. */
+    var creation = {
       drinkName: String(drinkName || "").slice(0, 60),
       emoji: String(emoji || "").slice(0, 4), updatedAt: serverTimestamp()
     };
+    var commun = { updatedAt: serverTimestamp() };
     var maj = Object.assign({}, commun);
     maj["seekers." + user.uid] = moi;
     try {
@@ -4571,7 +4588,7 @@ window.fbJoinHunt = async function(drinkId, drinkName, emoji, lat, lng) {
         await setDoc(ref, Object.assign({
           drinkId: Number(drinkId) || drinkId,
           seekers: (function(){ var o = {}; o[user.uid] = moi; return o; })()
-        }, commun));
+        }, creation));
       }
     }
     /* On relit ce qui est REELLEMENT en base : c'est la seule preuve que
@@ -4626,6 +4643,11 @@ window.fbLoadNearbyHunts = async function(lat, lng, radiusKm) {
        passe autour. L'ecran Decouvertes le vide en plus a chaque ouverture. */
     var cache = window._huntsCache;
     var snap;
+    /* Le cache ne doit jamais survivre a une OUVERTURE D'ECRAN. Il ne se vidait
+       que sur mes propres ecritures : quand c'est quelqu'un d'autre qui lance
+       une chasse, mon telephone servait l'etat d'avant, et rien ne le disait.
+       window._huntsFrais est mis a zero par l'ecran de la chasse. */
+    if (window._huntsFrais) { window._huntsFrais = false; cache = null; window._huntsCache = null; }
     if (cache && (Date.now() - cache.at) < 20000) snap = cache.snap;
     else { snap = await getDocs(query(collection(db, "hunts"), limit(200))); window._huntsCache = { at: Date.now(), snap: snap }; }
     var out = [], myUid = auth.currentUser ? auth.currentUser.uid : null;
@@ -4640,16 +4662,37 @@ window.fbLoadNearbyHunts = async function(lat, lng, radiusKm) {
        aucune notification n'etait jamais partie. Le rayon vient maintenant de
        « Ta zone », et sans rayon du tout on garde le filet large. */
     var R = (Number(radiusKm) > 0) ? Number(radiusKm) : 100, fresh = Date.now() - 365 * 86400000;
+    /* LA MARGE D'ARRONDI. C'EST ELLE QUI FAISAIT PARAITRE LA CHASSE MORTE.
+       ----------------------------------------------------------------------
+       La position d'un chercheur est volontairement arrondie a une decimale
+       (_coarse), soit une case d'environ 11 km sur 7 : c'est la protection de
+       vie privee du seul document public de l'app. Mais ici on comparait cette
+       position ARRONDIE a MA position EXACTE, avec un rayon serre.
+       Consequence mesuree sur l'emulateur : Bob, au pied d'Alice, ne voyait pas
+       sa chasse des que le rayon descendait sous ~7 km — et « Ton quartier »
+       vaut 3 km. Le reglage le plus naturel etait donc celui qui cachait tout.
+       On ne peut pas retrouver la precision qu'on a jetee. On peut en revanche
+       arreter de faire semblant de l'avoir : un chercheur est garde des qu'il
+       PEUT etre dans le rayon, compte tenu de l'arrondi. */
+    var margeArrondi = _margeArrondiKm(lat != null ? lat : 50);
     snap.forEach(function(d) {
       var h = d.data(); var seekers = h.seekers || {};
+      /* Chasses de simulation : fbSimulateHunt a ete retire du code, mais ce
+         qu'il avait ecrit est reste en base. Mesure du 16 septembre 2026 : 21
+         des 41 chasses en ligne portent un identifiant simtest_ et un
+         chercheur simseeker_. A Bruxelles, rayon 5 km, elles etaient les
+         SEULES affichees. Une chasse que personne ne peut ni rejoindre ni
+         terminer n'est pas une chasse : on ne la montre pas. */
+      if (/^simtest_/.test(String(d.id || ""))) return;
       var near = 0, mine = false, distKm = null, lastAt = null;
       Object.keys(seekers).forEach(function(uid) {
         var s = seekers[uid]; if (!s) return;                 // chercheur parti
         if (s.at && s.at < fresh) return;                     // vraiment très ancien
+        if (/^simseeker_/.test(String(uid))) return;          // chercheur fabrique par l'ancien outil de test
         if (lat != null && s.lat != null) {
           var dLa = (lat - s.lat) * 111, dLo = (lng - s.lng) * 111 * Math.cos(lat * Math.PI / 180);
           var dk = Math.sqrt(dLa * dLa + dLo * dLo);
-          if (dk > R) return;
+          if (dk - margeArrondi > R) return;
           if (distKm == null || dk < distKm) distKm = dk;   // positions arrondies (~10 km) : indicatif
         }
         if (s.at && (lastAt == null || s.at > lastAt)) lastAt = s.at;
@@ -7925,7 +7968,18 @@ function nameLooksAlcoholic(name,brand){
   for(var i=0;i<scripts.length;i++)if(brut.indexOf(scripts[i])!==-1)return true;
   // 2. Degre ecrit : « 5 % vol », « 12,5 % alc », « 40° », « 80 proof ».
   var bas=brut.toLowerCase();
-  if(/\d+([.,]\d+)?\s*%\s*(vol|alc|abv)|\d{1,2}([.,]\d)?\s*°(\s*(vol|alc|gl))?(?![a-z])|\b\d+\s*proof\b/.test(bas)&&!/\b0[.,]0\s*%/.test(bas))return true;
+  /* LA MENTION « 0,0 % » N'EXCUSE QUE LE 0,0 %, PAS LE RESTE DE L'ETIQUETTE.
+     L'ancienne condition annulait TOUTE la detection de degre des que « 0,0 % »
+     apparaissait quelque part. « Coffret 0,0 % + 40 % vol » et « Duo
+     degustation 0.0% et 12% vol » passaient donc entiers — exactement les
+     coffrets mixtes que la regle du projet interdit. On regarde maintenant
+     CHAQUE degre trouve, et un seul degre non nul suffit a refuser. */
+  var _reDeg=/(\d+(?:[.,]\d+)?)\s*%\s*(?:vol|alc|abv)|(\d{1,2}(?:[.,]\d)?)\s*°(?:\s*(?:vol|alc|gl))?(?![a-z])|\b(\d+)\s*proof\b/g;
+  var _m;
+  while((_m=_reDeg.exec(bas))!==null){
+    var _d=parseFloat(String(_m[1]||_m[2]||_m[3]||"0").replace(",","."));
+    if(_d>0)return true;
+  }
   // 3. Texte normalise (minuscules, sans accents), faux amis retires.
   var t=" "+normTxt(brut).replace(/[\u2019']/g," ")+" ";
   var faux=(typeof ALCOOL_FAUX!=="undefined")?ALCOOL_FAUX:[];
@@ -14184,8 +14238,14 @@ window.magoHuntRadius=10;
 try{var _hr=Math.round(Number(localStorage.getItem("magoHuntRadius")));if(_hr>=HR_MIN&&_hr<=HR_MAX)window.magoHuntRadius=_hr;}catch(e){}
 function _hrClamp(km){km=Math.round(Number(km));if(!(km>=HR_MIN))km=HR_MIN;if(km>HR_MAX)km=HR_MAX;return km;}
 function huntRadiusDesc(km){
-  if(km<=2)return "Tout près de toi — juste ton coin de rue.";
-  if(km<=5)return "Ton quartier et ceux d'à côté.";
+  /* PAS DE PROMESSE DE PRECISION QU'ON N'A PAS. La position partagee dans une
+     chasse est volontairement arrondie a environ 11 km (voir _coarse) : c'est
+     ce qui empeche de remonter au quartier d'habitation de quelqu'un. En
+     dessous d'une dizaine de kilometres, le reglage ne peut donc pas trancher
+     finement, et l'ancien texte (« juste ton coin de rue ») promettait le
+     contraire de ce que la donnee permet. */
+  if(km<=2)return "Au plus près — mais les chasses se repèrent à la ville près.";
+  if(km<=5)return "Ton quartier et ceux d'à côté — à la ville près.";
   if(km<=10)return "Une bonne partie de ta ville.";
   if(km<=15)return "Large : toute la ville et sa périphérie.";
   if(km<=30)return "Très large : la ville entière et au-delà.";
@@ -14948,7 +15008,15 @@ function repondreIndication(did,sid,ok){
     s.confirmations[did]=Math.max(1,(s.confirmations[did]||0)+1);_noterObservation(s,did,true);
     if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||storeId,did,1);
     if(window.fbAddReport)try{window.fbAddReport(s.fbId||storeId,did,"stock",{note:_provenance("reponse",s)});}catch(e){}
-    if(w){w.verdict="ok";w.verdictAt=Date.now();}
+    if(w){
+      w.verdict="ok";w.verdictAt=Date.now();
+      /* VOILA la validation : la personne y est allee, la boisson y etait. La
+         chasse a rempli son office, on retire son chercheur du document
+         partage — sinon elle continue d'annoncer « on la cherche » et de
+         mobiliser le quartier pour une boisson deja trouvee. Une reponse
+         « non » (verdict ko) ne retire rien : la chasse continue. */
+      try{ if(window.fbLeaveHunt)window.fbLeaveHunt(did); }catch(eH){}
+    }
   }else{
     s.confirmations[did]=Math.min(-1,(s.confirmations[did]||0)-1);_noterObservation(s,did,false);
     if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||storeId,did,-1);
@@ -15090,6 +15158,13 @@ function checkWatches(){
       if(w.by==="Explorateur")w.by=null;
       w.verdict=null;w.reminders=0;
       fired=true;
+      /* ON NE RETIRE PAS LA CHASSE ICI. Ce point-ci n'est qu'un SIGNALEMENT :
+         quelqu'un dit avoir vu la boisson quelque part. L'app demande ensuite
+         « elle y etait ? » et c'est la reponse qui fait foi. Arreter la chasse
+         des le signalement, c'est l'arreter avant que la personne ait eu la
+         boisson en main — et si la reponse est « non, elle n'y etait pas », on
+         l'aurait arretee pour rien. La chasse s'arrete a la validation, dans
+         repondreVeille. */
       playSound("win");
       toast(""+w.name+" signal\u00E9e chez "+sanitize(best.store.name)+(best.dist!=null?" ("+fmtDist(best.dist)+")":"")+" !");
       pushActivity({
@@ -21707,7 +21782,14 @@ function setChasseSeg(name){
   if(name==="tendances"){try{renderVuesRecentes();}catch(e){}try{renderTopScanned();}catch(e){}}
   if(name==="valider"){try{renderDiscoveries();}catch(e){}}
 }
-function chasseSegTap(name){try{playSound("pop");}catch(e){}setChasseSeg(name);}
+function chasseSegTap(name){
+  /* Toucher un onglet, c'est demander a voir l'etat ACTUEL. Le cache de 20 s
+     ne se vidait que sur mes propres ecritures : la chasse que quelqu'un
+     d'autre venait de lancer n'apparaissait pas, et rien ne disait pourquoi. */
+  try{window._huntsFrais=true;window._huntsCache=null;}catch(e){}
+  try{playSound("pop");}catch(e){}
+  setChasseSeg(name);
+}
 function _majCompteurValider(){
   var n=(DISCOVERIES||[]).filter(function(d){return !d.promoted&&!d.rejected;}).length;
   var el=document.getElementById("chasse-seg-valider-n");if(el)el.textContent=n?" · "+n:"";
@@ -21854,11 +21936,19 @@ function renderChasse(){
   }
   _peindreChasse(demande);
   if(window.fbLoadNearbyHunts&&window.STORES&&STORES.length){
-    /* LE MEME CHIFFRE QUE LES NOTIFICATIONS. On demandait 15 — valeur que
-       fbLoadNearbyHunts traitait comme « pas de limite utile » et remplacait
-       par 100 km. La liste montrait donc des chasses pour lesquelles on n'avait
-       jamais ete prevenu, et ou l'on n'irait jamais. */
-    window.fbLoadNearbyHunts(userLat,userLng,_hrClamp(window.magoHuntRadius)).then(function(hunts){
+    /* VOIR UNE CHASSE NE COUTE RIEN ; ETRE REVEILLE, SI.
+       -----------------------------------------------------------------------
+       Le rayon choisi dans « Ta zone » gouvernait les trois choses a la fois :
+       qui te notifie, et ce que tu vois. C'etait cohérent, mais ca fermait la
+       porte a l'entraide : une chasse lancee a 30 km n'existait pour personne
+       d'autre que son quartier, alors qu'il suffit parfois de passer devant le
+       bon magasin. Quelqu'un qui OUVRE l'onglet a choisi de regarder — on lui
+       montre tout, la plus proche d'abord.
+       Le rayon continue de gouverner ce qui compte vraiment : les
+       notifications. Il vit dans pushTokens/{uid}.rayon et c'est le serveur qui
+       le relit, destinataire par destinataire. Personne n'est reveille au-dela
+       de sa zone ; personne n'est empeche d'aider. */
+    window.fbLoadNearbyHunts(userLat,userLng,20000).then(function(hunts){
       (hunts||[]).forEach(function(h){
         var k=String(h.drinkId);
         var n=h.seekers||0;
@@ -21896,14 +21986,22 @@ function _peindreChasse(demande){
     .filter(function(x){
       var d=(DRINKS||[]).find(function(y){return Number(y.id)===Number(x.id);});
       if(!d)return false;                       // fiche inconnue de cet appareil
-      if(magasinProcheAvec(x.id))return false;  // quelqu'un l'a deja trouvee ici
+      /* « Je l'ai deja dans un magasin d'a cote » est une bonne raison de
+         retirer MA propre chasse : je n'ai plus a la chercher. C'en est une
+         tres mauvaise pour celle de quelqu'un d'AUTRE — c'est meme exactement
+         la personne que je peux aider, puisque je passe devant le magasin. La
+         chasse des autres reste donc affichee. */
+      if(x.moi&&magasinProcheAvec(x.id))return false;
       x.d=d;return true;
     })
     .sort(function(a,b){
       if(b.chercheurs!==a.chercheurs)return b.chercheurs-a.chercheurs;
       return (a.distKm==null?99:a.distKm)-(b.distKm==null?99:b.distKm);
     })
-    .slice(0,8);
+    /* Huit, c'etait assez quand la liste s'arretait a ta zone. Maintenant
+       qu'elle porte toutes les chasses, huit couperait les plus lointaines
+       sans rien dire. Trente : la base entiere en compte vingt aujourd'hui. */
+    .slice(0,30);
   var autres=lignes.filter(function(x){return !x.moi;}).length;
   if(cnt)cnt.textContent=lignes.length?_tr("huntCount").replace("{n}",lignes.length):"";
   /* LE BADGE DE L'ONGLET vient du MEME calcul que la liste, et pas du compteur
