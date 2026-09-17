@@ -343,7 +343,30 @@ exports.notifyStockToWatchers = onDocumentUpdated(
     const before = event.data.before.data() || {};
     const after = event.data.after.data() || {};
     const bd = new Set((before.drinks || []).map(String));
-    const added = (after.drinks || []).map(String).filter(function(x){ return !bd.has(x); });
+    const ajoutees = (after.drinks || []).map(String).filter(function(x){ return !bd.has(x); });
+    /* CONFIRMER N'EST PAS AJOUTER, ET C'ETAIT LE TROU.
+       -----------------------------------------------------------------------
+       Ce declencheur ne regardait que le tableau `drinks` : on n'etait prevenu
+       que si la boisson ENTRAIT dans le magasin. Or le cas le plus frequent est
+       l'inverse — la boisson est deja rattachee au magasin (rayon d'enseigne,
+       import, remplissage), et ce que fait la personne en rayon, c'est la
+       CONFIRMER : « oui, je l'ai vue ici ». Le tableau ne bouge alors pas d'un
+       pouce, et personne n'etait prevenu.
+       Sur Mountain Dew Original, 8 217 magasins de la base la rattachent deja :
+       aucune confirmation n'aurait jamais alerte qui que ce soit.
+       Une confirmation qui passe de zero (ou d'un signalement d'absence) a un
+       nombre positif est exactement ce que la chasse attend : quelqu'un l'a vue
+       de ses yeux. On la traite comme une arrivee. */
+    const cAvant = before.confirmations || {}, cApres = after.confirmations || {};
+    const confirmees = Object.keys(cApres).filter(function (id) {
+      return (Number(cApres[id]) || 0) > 0 && (Number(cAvant[id]) || 0) <= 0;
+    });
+    const vus = new Set(ajoutees);
+    const added = ajoutees.concat(confirmees.filter(function (id) {
+      if (vus.has(String(id))) return false;   // deja compte : une seule alerte par boisson
+      vus.add(String(id));
+      return true;
+    }).map(String));
     /* GARDE-FOU CONTRE LA TEMPETE. Une vraie observation en rayon ajoute une
        boisson, parfois deux. Un remplissage d'enseigne en ajoute jusqu'a mille
        deux cents, sur des milliers de magasins : ce declencheur partait alors
