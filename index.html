@@ -1093,6 +1093,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         </div>
       </div>
       <div id="sd-annonce"></div>
+      <div id="sd-vitrine" style="padding:0 20px 4px"></div>
       <div style="padding:16px 20px 0">
         <div class="searchbox" style="cursor:text;margin-bottom:12px">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--s3)" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="var(--s3)" stroke-width="2" stroke-linecap="round"/></svg>
@@ -5812,6 +5813,44 @@ window.fbSaveDiscoveryPhoto = async function(discId, base64) {
     by: user.uid,
     createdAt: serverTimestamp()
   });
+};
+/* ── LA VITRINE D'UN COMMERCE ────────────────────────────────────────────
+   Douze photos au plus, dans une SOUS-collection : le document du magasin est
+   telecharge par milliers quand quelqu'un ouvre la carte, une photo posee la
+   serait payee en bande passante par tout le monde.
+   L'identifiant porte le plafond (p1..p12) : les regles peuvent ainsi le faire
+   respecter sans lire la collection — treize photos sont impossibles, pas
+   seulement decouragees. */
+window.MAGO_PHOTOS_MAX = 12;
+window.fbChargerPhotosMagasin = async function(storeId) {
+  try {
+    var snap = await getDocs(collection(db, "stores", String(storeId), "photos"));
+    var out = [];
+    snap.forEach(function(d) { out.push(Object.assign({ id: d.id }, d.data())); });
+    /* p2 avant p10 : un tri de chaines mettrait p10 en deuxieme. */
+    out.sort(function(a, b) { return (Number(String(a.id).slice(1)) || 0) - (Number(String(b.id).slice(1)) || 0); });
+    return out;
+  } catch (e) { console.warn("photos magasin:", e && e.message); return []; }
+};
+window.fbAjouterPhotoMagasin = async function(storeId, base64, legende, prix, photoId) {
+  var user = await ensureAuthed();
+  var id = photoId || null;
+  if (!id) {
+    /* La premiere place libre, pour que supprimer la troisieme n'empeche pas
+       d'en reposter une. */
+    var deja = {};
+    (await window.fbChargerPhotosMagasin(storeId)).forEach(function(p) { deja[p.id] = 1; });
+    for (var i = 1; i <= window.MAGO_PHOTOS_MAX && !id; i++) if (!deja["p" + i]) id = "p" + i;
+    if (!id) throw new Error("plein");
+  }
+  var data = { data: String(base64), par: user.uid, maj: serverTimestamp() };
+  if (legende) data.legende = String(legende).slice(0, 60);
+  if (prix) data.prix = String(prix).slice(0, 16);
+  await setDoc(doc(db, "stores", String(storeId), "photos", id), data);
+  return id;
+};
+window.fbSupprimerPhotoMagasin = async function(storeId, photoId) {
+  await deleteDoc(doc(db, "stores", String(storeId), "photos", String(photoId)));
 };
 window.fbLoadDiscoveryPhoto = async function(discId) {
   try {
@@ -16992,6 +17031,8 @@ function renderStoreAcces(s, nbBoissons){
   if(nbBoissons)vers.push({ id:"sd-ancre-boissons", txt:"Boissons", n:nbBoissons });
   var board=document.getElementById("sd-board");
   if(board&&board.innerHTML)vers.push({ id:"sd-board", txt:"Tableau de bord" });
+  var vit=document.getElementById("sd-vitrine");
+  if(vit&&vit.innerHTML)vers.push({ id:"sd-vitrine", txt:"En rayon" });
   var march=document.getElementById("sd-merchant");
   if(march&&march.innerHTML&&!(board&&board.innerHTML))vers.push({ id:"sd-merchant", txt:"Mode commer\u00E7ant" });
   var claim=document.getElementById("sd-claim");
@@ -17212,6 +17253,7 @@ function renderStoreDetail(){
   };
   try{renderStoreMission();}catch(e){}
   try{renderMerchantCard(s);}catch(e){}
+  try{rendreVitrine(s);}catch(e){}
 
   /* Ici, et seulement ici, on recopie le rayon probable dans CE magasin : une
      fiche doit lister ce qu'on s'attend a y trouver. Un magasin a la fois,
@@ -17463,6 +17505,94 @@ function rendreAnnonce(st){
    elle atteste d'une identite verifiee, elle se gagne, et aucun paiement ne
    doit pouvoir la poser. Le jour ou payer changerait ce que la carte affirme,
    la carte mentirait. */
+/* ── LA VITRINE, COTE VISITEUR ───────────────────────────────────────────
+   Ce que la liste des boissons ne saura jamais dire : le pain du jour,
+   l'arrivage, le sandwich, et le prix qui va avec. Le gerant le montre en
+   photo ; nous, on l'affiche au-dessus de la liste, la ou ca se regarde.
+   Rien ne s'affiche tant qu'il n'y a pas de photo : une vitrine vide est un
+   bloc de plus a faire defiler. */
+function rendreVitrine(st){
+  var hote=document.getElementById("sd-vitrine");
+  if(!hote)return;
+  var sid=String((st&&(st.fbId||st.id))||"");
+  if(hote.dataset.pour===sid&&hote.dataset.fait==="1")return;   // deja peinte pour ce magasin
+  hote.dataset.pour=sid; hote.dataset.fait="0"; hote.innerHTML="";
+  if(!st||!window.fbChargerPhotosMagasin)return;
+  window.fbChargerPhotosMagasin(sid).then(function(photos){
+    if(hote.dataset.pour!==sid)return;                          // on a change de magasin entre-temps
+    hote.dataset.fait="1";
+    if(!photos||!photos.length){ hote.innerHTML=""; return; }
+    var gerant=false; try{ gerant=estProprietaire(st); }catch(e){}
+    hote.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin:2px 0 7px">'+
+        '<div class="t-section" style="flex-shrink:0">'+sanitize(tr("En rayon"))+'</div>'+
+        '<div class="sec-count" style="flex:1">'+sanitize(trh("{n} photo(s) du g\u00E9rant",{n:photos.length}))+'</div></div>'+
+      '<div id="sd-vitrine-rail" style="display:flex;gap:9px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px">'+
+      photos.map(function(ph){
+        return '<div data-ph="'+sanitize(ph.id)+'" style="flex-shrink:0;width:132px;border-radius:13px;overflow:hidden;background:var(--bg2);border:1.5px solid var(--border)">'+
+          '<img src="'+sanitize(ph.data)+'" alt="'+sanitize(ph.legende||tr("Photo du magasin"))+'" loading="lazy" style="width:132px;height:99px;object-fit:cover;display:block">'+
+          '<div style="padding:6px 8px">'+
+            (ph.legende?'<div style="font-size:11.5px;font-weight:700;color:var(--s1);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(ph.legende)+'</div>':'')+
+            (ph.prix?'<div style="font-size:12px;font-weight:800;color:var(--gold-txt);margin-top:1px">'+sanitize(ph.prix)+'</div>':'')+
+            (gerant?'<div class="sd-ph-sup" data-ph="'+sanitize(ph.id)+'" role="button" tabindex="0" style="font-size:10.5px;font-weight:700;color:#dc2626;margin-top:4px;cursor:pointer">'+sanitize(tr("Retirer"))+'</div>':'')+
+          '</div></div>';
+      }).join("")+'</div>';
+    if(gerant){
+      Array.prototype.forEach.call(hote.querySelectorAll(".sd-ph-sup"),function(b){
+        b.onclick=function(){
+          if(!confirm(tr("Retirer cette photo de ta vitrine ?")))return;
+          window.fbSupprimerPhotoMagasin(sid,b.getAttribute("data-ph")).then(function(){
+            hote.dataset.fait="0"; rendreVitrine(st);
+            try{playSound("pop");}catch(e){}
+          }).catch(function(e){ toast("\u00C9chec : "+((e&&e.message)||e)); });
+        };
+      });
+    }
+  }).catch(function(){ hote.dataset.fait="1"; });
+}
+/* ── LA VITRINE, COTE GERANT ─────────────────────────────────────────────
+   Une photo, une legende, un prix — les trois champs qu'un commercant a en
+   tete, et rien de plus. Le prix reste du TEXTE libre : « 2,49 € », « 3 pour
+   5 € », « a partir de 1,20 € ». Le forcer en nombre, c'est interdire la
+   moitie de ce qu'une vitrine annonce vraiment. Il vit dans la sous-collection
+   du magasin, et non dans `prices`, qui est un releve communautaire que
+   n'importe qui peut ecrire : un prix presente comme celui du gerant doit
+   venir du gerant. */
+function vitrineBoutonGerant(st){
+  return '<div id="sd-ph-add" role="button" tabindex="0" style="margin-top:9px;padding:11px;border-radius:12px;background:var(--bg3);border:1.5px solid var(--border);text-align:center;font-size:12.5px;font-weight:800;color:var(--s1);cursor:pointer">'+
+    sanitize(tr("Ajouter une photo de ton rayon"))+'</div>'+
+    '<input id="sd-ph-file" type="file" accept="image/*" style="display:none">';
+}
+function cablerVitrineGerant(st){
+  var b=document.getElementById("sd-ph-add"), f=document.getElementById("sd-ph-file");
+  if(!b||!f)return;
+  b.onclick=function(){ f.click(); };
+  b.onkeydown=function(ev){ if(ev.key==="Enter"){ev.preventDefault();f.click();} };
+  f.onchange=function(){
+    var file=f.files&&f.files[0]; f.value="";
+    if(!file)return;
+    var sid=String(st.fbId||st.id);
+    /* Meme compression que le scan de frigo : une photo de rayon, c'est le
+       meme objet. La borne des regles est en CARACTERES (220 000) et la
+       base64 pese environ un tiers de plus que l'image : 420 Ko tient. */
+    compressPhotoFile(file,function(data){
+      var legende=(prompt(tr("Une légende ? (facultatif)"))||"").slice(0,60);
+      var prix=(prompt(tr("Un prix ? (facultatif, ex : 2,49 \u20AC)"))||"").slice(0,16);
+      toast(tr("Envoi de la photo\u2026"));
+      window.fbAjouterPhotoMagasin(sid,data,legende,prix).then(function(){
+        var h=document.getElementById("sd-vitrine"); if(h)h.dataset.fait="0";
+        rendreVitrine(st);
+        try{playSound("win");}catch(e){}
+        toast(tr("Photo publiée sur ta fiche"));
+      }).catch(function(e){
+        var m=String((e&&e.message)||e);
+        toast(m==="plein"
+          ? trh("Ta vitrine est pleine ({n} photos) \u2014 retires-en une",{n:window.MAGO_PHOTOS_MAX||12})
+          : (/permission/.test(m) ? tr("Réservé au gérant du magasin, avec le pass complet") : "\u00C9chec : "+m));
+        try{playSound("err");}catch(_e){}
+      });
+    },function(){ toast(tr("Photo illisible \u2014 réessaie")); },{maxSide:1400,maxKb:420});
+  };
+}
 function rendrePass(st){
   var hote=document.getElementById("sd-pass");
   if(!hote)return;
@@ -17522,6 +17652,11 @@ function rendrePass(st){
       var champ=document.getElementById("ann-txt");
       if(champ&&a&&a.texte&&!champ.value)champ.value=a.texte;
     }).catch(function(){});
+    /* La vitrine se pose au meme endroit que l'annonce, sous la meme
+       condition : le pass complet. C'est le seul bloc de la fiche qui parle
+       au gerant, et c'est la qu'il va chercher ce qu'il peut publier. */
+    hote.insertAdjacentHTML("beforeend",vitrineBoutonGerant(st));
+    try{ cablerVitrineGerant(st); }catch(e){}
   }
 }
 

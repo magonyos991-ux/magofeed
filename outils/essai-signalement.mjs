@@ -193,7 +193,7 @@ dit("la chasse aux codes-barres figure dans la commande de deploiement",
   /"chasse-codes\.js"/.test(deploi));
 dit("le mode d'emploi n'exige plus un total de banc d'essai fige",
   !/n'affiche pas `148\/148`, \*\*ne d\u00E9ploie pas\*\*/.test(deploi) &&
-  /266\/266 conformes/.test(deploi) && /moindre `ECHEC`/.test(deploi),
+  /277\/277 conformes/.test(deploi) && /moindre `ECHEC`/.test(deploi),
   "il interdisait de deployer alors que le banc affichait 260/260, tout vert");
 dit("une fonction non deployee le dit au lieu d'afficher « internal »",
   /functions\/internal.{0,40}functions\/not-found/s.test(src) && /pas encore d.{0,12}ploy/.test(src),

@@ -911,6 +911,39 @@ await env.withSecurityRulesDisabled(async (c)=>{
   await setDoc(doc(c.firestore(),'pointsDons','d1'),
     {par:'admin',pour:ALICE,pseudo:'Alice',montant:6,motif:'signalement perdu',at:new Date()});
 });
+/* LA VITRINE D'UN COMMERCE. Le gerant montre son rayon en photo ; personne
+   d'autre ne doit pouvoir accrocher une image sur la fiche d'un magasin. Le
+   plafond de douze vit dans le NOM du document (p1..p12) : le langage des
+   regles ne sait pas compter les documents d'une collection, mais il sait
+   lire un identifiant — treize photos sont donc impossibles, pas seulement
+   decouragees. */
+const IMG = 'data:image/jpeg;base64,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+/* A ce stade du banc, Alice tient bien s1 avec le pass complet (ligne 527) :
+   c'est donc elle, la gerante, et sa photo doit passer. Le visiteur, ici,
+   c'est Mallory. */
+await doit('legitime : la gerante accroche une photo sur SON magasin',
+  ()=>assertSucceeds(setDoc(doc(a,'stores','s1','photos','p1'),{data:IMG,par:ALICE})));
+await doit('legitime : elle corrige le prix sans supprimer la photo',
+  ()=>assertSucceeds(setDoc(doc(a,'stores','s1','photos','p1'),{data:IMG,par:ALICE,prix:'2,49 EUR'})));
+await doit('bloque : un visiteur accroche une photo sur le magasin d un autre',
+  ()=>assertFails(setDoc(doc(m,'stores','s1','photos','p2'),{data:IMG,par:MALLORY})));
+await doit('bloque : la gerante d un magasin en decore un autre',
+  ()=>assertFails(setDoc(doc(a,'stores','s2','photos','p1'),{data:IMG,par:ALICE})));
+await doit('bloque : un anonyme accroche une photo',
+  ()=>assertFails(setDoc(doc(anon,'stores','s1','photos','p1'),{data:IMG,par:'anon'})));
+await doit('bloque : une photo signee du nom de quelqu un d autre',
+  ()=>assertFails(setDoc(doc(a,'stores','s1','photos','p3'),{data:IMG,par:MALLORY})));
+await doit('bloque : une treizieme photo (le plafond vit dans le nom)',
+  ()=>assertFails(setDoc(doc(a,'stores','s1','photos','p13'),{data:IMG,par:ALICE})));
+await doit('bloque : un nom de document invente',
+  ()=>assertFails(setDoc(doc(a,'stores','s1','photos','banniere'),{data:IMG,par:ALICE})));
+await doit('bloque : autre chose qu une image en base64',
+  ()=>assertFails(setDoc(doc(a,'stores','s1','photos','p1'),{data:'https://exemple.test/x.jpg',par:ALICE})));
+await doit('bloque : un champ non prevu se glisse dans la photo',
+  ()=>assertFails(setDoc(doc(a,'stores','s1','photos','p1'),{data:IMG,par:ALICE,certified:true})));
+await doit('legitime : tout le monde peut REGARDER la vitrine',
+  ()=>assertSucceeds(getDoc(doc(a,'stores','s1','photos','p1'))));
+
 await doit('legitime : l admin lit le journal des points offerts',
   ()=>assertSucceeds(getDoc(doc(ad,'pointsDons','d1'))));
 await doit('bloque : lire le journal des points offerts sans etre admin',
