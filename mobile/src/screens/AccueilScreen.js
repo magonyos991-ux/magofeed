@@ -4,6 +4,15 @@ import { View, Text, TextInput, FlatList, Pressable, ActivityIndicator, StyleShe
 import { chargerCatalogue, filtrerCatalogue } from "../data/catalog";
 import { C, F } from "../theme";
 
+/* Sous-titre utile seulement : pas de marque vide, ni « Autre », ni la
+   répétition du nom de la boisson. */
+function sousTitre(d) {
+  const m = String(d.brand || d.cat || "").trim();
+  if (!m || m.toLowerCase() === "autre") return "";
+  if (m.toLowerCase() === String(d.name || "").trim().toLowerCase()) return "";
+  return m;
+}
+
 export default function AccueilScreen({ navigation }) {
   const [catalogue, setCatalogue] = useState(null);
   const [erreur, setErreur] = useState(false);
@@ -55,8 +64,8 @@ export default function AccueilScreen({ navigation }) {
               <View style={s.puce} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={s.nom} numberOfLines={1}>{item.name}</Text>
-                {item.brand || item.cat ? (
-                  <Text style={s.marque} numberOfLines={1}>{item.brand || item.cat}</Text>
+                {sousTitre(item) ? (
+                  <Text style={s.marque} numberOfLines={1}>{sousTitre(item)}</Text>
                 ) : null}
               </View>
               <Text style={s.fleche}>›</Text>
