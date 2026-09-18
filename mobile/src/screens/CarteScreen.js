@@ -2,7 +2,7 @@
    Vert = au moins un rayon confirmé ; gris = magasin connu, rien de confirmé. */
 import React, { useEffect, useState } from "react";
 import { View, Text, ActivityIndicator, StyleSheet, Platform } from "react-native";
-import MapView, { Marker, UrlTile } from "react-native-maps";
+import MapView, { Marker } from "react-native-maps";
 import * as Location from "expo-location";
 import { magasinsAutour, CENTRE_DEFAUT } from "../data/stores";
 import { C, F } from "../theme";
@@ -51,7 +51,7 @@ export default function CarteScreen() {
     <View style={s.page}>
       <MapView
         style={{ flex: 1 }}
-        mapType={Platform.OS === "android" ? "none" : "standard"}
+        mapType={Platform.OS === "ios" ? "mutedStandard" : "standard"}
         initialRegion={{
           latitude: position.lat,
           longitude: position.lng,
@@ -60,7 +60,6 @@ export default function CarteScreen() {
         }}
         showsUserLocation
       >
-        <UrlTile urlTemplate="https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png" maximumZ={20} zIndex={-1} />
         {magasins.map((m) => (
           <Marker
             key={m.id}
