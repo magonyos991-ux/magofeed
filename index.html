@@ -9196,6 +9196,22 @@ function _surPlaceSignalement(s){
   var d = _distanceSignalement(s);
   return d != null && d <= SIGNAL_SUR_PLACE_M;
 }
+/* « DEJA LA » NE DOIT PAS VOULOIR DIRE « PROBABLEMENT LA ».
+   s.drinks n'est pas la liste de ce qu'on a vu : rayonAppliquer y recopie, a
+   l'ouverture de chaque fiche, le rayon PROBABLE de l'enseigne (8 201 magasins
+   d'enseigne, 25 936 independants). Les gardes « deja dans ton rayon » lisaient
+   cette liste : la personne, devant l'etagere, s'entendait repondre que la
+   boisson y etait deja, rien n'etait ecrit, et _stripAutoDrinks l'effacait au
+   rendu suivant faute de confirmation. Le trou d'invisibilite que toute cette
+   session repare, par une autre porte.
+   Est REELLEMENT en rayon ce que quelqu'un a confirme, ou ce que le catalogue
+   verifie de l'enseigne porte. Le reste est une supposition, et on accepte
+   toujours de la confirmer. */
+function _vraimentEnRayon(s,did){
+  if(!s)return false;
+  if(Number((s.confirmations||{})[did])>0)return true;
+  return (s.drinksVerified||[]).some(function(x){return Number(x)===Number(did);});
+}
 function _refusTropLoin(){
   try{ toast("Trop loin pour signaler ce magasin \u00b7 il faut l'avoir vu, ou le conna\u00eetre"); }catch(e){}
   try{ playSound("err"); }catch(e){}
@@ -17735,7 +17751,7 @@ function rafaleAddCode(code){
     return;
   }
   var did=d.id;
-  if((s.drinks||[]).some(function(x){return Number(x)===Number(did);})){
+  if(_vraimentEnRayon(s,did)){
     rafaleFlash("#3b82f6");playSound("beep");rafaleNote("Déjà dans ton rayon : "+d.name,"#93c5fd");
     return;
   }
@@ -17822,7 +17838,10 @@ function openAddDrinkToStore(){
 function _renderAddDrinkList(q){
   var host=document.getElementById("add-drink-list");if(!host)return;
   var s=curStoreDetail;if(!s)return;
-  var have={};(s.drinks||[]).forEach(function(x){have[Number(x)]=true;});
+  /* La pastille « deja la » suit la meme regle : elle ne se pose que sur une
+     presence reelle, sinon elle bloque le tap (row.onclick sort sur have[id])
+     devant une boisson que personne n'a jamais confirmee ici. */
+  var have={};(s.drinks||[]).forEach(function(x){ if(_vraimentEnRayon(s,x))have[Number(x)]=true; });
   var nq=(typeof normTxt==="function")?normTxt(q||""):(q||"").toLowerCase();
   var list=(DRINKS||[]).filter(function(d){
     if(!nq)return true;
@@ -18383,8 +18402,12 @@ var _autoImportBusy=false;
 /* Les magasins importes d'OpenStreetMap ont recu, a l'import, un rayon DEVINE
    d'apres leur categorie. On ne montre donc d'eux que ce que quelqu'un a
    reellement confirme — sinon l'app affiche des stocks que personne n'a vus.
-   Le rayon probable de l'enseigne, lui, n'entre jamais dans s.drinks : il est
-   consulte a part (rayonProbableContient), donc cette garde ne le touche pas. */
+   Attention : le rayon probable de l'enseigne, LUI, entre bien dans s.drinks —
+   rayonAppliquer l'y recopie a l'ouverture d'une fiche, et cette garde le
+   retire ensuite au rendu suivant. Les deux se suivent donc sans se parler.
+   C'est sans consequence a l'affichage (le rayon probable se reaffiche a
+   chaque ouverture), mais c'est la raison pour laquelle aucun test de presence
+   ne doit se fier a s.drinks : voir _vraimentEnRayon. */
 function _stripAutoDrinks(s){
   if(!s||typeof s.id!=="string"||s.id.charAt(0)!=="o")return s;
   var conf=s.confirmations||{};

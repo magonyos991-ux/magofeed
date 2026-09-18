@@ -235,6 +235,18 @@ const vu = await page.evaluate(() => {
   out.amiAccepte = acc ? acc.title + " >" + (acc.action && acc.action.kind) : null;
   out.amiPastille = typeof majPastilleAmis === "function";
 
+  /* « Deja la » doit vouloir dire « quelqu'un l'a vue », pas « probablement ».
+     rayonAppliquer recopie le rayon PROBABLE de l'enseigne dans s.drinks : un
+     test de presence qui lit s.drinks refuse le signalement de quelqu'un qui
+     est devant l'etagere. */
+  const mag = { id: "o7", name: "Delhaize", drinks: [11, 22, 33], confirmations: { 11: 2 }, drinksVerified: [22] };
+  out.vraimentEnRayon = {
+    confirmee: _vraimentEnRayon(mag, 11),
+    verifiee: _vraimentEnRayon(mag, 22),
+    seulementProbable: _vraimentEnRayon(mag, 33),
+    absente: _vraimentEnRayon(mag, 44)
+  };
+
   /* Un magasin importe n'expose que ce qui est confirme. */
   const osm = { id: "o1", name: "Proxy Delhaize", drinks: [1, 2], confirmations: { 1: 1 } };
   _stripAutoDrinks(osm);
@@ -290,6 +302,14 @@ dit("le meme etat ne sonne pas deux fois", vu.amiPasDeDoublon);
 dit("une acceptation sonne et ouvre le fil",
   /Cobra Supreme a accepté ta demande >conv/.test(vu.amiAccepte || ""), vu.amiAccepte);
 dit("la pastille des demandes existe toujours", vu.amiPastille);
+
+dit("« deja la » = confirmee par quelqu'un, ou verifiee au catalogue de l'enseigne",
+  vu.vraimentEnRayon.confirmee === true && vu.vraimentEnRayon.verifiee === true);
+dit("une boisson seulement PROBABLE ne bloque plus le signalement",
+  vu.vraimentEnRayon.seulementProbable === false && vu.vraimentEnRayon.absente === false,
+  "sinon la personne devant l'etagere s'entend dire « deja dans ton rayon » et rien n'est ecrit");
+dit("aucun garde de presence ne lit s.drinks",
+  !/\(s\.drinks\|\|\[\]\)\.some\(function\(x\)\{return Number\(x\)===Number\(did\);\}\)\)\{\n    rafaleFlash/.test(src));
 
 dit("un magasin importe ne montre que ce qui est confirme", vu.gardeImport.garde && vu.gardeImport.jette);
 dit("un magasin cree par la communaute n'est jamais rogne", vu.gardeCommunautaire);
