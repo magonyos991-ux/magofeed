@@ -74,6 +74,11 @@ service cloud.firestore {
               'emailTestDay','emailTestCount',
               'penalty','penaltyAt',
               'points','pointsHerites','pointsPreuves','pointsJour','pointsJourTotal','pointsMaj',
+              /* Points offerts par l'administrateur (offrirPoints, Admin SDK).
+                 Ils entrent dans le score officiel : s'ils etaient ecrivables
+                 depuis le client, il suffirait d'ouvrir la console pour s'en
+                 offrir. */
+              'pointsOfferts',
               'refPoints','refCount','refAt','refCode'];
     }
     /* Le langage des regles ne sait pas boucler : on verifie chaque case a la
@@ -212,6 +217,14 @@ service cloud.firestore {
     //    reprendre ses points. Lecture reservee a l'admin : ce n'est pas un
     //    pilori public.
     match /penalties/{pid} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    /* Journal des points OFFERTS par l'administrateur (offrirPoints, Admin
+       SDK). Ecrit par le serveur seul, lu par l'admin : un don doit toujours
+       pouvoir repondre a « pourquoi cette personne a-t-elle ces points ». */
+    match /pointsDons/{did} {
       allow read: if isAdmin();
       allow write: if false;
     }

@@ -64,6 +64,16 @@ await doit('bloque : s ecrire 999999 points',
   ()=>assertFails(setDoc(doc(a,'users',ALICE),{points:999999},{merge:true})));
 await doit('bloque : se donner des points de parrainage',
   ()=>assertFails(setDoc(doc(a,'users',ALICE),{refPoints:5000,refCount:99},{merge:true})));
+/* POINTS OFFERTS PAR L'ADMINISTRATION. Ils entrent dans le score officiel
+   (recalculerScore), donc ils doivent etre aussi inecrivables que les autres :
+   sans cette ligne, il suffirait d'ouvrir la console de son navigateur pour
+   s'offrir mille points, et tout le reste de la protection ne servirait plus a
+   rien. Le don passe par la Cloud Function offrirPoints (Admin SDK), qui laisse
+   une trace nominative dans pointsDons. */
+await doit('bloque : s offrir des points a soi-meme',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),{pointsOfferts:1000},{merge:true})));
+await doit('bloque : CREER son profil avec des points offerts',
+  ()=>assertFails(setDoc(doc(m,'users',MALLORY),{pseudo:'M',pointsOfferts:1000})));
 /* LA FAILLE QUE CES TROIS TESTS FERMENT. La protection ci-dessus ne portait
    que sur la MODIFICATION. La CREATION, elle, n'interdisait que les compteurs
    d'e-mails et la sanction : « points » n'y figurait pas. Or chacun a le droit
@@ -892,6 +902,23 @@ await doit('bloque : ecrire une fausse alerte',
   ()=>assertFails(setDoc(doc(m,'alertesAdmin','faux'),{titre:'Don de 500 euros',corps:'x'})));
 await doit('bloque : l admin lui-meme ne peut pas ecrire dans le journal',
   ()=>assertFails(setDoc(doc(ad,'alertesAdmin','a2'),{titre:'x',corps:'y'})));
+
+/* JOURNAL DES POINTS OFFERTS. Meme regime que les sanctions : l'administrateur
+   le lit — un don doit toujours pouvoir repondre a « pourquoi cette personne
+   a-t-elle ces points ? » — et personne ne l'ecrit depuis un navigateur, pas
+   meme lui. Un journal qu'on peut reecrire ne prouve rien. */
+await env.withSecurityRulesDisabled(async (c)=>{
+  await setDoc(doc(c.firestore(),'pointsDons','d1'),
+    {par:'admin',pour:ALICE,pseudo:'Alice',montant:6,motif:'signalement perdu',at:new Date()});
+});
+await doit('legitime : l admin lit le journal des points offerts',
+  ()=>assertSucceeds(getDoc(doc(ad,'pointsDons','d1'))));
+await doit('bloque : lire le journal des points offerts sans etre admin',
+  ()=>assertFails(getDoc(doc(m,'pointsDons','d1'))));
+await doit('bloque : fabriquer un don de points',
+  ()=>assertFails(setDoc(doc(a,'pointsDons','d2'),{pour:ALICE,montant:9999})));
+await doit('bloque : l admin lui-meme ne peut pas ecrire un don',
+  ()=>assertFails(setDoc(doc(ad,'pointsDons','d3'),{pour:ALICE,montant:9999})));
 await doit('bloque : effacer une alerte pour cacher un echec',
   ()=>assertFails(deleteDoc(doc(ad,'alertesAdmin','a1'))));
 

@@ -229,7 +229,8 @@ async function recalculerScore(uid) {
       : (Number(d.pointsHerites) || 0);
     const penalite = (sanction === null) ? (Number(d.penalty) || 0) : sanction;
     const total = Math.max(0,
-      herite + (d.pointsPreuves || 0) + (d.refPoints || 0) - penalite);
+      herite + (d.pointsPreuves || 0) + (d.refPoints || 0)
+      + (d.pointsOfferts || 0) - penalite);
     if (!premierPassage && d.points === total && (Number(d.penalty) || 0) === penalite) return;
     const patch = { points: total };
     // On recopie la sanction dans le profil : l'app l'affiche depuis la, et
@@ -821,6 +822,52 @@ exports.rattraperSignalements = onCall({ region: REGION, timeoutSeconds: 300 }, 
     await evaluerParrainage(u);
   }
   return res;
+});
+
+/* OFFRIR DES POINTS, QUAND LA PREUVE A ETE PERDUE.
+   Le serveur ne credite que sur preuve : un document `reports`. C'est ce qui
+   rend le classement honnete, et il n'y a pas a y toucher. Mais il arrive que
+   la preuve n'ait jamais ete ecrite — un defaut de l'application, pas de la
+   personne. Cas reel : quelqu'un signale deux boissons en rayon, l'app repond
+   « deja dans ton rayon » parce que le rayon PROBABLE de l'enseigne les
+   contenait deja, n'ecrit rien, et le profil reste a zero. Aucun rattrapage
+   automatique n'est possible : il n'y a rien a relire.
+   Ce don est donc separe des preuves. Il vit dans son propre champ
+   (pointsOfferts), il entre dans le score, et il laisse une trace nominative
+   et datee dans `pointsDons` — pour que « pourquoi cette personne a-t-elle ces
+   points ? » ait toujours une reponse. Reserve a l'administrateur.
+
+   Deploiement : firebase deploy --only functions:offrirPoints */
+const DON_MAX = 500;
+exports.offrirPoints = onCall({ region: REGION }, async (req) => {
+  const uid = req.auth && req.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi.");
+  const moi = await db.doc(`admins/${uid}`).get();
+  if (!moi.exists) throw new HttpsError("permission-denied", "Reserve a l'administrateur.");
+
+  const cible = String((req.data && req.data.uid) || "").trim();
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(cible)) throw new HttpsError("invalid-argument", "Identifiant invalide.");
+  const montant = Math.round(Number((req.data && req.data.montant) || 0));
+  if (!isFinite(montant) || montant === 0) throw new HttpsError("invalid-argument", "Montant invalide.");
+  if (Math.abs(montant) > DON_MAX) throw new HttpsError("invalid-argument", "Au-dela de " + DON_MAX + " points, fais-le en plusieurs fois.");
+  const motif = String((req.data && req.data.motif) || "").slice(0, 200);
+
+  const ref = db.doc(`users/${cible}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "Cette personne n'a pas de profil.");
+  const pseudo = (snap.data() || {}).pseudo || null;
+
+  await ref.set({ pointsOfferts: FieldValue.increment(montant) }, { merge: true });
+  await db.collection("pointsDons").add({
+    par: uid, pour: cible, pseudo: pseudo,
+    montant: montant, motif: motif,
+    at: FieldValue.serverTimestamp()
+  });
+  await recalculerScore(cible);
+
+  const apres = await ref.get();
+  return { ok: true, pseudo: pseudo, offerts: (apres.data() || {}).pointsOfferts || 0,
+           score: (apres.data() || {}).points || 0 };
 });
 
 /* Bascule : fige le solde actuel de chacun pour que PERSONNE ne perde ses

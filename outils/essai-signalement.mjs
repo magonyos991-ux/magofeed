@@ -157,6 +157,26 @@ dit("le jeton d'analyse IA se consomme sur tous les chemins",
   (ia.match(/vRef\.delete\(\)/g) || []).length >= 2,
   "un raccourci qui sort avant laisse le jeton rejouable : une analyse peut financer plusieurs promotions");
 
+dit("un don de points existe, trace et reserve a l'admin",
+  /exports\.offrirPoints = onCall/.test(pts) &&
+  /Reserve a l'administrateur/.test(pts.slice(pts.indexOf("exports.offrirPoints"))) &&
+  /collection\("pointsDons"\)\.add/.test(pts),
+  "le serveur ne credite que sur preuve ; quand l'app a perdu la preuve, le don doit rester visible");
+dit("les points offerts entrent dans le score officiel",
+  /\+ \(d\.pointsOfferts \|\| 0\) - penalite/.test(pts));
+dit("un don est plafonne", /const DON_MAX = 500;/.test(pts));
+
+const regles = await readFile(join(process.cwd(), "functions-a-deployer/firestore.rules"), "utf8");
+const banc = await readFile(join(process.cwd(), "functions-a-deployer/tests-regles/regles.test.mjs"), "utf8");
+dit("le banc d'essai couvre les points offerts et leur journal",
+  /pointsOfferts:1000/.test(banc) && /pointsDons/.test(banc),
+  "une regle sans epreuve est une regle qui se perd");
+dit("les points offerts sont infalsifiables depuis le client",
+  /'pointsOfferts',/.test(regles),
+  "sinon il suffit d'ouvrir la console pour s'en offrir");
+dit("le journal des dons est lisible par l'admin seul, ecrit par personne",
+  /match \/pointsDons\/\{did\} \{[\s\S]{0,120}allow read: if isAdmin\(\);[\s\S]{0,60}allow write: if false;/.test(regles));
+
 const farm = await readFile(join(process.cwd(), "functions-a-deployer/anti-farm.js"), "utf8");
 dit("la sanction ne coute pas dix fois ce que le geste rapporte",
   /const POINTS_RETIRES = 3;/.test(farm),
@@ -173,8 +193,11 @@ dit("la chasse aux codes-barres figure dans la commande de deploiement",
   /"chasse-codes\.js"/.test(deploi));
 dit("le mode d'emploi n'exige plus un total de banc d'essai fige",
   !/n'affiche pas `148\/148`, \*\*ne d\u00E9ploie pas\*\*/.test(deploi) &&
-  /260\/260 conformes/.test(deploi) && /moindre `ECHEC`/.test(deploi),
+  /266\/266 conformes/.test(deploi) && /moindre `ECHEC`/.test(deploi),
   "il interdisait de deployer alors que le banc affichait 260/260, tout vert");
+dit("une fonction non deployee le dit au lieu d'afficher « internal »",
+  /functions\/internal.{0,40}functions\/not-found/s.test(src) && /pas encore d.{0,12}ploy/.test(src),
+  "« Echec : functions/internal » ne veut rien dire pour qui le lit");
 dit("le fichier des notifications figure dans la commande de deploiement",
   /"messages-push\.js"/.test(deploi), "sinon les notifications ne montent jamais");
 

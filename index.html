@@ -890,6 +890,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       <div id="admin-rejouer" style="margin-bottom:18px"></div>
       <div id="admin-visibilite" style="margin-bottom:18px"></div>
       <div id="admin-points-rendus" style="margin-bottom:18px"></div>
+      <div id="admin-offrir" style="margin-bottom:18px"></div>
       <div id="admin-list"></div>
     </div>
     </div>
@@ -5159,6 +5160,19 @@ window.fbConfirmAiDrink = async function(discoveryId) {
 /* Rendre les points que l'ancienne regle de distance avait refuses en silence.
    Cote serveur : rattraperSignalements (points-et-parrainage.js). Sans
    `appliquer`, elle ne fait que compter — on regarde avant d'ecrire. */
+/* « Echec : functions/internal » ne veut rien dire pour la personne qui le lit.
+   Une fonction qui n'est PAS deployee repond 404 avec une page, que le SDK ne
+   sait pas traduire : il rend « internal ». C'est le cas le plus frequent ici,
+   et le seul qui se repare en une commande. On le dit. */
+function _motifFonction(e) {
+  var code = String((e && e.code) || "");
+  if (code === "functions/internal" || code === "functions/not-found") {
+    return "fonction pas encore d\u00E9ploy\u00E9e \u2014 lance la commande du \u00A70 bis";
+  }
+  if (code === "functions/permission-denied") return "r\u00E9serv\u00E9 \u00E0 l'administrateur";
+  if (code === "functions/unauthenticated") return "reconnecte-toi";
+  return String(code || (e && e.message) || e);
+}
 window.fbRattraperSignalements = async function(jours, appliquer, uid) {
   try {
     await ensureAuthed();
@@ -5167,7 +5181,46 @@ window.fbRattraperSignalements = async function(jours, appliquer, uid) {
     var res = await call({ jours: Number(jours) || 60, appliquer: !!appliquer, uid: uid ? String(uid) : "" });
     return (res && res.data) || { ok: false, reason: "no-response" };
   } catch (e) {
-    return { ok: false, reason: String((e && e.code) || (e && e.message) || e) };
+    return { ok: false, reason: _motifFonction(e) };
+  }
+};
+/* Offrir des points a quelqu'un dont la preuve a ete perdue par un defaut de
+   l'app. Trace cote serveur dans `pointsDons`. */
+/* Trouver une personne par son pseudo, pour l'administration. `users` est en
+   lecture publique (c'est ce qui fait vivre le classement) : on peut donc
+   chercher sans fonction serveur. La recherche est prefixee — Firestore ne
+   sait pas chercher « au milieu » — et on accepte aussi un identifiant colle
+   tel quel, parce que c'est ce qu'on a sous la main quand on vient d'une
+   trace. Reserve a l'admin par l'ecran, pas par les regles : cette lecture
+   n'expose rien de plus que le classement. */
+window.fbChercherJoueurs = async function(q) {
+  var t = String(q || "").trim();
+  if (!t) return [];
+  var out = [];
+  /* Un identifiant colle : lecture directe, aucune recherche. */
+  if (/^[A-Za-z0-9_-]{20,}$/.test(t)) {
+    try {
+      var d1 = await getDoc(doc(db, "users", t));
+      if (d1.exists()) out.push(Object.assign({ uid: d1.id }, d1.data()));
+    } catch (e) {}
+    if (out.length) return out;
+  }
+  try {
+    var snap = await getDocs(query(collection(db, "users"),
+      orderBy("pseudo"), startAt(t), endAt(t + "\uf8ff"), limit(10)));
+    snap.forEach(function(d) { out.push(Object.assign({ uid: d.id }, d.data())); });
+  } catch (e) { console.warn("recherche joueurs:", e && e.message); }
+  return out;
+};
+window.fbOffrirPoints = async function(uid, montant, motif) {
+  try {
+    await ensureAuthed();
+    var fns = getFunctions(app, "europe-west1");
+    var call = httpsCallable(fns, "offrirPoints");
+    var res = await call({ uid: String(uid || ""), montant: Number(montant) || 0, motif: String(motif || "") });
+    return (res && res.data) || { ok: false, reason: "no-response" };
+  } catch (e) {
+    return { ok: false, reason: _motifFonction(e) };
   }
 };
 window.fbSyncWatch = async function(add, drinkId, drinkName, lat, lng) {
@@ -23875,7 +23928,67 @@ function renderPointsRendus(){
   btn.onclick=lancer;
   btn.onkeydown=function(ev){ if(ev.key==="Enter")lancer(); };
 }
+/* Offrir des points a quelqu'un dont la contribution n'a laisse aucune preuve
+   — parce que l'app l'a perdue. On cherche par pseudo, on confirme sur le
+   pseudo, et le serveur garde la trace de qui a offert quoi, et pourquoi. */
+function renderOffrirPoints(){
+  var el=document.getElementById("admin-offrir");
+  if(!el)return;
+  el.innerHTML='<div style="font-size:12px;color:var(--s2);margin-bottom:6px">Offrir des points (contribution perdue par l\u2019app)</div>'+
+    '<div style="display:flex;gap:8px;margin-bottom:6px"><input id="off-q" type="text" placeholder="pseudo ou identifiant" autocomplete="off" style="flex:1;min-width:0;padding:11px 12px;border-radius:12px;border:1px solid var(--bd);background:var(--bg3);color:var(--s1);font-size:13.5px">'+
+    '<input id="off-n" type="number" inputmode="numeric" placeholder="pts" style="width:74px;padding:11px 10px;border-radius:12px;border:1px solid var(--bd);background:var(--bg3);color:var(--s1);font-size:13.5px"></div>'+
+    '<input id="off-m" type="text" placeholder="motif (gard\u00E9 en trace)" autocomplete="off" style="width:100%;padding:11px 12px;border-radius:12px;border:1px solid var(--bd);background:var(--bg3);color:var(--s1);font-size:13.5px;margin-bottom:6px">'+
+    '<div id="off-btn" role="button" tabindex="0" style="padding:12px 14px;border-radius:12px;background:var(--bg3);cursor:pointer;font-size:13.5px;font-weight:700;color:var(--s1);text-align:center">Chercher la personne</div>'+
+    '<div id="off-res" style="font-size:12px;color:var(--s2);margin-top:8px;line-height:1.5"></div>';
+  var btn=document.getElementById("off-btn"), res=document.getElementById("off-res");
+  var cible=null;
+  function chercher(){
+    var q=(document.getElementById("off-q").value||"").trim();
+    if(!q){res.textContent="Entre un pseudo ou un identifiant.";return;}
+    if(!window.fbChercherJoueurs){res.textContent="Outil indisponible (module hors ligne)";return;}
+    res.textContent="Recherche\u2026";
+    window.fbChercherJoueurs(q).then(function(rows){
+      if(!rows||!rows.length){res.textContent="Personne trouv\u00E9e sous ce nom.";cible=null;btn.textContent="Chercher la personne";return;}
+      res.innerHTML="";
+      rows.slice(0,6).forEach(function(u){
+        var l=document.createElement("div");
+        l.setAttribute("role","button");l.setAttribute("tabindex","0");
+        l.style.cssText="padding:9px 10px;border-radius:10px;background:var(--bg3);margin-bottom:5px;cursor:pointer";
+        l.innerHTML=sanitize(u.pseudo||"(sans pseudo)")+' <span style="color:var(--s3)">\u00B7 '+nbSur(u.points)+' pts</span>';
+        l.onclick=function(){
+          cible=u;
+          res.innerHTML="Choisi : <b>"+sanitize(u.pseudo||u.uid)+"</b> \u00B7 "+nbSur(u.points)+" pts aujourd\u2019hui.";
+          btn.textContent="Offrir les points";
+        };
+        res.appendChild(l);
+      });
+    }).catch(function(e){ res.textContent="\u00C9chec : "+((e&&e.message)||e); });
+  }
+  function offrir(){
+    var n=Number((document.getElementById("off-n")||{}).value);
+    var m=((document.getElementById("off-m")||{}).value||"").trim();
+    if(!cible){chercher();return;}
+    if(!isFinite(n)||!n){res.textContent="Indique combien de points.";return;}
+    if(!confirm("Offrir "+n+" point"+(Math.abs(n)>1?"s":"")+" \u00E0 \u00AB "+(cible.pseudo||cible.uid)+" \u00BB ?\n\nLe don est trac\u00E9 : qui, pour qui, combien, pourquoi."))return;
+    btn.style.opacity=".5";res.textContent="Versement\u2026";
+    window.fbOffrirPoints(cible.uid,n,m).then(function(r){
+      btn.style.opacity="";
+      if(!r||!r.ok){res.textContent="\u00C9chec : "+((r&&r.reason)||"inconnu");try{playSound("err");}catch(e){}return;}
+      res.innerHTML="\u2713 <b>"+sanitize(r.pseudo||cible.uid)+"</b> a maintenant <b>"+nbSur(r.score)+"</b> points ("+nbSur(r.offerts)+" offerts au total).";
+      cible=null;btn.textContent="Chercher la personne";
+      try{playSound("win");}catch(e){}
+    }).catch(function(e){
+      btn.style.opacity="";
+      res.textContent="\u00C9chec : "+((e&&e.message)||e);
+      try{playSound("err");}catch(_e){}
+    });
+  }
+  btn.onclick=offrir;
+  btn.onkeydown=function(ev){ if(ev.key==="Enter")offrir(); };
+  document.getElementById("off-q").onkeydown=function(ev){ if(ev.key==="Enter"){cible=null;chercher();} };
+}
 function renderAdmin(){
+  try{ renderOffrirPoints(); }catch(e){}
   try{ renderRejouerSignalements(); }catch(e){}
   try{ renderReparerVisibilite(); }catch(e){}
   try{ renderPointsRendus(); }catch(e){}

@@ -99,8 +99,17 @@ d'ami partiront ensemble.
   pendant que l'écran annonçait le contraire. Le fichier le demandait pourtant
   noir sur blanc dans sa propre section Déploiement.
 
-Aucune règle Firestore ne change : le banc d'essai (§1) n'a pas besoin d'être
-relancé pour ce lot.
+- **`offrirPoints`** (nouvelle, admin) — le serveur ne crédite que sur preuve,
+  et c'est ce qui rend le classement honnête. Mais quand la preuve n'a jamais
+  été écrite — par un défaut de l'app, pas par la personne — aucun rattrapage
+  automatique n'est possible : il n'y a rien à relire. Ce don vit donc dans son
+  propre champ (`pointsOfferts`), entre dans le score, et laisse une trace
+  nominative et datée dans `pointsDons`. Dans l'app : **Administration →
+  « Offrir des points »**, on cherche la personne par son pseudo.
+
+**Les règles Firestore changent cette fois** (`pointsOfferts` rejoint les champs
+que le client ne peut pas écrire, et `pointsDons` devient lisible par l'admin
+seul) : lance le banc d'essai du §1 avant de déployer.
 
 ## 1. Les règles Firestore — dans la commande de la section 0 bis
 
@@ -112,7 +121,7 @@ Avant tout changement de règles, le banc d'essai doit passer :
 ```
 cd functions-a-deployer/tests-regles
 npm install          # une seule fois
-npm test             # doit se terminer par : 260/260 conformes
+npm test             # doit se terminer par : 266/266 conformes
 ```
 
 Il attaque une base jetable sur ta machine. Rien ne part en ligne. S'il
