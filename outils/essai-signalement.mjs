@@ -216,6 +216,45 @@ const vu = await page.evaluate(() => {
   out.propositionAncienne = rejoue({ id: "x1", barcode: CODE, name: "Ancienne", votes: 1 });
   out.propositionRejetee = rejoue({ id: CODE, name: "Rejetee", votes: 1, rejected: true });
 
+  /* LE SCENARIO EXACT QUI A COUTE DEUX SIGNALEMENTS.
+     Un magasin porte la boisson dans son rayon PROBABLE (remplissage
+     d'enseigne), sans aucune confirmation. Quelqu'un est devant l'etagere et
+     la signale depuis « Ajouter une boisson ». Avant correction, la pastille
+     « deja la » bloquait le tap et rien n'etait ecrit nulle part. */
+  {
+    let envoye = null;
+    window.fbAddDrinkToStore = (id, did) => { envoye = { id, did }; return Promise.resolve(); };
+    let rapport = null;
+    window.fbAddReport = (sid, did, type, o) => { rapport = { sid, did, type, note: o && o.note }; return Promise.resolve(); };
+    window.toast = () => {};
+    try { localStorage.removeItem("magoAwards"); } catch (e) {}
+    window.userLat = 50.8466; window.userLng = 4.3528;
+    const mag = { id: "o99", fbId: "o99", name: "Proxy Delhaize", lat: 50.8470, lng: 4.3530,
+                  drinks: [13200], confirmations: {} };      // rayon suppose, zero confirmation
+    window.STORES = [mag];
+    window.curStoreDetail = mag;
+    const boisson = (DRINKS || []).find((d) => Number(d.id) === 13200);
+    out.scenarioAmie = { boissonAuCatalogue: !!boisson };
+    if (boisson) {
+      /* On passe par L'ECRAN, pas par la fonction : c'est la pastille
+         « deja la » de cette liste qui bloquait le tap, et l'appeler
+         directement ne prouverait rien. */
+      const hote = document.createElement("div");
+      hote.id = "add-drink-list";
+      document.body.appendChild(hote);
+      _renderAddDrinkList(boisson.name);
+      const ligne = hote.querySelector('.add-drink-row[data-id="13200"]');
+      out.scenarioAmie.ligneAffichee = !!ligne;
+      out.scenarioAmie.marqueeDejaLa = !!(ligne && /déjà là/.test(ligne.textContent || ""));
+      if (ligne) ligne.onclick();                       // le tap de la personne
+      out.scenarioAmie.ecritDansLeMagasin = !!envoye;
+      out.scenarioAmie.confirmationPosee = Number(mag.confirmations[13200]) || 0;
+      out.scenarioAmie.rapportEcrit = rapport && rapport.type === "stock";
+      out.scenarioAmie.noteDuRapport = rapport && rapport.note;
+      hote.remove();
+    }
+  }
+
   /* Une demande d'ami doit sonner. */
   const MOI = "moi", ELLE = "elle";
   window._fbUser = { uid: MOI };
@@ -320,6 +359,17 @@ dit("la rafale ne brule plus le verrou du rattachement normal",
 dit("rescanner une proposition nee d'une photo la retrouve", /Dragon Punch/.test(vu.propositionPhoto), vu.propositionPhoto);
 dit("l'ancienne forme (champ barcode) marche toujours", /Ancienne/.test(vu.propositionAncienne));
 dit("une proposition rejetee ne revient pas", !/Rejetee/.test(vu.propositionRejetee));
+
+dit("la boisson de l'histoire est bien au catalogue", vu.scenarioAmie.boissonAuCatalogue);
+dit("l'ecran la propose au lieu de la dire « deja la »",
+  vu.scenarioAmie.ligneAffichee === true && vu.scenarioAmie.marqueeDejaLa === false,
+  "la pastille verte bloque le tap : row.onclick sort sur have[id]");
+dit("signaler sur place une boisson au rayon seulement PROBABLE ecrit le magasin",
+  vu.scenarioAmie.ecritDansLeMagasin === true && vu.scenarioAmie.confirmationPosee === 1,
+  "c'est le geste qui ne laissait aucune trace");
+dit("et laisse le rapport que le serveur attend pour payer",
+  vu.scenarioAmie.rapportEcrit === true && /^magasin\|\d+$/.test(vu.scenarioAmie.noteDuRapport || ""),
+  "note : " + vu.scenarioAmie.noteDuRapport);
 
 dit("le premier chargement des amis ne sonne pas", vu.amiAvant === 0);
 dit("le pseudo d'un inconnu est rattrape quand il arrive", vu.nomDiffere,
