@@ -888,6 +888,8 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
       <!-- Rattrapage des signalements qui n'ont pas atteint leur magasin :
            le bouton constate d'abord, il ne répare que si on le redemande. -->
       <div id="admin-rejouer" style="margin-bottom:18px"></div>
+      <div id="admin-visibilite" style="margin-bottom:18px"></div>
+      <div id="admin-points-rendus" style="margin-bottom:18px"></div>
       <div id="admin-list"></div>
     </div>
     </div>
@@ -3423,6 +3425,43 @@ window.fbRejouerSignalements = async function(jours, appliquer) {
   }
   return res;
 };
+/* RENDRE VISIBLE CE QUI A ETE SIGNALE MAIS QUE L'AFFICHAGE IGNORE.
+   L'outil du dessus part des rapports (`reports`). Il ne trouve donc rien
+   quand le rapport n'a jamais existe — et c'est exactement ce qui est arrive :
+   pendant une journee, un signalement fait a plus de 500 metres du magasin
+   ecrivait la boisson dans `drinks` sans ecrire `confirmations`. Or les
+   magasins importes d'OpenStreetMap n'affichent QUE ce qui est confirme
+   (_stripAutoDrinks), pour ne pas exposer les rayons devines a l'import.
+   Resultat : la boisson etait dans la base, invisible pour tout le monde.
+   Celui-ci part des MAGASINS : il demande a Firestore quels magasins
+   contiennent la boisson, et pose la confirmation manquante. Il n'incremente
+   jamais (une confirmation existante est laissee telle quelle), donc on peut
+   le relancer sans rien fausser. */
+window.fbReparerVisibilite = async function(drinkId, appliquer) {
+  const adm = await getDoc(doc(db, "admins", (auth.currentUser || {}).uid || "-"));
+  if (!adm.exists()) throw new Error("Reserve a l'administrateur");
+  const did = Number(drinkId);
+  if (!isFinite(did)) throw new Error("Identifiant de boisson invalide");
+  const snap = await getDocs(query(collection(db, "stores"), where("drinks", "array-contains", did), limit(300)));
+  const res = { trouves: 0, aveugles: [], reparés: 0 };
+  const aEcrire = [];
+  snap.forEach(function(d) {
+    res.trouves++;
+    const o = d.data() || {};
+    if ((Number((o.confirmations || {})[did]) || 0) > 0) return;
+    res.aveugles.push({ id: d.id, nom: o.name || d.id });
+    aEcrire.push(d.id);
+  });
+  if (!appliquer) return res;
+  for (const id of aEcrire) {
+    const patch = {};
+    patch["confirmations." + did] = 1;
+    patch["seenAt." + did] = Math.floor(Date.now() / 3600000) * 3600000;
+    await updateDoc(doc(db, "stores", id), patch);
+    res["reparés"]++;
+  }
+  return res;
+};
 window.fbRecentReports = async function(n) {
   try {
     var snap = await getDocs(query(collection(db, "reports"), orderBy("createdAt", "desc"), limit(n || 25)));
@@ -3875,34 +3914,39 @@ function _magasinConnu(storeId) {
   }
   return null;
 }
-/* VU, OU SEULEMENT SU ? Deux ecritures differentes, et c'est toute la valeur
-   de l'app qui tient a cette distinction.
-   `drinks` dit « on en trouve probablement ici ». `confirmations` dit « quelqu'un
-   l'a VUE », et c'est ce qui allume la pastille, nourrit les alertes et fait
-   apparaitre « vu par X ». Jusqu'ici, les deux etaient ecrits ensemble quelle
-   que soit la distance : depuis Bruxelles, on pouvait « confirmer » un Coca a
-   Seoul, et personne sur place ne pouvait distinguer cette ligne d'une vraie
-   observation. Le serveur, lui, refusait deja de payer au-dela de 500 metres —
-   les deux disent enfin la meme chose.
-   Signaler de loin reste utile (on connait le magasin d'a cote sans y etre) :
-   ca pose le rayon probable, pas le constat. */
-window.fbAddDrinkToStore = async function(storeId, drinkId, opts) {
+/* UNE SEULE ECRITURE, VISIBLE PAR TOUT LE MONDE.
+   `drinks` dit ou la boisson se trouve, `confirmations` dit que quelqu'un l'y
+   a vue — c'est elle qui allume la pastille, nourrit les alertes, affiche
+   « vu par X », et surtout c'est elle que l'affichage exige sur les magasins
+   importes d'OpenStreetMap. Les separer selon la distance revenait a jeter
+   silencieusement le signalement de quelqu'un qui ne portait pas son
+   telephone au bon endroit. Elles repartent ensemble, toujours.
+   La distance ne decide que des POINTS, et ce jugement-la appartient au
+   serveur (DIST_MAX_M, 500 m), ou il ne peut pas etre contourne. */
+window.fbAddDrinkToStore = async function(storeId, drinkId) {
   var s = _magasinConnu(storeId);
   /* L'identifiant recu EST celui du document : les magasins importes gardent
      leur identifiant OpenStreetMap comme nom de document. On peut donc ecrire
      meme quand la fiche n'est dans aucune liste en memoire. */
   var fbId = (s && s.fbId) || String(storeId || "");
   if (!fbId) throw new Error("magasin inconnu");
-  var vu = !opts || opts.vu !== false;
+  /* UN SIGNALEMENT COMPTE, D'OU QU'IL VIENNE.
+     La version precedente n'ecrivait `confirmations` que pour une observation
+     a moins de 500 metres. C'etait une erreur, et elle a rendu l'app inutile
+     pendant une journee : les magasins importes d'OpenStreetMap passent par
+     _stripAutoDrinks, qui EFFACE a l'affichage toute boisson sans
+     confirmation. Un signalement fait de loin partait donc dans `drinks`, ou
+     personne ne le voyait jamais — ni son auteur, ni les autres.
+     Le principe de l'app est qu'une personne qui signale rend service a tout
+     le monde. La distance ne change pas ce qu'elle a vu : elle ne decide que
+     des POINTS, et cette regle-la vit sur le serveur, ou la triche se juge. */
   var updates = {};
   updates["drinks"] = arrayUnion(Number(drinkId) || drinkId);
-  if (vu) {
-    updates["confirmations." + drinkId] = increment(1);
-    var heure = Math.floor(Date.now() / 3600000) * 3600000;   // a l'heure, jamais a la minute
-    updates["seenAt." + drinkId] = heure;
-    updates["confirmedBy." + drinkId] = (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24);
-    updates["confirmedAt." + drinkId] = heure;
-  }
+  updates["confirmations." + drinkId] = increment(1);
+  var heure = Math.floor(Date.now() / 3600000) * 3600000;   // a l'heure, jamais a la minute
+  updates["seenAt." + drinkId] = heure;
+  updates["confirmedBy." + drinkId] = (localStorage.getItem("magopseudo") || "Explorateur").slice(0, 24);
+  updates["confirmedAt." + drinkId] = heure;
   await window.fbUpdateDoc(window.fbDoc(window.db, "stores", fbId), updates);
 };
 
@@ -5042,6 +5086,20 @@ window.fbConfirmAiDrink = async function(discoveryId) {
     var fns = getFunctions(app, "europe-west1");
     var call = httpsCallable(fns, "confirmAiDrink");
     var res = await call({ discoveryId: String(discoveryId) });
+    return (res && res.data) || { ok: false, reason: "no-response" };
+  } catch (e) {
+    return { ok: false, reason: String((e && e.code) || (e && e.message) || e) };
+  }
+};
+/* Rendre les points que l'ancienne regle de distance avait refuses en silence.
+   Cote serveur : rattraperSignalements (points-et-parrainage.js). Sans
+   `appliquer`, elle ne fait que compter — on regarde avant d'ecrire. */
+window.fbRattraperSignalements = async function(jours, appliquer, uid) {
+  try {
+    await ensureAuthed();
+    var fns = getFunctions(app, "europe-west1");
+    var call = httpsCallable(fns, "rattraperSignalements");
+    var res = await call({ jours: Number(jours) || 60, appliquer: !!appliquer, uid: uid ? String(uid) : "" });
     return (res && res.data) || { ok: false, reason: "no-response" };
   } catch (e) {
     return { ok: false, reason: String((e && e.code) || (e && e.message) || e) };
@@ -9023,8 +9081,14 @@ var SIGNAL_SUR_PLACE_M = 500;
 var SIGNAL_PORTEE_M = 100000;
 function _regimeSignalement(s){
   var d = (s && typeof s.dist === "number" && isFinite(s.dist)) ? s.dist : null;
-  if (d != null && d > SIGNAL_PORTEE_M) return { ok:false, vu:false, loin:true };
-  return { ok:true, vu:(d != null && d <= SIGNAL_SUR_PLACE_M), loin:false };
+  return { ok: !(d != null && d > SIGNAL_PORTEE_M) };
+}
+/* Sur place ou de memoire ? Cela ne change RIEN a ce qui est publie — cela
+   change seulement ce que le serveur paiera (DIST_MAX_M, 500 m). On s'en sert
+   uniquement pour ne pas promettre des points qui ne viendront pas. */
+function _surPlaceSignalement(s){
+  var d = (s && typeof s.dist === "number" && isFinite(s.dist)) ? s.dist : null;
+  return d != null && d <= SIGNAL_SUR_PLACE_M;
 }
 function _refusTropLoin(){
   try{ toast("Trop loin pour signaler ce magasin \u00b7 il faut l'avoir vu, ou le conna\u00eetre"); }catch(e){}
@@ -9062,7 +9126,6 @@ function _ecrireRattachement(s,ctx){
      tricheur, et son signalement restera de toute facon « probable ». */
   var _reg=_regimeSignalement(s);
   if(ctx.drinkId!=null&&!_reg.ok){ _refusTropLoin(); return; }
-  var _surPlace=_reg.vu;
   var tagKey="tag:"+(ctx.drinkId!=null?ctx.drinkId:(ctx.discoveryId!=null?"d"+ctx.discoveryId:"b"+ctx.pendingBarcode))+":"+sid;
   if(!awardFree(tagKey,FOREVER)){
     toast("D\u00e9j\u00e0 rattach\u00e9 \u00e0 "+sanitize(s.name));
@@ -9073,16 +9136,12 @@ function _ecrireRattachement(s,ctx){
     if(!s.drinks)s.drinks=[];
     var did=ctx.drinkId;
     if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
-    /* VU sur place, ou SU de memoire ? Seule une observation a moins de 500
-       metres devient une confirmation — le meme seuil que le serveur emploie
-       pour crediter. Au-dela, on pose le rayon probable sans pretendre que
-       quelqu'un l'a vue : sinon, depuis Bruxelles, on « confirmerait » un
-       rayon a Seoul, et personne sur place ne pourrait faire la difference. */
-    if(_surPlace){
-      if(!s.confirmations)s.confirmations={};
-      s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
-    }
-    if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||sid,did,{vu:_surPlace}).catch(_rattachementEchoue);
+    /* La confirmation est posee dans TOUS les cas : c'est elle qui rend la
+       boisson visible aux autres, et c'est tout l'objet de l'app. La distance
+       ne decide que des points. */
+    if(!s.confirmations)s.confirmations={};
+    s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
+    if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||sid,did).catch(_rattachementEchoue);
     /* La PREUVE que le serveur saura crediter (reports type "stock", +3) :
        ce chemin etait le seul a n'en laisser aucune. La carte l'ecrit deja
        elle-meme (mapStockReport), on ne double pas. */
@@ -9121,14 +9180,23 @@ function _ecrireRattachement(s,ctx){
      deux boissons depuis chez elle, lu deux fois « +3 pts », et vu son profil
      rester a zero — sans que rien, nulle part, ne lui explique pourquoi.
      On dit desormais la meme chose que le serveur, avant lui. Le signalement
-     reste enregistre dans les deux cas : il sert aux autres, il ne rapporte
-     simplement rien. */
+     est publie dans les deux cas — il sert a tout le monde, c'est l'objet de
+     l'app — et le serveur verse 1 point a ce qu'il ne peut pas verifier
+     (MONTANT_DE_MEMOIRE). On ne l'annonce pas ici : le chiffre depend d'un
+     plafond quotidien et de l'anti-farm, et promettre a la place du serveur
+     est exactement l'erreur qu'on repare. */
   if(awardOnce(tagKey,FOREVER)){
-    if(_surPlace){
+    if(_surPlaceSignalement(s)){
       userStats.pts+=3;flyPts(3);
       toast("Rattach\u00E9 \u00E0 "+sanitize(s.name)+" \u00B7 +3 pts");
     }else{
-      toast(trh("Not\u00E9 comme probable chez {s} \u00B7 confirme sur place pour la valider et gagner tes points",{s:sanitize(s.name)}));
+      /* On ne promet plus de chiffre ici. Le serveur ne paie le plein tarif
+         qu'a moins de 500 m (DIST_MAX_M) et verse 1 point a un « je l'ai vue »
+         qu'il ne peut pas verifier : annoncer « +3 pts » dans tous les cas est
+         ce qui a fabrique des profils restes a zero apres deux signalements.
+         Ce qui compte, et qui est vrai dans tous les cas, c'est que le
+         signalement sert a tout le monde. */
+      toast(trh("Signal\u00E9 chez {s} \u00B7 visible par tout le monde (3 pts si tu es sur place)",{s:sanitize(s.name)}));
     }
   }
   trackStoreContribution(sid);
@@ -9858,8 +9926,15 @@ function onBarcodeDetected(r){
      JAMAIS redemander son vrai nom a OpenFoodFacts. Rejeter ne voulait rien
      dire ici. Une decouverte promue non plus : elle vit desormais au
      catalogue, c'est la fiche catalogue qu'il faut montrer. */
+  /* L'IDENTIFIANT VAUT CODE-BARRE. Une proposition nee d'une PHOTO prend pour
+     identifiant le code qui vient d'echouer au scan — c'est tout l'interet du
+     dispositif — mais elle n'a jamais porte de champ `barcode`. Cette ligne ne
+     regardait que ce champ : on rescannait la canette qu'on venait de proposer,
+     et l'app repondait « Produit inconnu », en redemandant son nom. On accepte
+     donc les deux, comme le fait deja le cache des scans. */
   var foundDiscovery=DISCOVERIES.find(function(d){
-    return String(d.barcode)===String(code)&&!d.rejected&&!d.promoted;
+    if(d.rejected||d.promoted)return false;
+    return String(d.barcode)===String(code)||String(d.id)===String(code);
   });
   res.style.display="block";
   // Nettoie les liens injectes par un scan precedent (« deja au catalogue ? »,
@@ -14555,7 +14630,9 @@ var ACT_META={
   tipOk:        {label:"Confirmée",   col:"#16a34a"},
   tipKo:        {label:"Pas trouvée", col:"#dc2626"},
   penalty:      {label:"Points retirés", col:"#dc2626"},
-  msg:          {label:"Message",      col:"var(--s1)"}
+  msg:          {label:"Message",      col:"var(--s1)"},
+  ami:          {label:"Demande d'ami",col:"#c69a57"},
+  amiOk:        {label:"Ami accepté",  col:"#16a34a"}
 };
 function _actMeta(type){ return ACT_META[type]||{label:"Info",col:"var(--s2)"}; }
 /* Vignette : la VRAIE photo du produit quand on connait la boisson, sinon le
@@ -14583,6 +14660,7 @@ function _activityIcon(type){
   // Sanction : une etoile barree. Le meme trait que le reste, aucun emoji.
   else if(type==="penalty")p='<path d="M12 3.6l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 16l-4.8 2.5.9-5.4-3.9-3.8 5.4-.8L12 3.6z"/><path d="M4 20 20 4"/>';
   else if(type==="msg")p='<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7.5 8.5 6 8.5-6"/>';
+  else if(type==="ami"||type==="amiOk")p='<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>';
   else p='<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>';
   return '<span style="width:34px;height:34px;border-radius:11px;background:color-mix(in srgb,'+col+' 14%,transparent);display:flex;align-items:center;justify-content:center;color:'+col+'"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+p+'</svg></span>';
 }
@@ -14601,6 +14679,7 @@ function _runActivityAction(act){
   if(act.kind==="storeMap"&&act.lat!=null){try{showStoreOnMap(Number(act.lat),Number(act.lng));}catch(e){}return;}
   if(act.kind==="drink"&&act.drinkId!=null){var d=DRINKS.find(function(x){return Number(x.id)===Number(act.drinkId);});if(d){try{pick(d);}catch(e){}}return;}
   if(act.kind==="conv"&&act.cid){try{openThread(String(act.cid),act.uid?String(act.uid):null);}catch(e){}return;}
+  if(act.kind==="amis"){ try{ show("amis"); }catch(e){} return; }
   if(act.kind==="hunts"){
     /* Ce lien faisait defiler l'accueil vers #hunts-card, un conteneur qui
        n'existe plus : il ne se passait donc rien du tout. Les chasses vivent
@@ -17563,12 +17642,10 @@ function rafaleAddCode(code){
   /* Le scan en rafale part du magasin OUVERT, pas du magasin ou l'on est : on
      peut tres bien scanner ses canettes chez soi apres avoir ouvert la fiche
      d'ailleurs. La rafale suit donc la meme regle que le reste. */
-  var _regR=_regimeSignalement(s);
-  if(_regR.vu){
-    if(!s.confirmations)s.confirmations={};
-    s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
-  }
-  if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did,{vu:_regR.vu}).catch(_rattachementEchoue);
+  if(!_regimeSignalement(s).ok){ _refusTropLoin(); return; }
+  if(!s.confirmations)s.confirmations={};
+  s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
+  if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(_rattachementEchoue);
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
   window._rafaleCount=(window._rafaleCount||0)+1;
   try{if(awardOnce("tag:"+did+":"+String(s.id),FOREVER)){userStats.pts+=2;if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);}}catch(e){}
@@ -17664,11 +17741,9 @@ function addDrinkToStoreHere(d){
      regarde la distance. */
   var _reg=_regimeSignalement(s);
   if(!_reg.ok){ _refusTropLoin(); return; }
-  if(_reg.vu){
-    if(!s.confirmations)s.confirmations={};
-    s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
-  }
-  if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did,{vu:_reg.vu}).catch(_rattachementEchoue);
+  if(!s.confirmations)s.confirmations={};
+  s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
+  if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(_rattachementEchoue);
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
   var key="tag:"+did+":"+String(s.id);
   if(awardOnce(key,FOREVER)){
@@ -18171,6 +18246,11 @@ var _autoImportBusy=false;
    (id commençant par "o") avaient reçu des boissons supposées (jusqu'à ~101).
    On ne garde QUE les boissons réellement confirmées (confirmations > 0). Appelé
    à chaque rendu -> les "101 boissons" fantômes disparaissent, sans rien inventer. */
+/* Les magasins importes d'OpenStreetMap ont recu, a l'import, un rayon DEVINE
+   d'apres leur categorie. On ne montre donc d'eux que ce que quelqu'un a
+   reellement confirme — sinon l'app affiche des stocks que personne n'a vus.
+   Le rayon probable de l'enseigne, lui, n'entre jamais dans s.drinks : il est
+   consulte a part (rayonProbableContient), donc cette garde ne le touche pas. */
 function _stripAutoDrinks(s){
   if(!s||typeof s.id!=="string"||s.id.charAt(0)!=="o")return s;
   var conf=s.confirmations||{};
@@ -18825,7 +18905,10 @@ function submitProposal(){
     id=String(_orphelin.code);
     window._lastUnknownCode=null;
   }
-  var d={id:id,name:sanitize(name),brand:sanitize(brand),votes:1,cat:(ai&&ai.cat)||"",foundIn:[],hasPhoto:true,manualProposal:true};
+  /* Le code devient aussi le champ `barcode` : tout le reste de l'app (cache
+     des scans, rattachement a un magasin, vote) cherche la par habitude. */
+  var _codeLie=/^[0-9]{8,14}$/.test(String(id))?String(id):"";
+  var d={id:id,name:sanitize(name),brand:sanitize(brand),votes:1,cat:(ai&&ai.cat)||"",foundIn:[],hasPhoto:true,manualProposal:true,barcode:_codeLie};
   DISCOVERIES.unshift(d);
   markVotedDiscovery(id);
   var extra={hasPhoto:true,manualProposal:true};
@@ -18857,7 +18940,26 @@ function submitProposal(){
     Promise.all([pDisc,pPhoto||Promise.resolve()]).then(function(){
       return window.fbConfirmAiDrink(id);
     }).then(function(res){
-      if(!res||!res.ok||!res.entry)return;
+      /* CE QUI RATE DOIT SE DIRE. Ce « return » muet est la cause exacte du
+         plus gros malentendu de l'app : on annonce « validation par l'IA en
+         cours… », le serveur refuse (verification expiree, nom modifie,
+         proposition deja tranchee), et plus rien n'arrive. La personne croit
+         sa boisson au catalogue, la rescanne, ne la trouve pas, la cherche
+         par son nom, ne la trouve pas non plus — et ne saura jamais pourquoi.
+         La proposition n'est pas perdue pour autant : elle part au vote
+         communautaire. On le dit, c'est tout ce qui manquait. */
+      if(!res||!res.ok||!res.entry){
+        var pourquoi={
+          "no-verification":"L\u2019analyse a expir\u00E9 (15 min) \u2014 reprends la photo pour une validation directe.",
+          "name-mismatch":"Le nom a \u00E9t\u00E9 modifi\u00E9 apr\u00E8s l\u2019analyse : la communaut\u00E9 va voter.",
+          "already-decided":"Cette proposition a d\u00E9j\u00E0 \u00E9t\u00E9 trait\u00E9e.",
+          "not-owner":"Cette proposition n\u2019est pas la tienne.",
+          "no-discovery":"La proposition n\u2019est pas encore enregistr\u00E9e \u2014 r\u00E9essaie dans un instant."
+        }[(res&&res.reason)||""]||"La validation directe n\u2019a pas abouti.";
+        toast(pourquoi+" Ta proposition reste en vote \u00B7 +2 pts");
+        try{playSound("pop");}catch(e){}
+        return;
+      }
       d.promoted=true;
       try{mergeCatalog([res.entry]);}catch(e){console.warn(e);}
       if(photoData){
@@ -18869,7 +18971,27 @@ function submitProposal(){
       try{renderDiscoveries();}catch(e){}
       playSound("win");
       toast("\u00AB "+res.entry.name+" \u00BB valid\u00E9e par l'IA \u2014 d\u00E9j\u00E0 dans le catalogue !");
-    }).catch(function(e){console.warn("Confirm AI error:",e);});
+      /* LE GESTE QUI EVITE TOUT LE RESTE. La fiche vient de naitre sans
+         code-barre (aucun code n'avait echoue au scan avant la photo) : sans
+         lui, elle restera introuvable au scan pour toujours, et la personne
+         devra retaper son nom a chaque fois. Elle tient la canette en main a
+         cet instant precis — c'est le seul moment ou le geste coute deux
+         secondes. On le propose, on ne l'impose pas. */
+      if(!(res.entry.barcodes&&res.entry.barcodes.length)){
+        setTimeout(function(){
+          if(!confirm("\u00AB "+res.entry.name+" \u00BB n'a pas encore de code-barre.\n\nLe scanner maintenant ? Sans lui, un scan ne la retrouvera jamais."))return;
+          window._lienCodePour=res.entry.id;
+          show("scan");
+          try{ resetScanUI(); }catch(e){}
+          var h2=document.getElementById("scan-hint");
+          if(h2)h2.textContent=tr("Vise le code-barre de {b}").replace("{b}",res.entry.name);
+          try{ startScan(); }catch(e){}
+        },900);
+      }
+    }).catch(function(e){
+      console.warn("Confirm AI error:",e);
+      toast("Validation directe indisponible \u2014 ta proposition part au vote \u00B7 +2 pts");
+    });
   }else{
     toast("Proposition envoy\u00E9e \u00B7 +2 pts \u2014 \u00E0 la communaut\u00E9 de voter !");
   }
@@ -21320,6 +21442,22 @@ function handleDeepLink(){
     goTab(0);
     return;
   }
+  /* Le tap sur une notification de demande d'ami ouvre l'ecran des amis,
+     la ou l'on accepte. Sans ce lien, la notification deposait la personne
+     sur l'accueil, a elle de deviner ou aller. */
+  if(/#amis\b/.test(location.hash||"")){
+    if(_deepLinkSealed())return;
+    _deepLinkSeal();
+    try{history.replaceState(null,"",location.pathname);}catch(e){}
+    var goAm=function(n){
+      var me=(window._fbUser&&window._fbUser.uid)||null;
+      if(me&&typeof show==="function"){try{show("amis");}catch(e){}}
+      else if(n<150){setTimeout(function(){goAm(n+1);},400);}
+    };
+    if(window._fbAuthReady&&window._fbAuthReady.then)window._fbAuthReady.then(function(){goAm(0);},function(){goAm(0);});
+    else goAm(0);
+    return;
+  }
   /* Le tap sur une notification de message ouvre le fil (#thread=<cid>). On
      attend que l'identite soit la : openThread refuse sans compte. */
   var mth=(location.hash||"").match(/#thread=([A-Za-z0-9_%-]+)/);
@@ -23342,8 +23480,93 @@ function renderRejouerSignalements(){
   btn.onclick=go;
   btn.onkeydown=function(ev){ if(ev.key==="Enter")go(); };
 }
+/* Reparer une boisson devenue invisible malgre son signalement.
+   On entre son identifiant (celui de la fiche), l'outil dit dans combien de
+   magasins elle est presente sans etre confirmee, et repose la confirmation. */
+function renderReparerVisibilite(){
+  var el=document.getElementById("admin-visibilite");
+  if(!el)return;
+  el.innerHTML='<div style="font-size:12px;color:var(--s2);margin-bottom:6px">Boisson signalée mais invisible sur la carte</div>'+
+    '<div style="display:flex;gap:8px"><input id="vis-id" type="number" inputmode="numeric" placeholder="id de la boisson" style="flex:1;min-width:0;padding:11px 12px;border-radius:12px;border:1px solid var(--bd);background:var(--bg3);color:var(--s1);font-size:13.5px">'+
+    '<div id="vis-btn" role="button" tabindex="0" style="padding:11px 14px;border-radius:12px;background:var(--bg3);cursor:pointer;font-size:13.5px;font-weight:700;color:var(--s1);white-space:nowrap">Vérifier</div></div>'+
+    '<div id="vis-res" style="font-size:12px;color:var(--s2);margin-top:8px"></div>';
+  var btn=document.getElementById("vis-btn"), res=document.getElementById("vis-res"), inp=document.getElementById("vis-id");
+  var aRattraper=null, pourId=null;
+  function lancer(){
+    var did=Number(inp.value);
+    if(!isFinite(did)||!did){res.textContent="Entre l'identifiant de la boisson.";return;}
+    if(pourId!==did)aRattraper=null;
+    var appliquer=aRattraper>0;
+    if(!window.fbReparerVisibilite){res.textContent="Outil indisponible (module hors ligne)";return;}
+    btn.style.opacity=".5";
+    res.textContent=appliquer?"Réparation en cours…":"Lecture des magasins…";
+    window.fbReparerVisibilite(did,appliquer).then(function(r){
+      btn.style.opacity="";pourId=did;
+      if(appliquer){
+        aRattraper=null;btn.textContent="Vérifier";
+        res.textContent="✓ "+r["reparés"]+" magasin"+(r["reparés"]>1?"s":"")+" — la boisson est visible par tout le monde.";
+        try{playSound("win");}catch(e){}
+        return;
+      }
+      aRattraper=r.aveugles.length;
+      if(!aRattraper){
+        res.textContent=r.trouves?("Les "+r.trouves+" magasins qui l'ont sont déjà visibles."):"Aucun magasin ne l'a en rayon.";
+        btn.textContent="Vérifier";
+        return;
+      }
+      btn.textContent="Réparer ("+aRattraper+")";
+      res.innerHTML=sanitize(aRattraper+" magasin"+(aRattraper>1?"s l'ont":" l'a")+" en rayon sans confirmation :")+"<br>"+
+        r.aveugles.slice(0,8).map(function(m){return "• "+sanitize(m.nom);}).join("<br>")+
+        (aRattraper>8?"<br>…et "+(aRattraper-8)+" de plus":"");
+    }).catch(function(e){
+      btn.style.opacity="";
+      res.textContent="Échec : "+((e&&e.message)||e);
+      try{playSound("err");}catch(_e){}
+    });
+  }
+  btn.onclick=lancer;
+  btn.onkeydown=function(ev){ if(ev.key==="Enter")lancer(); };
+  inp.onkeydown=function(ev){ if(ev.key==="Enter")lancer(); };
+}
+/* Les points que la distance avait refuses, rendus a ceux qui les ont gagnes. */
+function renderPointsRendus(){
+  var el=document.getElementById("admin-points-rendus");
+  if(!el)return;
+  el.innerHTML='<div id="pr-btn" role="button" tabindex="0" style="padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;font-size:13.5px;font-weight:700;color:var(--s1)">Rendre les points refusés pour « trop loin »</div>'+
+    '<div id="pr-res" style="font-size:12px;color:var(--s2);margin-top:8px"></div>';
+  var btn=document.getElementById("pr-btn"), res=document.getElementById("pr-res");
+  var aRendre=null;
+  function lancer(){
+    if(!window.fbRattraperSignalements){res.textContent="Outil indisponible (module hors ligne)";return;}
+    var appliquer=aRendre>0;
+    btn.style.opacity=".5";
+    res.textContent=appliquer?"Versement en cours…":"Lecture des signalements…";
+    window.fbRattraperSignalements(90,appliquer).then(function(r){
+      btn.style.opacity="";
+      if(!r||!r.ok){res.textContent="Échec : "+((r&&r.reason)||"fonction non déployée");try{playSound("err");}catch(e){}return;}
+      if(appliquer){
+        aRendre=null;btn.textContent="Rendre les points refusés pour « trop loin »";
+        res.textContent="✓ "+r.rendus+" point"+(r.rendus>1?"s":"")+" rendu"+(r.rendus>1?"s":"")+".";
+        try{playSound("win");}catch(e){}
+        return;
+      }
+      aRendre=r.aRendre;
+      if(!aRendre){res.textContent="Rien à rendre ("+r.examines+" signalements relus).";return;}
+      btn.textContent="Rendre ces "+aRendre+" signalement"+(aRendre>1?"s":"");
+      res.textContent=aRendre+" signalement"+(aRendre>1?"s":"")+" de "+r.personnes+" personne"+(r.personnes>1?"s":"")+" n'"+(aRendre>1?"ont":"a")+" rien rapporté alors que l'app avait annoncé des points.";
+    }).catch(function(e){
+      btn.style.opacity="";
+      res.textContent="Échec : "+((e&&e.message)||e);
+      try{playSound("err");}catch(_e){}
+    });
+  }
+  btn.onclick=lancer;
+  btn.onkeydown=function(ev){ if(ev.key==="Enter")lancer(); };
+}
 function renderAdmin(){
   try{ renderRejouerSignalements(); }catch(e){}
+  try{ renderReparerVisibilite(); }catch(e){}
+  try{ renderPointsRendus(); }catch(e){}
   var el=document.getElementById("admin-list");if(!el)return;
   el.innerHTML="";
   renderFounderDash();
@@ -26157,7 +26380,6 @@ function majLigneAmis(){
        :tr("Personne pour l'instant — trouve des joueurs"));
   if(pc){ if(d>0){pc.style.display="";pc.textContent=String(d);} else pc.style.display="none"; }
 }
-window.addEventListener("fbAmisChanged",function(){ amisRerendre(); try{majPastilleAmis();}catch(e){} });
 /* La pastille des demandes d'ami sur l'icone du profil, en haut de l'accueil :
    une demande doit se voir sans aller la chercher. */
 function majPastilleAmis(){
@@ -26165,6 +26387,49 @@ function majPastilleAmis(){
   var el=document.getElementById("home-amis-badge");
   if(el){ el.textContent=d>9?"9+":String(d); el.classList.toggle("on",d>0); }
 }
+/* UNE DEMANDE D'AMI DOIT SE VOIR, PAS SE DECOUVRIR.
+   Jusqu'ici, une demande n'existait que sur l'ecran des amis et sur une
+   pastille du profil : personne ne va verifier un ecran qu'il n'a aucune
+   raison d'ouvrir. On la fait donc sonner comme un message — cloche, son, et
+   un tap qui mene droit a l'ecran ou l'on accepte.
+   Le telephone eteint est prevenu par le serveur (notifierDemandeAmi). */
+var _amisEtatVu = null;
+function amisDetecterNouveaux(rows){
+  var me = msgMe();
+  if(!me || !rows) return;
+  var etat = {};
+  rows.forEach(function(l){ etat[l.pid] = l.state + "|" + (l.requestBy || ""); });
+  if(_amisEtatVu === null){ _amisEtatVu = etat; return; }   // premier chargement : la pastille suffit
+  var sonne = false;
+  rows.forEach(function(l){
+    var avant = _amisEtatVu[l.pid];
+    if(avant === (l.state + "|" + (l.requestBy || ""))) return;
+    var autre = amisAutre(l);
+    if(!autre) return;
+    /* La fiche publique n'est peut-etre pas encore chargee : msgUser la
+       demande et re-rend l'ecran a l'arrivee. Sans cet appel, la premiere
+       demande d'un inconnu s'annonce comme « Quelqu'un ». */
+    try{ msgUser(autre); }catch(e){}
+    var nom = msgPseudo(autre);
+    if(l.state === "request" && l.requestBy !== me){
+      sonne = pushActivity({ type:"ami", title:nom+" veut devenir ton ami",
+        body:"Ouvre pour accepter ou refuser.", key:"ami:"+l.pid,
+        ts:_msgMsRow(l) || Date.now(), action:{ kind:"amis" } }) || sonne;
+    } else if(l.state === "ok" && avant && avant.indexOf("request|") === 0 && avant.indexOf(me) > 0){
+      sonne = pushActivity({ type:"amiOk", title:nom+" a accepté ta demande",
+        body:"Vous pouvez vous écrire.", key:"amiok:"+l.pid,
+        ts:_msgMsRow(l) || Date.now(), action:{ kind:"conv", cid:l.pid, uid:autre } }) || sonne;
+    }
+  });
+  _amisEtatVu = etat;
+  if(sonne){ try{ playSound("pop"); }catch(e){} }
+}
+function _msgMsRow(l){ try{ return msgMs(l.at); }catch(e){ return 0; } }
+window.addEventListener("fbAmisChanged",function(e){
+  try{ amisDetecterNouveaux((e && e.detail) || amisListe()); }catch(err){}
+  amisRerendre();
+  try{ majPastilleAmis(); }catch(err){}
+});
 
 function renderMessages(){
   var body=document.getElementById("msg-body"),seg=document.getElementById("msg-seg");if(!body||!seg)return;
@@ -26897,9 +27162,8 @@ function msgNoterEmplacement(sid,did){
   try{
     if(!s.drinks)s.drinks=[];
     var deja=s.drinks.some(function(x){return String(x)===String(d.id);});
-    var _regM=_regimeSignalement(s);
-    if(!_regM.ok){ _refusTropLoin(); return; }
-    if(!deja){s.drinks.push(d.id);if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||s.id,d.id,{vu:_regM.vu}).catch(_rattachementEchoue);}
+    if(!_regimeSignalement(s).ok){ _refusTropLoin(); return; }
+    if(!deja){s.drinks.push(d.id);if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||s.id,d.id).catch(_rattachementEchoue);}
     else if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||s.id,d.id,1);
     if(!s.confirmations)s.confirmations={};if(!s.confirmations[d.id])s.confirmations[d.id]=0;s.confirmations[d.id]++;
     try{_noterObservation(s,d.id,true);}catch(e){}
