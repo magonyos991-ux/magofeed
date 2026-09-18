@@ -102,7 +102,7 @@ const BUG_RULES = {
 };
 
 export default [
-  { ignores: ["node_modules/**", "f/**", "promo/**", "icons/**", "android/**", "ios/**", "www/**"] },
+  { ignores: ["node_modules/**", "f/**", "promo/**", "icons/**", "android/**", "ios/**", "www/**", "mobile/**"] },
   {
     /* index.html : eslint-plugin-html extrait les blocs <script>.
        sourceType "module" pour que le bloc Firebase (import …) soit analysé
