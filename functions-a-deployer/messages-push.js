@@ -39,7 +39,14 @@ async function pushToUser(uid, title, body, data, link) {
       notification: { title: title, body: body },
       data: data || {},
       webpush: {
-        notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png", tag: "msg-" + (data && data.cid || "x") },
+        /* UNE NOTIFICATION PAR CONVERSATION, ET PAR DEMANDE D'AMI.
+           Ce tag ne connaissait que `cid`. Les demandes d'ami n'en ont pas :
+           elles retombaient toutes sur « msg-x », donc la deuxieme effacait la
+           premiere sur le telephone. Deux personnes vous demandent en ami, vous
+           n'en voyez qu'une — en silence. On prend la premiere identite
+           disponible, quelle que soit la sorte de notification. */
+        notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png",
+          tag: String((data && (data.cid || data.pid)) || "magofeed") },
         fcmOptions: { link: link || APP_URL }
       }
     });

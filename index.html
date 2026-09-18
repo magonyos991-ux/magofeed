@@ -13805,8 +13805,23 @@ window.rayonProbableIds=function(s){
   for(var k in _setsRayon[c])out.push(Number(k));
   return out;
 };
+/* PLUS DE VERROU A UN COUP.
+   Cette fonction sortait immediatement si elle avait deja travaille sur ce
+   magasin (drapeau _rayonApplique). Or s.drinks, ou elle recopie le rayon, est
+   remis a plat par DEUX autres mecanismes : _stripAutoDrinks au rendu de la
+   liste, et magasinCompleter qui ecrase le magasin allege avec le document
+   complet du serveur. Le verrou reste alors leve sur une liste videe, et le
+   rayon ne revient jamais.
+   Mesure sur un Proxy Delhaize : 477 boissons a la premiere ouverture de la
+   fiche, 1 apres un retour a la liste, 1 pour toujours ensuite. Et par la
+   carte — le chemin normal de l'onglet Explorer — la fiche se remplissait puis
+   se vidait toute seule. La reponse a « quel Delhaize, justement » ne tenait
+   qu'un aller-retour.
+   La fusion se dedoublonne d'elle-meme (dictionnaire `vus`) : l'appeler deux
+   fois donne le meme resultat. Le verrou ne protegeait donc rien, et il n'y a
+   que trois appelants, tous sur UN magasin ouvert — jamais sur une liste. */
 window.rayonAppliquer=function(s){
-  if(!s||s._rayonApplique)return s;
+  if(!s)return s;
   var ids=window.rayonProbableIds(s);
   if(ids.length){
     var vus={};
@@ -13815,7 +13830,6 @@ window.rayonAppliquer=function(s){
     ids.forEach(function(id){ if(!vus[id]){vus[id]=1;out.push(id);} });
     s.drinks=out;
   }
-  s._rayonApplique=true;
   return s;
 };
 function adminFillEnseignes(){
@@ -18415,16 +18429,8 @@ function _stripAutoDrinks(s){
   if(real.length!==(s.drinks||[]).length){
     s.drinks=real;
     if(s.drinksVerified)s.drinksVerified=(s.drinksVerified||[]).filter(function(id){return (conf[id]||0)>0;});
-    /* LE RAYON PROBABLE DOIT POUVOIR REVENIR.
-       rayonAppliquer ne recopie le rayon de l'enseigne qu'une fois par objet
-       magasin (drapeau _rayonApplique). Cette garde, elle, le retirait au
-       rendu suivant — et le drapeau restant leve, il ne revenait JAMAIS.
-       Mesure sur un Proxy Delhaize : 477 boissons a la premiere ouverture de
-       la fiche, 1 apres un retour a la liste, 1 a toutes les ouvertures
-       suivantes. La reponse a « quel Delhaize, justement » disparaissait au
-       premier aller-retour. On rouvre donc la porte en meme temps qu'on
-       retire ce qui n'est pas confirme. */
-    s._rayonApplique = false;
+    /* Le rayon probable de l'enseigne, retire ici avec le reste, revient a
+       l'ouverture suivante de la fiche : rayonAppliquer n'a plus de verrou. */
   }
   return s;
 }
@@ -26584,24 +26590,54 @@ function majPastilleAmis(){
    raison d'ouvrir. On la fait donc sonner comme un message — cloche, son, et
    un tap qui mene droit a l'ecran ou l'on accepte.
    Le telephone eteint est prevenu par le serveur (notifierDemandeAmi). */
-var _amisEtatVu = null;
+var _amisEtatVu = null, _amisEtatVuUid = null;
 function amisDetecterNouveaux(rows){
   var me = msgMe();
   if(!me || !rows) return;
   var etat = {};
   rows.forEach(function(l){ etat[l.pid] = l.state + "|" + (l.requestBy || ""); });
-  if(_amisEtatVu === null){ _amisEtatVu = etat; return; }   // premier chargement : la pastille suffit
+  /* Premier chargement DE CE COMPTE : la pastille suffit. L'etat memorise
+     etait attache a la page, pas a l'identite : en se connectant, on se
+     faisait sonner des demandes vieilles de plusieurs jours comme si elles
+     venaient d'arriver — exactement ce que cette regle veut eviter. */
+  if(_amisEtatVu === null || _amisEtatVuUid !== me){
+    _amisEtatVuUid = me; _amisEtatVu = etat; return;
+  }
   var sonne = false;
   rows.forEach(function(l){
     var avant = _amisEtatVu[l.pid];
     if(avant === (l.state + "|" + (l.requestBy || ""))) return;
     var autre = amisAutre(l);
     if(!autre) return;
-    /* La fiche publique n'est peut-etre pas encore chargee : msgUser la
-       demande et re-rend l'ecran a l'arrivee. Sans cet appel, la premiere
-       demande d'un inconnu s'annonce comme « Quelqu'un ». */
-    try{ msgUser(autre); }catch(e){}
+    /* LE NOM ARRIVE EN DIFFERE, LA CLOCHE DOIT L'ATTENDRE.
+       msgUser est asynchrone : il rend le cache tout de suite et n'ecrit le
+       pseudo qu'au retour du reseau. Appele juste avant msgPseudo, il ne
+       servait donc a rien — la toute premiere demande d'un inconnu restait
+       « Un joueur veut devenir ton ami », POUR TOUJOURS, puisque la cle
+       empeche de reposer l'activite. Pendant ce temps le push du telephone,
+       lui, affichait bien « Marie veut devenir ton ami » : deux ecrans, deux
+       verites.
+       On repose donc l'activite quand le pseudo arrive. La cle est la meme :
+       pushActivity remplace l'entree au lieu d'en ajouter une seconde. */
     var nom = msgPseudo(autre);
+    try{
+      if(!(MSG.users[autre] && MSG.users[autre].pseudo)){
+        (function(uid, lien, moi){
+          if(!window.fbLoadUser) return;
+          window.fbLoadUser(uid).then(function(x){
+            if(!x || !x.pseudo) return;
+            try{ msgRetenirUser(uid, x); }catch(e){}
+            var vrai = String(x.pseudo).slice(0,24);
+            if(lien.state === "request" && lien.requestBy !== moi){
+              pushActivity({ type:"ami", title:vrai+" veut devenir ton ami",
+                body:"Ouvre pour accepter ou refuser.", key:"ami:"+lien.pid,
+                ts:_msgMsRow(lien) || Date.now(), action:{ kind:"amis" } });
+            }
+            try{ amisRerendre(); }catch(e){}
+          }).catch(function(){});
+        })(autre, l, me);
+      }
+    }catch(e){}
     if(l.state === "request" && l.requestBy !== me){
       sonne = pushActivity({ type:"ami", title:nom+" veut devenir ton ami",
         body:"Ouvre pour accepter ou refuser.", key:"ami:"+l.pid,

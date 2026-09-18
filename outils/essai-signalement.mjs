@@ -118,6 +118,9 @@ dit("un code deja connu ne cree pas une deuxieme fiche",
 
 const push = await readFile(join(process.cwd(), "functions-a-deployer/messages-push.js"), "utf8");
 dit("une demande d'ami reveille le telephone", /exports\.notifierDemandeAmi = onDocumentWritten/.test(push));
+dit("chaque notification d'ami a son identite propre",
+  /tag: String\(\(data && \(data\.cid \|\| data\.pid\)\) \|\| "magofeed"\)/.test(push),
+  "un tag commun fait que la deuxieme demande efface la premiere sur le telephone");
 dit("un refus de demande ne notifie personne", /} else \{\n      return;\n    \}/.test(push));
 
 const deploi = await readFile(join(process.cwd(), "DEPLOIEMENT-SECURITE.md"), "utf8");
@@ -225,6 +228,11 @@ const vu = await page.evaluate(() => {
   const lien = (state, by) => [{ pid: "p1", members: [ELLE, MOI], state, requestBy: by, at: 1 }];
   envoyer([]);
   out.amiAvant = _activity.filter((a) => a.type === "ami").length;
+  /* Le pseudo arrive en differe : la cloche doit finir par le porter. */
+  out.nomDiffere = /window\.fbLoadUser\(uid\)\.then/.test(amisDetecterNouveaux.toString()) &&
+                   /veut devenir ton ami/.test(amisDetecterNouveaux.toString());
+  /* Un changement de compte repart d'une page blanche. */
+  out.parCompte = /_amisEtatVuUid !== me/.test(amisDetecterNouveaux.toString());
   envoyer(lien("request", ELLE));
   const dem = _activity.find((a) => a.type === "ami");
   out.amiDemande = dem ? dem.title + " >" + (dem.action && dem.action.kind) : null;
@@ -314,6 +322,9 @@ dit("l'ancienne forme (champ barcode) marche toujours", /Ancienne/.test(vu.propo
 dit("une proposition rejetee ne revient pas", !/Rejetee/.test(vu.propositionRejetee));
 
 dit("le premier chargement des amis ne sonne pas", vu.amiAvant === 0);
+dit("le pseudo d'un inconnu est rattrape quand il arrive", vu.nomDiffere,
+  "sinon la cloche reste sur « Un joueur veut devenir ton ami », pour toujours");
+dit("changer de compte ne fait pas sonner les vieilles demandes", vu.parCompte);
 dit("une demande d'ami sonne et mene a l'ecran des amis",
   /Cobra Supreme veut devenir ton ami >amis/.test(vu.amiDemande || ""), vu.amiDemande);
 dit("le meme etat ne sonne pas deux fois", vu.amiPasDeDoublon);
