@@ -6705,8 +6705,23 @@ function report(type){
   if(!awardOnce("rep:"+type+":"+(s.fbId||s.id)+":"+d.id,24)){
     closeModal();toast("D\u00e9j\u00e0 signal\u00e9 aujourd'hui");playSound("err");return;
   }
-  var pts={stock:10,rupture:5,contrefacon:15,nouveau:20};
-  var msgs={stock:"✓ +10 pts",rupture:"✕ +5 pts",contrefacon:"+15 pts",nouveau:"+20 pts"};
+  /* LE MEME BAREME QUE LE SERVEUR, ET PAS UN AUTRE.
+     Ces chiffres annoncaient 10, 5, 15 et 20 points ; le serveur en verse
+     3, 3, 3 et 2 (BAREME_REPORT), et adopterScoreServeur remplace le compteur
+     local par le score officiel a chaque ouverture du profil. Les points
+     s'affichaient donc, volaient a l'ecran, puis disparaissaient — sans un mot.
+     C'est le defaut dont toute cette session part : ce qui est annonce doit
+     etre ce qui sera paye. */
+  var pts={stock:3,rupture:3,contrefacon:3,nouveau:2};
+  /* Une rupture declaree hors des 500 m ne rapporte rien du tout
+     (crediterContribution) : on ne l'annonce donc pas. Un « je l'ai vue » de
+     loin vaut 1 point (MONTANT_DE_MEMOIRE). */
+  var _surPlaceRep=_surPlaceSignalement(s);
+  if(type==="rupture"&&!_surPlaceRep)pts.rupture=0;
+  if(type==="stock"&&!_surPlaceRep)pts.stock=1;
+  var msgs={stock:"✓ +"+pts.stock+(pts.stock>1?" pts":" pt"),
+            rupture:pts.rupture?("✕ +"+pts.rupture+" pts"):"✕ Rupture notée · merci",
+            contrefacon:"+3 pts",nouveau:"+2 pts"};
   var now=new Date(),time=now.getHours()+":"+String(now.getMinutes()).padStart(2,"0");
   if(type==="stock"){
     if(!s.confirmations[d.id])s.confirmations[d.id]=0;s.confirmations[d.id]++;_noterObservation(s,d.id,true);userStats.confirms++;
@@ -6725,7 +6740,7 @@ function report(type){
     }
   }
   userStats.pts+=pts[type];
-  flyPts(pts[type]);
+  if(pts[type]>0)flyPts(pts[type]);
   bumpDaily(type==="scan"?"scans":"signals");
   userStats.activity.unshift({type:type,drink:d,store:s,time:time,pts:pts[type],day:todayKey()});
   trackStoreContribution(s.fbId||s.id);
@@ -9144,15 +9159,41 @@ function confirmerRattachement(ctx,s){
    localisation n'est pas un tricheur, et son signalement restera probable. */
 var SIGNAL_SUR_PLACE_M = 500;
 var SIGNAL_PORTEE_M = 100000;
+/* UNE SEULE DISTANCE, POUR TOUT LE MONDE.
+   `s.dist` n'est pose que sur les magasins presents dans STORES au moment d'un
+   releve GPS. Un magasin arrive ensuite — choisi dans le selecteur, ouvert
+   depuis un message, trouve par la recherche — n'en a aucune. Or ce sont
+   justement les seuls chemins par lesquels on atteint un magasin tres
+   eloigne. _provenance, lui, savait deja retomber sur un calcul a vol
+   d'oiseau ; la garde des cent kilometres et le calcul des points, non.
+   Les consequences etaient exactement symetriques, et toutes les deux fausses :
+     - dans un magasin a 200 m ouvert depuis le selecteur, le serveur payait
+       plein tarif et l'app repondait « tu n'es pas sur place » ;
+     - une superette a Seoul choisie depuis Bruxelles passait la garde des cent
+       kilometres, parce que la garde, elle, ne voyait aucune distance.
+   Les trois lisent desormais la meme mesure. Distance vraiment inconnue
+   (aucune position, ou magasin sans coordonnees) : on laisse passer, comme
+   avant — quelqu'un qui refuse la localisation n'est pas un tricheur. */
+function _distanceSignalement(s){
+  if (s && typeof s.dist === "number" && isFinite(s.dist)) return Math.round(s.dist);
+  if (s && typeof s.lat === "number" && isFinite(s.lat) && typeof s.lng === "number"
+      && typeof userLat === "number" && userLat && typeof userLng === "number") {
+    try {
+      var m = Math.round(haversine(userLat, userLng, s.lat, s.lng));
+      if (isFinite(m)) return m;
+    } catch (e) {}
+  }
+  return null;
+}
 function _regimeSignalement(s){
-  var d = (s && typeof s.dist === "number" && isFinite(s.dist)) ? s.dist : null;
+  var d = _distanceSignalement(s);
   return { ok: !(d != null && d > SIGNAL_PORTEE_M) };
 }
 /* Sur place ou de memoire ? Cela ne change RIEN a ce qui est publie — cela
    change seulement ce que le serveur paiera (DIST_MAX_M, 500 m). On s'en sert
    uniquement pour ne pas promettre des points qui ne viendront pas. */
 function _surPlaceSignalement(s){
-  var d = (s && typeof s.dist === "number" && isFinite(s.dist)) ? s.dist : null;
+  var d = _distanceSignalement(s);
   return d != null && d <= SIGNAL_SUR_PLACE_M;
 }
 function _refusTropLoin(){
@@ -15060,14 +15101,10 @@ function _moiPseudo(){return (localStorage.getItem("magopseudo")||"Explorateur")
    restent « ? » — et dans ce cas le signalement ne rapporte rien, ce que l'app
    dit maintenant avant le serveur. ======================================= */
 function _provenance(src,s){
-  var d=(s&&typeof s.dist==="number"&&isFinite(s.dist))?Math.round(s.dist):null;
-  if(d==null&&s&&typeof s.lat==="number"&&isFinite(s.lat)
-     &&typeof userLat==="number"&&userLat&&typeof userLng==="number"){
-    try{
-      var m=Math.round(haversine(userLat,userLng,s.lat,s.lng));
-      if(isFinite(m))d=m;
-    }catch(e){}
-  }
+  /* La MEME mesure que celle qui decide de la portee et des points
+     (_distanceSignalement) : deux calculs differents, c'etait l'app d'un cote
+     et le serveur de l'autre, chacun avec sa verite. */
+  var d=_distanceSignalement(s);
   return String(src||"?")+"|"+(d==null?"?":d);
 }
 
@@ -17702,18 +17739,39 @@ function rafaleAddCode(code){
     rafaleFlash("#3b82f6");playSound("beep");rafaleNote("Déjà dans ton rayon : "+d.name,"#93c5fd");
     return;
   }
-  if(!s.drinks)s.drinks=[];
-  s.drinks.push(did);
   /* Le scan en rafale part du magasin OUVERT, pas du magasin ou l'on est : on
      peut tres bien scanner ses canettes chez soi apres avoir ouvert la fiche
-     d'ailleurs. La rafale suit donc la meme regle que le reste. */
+     d'ailleurs. La rafale suit donc la meme regle que le reste.
+     Le controle passe AVANT d'inscrire la boisson : pose apres, il laissait la
+     boisson dans le magasin en memoire sans l'envoyer nulle part, et la lecture
+     suivante du meme code repondait « Deja dans ton rayon » — ce qui etait faux. */
   if(!_regimeSignalement(s).ok){ _refusTropLoin(); return; }
+  if(!s.drinks)s.drinks=[];
+  s.drinks.push(did);
   if(!s.confirmations)s.confirmations={};
   s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
   if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(_rattachementEchoue);
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
   window._rafaleCount=(window._rafaleCount||0)+1;
-  try{if(awardOnce("tag:"+did+":"+String(s.id),FOREVER)){userStats.pts+=2;if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);}}catch(e){}
+  /* LA RAFALE LAISSE SA PREUVE, ET NE BRULE PLUS LE VERROU DES AUTRES.
+     Deux defauts se cumulaient ici. D'une part aucun document `reports`
+     n'etait ecrit : le serveur ne credite que la-dessus, donc ces +2 points
+     n'existaient que sur l'ecran, jusqu'a la prochaine lecture du score.
+     D'autre part la cle etait EXACTEMENT celle de _ecrireRattachement
+     ("tag:<boisson>:<magasin>", dix ans) : une boisson passee une fois par la
+     rafale ne pouvait plus jamais produire de rapport par le chemin normal,
+     qui sort avant toute ecriture quand la cle est prise. Le commercant qui
+     remplissait son rayon en rafale se privait lui-meme, definitivement, de
+     tout credit sur ces boissons. La rafale a donc sa propre cle. */
+  try{
+    if(awardOnce("rafale:"+did+":"+String(s.id),FOREVER)){
+      if(window.fbAddReport){
+        try{window.fbAddReport(s.fbId||String(s.id),did,"stock",{note:_provenance("rafale",s)});}catch(e2){}
+      }
+      userStats.pts+=_surPlaceSignalement(s)?3:1;
+      if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+    }
+  }catch(e){}
   rafaleFlash("#22c55e");playSound("win");
   if(navigator.vibrate)try{navigator.vibrate(15);}catch(e){}
   rafaleNote("+1 "+d.name,"#86efac");
@@ -17800,19 +17858,30 @@ function addDrinkToStoreHere(d){
   if(typeof nameLooksAlcoholic==="function"&&nameLooksAlcoholic(d.name,d.brand)){toast("Magofeed reste sans alcool");return;}
   if(!s.drinks)s.drinks=[];
   var did=d.id;
-  if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
   /* Meme regle que partout ailleurs : on peut ouvrir la fiche d'un magasin a
      l'autre bout du monde, donc « ici » ne veut rien dire tant qu'on n'a pas
-     regarde la distance. */
+     regarde la distance. Le controle passe avant d'inscrire la boisson. */
   var _reg=_regimeSignalement(s);
   if(!_reg.ok){ _refusTropLoin(); return; }
+  if(!s.drinks.some(function(x){return Number(x)===Number(did);}))s.drinks.push(did);
   if(!s.confirmations)s.confirmations={};
   s.confirmations[did]=(s.confirmations[did]||0)+1;_noterObservation(s,did,true);
   if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||String(s.id),did).catch(_rattachementEchoue);
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
   var key="tag:"+did+":"+String(s.id);
   if(awardOnce(key,FOREVER)){
-    userStats.pts+=3;flyPts(3);toast("« "+d.name+" » ajoutée chez "+sanitize(s.name)+" · +3 pts");
+    /* LA PREUVE QUI MANQUAIT. Ce chemin ecrivait le magasin et annoncait
+       « +3 pts » sans jamais creer de document `reports` — or le serveur ne
+       credite que sur creation d'un rapport (crediterContribution). Le score
+       ne bougeait donc jamais, et adopterScoreServeur effacait les trois
+       points a l'ouverture suivante du profil. Le chemin le plus naturel pour
+       enrichir un magasin etait aussi le seul a ne rien rapporter. */
+    if(window.fbAddReport){
+      try{window.fbAddReport(s.fbId||String(s.id),did,"stock",{note:_provenance("magasin",s)});}catch(e){}
+    }
+    var _gain=_surPlaceSignalement(s)?3:1;
+    userStats.pts+=_gain;flyPts(_gain);
+    toast("« "+d.name+" » ajoutée chez "+sanitize(s.name)+" · +"+_gain+(_gain>1?" pts":" pt"));
     /* La mission est validee par _noterObservation, que ce chemin appelle
        quelques lignes plus haut : la refaire ici sonnait deux fois. */
   }
@@ -23633,14 +23702,16 @@ function renderPointsRendus(){
       if(!r||!r.ok){res.textContent="\u00C9chec : "+((r&&r.reason)||"fonction non d\u00E9ploy\u00E9e");try{playSound("err");}catch(e){}return;}
       if(appliquer){
         aRendre=null;btn.textContent="Rendre les points refusés pour « trop loin »";
-        res.textContent="\u2713 "+r.rendus+" point"+(r.rendus>1?"s":"")+" rendu"+(r.rendus>1?"s":"")+".";
+        res.textContent="\u2713 "+r.rendus+" point"+(r.rendus>1?"s":"")+" rendu"+(r.rendus>1?"s":"")+"."+
+          (r.reportes?(" "+r.reportes+" report\u00E9"+(r.reportes>1?"s":"")+" \u00E0 demain : plafond quotidien atteint, relance l'outil."):"");
         try{playSound("win");}catch(e){}
         return;
       }
       aRendre=r.aRendre;
       if(!aRendre){res.textContent="Rien \u00E0 rendre ("+r.examines+" signalements relus).";return;}
       btn.textContent="Rendre ces "+aRendre+" signalement"+(aRendre>1?"s":"");
-      res.textContent=aRendre+" signalement"+(aRendre>1?"s":"")+" de "+r.personnes+" personne"+(r.personnes>1?"s":"")+" n'"+(aRendre>1?"ont":"a")+" rien rapport\u00E9 alors que l'app avait annonc\u00E9 des points.";
+      res.textContent=aRendre+" signalement"+(aRendre>1?"s":"")+" de "+r.personnes+" personne"+(r.personnes>1?"s":"")+" n'"+(aRendre>1?"ont":"a")+" rien rapport\u00E9 alors que l'app avait annonc\u00E9 des points."+
+        (r.doublons?(" "+r.doublons+" doublon"+(r.doublons>1?"s":"")+" du m\u00EAme geste ne "+(r.doublons>1?"seront":"sera")+" pas pay\u00E9"+(r.doublons>1?"s":"")+"."):"");
     }).catch(function(e){
       btn.style.opacity="";
       res.textContent="\u00C9chec : "+((e&&e.message)||e);
@@ -27245,11 +27316,18 @@ function msgNoterEmplacement(sid,did){
   var s=(typeof STORES!=="undefined"?STORES:[]).find(function(x){return String(x.fbId||x.id)===String(sid);});
   var d=(DRINKS||[]).find(function(x){return String(x.id)===String(did);});
   if(!s||!d)return false;
+  /* La portee se juge AVANT de consommer le credit du jour. Pose apres,
+     awardOnce ecrivait la cle « conf:<magasin>:<boisson> » puis la fonction
+     sortait : un refus pour distance brulait la journee, et la vraie
+     confirmation faite sur place ensuite recevait « Deja confirme
+     aujourd'hui », sans rapport ni points, pour une confirmation qui n'avait
+     jamais eu lieu. Cette cle est partagee avec confirmWithPrice et
+     repondreIndication, ou elle commande l'ecriture du rapport. */
+  if(!_regimeSignalement(s).ok){ _refusTropLoin(); return false; }
   if(!awardOnce("conf:"+(s.fbId||s.id)+":"+d.id,24))return false;
   try{
     if(!s.drinks)s.drinks=[];
     var deja=s.drinks.some(function(x){return String(x)===String(d.id);});
-    if(!_regimeSignalement(s).ok){ _refusTropLoin(); return; }
     if(!deja){s.drinks.push(d.id);if(window.fbAddDrinkToStore)window.fbAddDrinkToStore(s.fbId||s.id,d.id).catch(_rattachementEchoue);}
     else if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||s.id,d.id,1);
     if(!s.confirmations)s.confirmations={};if(!s.confirmations[d.id])s.confirmations[d.id]=0;s.confirmations[d.id]++;

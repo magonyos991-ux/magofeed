@@ -98,6 +98,17 @@ dit("le rattrapage des points est reserve a l'administrateur",
 dit("le rattrapage ne peut pas payer deux fois",
   /if \(r\.raison !== "trop loin"\) return;/.test(pts) && /raison: "de memoire"/.test(pts));
 
+dit("le rattrapage ne paie qu'une fois par personne, magasin, boisson et jour",
+  /const vus = new Set\(\);/.test(pts) && /if \(vus\.has\(t\.cle\)\) \{ rejeux\.push\(t\); continue; \}/.test(pts),
+  "l'ancienne regle refusait la distance AVANT l'anti-rejeu : tous les doublons portent « trop loin »");
+dit("le plafond quotidien reporte la dette au lieu de l'effacer",
+  /res\.reportes\+\+;/.test(pts) && !/credited: verse, raison: "de memoire" \}, \{ merge: true \}\);\n      res\.rendus \+= verse;\n    \}\n  \}/.test(pts.replace(/\r/g,"")),
+  "marquer « de memoire » avec 0 verse rendait la dette invisible pour toujours");
+dit("le rattrapage lit du plus ancien au plus recent, et pagine",
+  /orderBy\("createdAt", "asc"\)/.test(pts) && /startAfter\(curseur\)/.test(pts));
+dit("cibler une personne n'annule pas la fenetre en jours",
+  /where\("by", "==", quiSeul\)[\s\S]{0,120}where\("createdAt", ">=", depuis\)/.test(pts));
+
 const ia = await readFile(join(process.cwd(), "functions-a-deployer/reconnaissance-ia.js"), "utf8");
 dit("une fiche creee par l'IA emporte le code-barre qui a echoue au scan",
   /const codeLie = \/\^\[0-9\]\{8,14\}\$\/\.test\(discId\)/.test(ia) && /barcodes: codeLie \? \[codeLie\] : \[\]/.test(ia),
@@ -175,6 +186,18 @@ const vu = await page.evaluate(() => {
     sansGPS: _surPlaceSignalement({})
   };
 
+  /* La distance est la MEME pour la portee, les points et la note du rapport. */
+  window.userLat = 50.8466; window.userLng = 4.3528;          // Grand-Place
+  const sansDist = { id: "p1", fbId: "p1", name: "Carrefour", lat: 50.8470, lng: 4.3530 };   // ~50 m
+  const loinSansDist = { id: "p2", fbId: "p2", name: "Seoul", lat: 37.5665, lng: 126.9780 };
+  out.distanceUnifiee = {
+    proche: _distanceSignalement(sansDist),
+    surPlaceSansDist: _surPlaceSignalement(sansDist),
+    porteeLoinSansDist: _regimeSignalement(loinSansDist).ok,
+    note: _provenance("essai", sansDist),
+    sansRien: _distanceSignalement({ id: "p3", name: "?" })
+  };
+
   /* Rescanner une proposition nee d'une photo : son identifiant EST le code. */
   const CODE = "5901234123457";                       // EAN-13 valide
   const rejoue = (decouverte) => {
@@ -235,6 +258,26 @@ dit("a neuf mille kilometres : refuse", !vu.aLautreBout.envoye && vu.aLautreBout
 dit("la portee ne refuse que l'absurde",
   vu.portee.dedans && vu.portee.memeVille && vu.portee.inconnue && !vu.portee.autreBout);
 dit("la distance ne decide que des points", vu.points.dedans && !vu.points.loin && !vu.points.sansGPS);
+
+dit("un magasin sans distance prealable est quand meme mesure",
+  vu.distanceUnifiee.proche !== null && vu.distanceUnifiee.proche < 500,
+  "mesure : " + vu.distanceUnifiee.proche);
+dit("on est donc reconnu sur place, comme le serveur le verra", vu.distanceUnifiee.surPlaceSansDist === true,
+  "sinon l'app dit « tu n'es pas la » a quelqu'un que le serveur paie plein tarif");
+dit("et Seoul depuis Bruxelles est refuse meme sans distance prealable",
+  vu.distanceUnifiee.porteeLoinSansDist === false,
+  "la garde des cent kilometres etait aveugle sur ces magasins-la");
+dit("la note du rapport porte la meme mesure", /^essai\|\d+$/.test(vu.distanceUnifiee.note || ""), vu.distanceUnifiee.note);
+dit("une distance vraiment inconnue reste inconnue", vu.distanceUnifiee.sansRien === null);
+dit("le bareme annonce est celui du serveur",
+  /var pts=\{stock:3,rupture:3,contrefacon:3,nouveau:2\};/.test(src),
+  "il annoncait 10/5/15/20 pour 3/3/3/2 reels");
+dit("ajouter une boisson depuis la fiche laisse la preuve attendue par le serveur",
+  /fbAddReport\(s\.fbId\|\|String\(s\.id\),did,"stock",\{note:_provenance\("magasin",s\)\}\)/.test(src));
+dit("la rafale laisse la sienne", /_provenance\("rafale",s\)/.test(src));
+dit("la rafale ne brule plus le verrou du rattachement normal",
+  /awardOnce\("rafale:"\+did\+":"\+String\(s\.id\),FOREVER\)/.test(src),
+  "meme cle = un rattachement normal ne pouvait plus jamais ecrire de rapport");
 
 dit("rescanner une proposition nee d'une photo la retrouve", /Dragon Punch/.test(vu.propositionPhoto), vu.propositionPhoto);
 dit("l'ancienne forme (champ barcode) marche toujours", /Ancienne/.test(vu.propositionAncienne));

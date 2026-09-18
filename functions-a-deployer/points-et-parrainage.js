@@ -708,7 +708,7 @@ exports.utiliserCodeParrain = onCall({ region: REGION }, async (req) => {
    fois. Reservee a l'admin.
 
    Deploiement : firebase deploy --only functions:rattraperSignalements */
-exports.rattraperSignalements = onCall({ region: REGION, timeoutSeconds: 120 }, async (req) => {
+exports.rattraperSignalements = onCall({ region: REGION, timeoutSeconds: 300 }, async (req) => {
   const uid = req.auth && req.auth.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi.");
   const moi = await db.doc(`admins/${uid}`).get();
@@ -719,40 +719,96 @@ exports.rattraperSignalements = onCall({ region: REGION, timeoutSeconds: 120 }, 
   const appliquer = !!(req.data && req.data.appliquer);
   const quiSeul = String((req.data && req.data.uid) || "");
 
-  let q = db.collection("reports")
-    .where("createdAt", ">=", depuis)
-    .orderBy("createdAt", "desc")
-    .limit(1000);
-  if (quiSeul) q = db.collection("reports").where("by", "==", quiSeul).limit(1000);
-  const snap = await q.get();
-
+  /* DU PLUS ANCIEN AU PLUS RECENT, ET PAGINE.
+     Trie a l'envers et coupe a 1000, cette lecture ne voyait que les rapports
+     RECENTS — deja credites — tandis que ceux a rembourser, anterieurs a la
+     correction, tombaient hors de la coupe : l'outil annoncait « rien a
+     rendre » sur une base ou tout restait du. La fenetre en jours s'applique
+     aussi quand on cible une personne : sans cela, le parametre ne servait a
+     rien sur ce chemin. */
   const touches = [];
+  let curseur = null;
+  for (let page = 0; page < 20; page++) {
+    let q = db.collection("reports")
+      .where("createdAt", ">=", depuis)
+      .orderBy("createdAt", "asc")
+      .limit(500);
+    if (quiSeul) {
+      q = db.collection("reports")
+        .where("by", "==", quiSeul)
+        .where("createdAt", ">=", depuis)
+        .orderBy("createdAt", "asc")
+        .limit(500);
+    }
+    if (curseur) q = q.startAfter(curseur);
+    const lot = await q.get();
+    if (lot.empty) break;
+    lot.forEach((d) => {
+      const r = d.data() || {};
+      if (r.type !== "stock" || !r.by) return;
+      if (r.raison !== "trop loin") return;          // deja paye, ou refuse pour une autre raison
+      if (Number(r.credited) > 0) return;
+      touches.push({
+        ref: d.ref,
+        by: r.by,
+        pseudo: r.byPseudo || null,
+        /* La cle de l'anti-rejeu du serveur : une contribution par personne,
+           magasin, boisson et jour. */
+        cle: [r.by, String(r.storeId), String(r.drinkId),
+              new Date(r.createdAt && r.createdAt.toMillis ? r.createdAt.toMillis() : Date.now())
+                .toISOString().slice(0, 10)].join("|")
+      });
+    });
+    curseur = lot.docs[lot.docs.length - 1];
+    if (lot.size < 500) break;
+  }
+
+  /* UN SEUL PAIEMENT PAR GESTE REEL.
+     L'ancienne regle refusait la distance AVANT l'anti-rejeu : tous les
+     doublons d'une meme journee sont donc repartis avec « trop loin », aucun
+     avec « rejeu ». Les payer un par un aurait verse vingt points a vingt taps
+     sur le meme bouton — ce que la regle vivante refuse. On garde le premier
+     de chaque cle, les autres sont classes comme rejeu, sans rien verser. */
+  const vus = new Set();
+  const aPayer = [], rejeux = [];
+  for (const t of touches) {
+    if (vus.has(t.cle)) { rejeux.push(t); continue; }
+    vus.add(t.cle);
+    aPayer.push(t);
+  }
+
   const parPersonne = {};
-  snap.forEach((d) => {
-    const r = d.data() || {};
-    if (r.type !== "stock" || !r.by) return;
-    if (r.raison !== "trop loin") return;              // deja paye, ou refuse pour une autre raison
-    if (Number(r.credited) > 0) return;
-    touches.push({ ref: d.ref, by: r.by, pseudo: r.byPseudo || null });
-    parPersonne[r.by] = (parPersonne[r.by] || 0) + 1;
-  });
+  aPayer.forEach((t) => { parPersonne[t.by] = (parPersonne[t.by] || 0) + 1; });
 
   const res = {
     ok: true,
-    examines: snap.size,
-    aRendre: touches.length,
+    examines: touches.length + rejeux.length,
+    aRendre: aPayer.length,
+    doublons: rejeux.length,
     personnes: Object.keys(parPersonne).length,
     detail: Object.keys(parPersonne).slice(0, 20).map((u) => ({ uid: u, nb: parPersonne[u] })),
-    rendus: 0
+    rendus: 0,
+    reportes: 0
   };
   if (!appliquer) return res;
 
   const scores = new Set();
-  for (const t of touches) {
+  for (const t of aPayer) {
     const verse = await crediter(t.by, MONTANT_DE_MEMOIRE, "stock");
-    await t.ref.set({ counted: true, credited: verse, raison: "de memoire" }, { merge: true });
-    res.rendus += verse;
-    scores.add(t.by);
+    if (verse > 0) {
+      await t.ref.set({ counted: true, credited: verse, raison: "de memoire" }, { merge: true });
+      res.rendus += verse;
+      scores.add(t.by);
+    } else {
+      /* PLAFOND DU JOUR ATTEINT : ON NE MARQUE RIEN.
+         Ecrire « de memoire » avec credited:0 rendait la dette invisible pour
+         toujours — le filtre ci-dessus ne retient que « trop loin ». Le
+         rapport reste donc intact, et un passage demain le paiera. */
+      res.reportes++;
+    }
+  }
+  for (const t of rejeux) {
+    await t.ref.set({ counted: true, credited: 0, raison: "rejeu" }, { merge: true });
   }
   for (const u of scores) {
     await recalculerScore(u);
