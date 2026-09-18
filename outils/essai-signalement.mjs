@@ -114,7 +114,7 @@ dit("une fiche creee par l'IA emporte le code-barre qui a echoue au scan",
   /const codeLie = \/\^\[0-9\]\{8,14\}\$\/\.test\(discId\)/.test(ia) && /barcodes: codeLie \? \[codeLie\] : \[\]/.test(ia),
   "sans lui, la boisson reste introuvable au scan, a vie");
 dit("un code deja connu ne cree pas une deuxieme fiche",
-  /array-contains", codeLie[\s\S]{0,300}deja: true/.test(ia));
+  /array-contains", codeLie[\s\S]{0,900}deja: true/.test(ia));
 
 /* ── « + Proposé » : ce que l'app promet, et ce qu'elle grave pour tous ──── */
 {
@@ -153,7 +153,28 @@ dit("chaque notification d'ami a son identite propre",
   "un tag commun fait que la deuxieme demande efface la premiere sur le telephone");
 dit("un refus de demande ne notifie personne", /} else \{\n      return;\n    \}/.test(push));
 
+dit("le jeton d'analyse IA se consomme sur tous les chemins",
+  (ia.match(/vRef\.delete\(\)/g) || []).length >= 2,
+  "un raccourci qui sort avant laisse le jeton rejouable : une analyse peut financer plusieurs promotions");
+
+const farm = await readFile(join(process.cwd(), "functions-a-deployer/anti-farm.js"), "utf8");
+dit("la sanction ne coute pas dix fois ce que le geste rapporte",
+  /const POINTS_RETIRES = 3;/.test(farm),
+  "signaler de memoire rapporte 1 : exposer a -10 rendait le geste le plus cher de l'app");
+
+dit("l'acceptation apres un refus previent aussi le demandeur",
+  /etat === "ok" && etatAvant !== "ok"/.test(push),
+  "les regles autorisent declined -> ok, et l'app emprunte ce chemin");
+dit("le rattrapage compte ce qu'il a vraiment lu",
+  /lus \+= lot\.size;/.test(pts) && /examines: lus,/.test(pts));
+
 const deploi = await readFile(join(process.cwd(), "DEPLOIEMENT-SECURITE.md"), "utf8");
+dit("la chasse aux codes-barres figure dans la commande de deploiement",
+  /"chasse-codes\.js"/.test(deploi));
+dit("le mode d'emploi n'exige plus un total de banc d'essai fige",
+  !/n'affiche pas `148\/148`, \*\*ne d\u00E9ploie pas\*\*/.test(deploi) &&
+  /260\/260 conformes/.test(deploi) && /moindre `ECHEC`/.test(deploi),
+  "il interdisait de deployer alors que le banc affichait 260/260, tout vert");
 dit("le fichier des notifications figure dans la commande de deploiement",
   /"messages-push\.js"/.test(deploi), "sinon les notifications ne montent jamais");
 

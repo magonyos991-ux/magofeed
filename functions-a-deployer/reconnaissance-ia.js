@@ -262,6 +262,12 @@ exports.confirmAiDrink = onCall(
       if (!parCode.empty) {
         const exist = parCode.docs[0].data() || {};
         await dRef.update({ promoted: true, decidedAt: FieldValue.serverTimestamp() });
+        /* LE JETON SE CONSOMME ICI AUSSI. aiVerified/{uid} vaut une promotion,
+           une seule, pendant quinze minutes. Ce raccourci sortait avant le
+           `vRef.delete()` du chemin nominal : le jeton restait valable, donc
+           rejouable sur d'autres decouvertes — chacune payant la promotion
+           (+50). Une seule analyse photo pouvait en financer plusieurs. */
+        await vRef.delete().catch(function () {});
         return { ok: true, entry: exist, deja: true };
       }
     }

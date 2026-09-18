@@ -132,7 +132,11 @@ exports.notifierDemandeAmi = onDocumentWritten(
     if (etat === "request" && etatAvant !== "request") {
       dest = autre; qui = auteur;
       corps = "Ouvre Magofeed pour accepter ou refuser.";
-    } else if (etat === "ok" && etatAvant === "request") {
+    /* Toute arrivee sur « ok », pas seulement depuis « request » : les regles
+       autorisent explicitement declined -> ok (on a le droit de revenir sur un
+       refus qu'on a prononce), et l'app emprunte ce chemin. Le demandeur
+       n'etait alors prevenu par rien du tout. */
+    } else if (etat === "ok" && etatAvant !== "ok") {
       dest = auteur; qui = autre;
       corps = "Vous pouvez vous écrire.";
     } else {

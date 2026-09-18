@@ -727,7 +727,7 @@ exports.rattraperSignalements = onCall({ region: REGION, timeoutSeconds: 300 }, 
      aussi quand on cible une personne : sans cela, le parametre ne servait a
      rien sur ce chemin. */
   const touches = [];
-  let curseur = null;
+  let curseur = null, lus = 0;
   for (let page = 0; page < 20; page++) {
     let q = db.collection("reports")
       .where("createdAt", ">=", depuis)
@@ -743,6 +743,7 @@ exports.rattraperSignalements = onCall({ region: REGION, timeoutSeconds: 300 }, 
     if (curseur) q = q.startAfter(curseur);
     const lot = await q.get();
     if (lot.empty) break;
+    lus += lot.size;
     lot.forEach((d) => {
       const r = d.data() || {};
       if (r.type !== "stock" || !r.by) return;
@@ -782,7 +783,12 @@ exports.rattraperSignalements = onCall({ region: REGION, timeoutSeconds: 300 }, 
 
   const res = {
     ok: true,
-    examines: touches.length + rejeux.length,
+    /* Les rapports reellement PARCOURUS. On additionnait deux sous-ensembles
+       d'un meme tout (aPayer + rejeux = touches), ce qui comptait les doublons
+       deux fois et rendait 0 des qu'il n'y avait rien a rendre — donc l'ecran
+       annoncait « Rien a rendre (0 signalements relus) » apres en avoir lu des
+       centaines. */
+    examines: lus,
     aRendre: aPayer.length,
     doublons: rejeux.length,
     personnes: Object.keys(parPersonne).length,

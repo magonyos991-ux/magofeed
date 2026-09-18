@@ -47,7 +47,16 @@ const REGION = "europe-west1"; // ADAPTE si ton projet est ailleurs
 // ── Réglages (change-les ici, un seul endroit) ──────────────────────────
 const SEUIL = 2;              // combien de personnes différentes doivent contredire
 const FENETRE_JOURS = 10;     // au-delà, une rupture n'est plus une contradiction
-const POINTS_RETIRES = 10;    // exactement ce que rapportait l'annonce "stock"
+/* CE QUE LA SANCTION RETIRE DOIT RESTER PROPORTIONNE A CE QUE LE GESTE RAPPORTE.
+   Ce commentaire disait vrai quand l'app annoncait « +10 pts » — mais le
+   serveur, lui, n'a jamais verse que BAREME_REPORT.stock = 3, et depuis peu
+   1 point (MONTANT_DE_MEMOIRE) pour un « je l'ai vue » qu'il ne peut pas
+   verifier. Retirer 10 rendait donc le geste qu'on veut encourager le plus
+   cher de l'app : signaler de memoire rapportait 1 et exposait a -10.
+   On retire ce que le bareme paie sur place. La dissuasion reste entiere — la
+   sanction s'ajoute a la perte du gain, et se cumule a chaque incident — sans
+   punir dix fois le prix d'une erreur de bonne foi. */
+const POINTS_RETIRES = 3;
 const APP_URL = "https://magonyos991-ux.github.io/magofeed/";
 
 /* Clé de verrou : une annonce = un auteur + un magasin + une boisson.
