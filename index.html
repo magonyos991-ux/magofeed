@@ -9210,7 +9210,18 @@ function _surPlaceSignalement(s){
 function _vraimentEnRayon(s,did){
   if(!s)return false;
   if(Number((s.confirmations||{})[did])>0)return true;
-  return (s.drinksVerified||[]).some(function(x){return Number(x)===Number(did);});
+  var dv=s.drinksVerified||[];
+  if(!dv.length)return false;
+  /* Index pose une fois par magasin. Sans lui, la liste « Ajouter une boisson »
+     balayait drinksVerified pour CHAQUE boisson du rayon : sur un Auchan a
+     1 170 boissons et 198 verifiees, c'est 230 000 comparaisons a chaque
+     frappe au clavier. Le compte de la liste suffit a detecter un changement. */
+  if(!s._verifIdx||s._verifIdx.n!==dv.length){
+    var m={};
+    for(var i=0;i<dv.length;i++)m[Number(dv[i])]=1;
+    s._verifIdx={n:dv.length,m:m};
+  }
+  return s._verifIdx.m[Number(did)]===1;
 }
 function _refusTropLoin(){
   try{ toast("Trop loin pour signaler ce magasin \u00b7 il faut l'avoir vu, ou le conna\u00eetre"); }catch(e){}
@@ -13040,7 +13051,9 @@ function renderAddDrinksList(){
   var s=curStoreDetail;if(!s)return;
   var el=document.getElementById("adddrinks-list");if(!el)return;
   var qn=normTxt((document.getElementById("adddrinks-q")||{}).value||"");
-  var have={};(s.drinks||[]).forEach(function(d){have[Number(d)]=1;});
+  /* Meme regle que l'autre liste d'ajout : ce qui n'est que PROBABLE ne doit
+     pas etre presente comme deja present, sinon on ne peut pas le signaler. */
+  var have={};(s.drinks||[]).forEach(function(d){ if(_vraimentEnRayon(s,d))have[Number(d)]=1; });
   var list=DRINKS.filter(function(d){return !have[Number(d.id)]&&(!qn||fuzzyHit(d.name,qn)||fuzzyHit(d.brand,qn));}).slice(0,40);
   el.innerHTML=list.map(function(d){
     var on=!!_addDrinksSel[d.id];
