@@ -1101,13 +1101,15 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         </div>
         <div class="chips" id="sd-cats" style="margin-bottom:8px"></div>
       </div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 20px 8px">
+      <div id="sd-acces" style="display:none;padding:0 20px 8px"></div>
+      <div id="sd-ancre-boissons" style="display:flex;align-items:center;gap:9px;padding:8px 20px 8px">
         <div class="t-section" style="flex-shrink:0;white-space:nowrap">Boissons</div>
         <div class="sec-count" id="sd-drink-count" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
         <div id="sd-add-drink" onclick="openAddDrinkToStore()" role="button" tabindex="0" aria-label="Ajouter une boisson à ce magasin" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openAddDrinkToStore();}" style="flex-shrink:0;display:inline-flex;align-items:center;gap:5px;padding:0 13px;height:34px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> Ajouter</div>
         <div id="sd-frigo-contrib" onclick="scanFridgeStart()" role="button" tabindex="0" aria-label="Scanner le frigo de ce magasin" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();scanFridgeStart();}" style="display:none;flex-shrink:0;align-items:center;gap:5px;padding:0 13px;height:34px;border-radius:999px;background:var(--bg2);color:var(--s1);border:1.5px solid var(--border);font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2.5" width="14" height="19" rx="2.5"/><path d="M5 10h14M8.5 6.2v1.6M8.5 13.5v3"/></svg> Scanner le frigo</div>
       </div>
       <div id="sd-drink-list"></div>
+      <div id="sd-plus" style="display:none;padding:2px 20px 10px"></div>
       <div id="sd-admin-tools" style="display:none">
         <div class="sd-adm-title">Outils administrateur — invisibles pour les autres</div>
         <div class="sd-adm-row">
@@ -16925,6 +16927,45 @@ function closeStoreDetail(){
   }
   show(storeDetailReturn||"search");
 }
+/* Combien de boissons on pose d'emblee dans la fiche d'un magasin. Assez pour
+   que la liste ait l'air d'une liste, assez peu pour que ce qui vit en dessous
+   reste atteignable au pouce. */
+var SD_LOT = 40;
+/* UNE BARRE POUR ATTEINDRE LE BAS DE LA FICHE.
+   Les sections utiles — le tableau de bord du gerant, les vues, le partage —
+   vivent SOUS la liste des boissons. Sur un grand magasin, elles etaient a
+   trois cents lignes de defilement : personne ne les trouvait. Cette barre ne
+   deplace rien, elle donne un raccourci vers ce qui est deja la, et elle
+   n'affiche que les entrees qui existent reellement pour cette personne. */
+function renderStoreAcces(s, nbBoissons){
+  var el=document.getElementById("sd-acces");
+  if(!el)return;
+  var vers=[];
+  if(nbBoissons)vers.push({ id:"sd-ancre-boissons", txt:"Boissons", n:nbBoissons });
+  var board=document.getElementById("sd-board");
+  if(board&&board.innerHTML)vers.push({ id:"sd-board", txt:"Tableau de bord" });
+  var march=document.getElementById("sd-merchant");
+  if(march&&march.innerHTML&&!(board&&board.innerHTML))vers.push({ id:"sd-merchant", txt:"Mode commer\u00E7ant" });
+  var claim=document.getElementById("sd-claim");
+  if(claim&&claim.style.display!=="none")vers.push({ id:"sd-claim", txt:"C'est mon magasin" });
+  /* Une seule entree, c'est un raccourci vers l'ecran qu'on regarde deja : on
+     n'affiche rien plutot qu'un bouton qui ne sert a rien. */
+  if(vers.length<2){ el.style.display="none"; el.innerHTML=""; return; }
+  el.style.display="";
+  el.innerHTML='<div style="display:flex;gap:7px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px">'+
+    vers.map(function(v,i){
+      return '<span class="sd-acces-go" data-vers="'+v.id+'" role="button" tabindex="0" style="flex-shrink:0;padding:7px 13px;border-radius:999px;background:'+(i===0?"var(--s1)":"var(--bg2)")+';color:'+(i===0?"var(--app-bg)":"var(--s1)")+';border:1.5px solid '+(i===0?"var(--s1)":"var(--border)")+';font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap">'+
+        sanitize(v.txt)+(v.n?' <span style="opacity:.6">'+v.n+'</span>':'')+'</span>';
+    }).join("")+'</div>';
+  Array.prototype.forEach.call(el.querySelectorAll(".sd-acces-go"),function(b){
+    var aller=function(){
+      var cible=document.getElementById(b.getAttribute("data-vers"));
+      if(cible&&cible.scrollIntoView)try{cible.scrollIntoView({behavior:"smooth",block:"start"});}catch(e){cible.scrollIntoView();}
+    };
+    b.onclick=aller;
+    b.onkeydown=function(ev){ if(ev.key==="Enter")aller(); };
+  });
+}
 function renderStoreDetailCats(allDrinks){
   var el=document.getElementById("sd-cats");if(!el)return;
   var presentCats=Array.from(new Set(allDrinks.map(function(d){return d.cat;})));
@@ -17150,7 +17191,33 @@ function renderStoreDetail(){
   if(!drinks.length){listEl.innerHTML='<div style="padding:32px 20px;text-align:center;font-size:13px;color:var(--s3)">Aucun résultat pour ce filtre </div>';return;}
   listEl.innerHTML="";
   var storeIdStr=String(s.id);
-  drinks.forEach(function(d,_i){
+  /* PAR LOTS, PARCE QU'UN AUCHAN EN PORTE 1 170.
+     Cette boucle construisait UNE LIGNE PAR BOISSON, sans plafond : 1 170
+     lignes, chacune avec deux boutons, une animation et une image. Deux
+     consequences, et la seconde est celle qu'on ressent le plus :
+       - la fiche mettait plusieurs secondes a s'ouvrir sur un grand magasin ;
+       - tout ce qui vit SOUS la liste — le tableau de bord du gerant, les
+         vues, le partage — se trouvait derriere trois cents ecrans de defilement.
+     On en pose donc un lot, avec un bouton pour la suite. Le filtre et la
+     recherche, eux, ne sont pas plafonnes de la meme facon : quand on cherche,
+     on veut voir ce qu'on a demande. */
+  var _tousAffiches = drinks.length <= SD_LOT || window._sdTout === storeIdStr;
+  var _lot = _tousAffiches ? drinks : drinks.slice(0, SD_LOT);
+  var _plus = document.getElementById("sd-plus");
+  if(_plus){
+    if(_tousAffiches){ _plus.style.display="none"; _plus.innerHTML=""; }
+    else{
+      var _reste = drinks.length - _lot.length;
+      _plus.style.display="";
+      _plus.innerHTML='<div id="sd-plus-btn" role="button" tabindex="0" style="padding:12px;border-radius:13px;background:var(--bg2);border:1.5px solid var(--border);text-align:center;font-size:13px;font-weight:700;color:var(--s1);cursor:pointer">'+
+        "Voir les "+_reste+" autre"+(_reste>1?"s":"")+" boisson"+(_reste>1?"s":"")+'</div>';
+      var _pb=document.getElementById("sd-plus-btn");
+      var _tout=function(){ window._sdTout=storeIdStr; renderStoreDetail(); };
+      if(_pb){ _pb.onclick=_tout; _pb.onkeydown=function(ev){ if(ev.key==="Enter")_tout(); }; }
+    }
+  }
+  try{ renderStoreAcces(s, allDrinks.length); }catch(e){}
+  _lot.forEach(function(d,_i){
     var confs=s.confirmations[d.id]||0;
     /* MEME REGLE QUE LA LISTE DES MAGASINS, sinon les deux ecrans se
        contredisent sur le meme magasin : une confirmation de mars s'affichait
