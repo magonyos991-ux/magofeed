@@ -10034,6 +10034,23 @@ function onBarcodeDetected(r){
       if(!confirm("Lier le code "+rawCode+" \u00E0 \u00AB "+cible.name+" \u00BB ?\n\nV\u00E9rifie bien la variante (Zero, P\u00EAche, Cherry...) \u2014 un code = UNE boisson pr\u00E9cise.")){
         resetScanUI();rescan();return;
       }
+      /* DEUX PORTEES POSSIBLES, ET ON DIT LAQUELLE.
+         confirmFamilyFormat pose le lien SUR CET APPAREIL (magoLiensCode) et
+         envoie une suggestion de FORMAT a l'administrateur. C'est le bon outil
+         pour « ce Coca 50 cl, c'est le meme Coca » — pas pour une fiche qui
+         n'a aucun code : la boisson resterait introuvable au scan pour tout le
+         monde, et le geste n'aurait rien repare.
+         Une fiche sans code passe donc par la chasse aux codes-barres, ou deux
+         personnes suffisent a poser le lien pour de bon (poserCodeChasse). */
+      var _chasse=window._lienCodeChasse&&!(cible.barcodes&&cible.barcodes.length)&&window.fbProposerCodeChasse;
+      window._lienCodeChasse=false;
+      if(_chasse){
+        window.fbProposerCodeChasse(cible.id,cible.name,rawCode).then(function(r){
+          toast(r&&r.pose
+            ? ("\u2713 " + cible.name + " se scanne maintenant, pour tout le monde")
+            : "Code propos\u00E9 \u00B7 une deuxi\u00E8me personne le confirmera");
+        }).catch(function(){ toast("Proposition de code non envoy\u00E9e \u2014 r\u00E9essaie"); });
+      }
       confirmFamilyFormat(cible,rawCode,{});
       recordScan(rawCode,cible.name,cible.brand,cible.cat,"linked");
       renderWhereFound({drinkId:cible.id});
@@ -10061,10 +10078,15 @@ function onBarcodeDetected(r){
      catalogue, c'est la fiche catalogue qu'il faut montrer. */
   /* L'IDENTIFIANT VAUT CODE-BARRE. Une proposition nee d'une PHOTO prend pour
      identifiant le code qui vient d'echouer au scan — c'est tout l'interet du
-     dispositif — mais elle n'a jamais porte de champ `barcode`. Cette ligne ne
-     regardait que ce champ : on rescannait la canette qu'on venait de proposer,
-     et l'app repondait « Produit inconnu », en redemandant son nom. On accepte
-     donc les deux, comme le fait deja le cache des scans. */
+     dispositif — mais les plus anciennes n'ont jamais porte de champ
+     `barcode` : on rescannait la canette qu'on venait de proposer, et l'app
+     repondait « Produit inconnu » en redemandant son nom.
+     Les propositions d'aujourd'hui portent les deux (submitProposal pose
+     `barcode`, et les regles Firestore exigent barcode == id) : ce second
+     test est donc un filet pour les documents anterieurs, pas un invariant.
+     Il ne peut pas capturer a tort : onBarcodeDetected refuse tout ce qui
+     n'est pas un GTIN valide avant d'arriver ici, donc un identifiant
+     « m<horodatage> » ne sera jamais compare a un code. */
   var foundDiscovery=DISCOVERIES.find(function(d){
     if(d.rejected||d.promoted)return false;
     return String(d.barcode)===String(code)||String(d.id)===String(code);
@@ -19055,12 +19077,16 @@ function submitProposal(){
         console.warn(e);toast("Suggestion non envoy\u00E9e (r\u00E8gle photoSuggestions ?)");
       });
     }
-    if(awardOnce("pphoto:"+String(did),FOREVER)){userStats.pts+=1;}
+    /* Aucune Cloud Function ne credite une suggestion de photo : ni bareme,
+       ni declencheur. Le +1 n'existait que sur l'ecran, jusqu'a ce
+       qu'adopterScoreServeur remette le score officiel. On garde la trace du
+       geste (elle empeche de le compter deux fois) sans promettre de point. */
+    awardOnce("pphoto:"+String(did),FOREVER);
     updateProfileStats();
     if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
     closeProposeForm();
     playSound("win");
-    toast("Photo sugg\u00E9r\u00E9e \u00B7 +1 pt \u2014 l'admin va la v\u00E9rifier");
+    toast("Photo sugg\u00E9r\u00E9e \u2014 l'admin va la v\u00E9rifier");
     return;
   }
   // \u2500\u2500 Verdicts de l'IA sur la photo \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -19088,7 +19114,17 @@ function submitProposal(){
      scan de ce code la reconnaitra directement. */
   var _orphelin=window._lastUnknownCode;
   if(_orphelin&&_orphelin.code&&(Date.now()-_orphelin.ts)<15*60*1000){
-    id=String(_orphelin.code);
+    /* ON DEMANDE, PARCE QUE CE CODE PART DANS LE CATALOGUE DE TOUT LE MONDE.
+       Ce code est celui du DERNIER scan sans resultat, dans le quart d'heure.
+       Le plus souvent c'est la meme canette — d'ou l'interet. Mais rien ne le
+       garantit : on peut scanner une canette A inconnue, la reposer, puis
+       photographier une canette B. Comme confirmAiDrink fait maintenant suivre
+       ce code jusqu'a la fiche partagee, le mauvais lien ne resterait pas sur
+       l'appareil : il serait grave pour tous, et tous les scans futurs de A
+       ouvriraient B. Une question d'une ligne suffit a l'empecher. */
+    if(confirm("Relier le code-barre "+_orphelin.code+" \u00E0 \u00AB "+name+" \u00BB ?\n\nC'est le dernier code scann\u00E9 sans r\u00E9sultat. Si ce n'est pas la m\u00EAme canette, r\u00E9ponds non.")){
+      id=String(_orphelin.code);
+    }
     window._lastUnknownCode=null;
   }
   /* Le code devient aussi le champ `barcode` : tout le reste de l'app (cache
@@ -19099,20 +19135,44 @@ function submitProposal(){
   markVotedDiscovery(id);
   var extra={hasPhoto:true,manualProposal:true};
   if(ai&&ai.confidence!=null)extra.aiConfidence=ai.confidence;
-  var pDisc=null,pPhoto=null;
+  /* CHAQUE ECHEC A SON PROPRE MESSAGE, ET AUCUN NE SE FAIT PASSER POUR UN AUTRE.
+     `pDisc.catch(...)` ne traite qu'une promesse DERIVEE : pDisc restait
+     rejetee et tombait dans le Promise.all plus bas, dont le catch annonce
+     « ta proposition part au vote · +2 pts ». Autrement dit, le seul cas ou
+     la proposition n'existe NULLE PART etait annonce comme une reussite —
+     exactement le malentendu que cette session repare.
+     Idem pour la photo : un refus d'ecriture faisait echouer le meme
+     Promise.all, donc deux messages contradictoires pour un seul evenement,
+     dont l'un attribuait a l'IA un probleme de photo. */
+  var pDisc=null,pPhoto=null,_discOk=true;
   if(window.fbAddDiscovery){
-    pDisc=window.fbAddDiscovery(id,d.name,d.brand,d.cat,extra);
-    pDisc.catch(function(e){console.warn(e);});
+    pDisc=window.fbAddDiscovery(id,d.name,d.brand,d.cat,extra).catch(function(e){
+      _discOk=false;
+      console.warn(e);
+      toast("Proposition non enregistr\u00E9e \u2014 v\u00E9rifie ta connexion et r\u00E9essaie");
+      try{playSound("err");}catch(_e){}
+      return null;
+    });
   }
   if(window.fbSaveDiscoveryPhoto){
-    pPhoto=window.fbSaveDiscoveryPhoto(id,proposePhotoData);
-    pPhoto.catch(function(e){
+    pPhoto=window.fbSaveDiscoveryPhoto(id,proposePhotoData).catch(function(e){
       console.warn("Photo save error:",e);
-      toast("Photo non envoy\u00E9e (v\u00E9rifie la r\u00E8gle discoveryPhotos)");
+      /* « verifie la regle discoveryPhotos » etait du vocabulaire de
+         developpeur, que personne ne peut actionner. Le refus a une cause
+         ordinaire : une photo existe deja pour ce produit. */
+      toast(String(e&&e.code)==="permission-denied"
+        ? "Une photo existe d\u00E9j\u00E0 pour ce produit"
+        : "Photo non envoy\u00E9e \u2014 la proposition, elle, est bien partie");
+      return null;
     });
   }
   var photoData=proposePhotoData; // capture avant fermeture du formulaire
-  if(awardOnce("propose",1)){userStats.pts+=2;}
+  /* Le serveur verse POINTS_DECOUVERTE = 20 a la creation de la decouverte
+     (crediterDecouverte), ou 0 si le plafond du jour est atteint — et c'est
+     son chiffre qui s'affichera, puisque adopterScoreServeur ecrase le
+     compteur local. Annoncer « +2 pts » ne pouvait donc qu'etre faux, dans un
+     sens ou dans l'autre. On ne promet plus de montant. */
+  awardOnce("propose",1);
   updateProfileStats();
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
   closeProposeForm();
@@ -19123,9 +19183,15 @@ function submitProposal(){
     // (catalogue + photo publique + notif). Si quoi que ce soit cloche, la
     // proposition reste simplement en vote communautaire : rien ne casse.
     toast("Proposition envoy\u00E9e \u2014 validation par l'IA en cours\u2026");
-    Promise.all([pDisc,pPhoto||Promise.resolve()]).then(function(){
+    /* La PHOTO ne conditionne pas le verdict : son echec a deja son message,
+       et confirmAiDrink sait se passer d'elle (la fiche entre au catalogue
+       sans image plutot qu'avec une image non validee). Seule l'ecriture de
+       la proposition est un prealable. */
+    Promise.resolve(pDisc).then(function(){
+      if(!_discOk)return null;                 // rien a valider : la proposition n'existe pas
       return window.fbConfirmAiDrink(id);
     }).then(function(res){
+      if(res===null&&!_discOk)return;          // l'echec a deja ete dit
       /* CE QUI RATE DOIT SE DIRE. Ce « return » muet est la cause exacte du
          plus gros malentendu de l'app : on annonce « validation par l'IA en
          cours… », le serveur refuse (verification expiree, nom modifie,
@@ -19142,7 +19208,7 @@ function submitProposal(){
           "not-owner":"Cette proposition n\u2019est pas la tienne.",
           "no-discovery":"La proposition n\u2019est pas encore enregistr\u00E9e \u2014 r\u00E9essaie dans un instant."
         }[(res&&res.reason)||""]||"La validation directe n\u2019a pas abouti.";
-        toast(pourquoi+" Ta proposition reste en vote \u00B7 +2 pts");
+        toast(pourquoi+" Ta proposition reste en vote.");
         try{playSound("pop");}catch(e){}
         return;
       }
@@ -19162,11 +19228,17 @@ function submitProposal(){
          lui, elle restera introuvable au scan pour toujours, et la personne
          devra retaper son nom a chaque fois. Elle tient la canette en main a
          cet instant precis — c'est le seul moment ou le geste coute deux
-         secondes. On le propose, on ne l'impose pas. */
+         secondes. On le propose, on ne l'impose pas.
+         Le scan qui suit passe par la CHASSE AUX CODES (fbProposerCodeChasse,
+         via _lienCodeChasse) et non par le lien local : pose sur l'appareil
+         seul, le code n'aurait servi qu'a son auteur, et la fiche serait
+         restee introuvable au scan pour tout le monde — c'est-a-dire que le
+         geste n'aurait rien repare du tout. */
       if(!(res.entry.barcodes&&res.entry.barcodes.length)){
         setTimeout(function(){
           if(!confirm("\u00AB "+res.entry.name+" \u00BB n'a pas encore de code-barre.\n\nLe scanner maintenant ? Sans lui, un scan ne la retrouvera jamais."))return;
           window._lienCodePour=res.entry.id;
+          window._lienCodeChasse=true;
           show("scan");
           try{ resetScanUI(); }catch(e){}
           var h2=document.getElementById("scan-hint");
@@ -19176,10 +19248,10 @@ function submitProposal(){
       }
     }).catch(function(e){
       console.warn("Confirm AI error:",e);
-      toast("Validation directe indisponible \u2014 ta proposition part au vote \u00B7 +2 pts");
+      toast("Validation directe indisponible \u2014 ta proposition part au vote.");
     });
   }else{
-    toast("Proposition envoy\u00E9e \u00B7 +2 pts \u2014 \u00E0 la communaut\u00E9 de voter !");
+    toast("Proposition envoy\u00E9e \u2014 \u00E0 la communaut\u00E9 de voter !");
   }
 }
 function discLocate(discId){

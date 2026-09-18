@@ -41,7 +41,7 @@ dossier se remet à diverger. Elle sauvegarde ton `firebase.json` et ton
 `index.js` sous `.avant` avant de les remplacer.
 
 ```powershell
-cd C:\Users\ilias\magofeed-functions; $b="https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"; if (Test-Path firebase.json) { Copy-Item firebase.json firebase.json.avant -Force }; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firebase.json.modele") -OutFile "firebase.json"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.rules") -OutFile "firestore.rules"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.indexes.json") -OutFile "firestore.indexes.json"; cd functions; if (Test-Path index.js) { Copy-Item index.js index.js.avant -Force }; foreach ($f in @("index.js","points-et-parrainage.js","anti-farm.js","notifications-push.js","emails-brevo.js","reconnaissance-ia.js","scan-frigo.js","commerces-monde.js","remplir-enseignes.js","importer-horaires.js","partage.js","sauvegarde.js","don-notification.js","outils-admin.js","notif-admin.js","catalogue-ia.js","messages-push.js","dons.js","verification-commercant.js","recap-fondateur.js","migration-geohash.js")) { Invoke-WebRequest -UseBasicParsing -Uri ($b+$f) -OutFile $f; Write-Host "ok $f" }; npm install @duckdb/node-api geofire-common @google-cloud/firestore @anthropic-ai/sdk; cd ..; firebase deploy --only firestore:indexes; firebase deploy --only firestore:rules; firebase deploy --only functions
+cd C:\Users\ilias\magofeed-functions; $b="https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"; if (Test-Path firebase.json) { Copy-Item firebase.json firebase.json.avant -Force }; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firebase.json.modele") -OutFile "firebase.json"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.rules") -OutFile "firestore.rules"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.indexes.json") -OutFile "firestore.indexes.json"; cd functions; if (Test-Path index.js) { Copy-Item index.js index.js.avant -Force }; foreach ($f in @("index.js","points-et-parrainage.js","anti-farm.js","notifications-push.js","emails-brevo.js","reconnaissance-ia.js","scan-frigo.js","commerces-monde.js","remplir-enseignes.js","importer-horaires.js","partage.js","sauvegarde.js","don-notification.js","outils-admin.js","notif-admin.js","catalogue-ia.js","messages-push.js","chasse-codes.js","dons.js","verification-commercant.js","recap-fondateur.js","migration-geohash.js")) { Invoke-WebRequest -UseBasicParsing -Uri ($b+$f) -OutFile $f; Write-Host "ok $f" }; npm install @duckdb/node-api geofire-common @google-cloud/firestore @anthropic-ai/sdk; cd ..; firebase deploy --only firestore:indexes; firebase deploy --only firestore:rules; firebase deploy --only functions
 ```
 
 Le détail de ce que contient ce dossier, fichier par fichier, est dans
@@ -90,7 +90,14 @@ d'ami partiront ensemble.
   Un refus ne notifie personne.
 - **`confirmAiDrink`** — la fiche créée par l'IA reçoit enfin le code-barre
   qui avait échoué au scan. Sans ce changement, une boisson ajoutée par photo
-  reste introuvable au scanner, à vie.
+  reste introuvable au scanner, à vie. Ce code n'est plus adopté en silence :
+  l'app demande confirmation avant de le graver dans le catalogue partagé.
+- **`poserCodeChasse`** (chasse-codes.js) — **elle n'avait jamais été
+  branchée**. L'app écrivait des documents `chasseCodes` que personne ne
+  traitait : ils s'accumulaient en « attente », le code n'entrait jamais au
+  catalogue, et les points promis aux confirmants ne tombaient jamais —
+  pendant que l'écran annonçait le contraire. Le fichier le demandait pourtant
+  noir sur blanc dans sa propre section Déploiement.
 
 Aucune règle Firestore ne change : le banc d'essai (§1) n'a pas besoin d'être
 relancé pour ce lot.

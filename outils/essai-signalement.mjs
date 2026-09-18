@@ -116,6 +116,36 @@ dit("une fiche creee par l'IA emporte le code-barre qui a echoue au scan",
 dit("un code deja connu ne cree pas une deuxieme fiche",
   /array-contains", codeLie[\s\S]{0,300}deja: true/.test(ia));
 
+/* ── « + Proposé » : ce que l'app promet, et ce qu'elle grave pour tous ──── */
+{
+  const sp = (src.match(/function submitProposal\(\)\{[\s\S]*?\n\}/) || [""])[0];
+  dit("submitProposal existe", sp.length > 0);
+  dit("le code-barre orphelin se demande avant d'etre adopte",
+    /Relier le code-barre/.test(sp) && /_lastUnknownCode=null/.test(sp),
+    "ce code part dans le catalogue de tout le monde : il ne peut pas etre adopte en silence");
+  dit("une proposition qui n'a pas pu s'ecrire le dit",
+    /Proposition non enregistr/.test(sp) && /_discOk=false/.test(sp),
+    "le catch annoncait « part au vote » precisement quand rien n'etait parti");
+  dit("un echec de photo ne fait pas echouer la validation IA",
+    !/Promise\.all\(\[pDisc,pPhoto/.test(sp) && /Promise\.resolve\(pDisc\)/.test(sp));
+  dit("le refus de photo parle francais, pas Firestore",
+    /Une photo existe d/.test(sp) && !/v\\u00E9rifie la r\\u00E8gle discoveryPhotos/.test(sp));
+  /* On regarde ce que l'app DIT, pas ce que les commentaires racontent. */
+  const parle = (sp.match(/toast\([^;]*\)/g) || []).join(" | ");
+  dit("aucun montant n'est promis pour une proposition",
+    !/\+\s*\d+\s*pts?/.test(parle), "le serveur en verse 20, ou 0 si le plafond du jour est atteint : " + parle.slice(0, 120));
+  dit("relier un code apres promotion passe par la chasse, pas par le lien local",
+    /_lienCodeChasse=true/.test(sp),
+    "un lien local ne sert qu'a son auteur : la fiche reste introuvable au scan pour les autres");
+}
+dit("le scanner distingue les deux portees d'un lien de code",
+  /var _chasse=window\._lienCodeChasse/.test(src) && /fbProposerCodeChasse\(cible\.id,cible\.name,rawCode\)/.test(src));
+
+const idx = await readFile(join(process.cwd(), "functions-a-deployer/index.js"), "utf8");
+dit("la chasse aux codes-barres est branchee cote serveur",
+  /require\("\.\/chasse-codes"\)/.test(idx),
+  "sans cela les documents chasseCodes s'accumulent et le code n'entre jamais au catalogue");
+
 const push = await readFile(join(process.cwd(), "functions-a-deployer/messages-push.js"), "utf8");
 dit("une demande d'ami reveille le telephone", /exports\.notifierDemandeAmi = onDocumentWritten/.test(push));
 dit("chaque notification d'ami a son identite propre",

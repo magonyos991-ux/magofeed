@@ -84,6 +84,13 @@ Object.assign(exports, require("./messages-push"));
    Elles ont maintenant un foyer et repartent avec toutes les autres. ──────*/
 Object.assign(exports, require("./notif-admin"));
 Object.assign(exports, require("./catalogue-ia"));
+/* ── La chasse aux codes-barres. Elle n'a JAMAIS ete branchee ici : l'app
+   ecrivait des documents `chasseCodes` que personne ne traitait, ils
+   s'accumulaient en « attente », le code n'entrait jamais au catalogue et les
+   points promis aux confirmants ne tombaient jamais — pendant que l'ecran
+   annoncait le contraire. chasse-codes.js le demandait pourtant noir sur blanc
+   dans sa propre section DEPLOIEMENT. ─────────────────────────────────────*/
+Object.assign(exports, require("./chasse-codes"));
 
 /* ══════════════════════════════════════════════════════════════════════════
    PAS ENCORE BRANCHE — et pourquoi
