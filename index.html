@@ -3425,40 +3425,105 @@ window.fbRejouerSignalements = async function(jours, appliquer) {
   }
   return res;
 };
-/* RENDRE VISIBLE CE QUI A ETE SIGNALE MAIS QUE L'AFFICHAGE IGNORE.
-   L'outil du dessus part des rapports (`reports`). Il ne trouve donc rien
-   quand le rapport n'a jamais existe — et c'est exactement ce qui est arrive :
-   pendant une journee, un signalement fait a plus de 500 metres du magasin
-   ecrivait la boisson dans `drinks` sans ecrire `confirmations`. Or les
-   magasins importes d'OpenStreetMap n'affichent QUE ce qui est confirme
-   (_stripAutoDrinks), pour ne pas exposer les rayons devines a l'import.
-   Resultat : la boisson etait dans la base, invisible pour tout le monde.
-   Celui-ci part des MAGASINS : il demande a Firestore quels magasins
-   contiennent la boisson, et pose la confirmation manquante. Il n'incremente
-   jamais (une confirmation existante est laissee telle quelle), donc on peut
-   le relancer sans rien fausser. */
-window.fbReparerVisibilite = async function(drinkId, appliquer) {
+/* OU EN EST UNE BOISSON, ET QUI L'A REELLEMENT VUE.
+   La premiere version de cet outil posait une confirmation sur TOUT magasin
+   contenant la boisson sans en avoir. C'etait faux, et dangereux : un magasin
+   recoit aussi des boissons par remplissage d'enseigne, en masse, sans que
+   personne n'y soit alle. Mesure faite sur la base : la boisson 13200 figurait
+   dans 24 magasins — jusqu'a Paris — dont AUCUN n'avait la moindre
+   confirmation sur l'ensemble de son rayon (486, 819, 1170 boissons, zero
+   confirmation). Poser une confirmation la-dessus aurait fait dire a l'app
+   que quelqu'un avait vu la boisson en rayon. L'app aurait menti, et c'est
+   exactement le defaut qu'on repare.
+
+   Cet outil ne fabrique donc plus rien. Il ENQUETE :
+     - ou la boisson figure, et si le magasin porte la moindre trace humaine
+       (un magasin a zero confirmation n'a jamais recu de visite : son rayon
+       vient d'un import ou d'un remplissage d'enseigne) ;
+     - qui l'a signalee, d'apres les `reports`, qui sont nominatifs et dates ;
+     - et ce que le serveur en a fait (compte, credite, ou refuse, et pourquoi).
+   Il ne propose de reposer une confirmation que la ou un rapport la prouve.
+   Sans preuve, il le dit et n'ecrit rien. */
+window.fbEnqueteBoisson = async function(drinkId, appliquer) {
   const adm = await getDoc(doc(db, "admins", (auth.currentUser || {}).uid || "-"));
   if (!adm.exists()) throw new Error("Reserve a l'administrateur");
   const did = Number(drinkId);
   if (!isFinite(did)) throw new Error("Identifiant de boisson invalide");
+
+  /* 1. Les magasins qui la portent, et l'etat humain de chacun. */
+  const magasins = {};
   const snap = await getDocs(query(collection(db, "stores"), where("drinks", "array-contains", did), limit(300)));
-  const res = { trouves: 0, aveugles: [], reparés: 0 };
-  const aEcrire = [];
   snap.forEach(function(d) {
-    res.trouves++;
     const o = d.data() || {};
-    if ((Number((o.confirmations || {})[did]) || 0) > 0) return;
-    res.aveugles.push({ id: d.id, nom: o.name || d.id });
-    aEcrire.push(d.id);
+    const conf = o.confirmations || {};
+    magasins[d.id] = {
+      id: d.id,
+      nom: o.name || d.id,
+      confirmee: (Number(conf[did]) || 0) > 0,
+      confirmationsEnTout: Object.keys(conf).length,
+      importe: typeof d.id === "string" && d.id.charAt(0) === "o"
+    };
   });
-  if (!appliquer) return res;
-  for (const id of aEcrire) {
+
+  /* 2. Les signalements humains, nominatifs et dates. Lecture admin. */
+  let rapports = [];
+  try {
+    const rs = await getDocs(query(collection(db, "reports"), where("drinkId", "==", did), limit(300)));
+    rs.forEach(function(d) {
+      const r = d.data() || {};
+      rapports.push({
+        id: d.id,
+        par: r.byPseudo || r.by || "?",
+        uid: r.by || null,
+        type: r.type || "?",
+        storeId: r.storeId != null ? String(r.storeId) : null,
+        storeName: r.storeName || null,
+        quand: r.createdAt && r.createdAt.toMillis ? r.createdAt.toMillis() : null,
+        credite: Number(r.credited) || 0,
+        raison: r.raison || null,
+        note: r.note || null
+      });
+    });
+  } catch (e) {
+    rapports = null;                       // index manquant, ou regles : on le dira
+  }
+
+  /* 3. Un signalement PROUVE dont le magasin n'a pas la confirmation : voila
+        ce qui s'est reellement perdu, et la seule chose qu'on accepte de
+        reposer. Les « stock » seulement : une rupture ne se repose pas. */
+  const perdus = [];
+  (rapports || []).forEach(function(r) {
+    if (r.type !== "stock" || !r.storeId) return;
+    const m = magasins[r.storeId];
+    if (m && m.confirmee) return;
+    if (perdus.some(function(x) { return x.storeId === r.storeId; })) return;
+    perdus.push({ storeId: r.storeId, nom: (m && m.nom) || r.storeName || r.storeId, par: r.par });
+  });
+
+  const liste = Object.keys(magasins).map(function(k) { return magasins[k]; });
+  const res = {
+    boisson: did,
+    magasins: liste.length,
+    confirmes: liste.filter(function(m) { return m.confirmee; }).length,
+    /* Un magasin sans AUCUNE confirmation n'a jamais recu de visite : son rayon
+       vient d'un import ou d'un remplissage d'enseigne, pas de quelqu'un. */
+    jamaisVisites: liste.filter(function(m) { return m.confirmationsEnTout === 0; }).length,
+    apercu: liste.slice(0, 8),
+    rapports: rapports === null ? null : rapports.length,
+    signaleursPerdus: perdus,
+    reposes: 0
+  };
+  if (!appliquer || !perdus.length) return res;
+
+  for (const p of perdus) {
     const patch = {};
+    patch["drinks"] = arrayUnion(did);
+    /* POSEE, jamais incrementee : rejouer ne doit pas gonfler un compteur. */
     patch["confirmations." + did] = 1;
     patch["seenAt." + did] = Math.floor(Date.now() / 3600000) * 3600000;
-    await updateDoc(doc(db, "stores", id), patch);
-    res["reparés"]++;
+    if (p.par) patch["confirmedBy." + did] = String(p.par).slice(0, 24);
+    await updateDoc(doc(db, "stores", p.storeId), patch);
+    res.reposes++;
   }
   return res;
 };
@@ -23480,47 +23545,66 @@ function renderRejouerSignalements(){
   btn.onclick=go;
   btn.onkeydown=function(ev){ if(ev.key==="Enter")go(); };
 }
-/* Reparer une boisson devenue invisible malgre son signalement.
-   On entre son identifiant (celui de la fiche), l'outil dit dans combien de
-   magasins elle est presente sans etre confirmee, et repose la confirmation. */
+/* Enqueter sur une boisson : ou elle figure, qui l'a vue, ce que le serveur
+   en a fait. On ne repose que ce qu'un rapport prouve. */
 function renderReparerVisibilite(){
   var el=document.getElementById("admin-visibilite");
   if(!el)return;
-  el.innerHTML='<div style="font-size:12px;color:var(--s2);margin-bottom:6px">Boisson signalée mais invisible sur la carte</div>'+
+  el.innerHTML='<div style="font-size:12px;color:var(--s2);margin-bottom:6px">Enquêter sur une boisson (où elle figure, qui l\u2019a signalée)</div>'+
     '<div style="display:flex;gap:8px"><input id="vis-id" type="number" inputmode="numeric" placeholder="id de la boisson" style="flex:1;min-width:0;padding:11px 12px;border-radius:12px;border:1px solid var(--bd);background:var(--bg3);color:var(--s1);font-size:13.5px">'+
-    '<div id="vis-btn" role="button" tabindex="0" style="padding:11px 14px;border-radius:12px;background:var(--bg3);cursor:pointer;font-size:13.5px;font-weight:700;color:var(--s1);white-space:nowrap">Vérifier</div></div>'+
-    '<div id="vis-res" style="font-size:12px;color:var(--s2);margin-top:8px"></div>';
+    '<div id="vis-btn" role="button" tabindex="0" style="padding:11px 14px;border-radius:12px;background:var(--bg3);cursor:pointer;font-size:13.5px;font-weight:700;color:var(--s1);white-space:nowrap">Enquêter</div></div>'+
+    '<div id="vis-res" style="font-size:12px;color:var(--s2);margin-top:8px;line-height:1.5"></div>';
   var btn=document.getElementById("vis-btn"), res=document.getElementById("vis-res"), inp=document.getElementById("vis-id");
-  var aRattraper=null, pourId=null;
+  var aReposer=null, pourId=null;
   function lancer(){
     var did=Number(inp.value);
-    if(!isFinite(did)||!did){res.textContent="Entre l'identifiant de la boisson.";return;}
-    if(pourId!==did)aRattraper=null;
-    var appliquer=aRattraper>0;
-    if(!window.fbReparerVisibilite){res.textContent="Outil indisponible (module hors ligne)";return;}
+    if(!isFinite(did)||!did){res.textContent="Entre l\u2019identifiant de la boisson.";return;}
+    if(pourId!==did)aReposer=null;
+    var appliquer=aReposer>0;
+    if(!window.fbEnqueteBoisson){res.textContent="Outil indisponible (module hors ligne)";return;}
     btn.style.opacity=".5";
-    res.textContent=appliquer?"Réparation en cours…":"Lecture des magasins…";
-    window.fbReparerVisibilite(did,appliquer).then(function(r){
+    res.textContent=appliquer?"Remise en place\u2026":"Lecture des magasins et des signalements\u2026";
+    window.fbEnqueteBoisson(did,appliquer).then(function(r){
       btn.style.opacity="";pourId=did;
       if(appliquer){
-        aRattraper=null;btn.textContent="Vérifier";
-        res.textContent="✓ "+r["reparés"]+" magasin"+(r["reparés"]>1?"s":"")+" — la boisson est visible par tout le monde.";
+        aReposer=null;btn.textContent="Enquêter";
+        res.textContent="\u2713 "+r.reposes+" signalement"+(r.reposes>1?"s":"")+" remis en place.";
         try{playSound("win");}catch(e){}
         return;
       }
-      aRattraper=r.aveugles.length;
-      if(!aRattraper){
-        res.textContent=r.trouves?("Les "+r.trouves+" magasins qui l'ont sont déjà visibles."):"Aucun magasin ne l'a en rayon.";
-        btn.textContent="Vérifier";
-        return;
+      var d=DRINKS.find(function(x){return Number(x.id)===did;});
+      var h="<b>"+sanitize((d&&d.name)||("boisson "+did))+"</b><br>";
+      h+=r.magasins+" magasin"+(r.magasins>1?"s":"")+" la porte"+(r.magasins>1?"nt":"")+
+         ", dont <b>"+r.confirmes+"</b> avec une confirmation.<br>";
+      if(r.jamaisVisites){
+        h+='<span style="color:var(--s3)">'+r.jamaisVisites+" n\u2019"+(r.jamaisVisites>1?"ont":"a")+
+           " jamais re\u00E7u la moindre confirmation, sur aucune boisson : leur rayon vient d\u2019un import ou d\u2019un remplissage d\u2019enseigne, pas de quelqu\u2019un.</span><br>";
       }
-      btn.textContent="Réparer ("+aRattraper+")";
-      res.innerHTML=sanitize(aRattraper+" magasin"+(aRattraper>1?"s l'ont":" l'a")+" en rayon sans confirmation :")+"<br>"+
-        r.aveugles.slice(0,8).map(function(m){return "• "+sanitize(m.nom);}).join("<br>")+
-        (aRattraper>8?"<br>…et "+(aRattraper-8)+" de plus":"");
+      if(r.rapports===null){
+        h+='<span style="color:#b45309">Signalements illisibles \u2014 index manquant sur reports(drinkId), ou r\u00E8gles pas d\u00E9ploy\u00E9es.</span>';
+      }else{
+        h+=r.rapports+" signalement"+(r.rapports>1?"s":"")+" enregistr\u00E9"+(r.rapports>1?"s":"")+" par des personnes.";
+      }
+      aReposer=(r.signaleursPerdus||[]).length;
+      if(aReposer){
+        h+="<br><br>"+aReposer+" signalement"+(aReposer>1?"s":"")+" n\u2019"+(aReposer>1?"ont":"a")+
+           " pas atteint son magasin :<br>"+
+           r.signaleursPerdus.slice(0,8).map(function(m){
+             return "\u2022 "+sanitize(m.nom)+(m.par?" ("+sanitize(m.par)+")":"");
+           }).join("<br>");
+        btn.textContent="Remettre en place ("+aReposer+")";
+      }else if(r.rapports===0){
+        h+="<br><br>Personne ne l\u2019a signal\u00E9e : il n\u2019y a rien \u00E0 remettre en place. "+
+           "Si elle appara\u00EEt quand m\u00EAme en rayon, c\u2019est un remplissage d\u2019enseigne.";
+        btn.textContent="Enquêter";
+      }else{
+        h+="<br><br>Tout ce qui a \u00E9t\u00E9 signal\u00E9 est bien en place.";
+        btn.textContent="Enquêter";
+      }
+      res.innerHTML=h;
     }).catch(function(e){
       btn.style.opacity="";
-      res.textContent="Échec : "+((e&&e.message)||e);
+      res.textContent="\u00C9chec : "+((e&&e.message)||e);
       try{playSound("err");}catch(_e){}
     });
   }
@@ -23528,7 +23612,10 @@ function renderReparerVisibilite(){
   btn.onkeydown=function(ev){ if(ev.key==="Enter")lancer(); };
   inp.onkeydown=function(ev){ if(ev.key==="Enter")lancer(); };
 }
-/* Les points que la distance avait refuses, rendus a ceux qui les ont gagnes. */
+/* Les points que la distance avait refuses, rendus a ceux qui les ont gagnes.
+   Cote serveur : rattraperSignalements (points-et-parrainage.js). Il compte
+   d'abord, il ne verse qu'au second appui, et la relancer ne paie jamais deux
+   fois — le motif du rapport passe de « trop loin » a « de memoire ». */
 function renderPointsRendus(){
   var el=document.getElementById("admin-points-rendus");
   if(!el)return;
@@ -23540,23 +23627,23 @@ function renderPointsRendus(){
     if(!window.fbRattraperSignalements){res.textContent="Outil indisponible (module hors ligne)";return;}
     var appliquer=aRendre>0;
     btn.style.opacity=".5";
-    res.textContent=appliquer?"Versement en cours…":"Lecture des signalements…";
+    res.textContent=appliquer?"Versement en cours\u2026":"Lecture des signalements\u2026";
     window.fbRattraperSignalements(90,appliquer).then(function(r){
       btn.style.opacity="";
-      if(!r||!r.ok){res.textContent="Échec : "+((r&&r.reason)||"fonction non déployée");try{playSound("err");}catch(e){}return;}
+      if(!r||!r.ok){res.textContent="\u00C9chec : "+((r&&r.reason)||"fonction non d\u00E9ploy\u00E9e");try{playSound("err");}catch(e){}return;}
       if(appliquer){
         aRendre=null;btn.textContent="Rendre les points refusés pour « trop loin »";
-        res.textContent="✓ "+r.rendus+" point"+(r.rendus>1?"s":"")+" rendu"+(r.rendus>1?"s":"")+".";
+        res.textContent="\u2713 "+r.rendus+" point"+(r.rendus>1?"s":"")+" rendu"+(r.rendus>1?"s":"")+".";
         try{playSound("win");}catch(e){}
         return;
       }
       aRendre=r.aRendre;
-      if(!aRendre){res.textContent="Rien à rendre ("+r.examines+" signalements relus).";return;}
+      if(!aRendre){res.textContent="Rien \u00E0 rendre ("+r.examines+" signalements relus).";return;}
       btn.textContent="Rendre ces "+aRendre+" signalement"+(aRendre>1?"s":"");
-      res.textContent=aRendre+" signalement"+(aRendre>1?"s":"")+" de "+r.personnes+" personne"+(r.personnes>1?"s":"")+" n'"+(aRendre>1?"ont":"a")+" rien rapporté alors que l'app avait annoncé des points.";
+      res.textContent=aRendre+" signalement"+(aRendre>1?"s":"")+" de "+r.personnes+" personne"+(r.personnes>1?"s":"")+" n'"+(aRendre>1?"ont":"a")+" rien rapport\u00E9 alors que l'app avait annonc\u00E9 des points.";
     }).catch(function(e){
       btn.style.opacity="";
-      res.textContent="Échec : "+((e&&e.message)||e);
+      res.textContent="\u00C9chec : "+((e&&e.message)||e);
       try{playSound("err");}catch(_e){}
     });
   }

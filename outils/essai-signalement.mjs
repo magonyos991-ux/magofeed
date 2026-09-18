@@ -65,11 +65,25 @@ const src = await readFile(join(process.cwd(), "index.html"), "utf8");
   dit("la carte demande les confirmations", !!m && /"confirmations"/.test(m[1]),
     "sans elles, rien de ce qui est signale ne s'affiche");
 }
-dit("l'outil de reparation par magasin existe", /window\.fbReparerVisibilite = async function/.test(src));
-dit("il est reserve a l'administrateur",
-  /fbReparerVisibilite[\s\S]{0,400}admins[\s\S]{0,200}Reserve a l'administrateur/.test(src));
-dit("il POSE la confirmation au lieu de l'incrementer",
-  /patch\["confirmations\." \+ did\] = 1;/.test(src), "rejouer ne doit jamais gonfler un compteur");
+{
+  const enq = (src.match(/window\.fbEnqueteBoisson = async function[\s\S]*?\n};/) || [""])[0];
+  dit("l'outil d'enquete existe", enq.length > 0);
+  dit("il est reserve a l'administrateur",
+    /admins[\s\S]{0,200}Reserve a l'administrateur/.test(enq));
+  dit("il n'ecrit QUE la ou un rapport le prouve",
+    /if \(!appliquer \|\| !perdus\.length\) return res;/.test(enq) &&
+    /for \(const p of perdus\)/.test(enq),
+    "poser une confirmation sans preuve ferait mentir l'app");
+  dit("un signalement prouve vient d'un « stock », pas d'une rupture",
+    /if \(r\.type !== "stock" \|\| !r\.storeId\) return;/.test(enq));
+  dit("la confirmation est POSEE, jamais incrementee",
+    /patch\["confirmations\." \+ did\] = 1;/.test(enq), "rejouer ne doit pas gonfler un compteur");
+  dit("il distingue un magasin jamais visite d'un magasin confirme",
+    /confirmationsEnTout/.test(enq) && /jamaisVisites/.test(enq),
+    "un rayon de 486 boissons a zero confirmation vient d'un remplissage, pas de quelqu'un");
+  dit("il ne pose plus de confirmation a l'aveugle",
+    !/window\.fbReparerVisibilite/.test(src), "l'ancienne version ecrivait sur tout magasin sans confirmation");
+}
 dit("aucun toast ne promet trois points hors de portee du serveur",
   !/Not\\u00E9 comme probable[\s\S]{0,200}\+3 pts/.test(src));
 
