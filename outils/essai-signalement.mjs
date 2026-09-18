@@ -267,6 +267,38 @@ const vu = await page.evaluate(() => {
   out.propositionAncienne = rejoue({ id: "x1", barcode: CODE, name: "Ancienne", votes: 1 });
   out.propositionRejetee = rejoue({ id: CODE, name: "Rejetee", votes: 1, rejected: true });
 
+  /* UNE FICHE FUSIONNEE VERS LE VIDE DISPARAIT SANS ETRE REMPLACEE.
+     « Hawaï Ananas » pointait vers un identifiant qui n'a jamais existe : la
+     fiche etait retiree du catalogue au chargement, et scanner son code-barre
+     ne trouvait plus rien. */
+  out.fusions = (function(){
+    const t = window.DRINK_MERGES || {};
+    const ids = new Set((DRINKS || []).map((d) => Number(d.id)));
+    const orphelines = Object.keys(t).filter(function(k){
+      const c = Number(t[k]);
+      return !ids.has(c) && String(c).length !== 13;
+    });
+    const hawai = (DRINKS || []).find((d) => Number(d.id) === 11434);
+    return {
+      ciblesAbsentes: orphelines,
+      hawaiPresente: !!hawai,
+      hawaiScannable: !!(hawai && drinkForBarcode("5449000036919")),
+      marquesHawai: [...new Set((DRINKS || []).filter((d) => /hawa/i.test(d.brand || "")).map((d) => d.brand))]
+    };
+  })();
+  /* Les sept doublons a zero de tete ne doivent plus exister au catalogue. */
+  out.doublonsCode = (function(){
+    const vus = new Map(); const dup = [];
+    (DRINKS || []).forEach(function(d){
+      (d.barcodes || []).forEach(function(b){
+        const c = String(b).replace(/\D/g, "").replace(/^0+/, "");
+        if (vus.has(c) && vus.get(c) !== d.id) dup.push({ code: c, a: vus.get(c), b: d.id });
+        else vus.set(c, d.id);
+      });
+    });
+    return dup;
+  })();
+
   /* LE SCENARIO EXACT QUI A COUTE DEUX SIGNALEMENTS.
      Un magasin porte la boisson dans son rayon PROBABLE (remplissage
      d'enseigne), sans aucune confirmation. Quelqu'un est devant l'etagere et
@@ -411,6 +443,29 @@ dit("rescanner une proposition nee d'une photo la retrouve", /Dragon Punch/.test
 dit("l'ancienne forme (champ barcode) marche toujours", /Ancienne/.test(vu.propositionAncienne));
 dit("une proposition rejetee ne revient pas", !/Rejetee/.test(vu.propositionRejetee));
 
+dit("aucune fusion ne mene vers une fiche inexistante",
+  vu.fusions.ciblesAbsentes.length === 0,
+  "cibles absentes : " + vu.fusions.ciblesAbsentes.join(", "));
+dit("« Hawaï Ananas » est revenue au catalogue et se scanne",
+  vu.fusions.hawaiPresente && vu.fusions.hawaiScannable,
+  "elle disparaissait au chargement, son code-barre ne trouvait rien");
+dit("elle ne fabrique pas une deuxieme marque dans le rail",
+  vu.fusions.marquesHawai.length === 1, JSON.stringify(vu.fusions.marquesHawai));
+{
+  /* Les six collisions historiques sont declarees dans le controle du
+     catalogue, en attente d'une fusion depuis l'administration. Ce qu'on
+     verrouille ici, c'est qu'il n'en apparaisse pas de NOUVELLE. */
+  const ctl = await readFile(join(process.cwd(), "outils/controle-catalogue.mjs"), "utf8");
+  const bloc = (ctl.match(/COLLISIONS_CONNUES = new Set\(\[([\s\S]*?)\]\)/) || ["", ""])[1];
+  const connues = new Set([...bloc.matchAll(/"(\d+)"/g)].map((m) => m[1].replace(/^0+/, "")));
+  const neuves = vu.doublonsCode.filter((x) => !connues.has(x.code));
+  dit("aucun code-barre NOUVEAU ne designe deux fiches, fusions appliquees",
+    neuves.length === 0,
+    neuves.slice(0, 4).map((x) => x.code + " : " + x.a + " et " + x.b).join(" | "));
+  dit("les collisions tolerees sont toutes declarees",
+    vu.doublonsCode.length === connues.size,
+    vu.doublonsCode.length + " trouvees, " + connues.size + " declarees");
+}
 dit("la boisson de l'histoire est bien au catalogue", vu.scenarioAmie.boissonAuCatalogue);
 dit("l'ecran la propose au lieu de la dire « deja la »",
   vu.scenarioAmie.ligneAffichee === true && vu.scenarioAmie.marqueeDejaLa === false,

@@ -37,8 +37,17 @@ function corpsDe(nom) {
   }
   throw new Error("fin de " + nom + " introuvable");
 }
+/* codeNu vient de l'application, comme le detecteur d'alcool : c'est elle qui
+   decide si deux codes designent le meme produit (elle retire les caracteres
+   non numeriques ET les zeros de tete, pour que EAN-8, UPC-A et EAN-13 se
+   rejoignent). Ce controle comparait les chaines BRUTES — il annoncait donc
+   « TOUT EST CONFORME » sur sept fiches en double qui ne differaient de leur
+   jumelle que par un zero de tete : exactement ce qu'il existe pour interdire.
+   Un controle qui s'ecrit sa propre regle finit par diverger de celle qui
+   compte : c'est ecrit en tete de ce fichier, il fallait s'y tenir. */
 const app = new Function(readFileSync("data/alcool.js", "utf8") + "\n" + corpsDe("normTxt") + "\n"
-  + corpsDe("nameLooksAlcoholic") + "\nreturn {alcool:nameLooksAlcoholic};")();
+  + corpsDe("codeNu") + "\n"
+  + corpsDe("nameLooksAlcoholic") + "\nreturn {alcool:nameLooksAlcoholic, codeNu:codeNu};")();
 
 const src = readFileSync("data/drinks.js", "utf8").replace(/^\/\*[\s\S]*?\*\//, "");
 const DRINKS = new Function(src + "\nreturn DRINKS;")();
@@ -50,6 +59,9 @@ const DRINKS = new Function(src + "\nreturn DRINKS;")();
    d'administration sait le faire. Les effacer du fichier ferait perdre des
    contributions de gens reels. On les nomme donc, pour que le controle reste
    utile : une NOUVELLE collision sera signalee, celles-ci sont en attente. */
+/* Declarees sous la forme NORMALISEE (sans zero de tete), comme la comparaison
+   ci-dessous : sinon une tolerance posee en 13 chiffres ne reconnaitrait pas la
+   collision qu'elle est censee excuser. */
 const COLLISIONS_CONNUES = new Set([
   "3124480196774",   /* Oasis Tropical Sans Sucre / Oasis Tropical Zero */
   "90169168", "90169380",   /* Happy Day Orange / Rauch Orange */
@@ -68,20 +80,49 @@ function cleOk(c) {
 const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2190}-\u{21FF}\u{2600}-\u{27BF}\u{FE0F}\u{1F1E6}-\u{1F1FF}]/u;
 const CATS = ["Soda", "Energy", "Ice Tea", "Jus", "Eau", "Sport", "Exotique", "Lacté", "Café", "Snacks", "Autre"];
 
-const pb = { alcool: [], identifiants: [], collisions: [], cle: [], categories: [], emoji: [] };
+const pb = { alcool: [], identifiants: [], collisions: [], cle: [], categories: [], emoji: [], fusions: [] };
+/* LES FICHES FUSIONNEES NE SONT PLUS AU CATALOGUE.
+   L'application retire au chargement toute fiche dont l'identifiant est une
+   SOURCE de DRINK_MERGES (index.html, juste avant <script src="data/drinks.js">).
+   Ce controle lisait le fichier brut : il aurait donc reclame eternellement la
+   correction de doublons deja fusionnes. Il lit maintenant la meme table, et
+   il en profite pour verifier ce que personne ne verifiait : qu'une CIBLE de
+   fusion existe. « Hawaï Ananas » pointait vers un identifiant qui n'a jamais
+   existe — la fiche disparaissait du catalogue, son code-barre ne trouvait
+   plus rien, et rien ne le signalait.
+   Exception : une cible a 13 chiffres est une fiche communautaire, creee par
+   Date.now() et vivant dans Firestore (voir growth/build-share-pages.js). */
+const MERGES = (() => {
+  const src = readFileSync("index.html", "utf8");
+  const m = src.match(/window\.DRINK_MERGES = \{([\s\S]*?)\n\};/);
+  const t = new Map();
+  if (m) for (const p of m[1].matchAll(/(\d+)\s*:\s*(\d+)/g)) t.set(Number(p[1]), Number(p[2]));
+  return t;
+})();
+
 const vusId = new Set(), vusCode = new Map();
 for (const d of DRINKS) {
+  if (MERGES.has(Number(d.id))) continue;      // fusionnee : l'app la retire au chargement
   if (app.alcool(d.name, d.brand)) pb.alcool.push(d.name + " / " + (d.brand || ""));
   if (vusId.has(d.id)) pb.identifiants.push(String(d.id)); else vusId.add(d.id);
   if (!CATS.includes(d.cat)) pb.categories.push(d.name + " -> " + d.cat);
   if (EMOJI.test(String(d.name) + String(d.brand || "") + String(d.tag || ""))) pb.emoji.push(d.name);
   for (const b of (d.barcodes || [])) {
-    const c = String(b);
-    if (!cleOk(c)) pb.cle.push(c + "  (" + d.name + ")");
+    const brut = String(b);
+    if (!cleOk(brut)) pb.cle.push(brut + "  (" + d.name + ")");
+    const c = app.codeNu(brut);                 // la forme que l'app compare
     if (vusCode.has(c) && vusCode.get(c) !== d.id) {
-      if (!COLLISIONS_CONNUES.has(c)) pb.collisions.push(c + " : fiches " + vusCode.get(c) + " et " + d.id);
+      if (!COLLISIONS_CONNUES.has(c)) pb.collisions.push(brut + " : fiches " + vusCode.get(c) + " et " + d.id);
     } else vusCode.set(c, d.id);
   }
+}
+
+/* Une cible de fusion doit exister, sinon la fiche source disparait sans etre
+   remplacee — et son code-barre ne trouve plus rien. */
+for (const [source, cible] of MERGES) {
+  if (vusId.has(cible)) continue;
+  if (String(cible).length === 13) continue;   // fiche communautaire (Date.now)
+  pb.fusions.push(source + " -> " + cible + " (cible absente du catalogue)");
 }
 
 console.log("catalogue : " + DRINKS.length + " boissons · " + vusCode.size + " codes-barres distincts\n");

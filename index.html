@@ -6038,8 +6038,23 @@ window.fbLoadCommunityData();
    dans un script ordinaire execute pendant l'analyse du document, et non dans
    le module Firebase qui est differe : un doublon doit disparaitre au
    chargement du catalogue, pas a la reponse du reseau. */
-window.DRINK_MERGES = { 11286: 3301, 11287: 3300,
-  11433: 10068, 11434: 11224,   // Hawai -> Hawaï (Tropical, Ananas)
+/* 11286 -> 3301 a ete retiree : les DEUX identifiants sont absents du
+   catalogue, la fusion ne menait donc nulle part. Elle ne cassait rien — un
+   magasin portant 11286 se retrouvait avec 3301, invisible dans les deux cas —
+   mais elle se lisait comme une fusion valide, et c'est exactement le piege
+   dans lequel « Hawai Ananas » est tombee. Le controle du catalogue verifie
+   desormais que chaque cible existe. */
+window.DRINK_MERGES = { 11287: 3300,
+  11433: 10068,                 // Hawai Tropical -> Hawaï Tropical
+  /* 11434 pointait vers 11224, un identifiant qui n'a JAMAIS existe — verifie
+     sur tout l'historique de data/drinks.js. La fiche « Hawaï Ananas » etait
+     donc retiree du catalogue au chargement et remplacee par rien : scanner
+     son code-barre (5449000036919, porte par elle seule) ne trouvait aucun
+     produit, et l'app proposait de creer une boisson qui existe deja.
+     La fusion inverse rapatrie ce que applyMergesToStore avait deja deplace
+     chez les gens : les confirmations posees sous la cle 11224 reviennent sur
+     la fiche reelle. */
+  11224: 11434,
   11235: 14,     11055: 3500,   // Mecca-Cola -> Mecca Cola ; Club-Mate -> Club Mate
   11037: 10060,  11288: 10066,  // Sprite Zero -> Sprite Zéro ; Canada Dry (doublon)
   11306: 10112,  11460: 11016,  // Uludag -> Uludağ ; Nalu Exotic (doublon)
@@ -6060,7 +6075,22 @@ window.DRINK_MERGES = { 11286: 3301, 11287: 3300,
   11307: 11241,  // Ayran Sutas -> Sutas Ayran, orthographe turque exacte
   11338: 14634,  // Yeo's The Chrysantheme -> Yeo's The au Chrysantheme (3 codes)
   11324: 11238,  // Camlica Gazoz -> Camlica Gazoz (orthographe turque)
-  13088: 11347   // Mogu Mogu Bubble Gum -> Mogu Mogu Bubblegum
+  13088: 11347,  // Mogu Mogu Bubble Gum -> Mogu Mogu Bubblegum
+  /* Sept doublons du meme import, invisibles jusqu'ici parce que le controle
+     du catalogue comparait les codes BRUTS quand l'app, elle, les compare
+     normalises (codeNu retire les zeros de tete, pour que EAN-8, UPC-A et
+     EAN-13 se rejoignent). Chacune de ces fiches ne porte qu'un seul code : la
+     forme a zero de tete d'un code que la fiche gardee possede deja. Au scan,
+     c'est toujours la premiere du fichier qui repond — la seconde n'etait donc
+     joignable par aucun scan, seulement par la recherche, et le meme produit
+     figurait deux fois au catalogue. */
+  16319: 14917,  // Monster Energy Ultra Sunrise -> Monster Ultra Sunrise
+  16432: 14905,  // Monster Zero sucre -> Monster Energy Zero Sucre
+  16481: 10008,  // Peach Tea Arizona -> Arizona Peach
+  16722: 15354,  // Naked Boosted Smoothie Green Machine -> Naked Green Machine
+  17390: 15354,  // Naked Green machine boosted smoothie -> Naked Green Machine
+  16725: 15495,  // V8 Original 100% Vegetable Juice -> V8 Jus de Legumes
+  17722: 15888   // Soy Lait soja vanille bio -> Soy Boisson Soja Vanille
 };
 </script>
 <script src="data/drinks.js"></script>
