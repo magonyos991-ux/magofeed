@@ -107,6 +107,15 @@ d'ami partiront ensemble.
   nominative et datée dans `pointsDons`. Dans l'app : **Administration →
   « Offrir des points »**, on cherche la personne par son pseudo.
 
+- **`notifierChasse`** (notifications-push.js) — une chasse lancée là où
+  personne n'habite à moins de quinze kilomètres ne réveillait **personne**, et
+  son auteur ne l'apprenait jamais. Le rayon du destinataire reste la règle ;
+  mais quand le premier tour n'a trouvé personne, un second s'adresse à ceux
+  qui ont accepté ce secours (réglage coché, ou zone poussée au maximum), les
+  plus proches d'abord, jamais au-delà de 150 km, dix au maximum, et le message
+  dit la distance. Si vraiment personne : le chasseur est prévenu et la chasse
+  est marquée `sansPortee`.
+
 **Les règles Firestore changent cette fois** (`pointsOfferts` rejoint les champs
 que le client ne peut pas écrire, et `pointsDons` devient lisible par l'admin
 seul) : lance le banc d'essai du §1 avant de déployer.

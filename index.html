@@ -4914,6 +4914,16 @@ window.fbUpdatePushRayon = async function(km) {
     await setDoc(doc(db, "pushTokens", user.uid), { rayon: r, updatedAt: serverTimestamp() }, { merge: true });
   } catch (e) { /* silencieux */ }
 };
+/* LE SECOURS : accepter d'etre prevenu plus loin, quand personne n'est plus
+   pres. Ce champ ne sert QUE dans ce cas-la (notifications-push.js, second
+   tour) : sans lui, une chasse lancee a la campagne ne reveille personne et
+   son auteur ne le sait meme pas. */
+window.fbUpdatePushSecours = async function(oui) {
+  try {
+    var user = auth.currentUser; if (!user) return;
+    await setDoc(doc(db, "pushTokens", user.uid), { secours: !!oui, updatedAt: serverTimestamp() }, { merge: true });
+  } catch (e) { /* silencieux */ }
+};
 window.fbUpdatePushPosition = async function(lat, lng) {
   try {
     if (lat == null) return;
@@ -14642,8 +14652,46 @@ function renderZoneChasse(){
     '<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:800;color:var(--s1)">'+sanitize(trh("Ta zone : {n} km",{n:km}))+'</div>'+
     '<div style="font-size:11px;font-weight:600;color:var(--s2);margin-top:1px">'+sanitize(tr("Jusqu\'où on a le droit de te prévenir"))+'</div></div>'+
     '<span style="font-size:15px;color:var(--txt2)">›</span></div>';
+  /* LE SECOURS, JUSTE EN DESSOUS DE LA ZONE — c'est la qu'on se demande
+     « pourquoi je ne recois rien » et « pourquoi on me derange ».
+     Ce reglage ne change RIEN au quotidien : il ne sert que dans le cas ou
+     une chasse n'a reveille absolument personne. La ou il n'y a qu'un
+     habitant a quinze kilometres a la ronde, c'est la difference entre une
+     application qui sert et une application qui se tait. */
+  host.innerHTML+='<div id="cz-secours" role="button" tabindex="0" style="display:flex;align-items:center;gap:11px;padding:10px 14px;background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;margin-top:7px;cursor:pointer">'+
+    '<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:800;color:var(--s1)">'+sanitize(tr("Aider plus loin si personne n'est près"))+'</div>'+
+    '<div style="font-size:11px;font-weight:600;color:var(--s2);margin-top:1px;line-height:1.35">'+sanitize(tr("Uniquement quand une chasse n'a trouvé personne. Le message dit la distance."))+'</div></div>'+
+    '<span id="cz-sec-etat" style="flex-shrink:0;font-size:11px;font-weight:800;padding:4px 10px;border-radius:999px"></span></div>';
+  _czPeindreSecours();
+  var sec=document.getElementById("cz-secours");
+  if(sec){
+    var bascule=function(){
+      window.magoSecours=!window.magoSecours;
+      try{localStorage.setItem("magoSecours",window.magoSecours?"1":"0");}catch(e){}
+      try{ if(window.fbUpdatePushSecours)window.fbUpdatePushSecours(window.magoSecours); }catch(e){}
+      _czPeindreSecours();
+      try{playSound("pop");}catch(e){}
+      toast(window.magoSecours
+        ? tr("On te préviendra quand tu es la personne la plus proche")
+        : tr("On s'en tiendra à ta zone"));
+    };
+    sec.onclick=bascule;
+    sec.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();bascule();}};
+  }
   var r=document.getElementById("cz-row");
   if(r){r.onclick=ouvrirZoneChasse;r.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();ouvrirZoneChasse();}};}
+}
+/* Le choix vit en local ET dans pushTokens : le serveur ne lit que le second,
+   l'ecran ne lit que le premier, et ils sont ecrits ensemble. */
+window.magoSecours=false;
+try{ window.magoSecours = localStorage.getItem("magoSecours")==="1"; }catch(e){}
+function _czPeindreSecours(){
+  var b=document.getElementById("cz-sec-etat");
+  if(!b)return;
+  var on=!!window.magoSecours;
+  b.textContent=on?tr("Oui"):tr("Non");
+  b.style.background=on?"rgba(34,197,94,.18)":"var(--bg3)";
+  b.style.color=on?"#16a34a":"var(--s2)";
 }
 function ouvrirZoneChasse(){
   var km=_hrClamp(window.magoHuntRadius);
