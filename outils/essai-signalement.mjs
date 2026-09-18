@@ -235,6 +235,24 @@ const vu = await page.evaluate(() => {
   out.amiAccepte = acc ? acc.title + " >" + (acc.action && acc.action.kind) : null;
   out.amiPastille = typeof majPastilleAmis === "function";
 
+  /* Le rayon probable de l'enseigne doit survivre a un aller-retour :
+     rayonAppliquer ne le recopie qu'une fois par objet magasin, et la garde
+     anti-inventaire le retire au rendu de la liste. Si le drapeau reste leve,
+     il ne revient jamais — la reponse a « quel Delhaize, justement » dispa-
+     raissait au premier retour en arriere. */
+  {
+    const ens = { id: "o42", name: "Proxy Delhaize", brand: "Delhaize", lat: 50.85, lng: 4.35,
+                  drinks: [7], confirmations: { 7: 1 } };
+    const probables = (window.rayonProbableIds ? window.rayonProbableIds(ens) : []) || [];
+    window.rayonAppliquer(ens);
+    const ouverture = ens.drinks.length;
+    _stripAutoDrinks(ens);                       // le rendu de la liste passe par la
+    const retourListe = ens.drinks.length;
+    window.rayonAppliquer(ens);                  // on rouvre la fiche
+    out.rayonAllerRetour = { probables: probables.length, ouverture, retourListe,
+                             reouverture: ens.drinks.length };
+  }
+
   /* « Deja la » doit vouloir dire « quelqu'un l'a vue », pas « probablement ».
      rayonAppliquer recopie le rayon PROBABLE de l'enseigne dans s.drinks : un
      test de presence qui lit s.drinks refuse le signalement de quelqu'un qui
@@ -302,6 +320,13 @@ dit("le meme etat ne sonne pas deux fois", vu.amiPasDeDoublon);
 dit("une acceptation sonne et ouvre le fil",
   /Cobra Supreme a accepté ta demande >conv/.test(vu.amiAccepte || ""), vu.amiAccepte);
 dit("la pastille des demandes existe toujours", vu.amiPastille);
+
+dit("le rayon probable d'une enseigne s'affiche a l'ouverture de la fiche",
+  vu.rayonAllerRetour.probables > 10 && vu.rayonAllerRetour.ouverture > vu.rayonAllerRetour.probables - 1,
+  JSON.stringify(vu.rayonAllerRetour));
+dit("il revient apres un retour a la liste",
+  vu.rayonAllerRetour.retourListe === 1 && vu.rayonAllerRetour.reouverture === vu.rayonAllerRetour.ouverture,
+  "sans cela, un magasin n'affiche son assortiment qu'une seule fois, jamais plus");
 
 dit("« deja la » = confirmee par quelqu'un, ou verifiee au catalogue de l'enseigne",
   vu.vraimentEnRayon.confirmee === true && vu.vraimentEnRayon.verifiee === true);
