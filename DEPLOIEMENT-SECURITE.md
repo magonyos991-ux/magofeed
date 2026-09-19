@@ -25,6 +25,57 @@ tournent tous depuis le même dossier.
 Le score doit avoir monté et rester. Puis Administration → Sécurité : aucune
 pastille rouge.
 
+## 0. Déployer le serveur depuis GitHub — un bouton, plus de PowerShell
+
+C'est désormais le chemin normal. La commande PowerShell du 0 bis reste plus
+bas, pour le jour où GitHub serait indisponible ou où tu voudrais déployer
+depuis ta machine.
+
+### Une seule fois : ouvrir la porte
+
+1. Va sur **console.firebase.google.com** → ton projet **magofeed-7f621**
+   → la roue dentée en haut à gauche → **Paramètres du projet**
+   → onglet **Comptes de service** → bouton **Générer une nouvelle clé privée**.
+   Un fichier `.json` se télécharge. **Ne le mets jamais dans le dépôt.**
+2. Va sur **github.com/magonyos991-ux/magofeed** → **Settings** → dans la
+   colonne de gauche, **Secrets and variables** → **Actions** → bouton vert
+   **New repository secret**.
+3. Nom : `FIREBASE_SERVICE_ACCOUNT` — Valeur : **ouvre le fichier .json avec le
+   Bloc-notes, sélectionne tout (Ctrl+A), copie (Ctrl+C), colle**. Accolades
+   comprises, du premier `{` au dernier `}`. Puis **Add secret**.
+4. Supprime le fichier `.json` de ton dossier Téléchargements. Il ne sert plus :
+   GitHub en a une copie chiffrée que personne ne peut relire, pas même toi.
+
+C'est tout. Tu ne referas jamais ces quatre étapes.
+
+### À chaque fois : appuyer
+
+**github.com/magonyos991-ux/magofeed** → onglet **Actions** → dans la colonne
+de gauche, **Déployer le serveur (fonctions + règles)** → bouton
+**Run workflow** → laisse « tout » → **Run workflow**.
+
+Ça prend cinq à dix minutes. Un rond vert : c'est en ligne. Un rond rouge :
+clique dessus, la raison est écrite en français dans l'étape qui a échoué, et
+**rien n'a été déployé** — le banc d'essai garde la porte.
+
+Le déclenchement est **manuel**, et c'est voulu : déployer le serveur à chaque
+poussée reviendrait à mettre en ligne une fonction à moitié écrite. C'est toi
+qui choisis le moment.
+
+### Ce que le bouton fait, dans l'ordre
+
+1. Lance les **280 épreuves** des règles sur un vrai émulateur Firestore.
+   Une seule qui échoue, et le déploiement n'a pas lieu.
+2. Assemble le dossier que Firebase attend, vérifie que chaque module branché
+   dans `index.js` est bien présent, et contrôle la syntaxe de chaque fichier.
+3. Installe les dépendances déclarées dans `functions-a-deployer/package.json`.
+4. Déploie les **règles**, les **index**, puis les **fonctions**.
+
+Le menu déroulant permet de ne déployer que les règles, ou que les fonctions,
+si tu sais ce que tu fais. Dans le doute : « tout ».
+
+---
+
 ## 0 bis. Les dossiers — FAIT, gardé pour la prochaine machine
 
 Le message « Would you like to proceed with deletion? » n'était pas un bug :
