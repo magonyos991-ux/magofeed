@@ -170,7 +170,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
         <div class="ob-visual ob-visual-brand">
           <svg width="104" height="104" viewBox="0 0 200 200"><rect width="200" height="200" rx="52" fill="#151210"/><g transform="translate(100 100) scale(.72) translate(-100 -109)"><path d="M42 158V60l58 68 58-68v98" fill="none" stroke="#f4f0e9" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/><circle cx="100" cy="88" r="26" fill="#151210"/><circle cx="100" cy="88" r="19" fill="none" stroke="#c69a57" stroke-width="4.6"/><circle cx="100" cy="88" r="9" fill="none" stroke="#c69a57" stroke-width="4"/><circle cx="100" cy="88" r="3.1" fill="#c69a57"/></g></svg>
         </div>
-        <div class="ob-tag">Magofeed · 1 sur 4</div>
+        <div class="ob-tag">Magofeed · 1 sur 5</div>
         <div class="ob-title">Bienvenue sur Magofeed</div>
         <div class="ob-desc">L'app communautaire qui localise les boissons rares et exotiques — 100% sans alcool — dans les magasins autour de toi.</div>
       </div>
@@ -181,7 +181,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <div class="ob-store-mini" style="bottom:34px;right:-34px"><div class="ob-store-dot"></div>Épicerie Malik · 400 m</div>
           <div class="ob-store-mini" style="bottom:-14px;left:-14px"><div class="ob-store-dot" style="background:#f59e0b"></div>Itinéraire en un tap</div>
         </div>
-        <div class="ob-tag">Magofeed · 2 sur 4</div>
+        <div class="ob-tag">Magofeed · 2 sur 5</div>
         <div class="ob-title">Cherche, on te guide</div>
         <div class="ob-desc">Tape un nom de boisson : tu vois quels magasins l'ont en stock près de toi — confirmé par de vraies personnes.</div>
       </div>
@@ -190,7 +190,7 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
           <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#c69a57" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5.5A2.5 2.5 0 0 1 5.5 3H7M17 3h1.5A2.5 2.5 0 0 1 21 5.5V7M21 17v1.5a2.5 2.5 0 0 1-2.5 2.5H17M7 21H5.5A2.5 2.5 0 0 1 3 18.5V17"/><path d="M7.2 8v8M10.4 8v8M13.6 8v8M16.8 8v8" stroke-width="1.5"/></svg>
           <svg class="ob-spark" width="26" height="26" viewBox="0 0 24 24" fill="#e2b571"><path d="M12 2.6l1.9 5.6 5.6 1.9-5.6 1.9L12 17.6l-1.9-5.6-5.6-1.9 5.6-1.9zM19.6 16.4l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9z"/></svg>
         </div>
-        <div class="ob-tag">Magofeed · 3 sur 4</div>
+        <div class="ob-tag">Magofeed · 3 sur 5</div>
         <div class="ob-title">Scanne… ou photographie</div>
         <div class="ob-desc">Un code-barres ou une simple photo : l'IA reconnaît la boisson, vérifie qu'elle est bien sans alcool et peut l'ajouter au catalogue.</div>
       </div>
@@ -9123,7 +9123,14 @@ function ouvrirSignalement(cibleType,cibleId,apercu,nomLisible){
       }).catch(function(e){
         playSound("err");
         var c=String((e&&(e.code||e.message))||e);
-        toast(/permission/i.test(c)?"Connecte-toi pour signaler":"Envoi impossible, réessaie");
+        /* « Connecte-toi pour signaler » etait la SEULE traduction d'un refus,
+           y compris quand la personne etait parfaitement connectee et que le
+           refus venait des regles. On distingue donc les deux : ce qu'elle peut
+           reparer elle-meme, et ce qui ne depend pas d'elle. */
+        var connecte=!!(window._fbUser&&window._fbUser.uid&&!window._fbUser.isAnonymous);
+        toast(!/permission/i.test(c) ? "Envoi impossible, réessaie"
+          : (connecte ? "Signalement refusé — préviens-nous par e-mail, on regarde"
+                      : "Connecte-toi pour signaler"));
       });
     });
   });
@@ -15787,14 +15794,20 @@ function mapStockReport(storeId,inStock){
     if(window.fbAddReport)window.fbAddReport(s.fbId||sid,did,"rupture",{note:_provenance("carte",s)}); // trace admin (pseudo)
     if(!s.confirmations)s.confirmations={};
     s.confirmations[did]=(s.confirmations[did]||0)-1;_noterObservation(s,did,false);
-    userStats.signals=(userStats.signals||0)+1;userStats.pts+=5;flyPts(5);
+    /* Le serveur paie BAREME_REPORT.rupture = 3, et seulement sur place. Ce
+       +5 etait ecrase a l'ouverture suivante du profil (adopterScoreServeur) :
+       des points annonces, puis disparus. */
+    userStats.signals=(userStats.signals||0)+1;
+    userStats.pts+=_surPlaceSignalement(s)?3:0;
+    if(_surPlaceSignalement(s))flyPts(3);
     if(window.fbConfirmStock)window.fbConfirmStock(s.fbId||sid,did,-1);
     if(window.fbTouchCache)window.fbTouchCache();
     if(typeof resetWatchTrigger==="function")resetWatchTrigger(did,s.fbId||sid);
     trackStoreContribution(s.fbId||sid);
     updateProfileStats();
     if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
-    playSound("err");toast("Rupture signalée · +5 pts");
+    playSound("err");
+    toast(_surPlaceSignalement(s)?"Rupture signalée · +3 pts":"Rupture signalée · merci");
   }
   // Retour visuel : les deux boutons laissent place à une confirmation calme.
   var row=document.getElementById("route-stock-row");

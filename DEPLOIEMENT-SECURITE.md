@@ -121,8 +121,8 @@ champs que le client ne peut pas écrire, `pointsDons` devient lisible par
 l'admin seul, et la **vitrine d'un commerce** (`stores/{id}/photos/{p1..p12}`)
 s'ouvre au gérant qui a le pass complet — lecture publique, douze photos au
 plus, le plafond étant porté par le nom du document. Lance le banc d'essai du
-§1 avant de déployer : il compte **277 épreuves**, dont huit pour cette
-vitrine.
+§1 avant de déployer : il compte **280 épreuves**, dont huit pour cette
+vitrine et trois pour le signalement d'un message privé.
 
 ## 1. Les règles Firestore — dans la commande de la section 0 bis
 
@@ -134,7 +134,7 @@ Avant tout changement de règles, le banc d'essai doit passer :
 ```
 cd functions-a-deployer/tests-regles
 npm install          # une seule fois
-npm test             # doit se terminer par : 277/277 conformes
+npm test             # doit se terminer par : 280/280 conformes
 ```
 
 Il attaque une base jetable sur ta machine. Rien ne part en ligne. S'il

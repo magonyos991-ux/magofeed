@@ -445,6 +445,21 @@ await doit('legitime : signaler une decouverte avec un motif de la liste',
 await doit('bloque : signaler au nom de quelqu un d autre',
   ()=>assertFails(addDoc(collection(m,'abus'),
       {par:ALICE,cibleType:'decouverte',cibleId:'d1',motif:'spam',at:new Date(),etat:'nouveau'})));
+/* SIGNALER UN MESSAGE PRIVE. L'application heberge une messagerie entre
+   inconnus, avec envoi de photos : le signalement y est obligatoire, et il
+   doit FONCTIONNER. 'conversation' manquait a la liste fermee : le bouton
+   s'affichait, l'ecriture partait, la regle la refusait — et l'app traduisait
+   ce refus par « Connecte-toi pour signaler », a quelqu'un de connecte. */
+await doit('legitime : signaler un message prive',
+  ()=>assertSucceeds(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'conversation',cibleId:'c1',motif:'harcelement',at:new Date(),etat:'nouveau'})));
+await doit('legitime : signaler la photo d une vitrine',
+  ()=>assertSucceeds(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'vitrine',cibleId:'s1_p1',motif:'sexuel',at:new Date(),etat:'nouveau'})));
+await doit('bloque : un type de cible invente',
+  ()=>assertFails(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'nimportequoi',cibleId:'x',motif:'spam',at:new Date(),etat:'nouveau'})));
+
 await doit('bloque : un motif invente (texte libre deguise)',
   ()=>assertFails(addDoc(collection(m,'abus'),
       {par:MALLORY,cibleType:'profil',cibleId:'u1',motif:'tu es un imbecile',at:new Date(),etat:'nouveau'})));
