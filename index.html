@@ -4355,7 +4355,7 @@ function renderLangSheet(){
 function openLangSheet(){var sh=document.getElementById("lang-sheet");if(!sh)return;renderLangSheet();sh.style.display="block";playSound("pop");}
 function closeLangSheet(){var sh=document.getElementById("lang-sheet");if(sh)sh.style.display="none";}
 function shareApp(){
-  shareContent("Magofeed","Trouve des boissons rares et exotiques (sans alcool) près de chez toi :",location.origin+location.pathname);
+  shareContent("Magofeed","Trouve des boissons rares et exotiques (sans alcool) près de chez toi :",shareBaseURL());
 }
 
 /* ================================
@@ -8419,8 +8419,7 @@ function a11yCard(el,label){
    sont relus au demarrage pour ouvrir directement la bonne fiche.
 ================================ */
 function buildShareURL(kind,id){
-  var base=location.origin+location.pathname;
-  return base+"#"+kind+"="+encodeURIComponent(id);
+  return shareBaseURL()+"#"+kind+"="+encodeURIComponent(id);
 }
 function shareContent(title,text,url){
   if(navigator.share){
@@ -17503,6 +17502,11 @@ function ficheURL(params){
   return b+(sansChemin?"/?":"?")+params;
 }
 function shareBaseURL(){
+  /* App native (Capacitor) : location.origin vaut capacitor://localhost —
+     un lien partagé là-dessus ne s'ouvre chez personne. Tout lien public
+     émis depuis l'app pointe donc vers le site. Sur le web : inchangé. */
+  if(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform())
+    return "https://magonyos991-ux.github.io/magofeed/";
   var p=location.pathname.replace(/[^/]*\.html?$/i,"");
   if(!/\/$/.test(p))p+="/";
   return location.origin+p;
@@ -17519,7 +17523,7 @@ function drinkShareURL(d){
   // le lien profond, exactement comme avant.
   var f=ficheURL("d="+encodeURIComponent(d.id));
   if(f)return f;
-  return location.origin+location.pathname+"#drink="+d.id;
+  return shareBaseURL()+"#drink="+d.id;
 }
 /* Meme logique pour un magasin. Un commerçant qui partage sa propre fiche est
    le meilleur ambassadeur possible : autant que le lien montre son enseigne et
@@ -17528,7 +17532,7 @@ function storeShareURL(s){
   var id=(s&&(s.fbId||s.id));
   var f=ficheURL("s="+encodeURIComponent(id));
   if(f)return f;
-  return location.origin+location.pathname+"#store="+encodeURIComponent(id);
+  return shareBaseURL()+"#store="+encodeURIComponent(id);
 }
 function shareDrink(d){
   // Robuste aux deux appels du code : shareDrink(curSel) ET shareDrink() (bouton
