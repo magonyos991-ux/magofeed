@@ -5992,12 +5992,40 @@ async function ensureAuthed() {
   }
 }
 
+/* LA CLE D'UNE DECOUVERTE, C'EST L'ARTICLE, PAS SON ORTHOGRAPHE.
+   ----------------------------------------------------------------------------
+   Le document etait nomme d'apres le code tel qu'il avait ete lu. Or un meme
+   article se lit sous plusieurs longueurs — EAN-8, UPC-A a 12 chiffres, EAN-13
+   a 13 — et les formes courtes ne sont que la longue privee de ses zeros de
+   tete. Selon le decodeur, le telephone rend tantot l'une, tantot l'autre.
+   Resultat : 0078000033489 et 078000033489, la meme canette, donnaient deux
+   documents, deux compteurs de votes, deux fiches candidates au catalogue.
+   Le reste de l'app compare pourtant en forme utile depuis longtemps (codeNu).
+
+   ON NE RENOMME RIEN. Les documents deja en base portent leur ancienne cle, et
+   les renommer demanderait de les recopier un par un. On regarde donc les deux
+   noms possibles : si l'un des deux existe, c'est LUI la fiche de la personne,
+   et on continue d'ecrire dedans. On ne cree sous la forme utile que ce qui
+   n'existait pas encore. Rien n'est perdu, rien ne se dedouble. */
+function _codeUtile(c) { return String(c == null ? "" : c).replace(/\D/g, "").replace(/^0+/, ""); }
+async function _refDecouverte(barcode) {
+  var brut = String(barcode), utile = _codeUtile(barcode) || brut;
+  var refUtile = doc(db, "discoveries", utile);
+  if (utile === brut) return { ref: refUtile, snap: await getDoc(refUtile), cle: utile };
+  var snapUtile = await getDoc(refUtile);
+  if (snapUtile.exists()) return { ref: refUtile, snap: snapUtile, cle: utile };
+  var refBrut = doc(db, "discoveries", brut);
+  var snapBrut = await getDoc(refBrut);
+  if (snapBrut.exists()) return { ref: refBrut, snap: snapBrut, cle: brut };  // la fiche existante gagne
+  return { ref: refUtile, snap: snapUtile, cle: utile };
+}
 window.fbAddDiscovery = async function(barcode, name, brand, cat, extra) {
   var user = await ensureAuthed();
   try {
-    var ref = doc(db, "discoveries", String(barcode));
-    var votedRef = doc(db, "discoveries", String(barcode), "votedBy", user.uid);
-    var snap = await getDoc(ref);
+    var trouvee = await _refDecouverte(barcode);
+    var ref = trouvee.ref;
+    var votedRef = doc(db, "discoveries", trouvee.cle, "votedBy", user.uid);
+    var snap = trouvee.snap;
     var batch = writeBatch(db);
     if (snap.exists()) {
       var existing = snap.data();
@@ -6030,9 +6058,14 @@ window.fbVoteDiscovery = async function(discoveryId) {
   var user = auth.currentUser;
   if (!user) { console.warn("Firestore vote error: connexion requise"); return; }
   try {
+    /* Meme regle que pour la creation : un vote doit tomber sur la fiche qui
+       existe, pas sur un document neuf nomme d'apres une autre ecriture du
+       meme code — sinon le compteur se partage en deux et aucune des deux
+       moities n'atteint jamais le seuil de promotion. */
+    var trouvee = await _refDecouverte(discoveryId);
     var batch = writeBatch(db);
-    batch.update(doc(db, "discoveries", String(discoveryId)), { votes: increment(1) });
-    batch.set(doc(db, "discoveries", String(discoveryId), "votedBy", user.uid), { votedAt: serverTimestamp() });
+    batch.update(trouvee.ref, { votes: increment(1) });
+    batch.set(doc(db, "discoveries", trouvee.cle, "votedBy", user.uid), { votedAt: serverTimestamp() });
     await batch.commit();
   } catch (e) { console.warn("Firestore vote error:", e); }
 };
@@ -8384,8 +8417,15 @@ function nameLooksAlcoholic(name,brand){
   return window._alcoolRe.marques.test(t);
 }
 function offBestProduct(p){
-  /* nomPropre et pas sanitize : echapper ici, c'etait stocker « &amp; » en
-     base (voir le commentaire de desechapper). */
+  /* nomPropre et pas sanitize : echapper ICI, c'est stocker « &amp; » en base.
+     ------------------------------------------------------------------------
+     Ce n'etait pas qu'une faute a l'ecran, et le prix est mesure : Open Food
+     Facts rend « Dr Pepper & Cream Soda », la base de Magofeed contenait
+     « Dr Pepper &amp; Cream Soda ». Le dedoublonnage du catalogue comparait
+     les noms, et le mot parasite « amp » a suffi a faire croire a deux
+     boissons differentes — c'est comme ca qu'une fiche creee a la main par
+     quelqu'un le 8 juillet 2026 est devenue un doublon introuvable au scan.
+     nomPropre desechappe en plus ce qui a deja ete grave de travers. */
   var brand=nomPropre(((p.brands||"").split(",")[0]||"").trim());
   var candidates=[p.product_name_fr,p.product_name,p.generic_name_fr,p.generic_name];
   var name="",generic="";
@@ -8428,11 +8468,15 @@ function fetchOFFProduct(code){
     .catch(function(){return fetchWithTimeout(url,9000).then(function(r){return r.json();});});
 }
 function findCachedScan(code){
-  return scanHist.find(function(e){return String(e.code)===String(code);});
+  return scanHist.find(function(e){return codeNu(e.code)===codeNu(code);});
 }
 function recordScan(code,name,brand,cat,src,drinkId){
-  var ancien=scanHist.find(function(e){return String(e.code)===String(code);})||{};
-  scanHist=scanHist.filter(function(e){return String(e.code)!==String(code);});
+  /* Meme regle que partout : c'est la forme utile du code qui dit si c'est le
+     meme article. Sans ca, rescanner la meme canette sous une autre ecriture
+     creait une deuxieme ligne dans « Mes trouvailles », et le magasin comme le
+     prix notes la premiere fois etaient perdus. */
+  var ancien=scanHist.find(function(e){return codeNu(e.code)===codeNu(code);})||{};
+  scanHist=scanHist.filter(function(e){return codeNu(e.code)!==codeNu(code);});
   var entree={code:String(code),name:name,brand:brand||"",cat:cat||"",ts:Date.now(),src:src||""};
   if(drinkId!=null)entree.drinkId=Number(drinkId)||drinkId;
   else if(ancien.drinkId!=null)entree.drinkId=ancien.drinkId;
@@ -8449,7 +8493,7 @@ function recordScan(code,name,brand,cat,src,drinkId){
 /* Complete une entree du journal (magasin, prix...) sans la recreer. */
 function patchScanEntry(code,patch){
   if(code==null)return null;
-  var e=(scanHist||[]).find(function(x){return String(x.code)===String(code);});
+  var e=(scanHist||[]).find(function(x){return codeNu(x.code)===codeNu(code);});
   if(!e)return null;
   Object.assign(e,patch||{});
   try{localStorage.setItem("magoScanHist",JSON.stringify(scanHist));}catch(err){}
@@ -8468,7 +8512,8 @@ function _findsCodeFor(ctx){
   if(ctx.drinkId!=null){
     var d=DRINKS.find(function(x){return Number(x.id)===Number(ctx.drinkId);});
     var codes=(d&&d.barcodes)||[];
-    var e=(scanHist||[]).find(function(x){return codes.indexOf(String(x.code))!==-1;});
+    var _cs=codes.map(codeNu);
+    var e=(scanHist||[]).find(function(x){return _cs.indexOf(codeNu(x.code))!==-1;});
     return e?String(e.code):null;
   }
   return null;
@@ -10150,7 +10195,7 @@ function disavowBarcode(code,drinkId){
   }catch(e){}
   // L'historique local repetait le mauvais nom a chaque consultation.
   try{
-    scanHist=(scanHist||[]).filter(function(e){return String(e.code)!==String(code);});
+    scanHist=(scanHist||[]).filter(function(e){return codeNu(e.code)!==codeNu(code);});
     localStorage.setItem("magoScanHist",JSON.stringify(scanHist));
   }catch(e){}
 }
@@ -10350,7 +10395,9 @@ function onBarcodeDetected(r){
      « m<horodatage> » ne sera jamais compare a un code. */
   var foundDiscovery=DISCOVERIES.find(function(d){
     if(d.rejected||d.promoted)return false;
-    return String(d.barcode)===String(code)||String(d.id)===String(code);
+    /* En forme utile des deux cotes : 0078000033489 et 078000033489 sont la
+       meme canette, et c'est ainsi que le reste de l'app les compare. */
+    return codeNu(d.barcode)===codeNu(code)||codeNu(d.id)===codeNu(code);
   });
   res.style.display="block";
   // Nettoie les liens injectes par un scan precedent (« deja au catalogue ? »,
@@ -10424,7 +10471,7 @@ function onBarcodeDetected(r){
     btn.onclick=function(){addDiscovery(cached.name,cached.brand,code,cached.cat);};
     recordScan(code,cached.name,cached.brand,cached.cat,cached.src);
     var cachedDrink=drinkForBarcode(code);
-    var cachedDisc=DISCOVERIES.find(function(x){return String(x.barcode||x.id)===String(code)&&!x.rejected&&!x.promoted;});
+    var cachedDisc=DISCOVERIES.find(function(x){return codeNu(x.barcode||x.id)===codeNu(code)&&!x.rejected&&!x.promoted;});
     renderWhereFound(cachedDrink?{drinkId:cachedDrink.id,code:code}:(cachedDisc?{discoveryId:cachedDisc.id,code:code}:{pendingBarcode:code}));    playSound("win");toast("Déjà scanné : "+cached.name);
   } else {
     res.className="scan-result";
@@ -10473,7 +10520,7 @@ function onBarcodeDetected(r){
             var fmt=parseFormatFromOFF(p);
             var fmtLabel=(fmt.type||"format")+(fmt.cl?" "+fmt.cl+" cl":"");
             res.className="scan-result found";
-            res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="width:40px;height:40px;flex-shrink:0;font-size:28px;border-radius:10px;overflow:hidden">'+drinkIconHTML(family)+'</div><div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:700;color:#166534">'+family.name+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">Nouveau format d\u00E9tect\u00E9 : '+sanitize(fmtLabel)+'</div></div></div>';
+            res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="width:40px;height:40px;flex-shrink:0;font-size:28px;border-radius:10px;overflow:hidden">'+drinkIconHTML(family)+'</div><div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:700;color:#166534">'+sanitize(family.name)+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">Nouveau format d\u00E9tect\u00E9 : '+sanitize(fmtLabel)+'</div></div></div>';
             btn.textContent=tr("\u2713 Oui, c'est bien \u00E7a !");btn.style.background=family.color;btn.style.display="block";
             btn.onclick=function(){
               confirmFamilyFormat(family,code,fmt);
@@ -10502,7 +10549,7 @@ function onBarcodeDetected(r){
             return;
           }
           res.className="scan-result found";
-          res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="font-size:28px">'+scanCatEmoji(best.cat)+'</div><div><div style="font-size:15px;font-weight:700;color:#166534">'+best.name+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">'+(best.cat?best.cat+" · ":"")+(best.brand?"Marque : "+best.brand+" · ":"")+'Pas encore dans Magofeed</div></div></div>';
+          res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="font-size:28px">'+scanCatEmoji(best.cat)+'</div><div><div style="font-size:15px;font-weight:700;color:#166534">'+sanitize(best.name)+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">'+(best.cat?sanitize(best.cat)+" · ":"")+(best.brand?"Marque : "+sanitize(best.brand)+" · ":"")+'Pas encore dans Magofeed</div></div></div>';
           // Produit alimentaire (non-boisson) : on rappelle gentiment la vocation
           // de l'app, sans bloquer — l'ajout reste au choix de la personne.
           if(best.cat==="Snacks"){
@@ -11457,11 +11504,49 @@ function mergeCatalog(rows){
   if(!rows||!rows.length)return 0;
   var added=0;
   function nameKey(s){return normTxt(s).replace(/\s+/g," ").trim();}
+  /* UN CODE-BARRES DESIGNE UN ARTICLE. DEUX FICHES NE PEUVENT PAS LE PORTER.
+     ------------------------------------------------------------------------
+     Le dedoublonnage ne regardait que l'identifiant et le NOM. Or un nom se
+     tape a la main, et il suffit d'un mot de difference pour qu'il ne
+     ressemble plus a l'autre. C'est arrive, et c'est mesurable :
+
+       drinks.js  id 11381  « Dr Pepper Cream Soda »      code 078000033489
+       catalog    id 1783..  « Dr Pepper & Cream Soda »   code 0078000033489
+
+     Le meme article, a un zero de tete pres. Quelqu'un avait cree la deuxieme
+     a la main le 8 juillet 2026 apres un scan que l'app ne comprenait pas.
+     L'import du 5 septembre a ajoute la premiere. Les deux coexistent, et
+     drinkForBarcode rend celle qui vient en premier dans DRINKS : la fiche de
+     cette personne, avec sa photo et ses magasins, est devenue introuvable au
+     scan, a vie. C'est exactement ce que le fondateur redoutait.
+     Le nom differait parce qu'il etait passe deux fois par sanitize() : le
+     « & » y est devenu « &amp; », et le mot parasite « amp » a suffi.
+     On compare donc AUSSI les codes, en forme utile (codeNu : chiffres seuls,
+     zeros de tete retires), qui est deja la forme que le reste de l'app
+     emploie pour reconnaitre une canette. */
+  var _codesConnus={};
+  DRINKS.forEach(function(d){
+    (d.barcodes||[]).forEach(function(c){ var k=codeNu(c); if(k)_codesConnus[k]=d; });
+  });
   rows.forEach(function(r){
     if(!r||!r.name)return;
     var rid=Number(r.id)||r.id;
     if(window.DRINK_MERGES&&window.DRINK_MERGES[Number(rid)])return; // fiche fusionnee : absorbee par sa cible
     var nn=nameKey(r.name);
+    /* Le code d'abord : c'est la seule chose qui ne se tape pas de travers. */
+    var jumelle=null;
+    (r.barcodes||[]).forEach(function(c){ var k=codeNu(c); if(k&&_codesConnus[k]&&!jumelle)jumelle=_codesConnus[k]; });
+    if(jumelle){
+      /* On n'ajoute pas une deuxieme fiche : on complete celle qui existe avec
+         les ecritures du code qu'elle ne connaissait pas encore. Rien n'est
+         perdu, et un scan sous n'importe laquelle des deux ecritures la
+         retrouvera. */
+      if(!jumelle.barcodes)jumelle.barcodes=[];
+      (r.barcodes||[]).forEach(function(c){
+        if(c&&indexCode(jumelle.barcodes,c)===-1)jumelle.barcodes.push(String(c));
+      });
+      return;
+    }
     var exists=DRINKS.some(function(d){return d.id===rid||nameKey(d.name)===nn;});
     if(exists)return;
     // Classement automatique et uniforme. Si le classifieur hesite ("Autre"),
@@ -11469,7 +11554,7 @@ function mergeCatalog(rows){
     var cat=classifyDrink(r.name,r.brand);
     if(cat==="Autre"&&VALID_CATS.indexOf(r.cat)!==-1&&r.cat!=="Autre")cat=r.cat;
     var def=CAT_DEFAULTS[cat]||CAT_DEFAULTS["Autre"];
-    DRINKS.push({
+    var _nouvelle={
       id:rid,
       /* nomPropre et pas sanitize : garder « & » nu en memoire, sinon chaque
          rendu (qui echappe deja) affichait « &amp; » meme sur une base saine. */
@@ -11483,7 +11568,11 @@ function mergeCatalog(rows){
       stars:(typeof r.stars==="number"&&r.stars>=1&&r.stars<=5)?r.stars:4.0,
       barcodes:Array.isArray(r.barcodes)?r.barcodes.map(String).slice(0,5):[],
       community:true
-    });
+    };
+    DRINKS.push(_nouvelle);
+    /* La fiche qui vient d'entrer prend ses codes dans l'index : sans ca, deux
+       lignes du MEME lot portant le meme code creeraient deux fiches. */
+    (_nouvelle.barcodes||[]).forEach(function(c){ var k=codeNu(c); if(k)_codesConnus[k]=_nouvelle; });
     added++;
   });
   if(added){
@@ -18571,7 +18660,12 @@ function addDiscovery(name,brand,barcode,cat){
     playSound("err");
     return;
   }
-  var already=DISCOVERIES.find(function(d){return String(d.barcode)===String(barcode);});
+  /* ON RETROUVE SA PROPRE FICHE, MEME SI LE CODE EST ECRIT AUTREMENT.
+     La comparaison se faisait sur le texte brut : 0078000033489 et
+     078000033489 — la meme canette, a un zero de tete pres — donnaient deux
+     fiches, deux compteurs de votes, deux candidates a la promotion. Le reste
+     de l'app compare pourtant depuis longtemps en forme utile (codeNu). */
+  var already=DISCOVERIES.find(function(d){return codeNu(d.barcode||d.id)===codeNu(barcode);});
   var contribute=false; // n'ecrire dans Firestore (vote +1 / creation) que si c'est reellement du
   if(already){
     // Corrige un nom générique "Produit <code>" laissé par un premier scan sans nom saisi
@@ -24727,7 +24821,7 @@ function proposerChasse(code,best,res){
          deuxieme confirmation. */
       try{linkBarcodeLocally(code,cible.id);}catch(e){}
       if(!cible.barcodes)cible.barcodes=[];
-      if(cible.barcodes.indexOf(String(code))===-1)cible.barcodes.push(String(code));
+      if(indexCode(cible.barcodes,code)===-1)cible.barcodes.push(String(code));
       bloc.innerHTML='<div style="font-size:12.5px;font-weight:800;color:#166534">Merci \u2014 c\u2019est not\u00E9</div>'+
         '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:3px;line-height:1.45">'+
         (r&&r.nb>=2
@@ -24798,7 +24892,7 @@ function renderFichesSansCode(){
       /* Deja pris par une autre boisson ? Deux fiches portant le meme code, et
          le scan devient un tirage au sort. */
       var prise=(window.DRINKS||[]).find(function(x){
-        return x!==d&&x.barcodes&&x.barcodes.indexOf(c)!==-1;
+        return x!==d&&x.barcodes&&indexCode(x.barcodes,c)!==-1;
       });
       if(prise){toast("Ce code est d\u00E9j\u00E0 sur \u00AB "+prise.name+" \u00BB");playSound("err");return;}
       if(!d.barcodes)d.barcodes=[];
@@ -26556,7 +26650,7 @@ function renderFavs(){
   el.innerHTML="";
   fd.forEach(function(d){
     var div=document.createElement("div");div.className="ritem";
-    div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div><div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.cat+starSuffix(d)+'</div></div><span style="cursor:pointer;display:flex" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Retirer des favoris">'+heartSVG(true,20)+'</span>';
+    div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div><div style="flex:1"><div class="rname">'+sanitize(d.name)+'</div><div class="rsub">'+sanitize(d.cat)+starSuffix(d)+'</div></div><span style="cursor:pointer;display:flex" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Retirer des favoris">'+heartSVG(true,20)+'</span>';
     div.onclick=function(){pick(d);};a11yCard(div,d.name+", favori");el.appendChild(div);
     bindPhotoTap(div,d);
   });
