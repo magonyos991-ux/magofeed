@@ -30,7 +30,7 @@ import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 import http from 'http'; import fs from 'fs'; import path from 'path';
 import { execFileSync } from 'child_process';
 
-const CACHE = '/tmp/claude-0/-home-user-magofeed/a4554d7d-14ce-523f-8a9e-0a25d074053d/scratchpad';
+const CACHE = '/tmp/claude-0/-home-user-magofeed/f9c76e7c-8295-5e06-b430-aedcecd31d19/scratchpad';
 const ROOT  = '/home/user/magofeed';
 const SORTIE = ROOT + '/promo/stores/';
 
@@ -114,6 +114,10 @@ for (const fmt of FORMATS) {
   /* On saute l'accueil du premier lancement et les bulles d'aide : elles
      recouvrent l'ecran et n'ont rien a faire sur une capture de magasin. */
   await page.addInitScript(() => {
+    /* Les captures montrent l'app INSTALLEE : plein ecran, sans la coque de
+       presentation du site (regle des stores : uniquement l'application). */
+    var poser = function(){ try{ document.documentElement.classList.add('natif'); }catch(e){} };
+    poser(); document.addEventListener('DOMContentLoaded', poser);
     localStorage.setItem('magoob', '1');
     localStorage.setItem('magopseudo', 'Explorateur');
     localStorage.setItem('magotuto', '1');
