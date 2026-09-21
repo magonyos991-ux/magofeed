@@ -43,12 +43,15 @@ const code = `
   ` + drinksSrc + `
   ` + corpsDe("normTxt") + `
   ` + corpsDe("codeNu") + `
+  ` + corpsDe("desechapper") + `
+  ` + corpsDe("nomPropre") + `
   ` + corpsDe("indexCode") + `
   ` + corpsDe("porteCode") + `
   var VALID_CATS = ["Soda","Energy","Ice Tea","Jus","Eau","Sport","Exotique","Lacté","Café","Snacks","Autre"];
   var CAT_DEFAULTS = { "Autre": { emoji:"", color:"#c69a57", light:"#faf3e8" } };
   function classifyDrink(){ return "Autre"; }
   function sanitize(s){ return String(s == null ? "" : s); }
+  var _elemFactice = { innerHTML: "", textContent: "" };
   function renderBrandsRail(){} function renderTrends(){} function renderList(){}
   var document = { getElementById: function(){ return null; } };
   ` + corpsDe("mergeCatalog") + `

@@ -64,6 +64,16 @@ await doit('bloque : s ecrire 999999 points',
   ()=>assertFails(setDoc(doc(a,'users',ALICE),{points:999999},{merge:true})));
 await doit('bloque : se donner des points de parrainage',
   ()=>assertFails(setDoc(doc(a,'users',ALICE),{refPoints:5000,refCount:99},{merge:true})));
+/* POINTS OFFERTS PAR L'ADMINISTRATION. Ils entrent dans le score officiel
+   (recalculerScore), donc ils doivent etre aussi inecrivables que les autres :
+   sans cette ligne, il suffirait d'ouvrir la console de son navigateur pour
+   s'offrir mille points, et tout le reste de la protection ne servirait plus a
+   rien. Le don passe par la Cloud Function offrirPoints (Admin SDK), qui laisse
+   une trace nominative dans pointsDons. */
+await doit('bloque : s offrir des points a soi-meme',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),{pointsOfferts:1000},{merge:true})));
+await doit('bloque : CREER son profil avec des points offerts',
+  ()=>assertFails(setDoc(doc(m,'users',MALLORY),{pseudo:'M',pointsOfferts:1000})));
 /* LA FAILLE QUE CES TROIS TESTS FERMENT. La protection ci-dessus ne portait
    que sur la MODIFICATION. La CREATION, elle, n'interdisait que les compteurs
    d'e-mails et la sanction : « points » n'y figurait pas. Or chacun a le droit
@@ -435,6 +445,21 @@ await doit('legitime : signaler une decouverte avec un motif de la liste',
 await doit('bloque : signaler au nom de quelqu un d autre',
   ()=>assertFails(addDoc(collection(m,'abus'),
       {par:ALICE,cibleType:'decouverte',cibleId:'d1',motif:'spam',at:new Date(),etat:'nouveau'})));
+/* SIGNALER UN MESSAGE PRIVE. L'application heberge une messagerie entre
+   inconnus, avec envoi de photos : le signalement y est obligatoire, et il
+   doit FONCTIONNER. 'conversation' manquait a la liste fermee : le bouton
+   s'affichait, l'ecriture partait, la regle la refusait — et l'app traduisait
+   ce refus par « Connecte-toi pour signaler », a quelqu'un de connecte. */
+await doit('legitime : signaler un message prive',
+  ()=>assertSucceeds(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'conversation',cibleId:'c1',motif:'harcelement',at:new Date(),etat:'nouveau'})));
+await doit('legitime : signaler la photo d une vitrine',
+  ()=>assertSucceeds(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'vitrine',cibleId:'s1_p1',motif:'sexuel',at:new Date(),etat:'nouveau'})));
+await doit('bloque : un type de cible invente',
+  ()=>assertFails(addDoc(collection(m,'abus'),
+      {par:MALLORY,cibleType:'nimportequoi',cibleId:'x',motif:'spam',at:new Date(),etat:'nouveau'})));
+
 await doit('bloque : un motif invente (texte libre deguise)',
   ()=>assertFails(addDoc(collection(m,'abus'),
       {par:MALLORY,cibleType:'profil',cibleId:'u1',motif:'tu es un imbecile',at:new Date(),etat:'nouveau'})));
@@ -892,6 +917,56 @@ await doit('bloque : ecrire une fausse alerte',
   ()=>assertFails(setDoc(doc(m,'alertesAdmin','faux'),{titre:'Don de 500 euros',corps:'x'})));
 await doit('bloque : l admin lui-meme ne peut pas ecrire dans le journal',
   ()=>assertFails(setDoc(doc(ad,'alertesAdmin','a2'),{titre:'x',corps:'y'})));
+
+/* JOURNAL DES POINTS OFFERTS. Meme regime que les sanctions : l'administrateur
+   le lit — un don doit toujours pouvoir repondre a « pourquoi cette personne
+   a-t-elle ces points ? » — et personne ne l'ecrit depuis un navigateur, pas
+   meme lui. Un journal qu'on peut reecrire ne prouve rien. */
+await env.withSecurityRulesDisabled(async (c)=>{
+  await setDoc(doc(c.firestore(),'pointsDons','d1'),
+    {par:'admin',pour:ALICE,pseudo:'Alice',montant:6,motif:'signalement perdu',at:new Date()});
+});
+/* LA VITRINE D'UN COMMERCE. Le gerant montre son rayon en photo ; personne
+   d'autre ne doit pouvoir accrocher une image sur la fiche d'un magasin. Le
+   plafond de douze vit dans le NOM du document (p1..p12) : le langage des
+   regles ne sait pas compter les documents d'une collection, mais il sait
+   lire un identifiant — treize photos sont donc impossibles, pas seulement
+   decouragees. */
+const IMG = 'data:image/jpeg;base64,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+/* A ce stade du banc, Alice tient bien s1 avec le pass complet (ligne 527) :
+   c'est donc elle, la gerante, et sa photo doit passer. Le visiteur, ici,
+   c'est Mallory. */
+await doit('legitime : la gerante accroche une photo sur SON magasin',
+  ()=>assertSucceeds(setDoc(doc(a,'stores','s1','photos','p1'),{data:IMG,par:ALICE})));
+await doit('legitime : elle corrige le prix sans supprimer la photo',
+  ()=>assertSucceeds(setDoc(doc(a,'stores','s1','photos','p1'),{data:IMG,par:ALICE,prix:'2,49 EUR'})));
+await doit('bloque : un visiteur accroche une photo sur le magasin d un autre',
+  ()=>assertFails(setDoc(doc(m,'stores','s1','photos','p2'),{data:IMG,par:MALLORY})));
+await doit('bloque : la gerante d un magasin en decore un autre',
+  ()=>assertFails(setDoc(doc(a,'stores','s2','photos','p1'),{data:IMG,par:ALICE})));
+await doit('bloque : un anonyme accroche une photo',
+  ()=>assertFails(setDoc(doc(anon,'stores','s1','photos','p1'),{data:IMG,par:'anon'})));
+await doit('bloque : une photo signee du nom de quelqu un d autre',
+  ()=>assertFails(setDoc(doc(a,'stores','s1','photos','p3'),{data:IMG,par:MALLORY})));
+await doit('bloque : une treizieme photo (le plafond vit dans le nom)',
+  ()=>assertFails(setDoc(doc(a,'stores','s1','photos','p13'),{data:IMG,par:ALICE})));
+await doit('bloque : un nom de document invente',
+  ()=>assertFails(setDoc(doc(a,'stores','s1','photos','banniere'),{data:IMG,par:ALICE})));
+await doit('bloque : autre chose qu une image en base64',
+  ()=>assertFails(setDoc(doc(a,'stores','s1','photos','p1'),{data:'https://exemple.test/x.jpg',par:ALICE})));
+await doit('bloque : un champ non prevu se glisse dans la photo',
+  ()=>assertFails(setDoc(doc(a,'stores','s1','photos','p1'),{data:IMG,par:ALICE,certified:true})));
+await doit('legitime : tout le monde peut REGARDER la vitrine',
+  ()=>assertSucceeds(getDoc(doc(a,'stores','s1','photos','p1'))));
+
+await doit('legitime : l admin lit le journal des points offerts',
+  ()=>assertSucceeds(getDoc(doc(ad,'pointsDons','d1'))));
+await doit('bloque : lire le journal des points offerts sans etre admin',
+  ()=>assertFails(getDoc(doc(m,'pointsDons','d1'))));
+await doit('bloque : fabriquer un don de points',
+  ()=>assertFails(setDoc(doc(a,'pointsDons','d2'),{pour:ALICE,montant:9999})));
+await doit('bloque : l admin lui-meme ne peut pas ecrire un don',
+  ()=>assertFails(setDoc(doc(ad,'pointsDons','d3'),{pour:ALICE,montant:9999})));
 await doit('bloque : effacer une alerte pour cacher un echec',
   ()=>assertFails(deleteDoc(doc(ad,'alertesAdmin','a1'))));
 

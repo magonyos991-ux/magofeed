@@ -25,6 +25,57 @@ tournent tous depuis le même dossier.
 Le score doit avoir monté et rester. Puis Administration → Sécurité : aucune
 pastille rouge.
 
+## 0. Déployer le serveur depuis GitHub — un bouton, plus de PowerShell
+
+C'est désormais le chemin normal. La commande PowerShell du 0 bis reste plus
+bas, pour le jour où GitHub serait indisponible ou où tu voudrais déployer
+depuis ta machine.
+
+### Une seule fois : ouvrir la porte
+
+1. Va sur **console.firebase.google.com** → ton projet **magofeed-7f621**
+   → la roue dentée en haut à gauche → **Paramètres du projet**
+   → onglet **Comptes de service** → bouton **Générer une nouvelle clé privée**.
+   Un fichier `.json` se télécharge. **Ne le mets jamais dans le dépôt.**
+2. Va sur **github.com/magonyos991-ux/magofeed** → **Settings** → dans la
+   colonne de gauche, **Secrets and variables** → **Actions** → bouton vert
+   **New repository secret**.
+3. Nom : `FIREBASE_SERVICE_ACCOUNT` — Valeur : **ouvre le fichier .json avec le
+   Bloc-notes, sélectionne tout (Ctrl+A), copie (Ctrl+C), colle**. Accolades
+   comprises, du premier `{` au dernier `}`. Puis **Add secret**.
+4. Supprime le fichier `.json` de ton dossier Téléchargements. Il ne sert plus :
+   GitHub en a une copie chiffrée que personne ne peut relire, pas même toi.
+
+C'est tout. Tu ne referas jamais ces quatre étapes.
+
+### À chaque fois : appuyer
+
+**github.com/magonyos991-ux/magofeed** → onglet **Actions** → dans la colonne
+de gauche, **Déployer le serveur (fonctions + règles)** → bouton
+**Run workflow** → laisse « tout » → **Run workflow**.
+
+Ça prend cinq à dix minutes. Un rond vert : c'est en ligne. Un rond rouge :
+clique dessus, la raison est écrite en français dans l'étape qui a échoué, et
+**rien n'a été déployé** — le banc d'essai garde la porte.
+
+Le déclenchement est **manuel**, et c'est voulu : déployer le serveur à chaque
+poussée reviendrait à mettre en ligne une fonction à moitié écrite. C'est toi
+qui choisis le moment.
+
+### Ce que le bouton fait, dans l'ordre
+
+1. Lance les **280 épreuves** des règles sur un vrai émulateur Firestore.
+   Une seule qui échoue, et le déploiement n'a pas lieu.
+2. Assemble le dossier que Firebase attend, vérifie que chaque module branché
+   dans `index.js` est bien présent, et contrôle la syntaxe de chaque fichier.
+3. Installe les dépendances déclarées dans `functions-a-deployer/package.json`.
+4. Déploie les **règles**, les **index**, puis les **fonctions**.
+
+Le menu déroulant permet de ne déployer que les règles, ou que les fonctions,
+si tu sais ce que tu fais. Dans le doute : « tout ».
+
+---
+
 ## 0 bis. Les dossiers — FAIT, gardé pour la prochaine machine
 
 Le message « Would you like to proceed with deletion? » n'était pas un bug :
@@ -41,7 +92,7 @@ dossier se remet à diverger. Elle sauvegarde ton `firebase.json` et ton
 `index.js` sous `.avant` avant de les remplacer.
 
 ```powershell
-cd C:\Users\ilias\magofeed-functions; $b="https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"; if (Test-Path firebase.json) { Copy-Item firebase.json firebase.json.avant -Force }; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firebase.json.modele") -OutFile "firebase.json"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.rules") -OutFile "firestore.rules"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.indexes.json") -OutFile "firestore.indexes.json"; cd functions; if (Test-Path index.js) { Copy-Item index.js index.js.avant -Force }; foreach ($f in @("index.js","points-et-parrainage.js","anti-farm.js","notifications-push.js","emails-brevo.js","reconnaissance-ia.js","scan-frigo.js","commerces-monde.js","remplir-enseignes.js","importer-horaires.js","partage.js","sauvegarde.js","don-notification.js","outils-admin.js","notif-admin.js","catalogue-ia.js","dons.js","verification-commercant.js","recap-fondateur.js","migration-geohash.js")) { Invoke-WebRequest -UseBasicParsing -Uri ($b+$f) -OutFile $f; Write-Host "ok $f" }; npm install @duckdb/node-api geofire-common @google-cloud/firestore @anthropic-ai/sdk; cd ..; firebase deploy --only firestore:indexes; firebase deploy --only firestore:rules; firebase deploy --only functions
+cd C:\Users\ilias\magofeed-functions; $b="https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"; if (Test-Path firebase.json) { Copy-Item firebase.json firebase.json.avant -Force }; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firebase.json.modele") -OutFile "firebase.json"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.rules") -OutFile "firestore.rules"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.indexes.json") -OutFile "firestore.indexes.json"; cd functions; if (Test-Path index.js) { Copy-Item index.js index.js.avant -Force }; foreach ($f in @("index.js","points-et-parrainage.js","anti-farm.js","notifications-push.js","emails-brevo.js","reconnaissance-ia.js","scan-frigo.js","commerces-monde.js","remplir-enseignes.js","importer-horaires.js","partage.js","sauvegarde.js","don-notification.js","outils-admin.js","notif-admin.js","catalogue-ia.js","messages-push.js","chasse-codes.js","dons.js","verification-commercant.js","recap-fondateur.js","migration-geohash.js")) { Invoke-WebRequest -UseBasicParsing -Uri ($b+$f) -OutFile $f; Write-Host "ok $f" }; npm install @duckdb/node-api geofire-common @google-cloud/firestore @anthropic-ai/sdk; cd ..; firebase deploy --only firestore:indexes; firebase deploy --only firestore:rules; firebase deploy --only functions
 ```
 
 Le détail de ce que contient ce dossier, fichier par fichier, est dans
@@ -70,6 +121,60 @@ fiches du catalogue partagé en portaient un, et l'app les affichait vraiment.
 La fonction est corrigée ; ce bouton vide ce qu'elle a déjà écrit. Rejouable
 sans risque.
 
+## 0 ter. À déployer maintenant — les points et les demandes d'ami
+
+Trois fonctions changent, et il faut relancer la commande du 0 bis pour
+qu'elles montent. `messages-push.js` manquait dans la liste des fichiers
+téléchargés : il vient d'y être ajouté, donc la messagerie et les demandes
+d'ami partiront ensemble.
+
+- **`crediterContribution`** — un « je l'ai vue » signalé sans position
+  connue, ou à plus de 500 m, rapportait **zéro** pendant que l'app annonçait
+  « +3 pts ». Il rapporte maintenant **1 point** ; le plein tarif reste
+  réservé à ce qui est vérifiable. Une *rupture* garde le zéro.
+- **`rattraperSignalements`** (nouvelle, admin) — rend les points refusés
+  autrefois. Dans l'app : **Administration → « Rendre les points refusés pour
+  "trop loin" »**. Elle compte d'abord, elle ne verse qu'au second appui, et
+  la relancer ne paie jamais deux fois.
+- **`notifierDemandeAmi`** (nouvelle) — prévient le téléphone quand
+  quelqu'un demande à être ami, et prévient le demandeur quand c'est accepté.
+  Un refus ne notifie personne.
+- **`confirmAiDrink`** — la fiche créée par l'IA reçoit enfin le code-barre
+  qui avait échoué au scan. Sans ce changement, une boisson ajoutée par photo
+  reste introuvable au scanner, à vie. Ce code n'est plus adopté en silence :
+  l'app demande confirmation avant de le graver dans le catalogue partagé.
+- **`poserCodeChasse`** (chasse-codes.js) — **elle n'avait jamais été
+  branchée**. L'app écrivait des documents `chasseCodes` que personne ne
+  traitait : ils s'accumulaient en « attente », le code n'entrait jamais au
+  catalogue, et les points promis aux confirmants ne tombaient jamais —
+  pendant que l'écran annonçait le contraire. Le fichier le demandait pourtant
+  noir sur blanc dans sa propre section Déploiement.
+
+- **`offrirPoints`** (nouvelle, admin) — le serveur ne crédite que sur preuve,
+  et c'est ce qui rend le classement honnête. Mais quand la preuve n'a jamais
+  été écrite — par un défaut de l'app, pas par la personne — aucun rattrapage
+  automatique n'est possible : il n'y a rien à relire. Ce don vit donc dans son
+  propre champ (`pointsOfferts`), entre dans le score, et laisse une trace
+  nominative et datée dans `pointsDons`. Dans l'app : **Administration →
+  « Offrir des points »**, on cherche la personne par son pseudo.
+
+- **`notifierChasse`** (notifications-push.js) — une chasse lancée là où
+  personne n'habite à moins de quinze kilomètres ne réveillait **personne**, et
+  son auteur ne l'apprenait jamais. Le rayon du destinataire reste la règle ;
+  mais quand le premier tour n'a trouvé personne, un second s'adresse à ceux
+  qui ont accepté ce secours (réglage coché, ou zone poussée au maximum), les
+  plus proches d'abord, jamais au-delà de 150 km, dix au maximum, et le message
+  dit la distance. Si vraiment personne : le chasseur est prévenu et la chasse
+  est marquée `sansPortee`.
+
+**Les règles Firestore changent cette fois** : `pointsOfferts` rejoint les
+champs que le client ne peut pas écrire, `pointsDons` devient lisible par
+l'admin seul, et la **vitrine d'un commerce** (`stores/{id}/photos/{p1..p12}`)
+s'ouvre au gérant qui a le pass complet — lecture publique, douze photos au
+plus, le plafond étant porté par le nom du document. Lance le banc d'essai du
+§1 avant de déployer : il compte **280 épreuves**, dont huit pour cette
+vitrine et trois pour le signalement d'un message privé.
+
 ## 1. Les règles Firestore — dans la commande de la section 0 bis
 
 Elles s'y déploient avec les index et les fonctions, depuis le dossier unique.
@@ -80,11 +185,14 @@ Avant tout changement de règles, le banc d'essai doit passer :
 ```
 cd functions-a-deployer/tests-regles
 npm install          # une seule fois
-npm test             # doit afficher : 148/148 conformes
+npm test             # doit se terminer par : 280/280 conformes
 ```
 
 Il attaque une base jetable sur ta machine. Rien ne part en ligne. S'il
-n'affiche pas `148/148`, **ne déploie pas** : dis-le-moi.
+affiche le moindre `ECHEC`, **ne déploie pas** : dis-le-moi.
+Le total (260) grandit à chaque épreuve ajoutée — c'est l'absence d'échec qui
+compte, pas le chiffre. La consigne exigeait `148/148` : le banc en affiche 260
+depuis longtemps, donc elle interdisait de déployer alors que tout était vert.
 
 ## 2. Les Cloud Functions de base — DÉJÀ FAIT
 

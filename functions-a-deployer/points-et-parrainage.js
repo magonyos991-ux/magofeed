@@ -124,6 +124,9 @@ const BAREME_REPORT = {
   nouveau: 2,
   prix: 2          // un prix releve en rayon (note = le prix)
 };
+/* Ce que vaut un « je l'ai vue » quand on ne peut pas prouver qu'on y etait :
+   l'information reste vraie et utile, elle n'est simplement pas verifiable. */
+const MONTANT_DE_MEMOIRE = 1;
 const POINTS_DECOUVERTE = 20;   // proposer une decouverte
 const POINTS_PROMOTION = 50;    // elle entre au catalogue
 
@@ -226,7 +229,8 @@ async function recalculerScore(uid) {
       : (Number(d.pointsHerites) || 0);
     const penalite = (sanction === null) ? (Number(d.penalty) || 0) : sanction;
     const total = Math.max(0,
-      herite + (d.pointsPreuves || 0) + (d.refPoints || 0) - penalite);
+      herite + (d.pointsPreuves || 0) + (d.refPoints || 0)
+      + (d.pointsOfferts || 0) - penalite);
     if (!premierPassage && d.points === total && (Number(d.penalty) || 0) === penalite) return;
     const patch = { points: total };
     // On recopie la sanction dans le profil : l'app l'affiche depuis la, et
@@ -273,13 +277,31 @@ exports.crediterContribution = onDocumentCreated(
     if (rep.counted === true) return;              // deja passe
     const montant = BAREME_REPORT[rep.type] || 0;
     if (!montant || !rep.by) { await snap.ref.set({ counted: true, credited: 0 }, { merge: true }); return; }
-    // Un stock ou une rupture declares de loin (ou sans position) ne rapportent rien.
-    if ((rep.type === "stock" || rep.type === "rupture") && !surPlace(rep)) {
-      await snap.ref.set({ counted: true, credited: 0, raison: "trop loin" }, { merge: true });
-      return;
-    }
     if (await dejaCompteAujourdhui(rep, snap.id)) {
       await snap.ref.set({ counted: true, credited: 0, raison: "rejeu" }, { merge: true });
+      return;
+    }
+    /* SIGNALER DE LOIN RAPPORTE MOINS, PAS RIEN.
+       Cette regle versait zero des que la position etait au-dela de 500 m —
+       ou simplement INCONNUE, ce qui est le cas de quiconque a refuse la
+       geolocalisation. L'app, elle, annoncait « +3 pts ». Une personne a donc
+       signale deux boissons, vu deux fois « +3 pts », et garde un profil a
+       zero point sans que rien ne le lui explique. Ce n'est pas defendable :
+       son signalement, lui, sert a tout le monde.
+       Un « je l'ai vue » rapporte donc un point meme sans preuve de presence.
+       Le plein tarif reste reserve a ce qui est verifiable — etre sur place —
+       et le plafond quotidien comme l'anti-farm continuent de s'appliquer.
+       Une RUPTURE garde le zero : retirer une boisson d'un rayon devant lequel
+       on ne se trouve pas, ca n'aide personne, et ca peut nuire. */
+    if ((rep.type === "stock" || rep.type === "rupture") && !surPlace(rep)) {
+      if (rep.type !== "stock") {
+        await snap.ref.set({ counted: true, credited: 0, raison: "trop loin" }, { merge: true });
+        return;
+      }
+      const verseLoin = await crediter(rep.by, MONTANT_DE_MEMOIRE, rep.type);
+      await snap.ref.set({ counted: true, credited: verseLoin, raison: "de memoire" }, { merge: true });
+      await recalculerScore(rep.by);
+      await evaluerParrainage(rep.by);
       return;
     }
     const verse = await crediter(rep.by, montant, rep.type);
@@ -674,6 +696,178 @@ exports.utiliserCodeParrain = onCall({ region: REGION }, async (req) => {
     throw new HttpsError("already-exists", "Tu as deja utilise un code de parrainage.");
   }
   return { ok: true, delaiJours: DELAI_JOURS, seuil: SEUIL_CONTRIBUTIONS };
+});
+
+/* RENDRE LES POINTS REFUSES PAR L'ANCIENNE REGLE.
+   Tant que « stock » ne payait qu'a moins de 500 metres, chaque signalement
+   fait sans position connue repartait avec {credited:0, raison:"trop loin"} —
+   en silence, alors que l'app venait d'annoncer « +3 pts ». Ces rapports sont
+   toujours la, horodates et nominatifs : on peut donc rendre ce qui etait du,
+   au lieu de demander aux gens de recommencer.
+   Elle ne paie que les « stock », relit chaque rapport avant d'ecrire, et
+   remplace le motif par « de memoire » — donc la relancer ne paie jamais deux
+   fois. Reservee a l'admin.
+
+   Deploiement : firebase deploy --only functions:rattraperSignalements */
+exports.rattraperSignalements = onCall({ region: REGION, timeoutSeconds: 300 }, async (req) => {
+  const uid = req.auth && req.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi.");
+  const moi = await db.doc(`admins/${uid}`).get();
+  if (!moi.exists) throw new HttpsError("permission-denied", "Reserve a l'administrateur.");
+
+  const jours = Math.min(365, Math.max(1, Number((req.data && req.data.jours) || 60)));
+  const depuis = Timestamp.fromMillis(Date.now() - jours * 86400000);
+  const appliquer = !!(req.data && req.data.appliquer);
+  const quiSeul = String((req.data && req.data.uid) || "");
+
+  /* DU PLUS ANCIEN AU PLUS RECENT, ET PAGINE.
+     Trie a l'envers et coupe a 1000, cette lecture ne voyait que les rapports
+     RECENTS — deja credites — tandis que ceux a rembourser, anterieurs a la
+     correction, tombaient hors de la coupe : l'outil annoncait « rien a
+     rendre » sur une base ou tout restait du. La fenetre en jours s'applique
+     aussi quand on cible une personne : sans cela, le parametre ne servait a
+     rien sur ce chemin. */
+  const touches = [];
+  let curseur = null, lus = 0;
+  for (let page = 0; page < 20; page++) {
+    let q = db.collection("reports")
+      .where("createdAt", ">=", depuis)
+      .orderBy("createdAt", "asc")
+      .limit(500);
+    if (quiSeul) {
+      q = db.collection("reports")
+        .where("by", "==", quiSeul)
+        .where("createdAt", ">=", depuis)
+        .orderBy("createdAt", "asc")
+        .limit(500);
+    }
+    if (curseur) q = q.startAfter(curseur);
+    const lot = await q.get();
+    if (lot.empty) break;
+    lus += lot.size;
+    lot.forEach((d) => {
+      const r = d.data() || {};
+      if (r.type !== "stock" || !r.by) return;
+      if (r.raison !== "trop loin") return;          // deja paye, ou refuse pour une autre raison
+      if (Number(r.credited) > 0) return;
+      touches.push({
+        ref: d.ref,
+        by: r.by,
+        pseudo: r.byPseudo || null,
+        /* La cle de l'anti-rejeu du serveur : une contribution par personne,
+           magasin, boisson et jour. */
+        cle: [r.by, String(r.storeId), String(r.drinkId),
+              new Date(r.createdAt && r.createdAt.toMillis ? r.createdAt.toMillis() : Date.now())
+                .toISOString().slice(0, 10)].join("|")
+      });
+    });
+    curseur = lot.docs[lot.docs.length - 1];
+    if (lot.size < 500) break;
+  }
+
+  /* UN SEUL PAIEMENT PAR GESTE REEL.
+     L'ancienne regle refusait la distance AVANT l'anti-rejeu : tous les
+     doublons d'une meme journee sont donc repartis avec « trop loin », aucun
+     avec « rejeu ». Les payer un par un aurait verse vingt points a vingt taps
+     sur le meme bouton — ce que la regle vivante refuse. On garde le premier
+     de chaque cle, les autres sont classes comme rejeu, sans rien verser. */
+  const vus = new Set();
+  const aPayer = [], rejeux = [];
+  for (const t of touches) {
+    if (vus.has(t.cle)) { rejeux.push(t); continue; }
+    vus.add(t.cle);
+    aPayer.push(t);
+  }
+
+  const parPersonne = {};
+  aPayer.forEach((t) => { parPersonne[t.by] = (parPersonne[t.by] || 0) + 1; });
+
+  const res = {
+    ok: true,
+    /* Les rapports reellement PARCOURUS. On additionnait deux sous-ensembles
+       d'un meme tout (aPayer + rejeux = touches), ce qui comptait les doublons
+       deux fois et rendait 0 des qu'il n'y avait rien a rendre — donc l'ecran
+       annoncait « Rien a rendre (0 signalements relus) » apres en avoir lu des
+       centaines. */
+    examines: lus,
+    aRendre: aPayer.length,
+    doublons: rejeux.length,
+    personnes: Object.keys(parPersonne).length,
+    detail: Object.keys(parPersonne).slice(0, 20).map((u) => ({ uid: u, nb: parPersonne[u] })),
+    rendus: 0,
+    reportes: 0
+  };
+  if (!appliquer) return res;
+
+  const scores = new Set();
+  for (const t of aPayer) {
+    const verse = await crediter(t.by, MONTANT_DE_MEMOIRE, "stock");
+    if (verse > 0) {
+      await t.ref.set({ counted: true, credited: verse, raison: "de memoire" }, { merge: true });
+      res.rendus += verse;
+      scores.add(t.by);
+    } else {
+      /* PLAFOND DU JOUR ATTEINT : ON NE MARQUE RIEN.
+         Ecrire « de memoire » avec credited:0 rendait la dette invisible pour
+         toujours — le filtre ci-dessus ne retient que « trop loin ». Le
+         rapport reste donc intact, et un passage demain le paiera. */
+      res.reportes++;
+    }
+  }
+  for (const t of rejeux) {
+    await t.ref.set({ counted: true, credited: 0, raison: "rejeu" }, { merge: true });
+  }
+  for (const u of scores) {
+    await recalculerScore(u);
+    await evaluerParrainage(u);
+  }
+  return res;
+});
+
+/* OFFRIR DES POINTS, QUAND LA PREUVE A ETE PERDUE.
+   Le serveur ne credite que sur preuve : un document `reports`. C'est ce qui
+   rend le classement honnete, et il n'y a pas a y toucher. Mais il arrive que
+   la preuve n'ait jamais ete ecrite — un defaut de l'application, pas de la
+   personne. Cas reel : quelqu'un signale deux boissons en rayon, l'app repond
+   « deja dans ton rayon » parce que le rayon PROBABLE de l'enseigne les
+   contenait deja, n'ecrit rien, et le profil reste a zero. Aucun rattrapage
+   automatique n'est possible : il n'y a rien a relire.
+   Ce don est donc separe des preuves. Il vit dans son propre champ
+   (pointsOfferts), il entre dans le score, et il laisse une trace nominative
+   et datee dans `pointsDons` — pour que « pourquoi cette personne a-t-elle ces
+   points ? » ait toujours une reponse. Reserve a l'administrateur.
+
+   Deploiement : firebase deploy --only functions:offrirPoints */
+const DON_MAX = 500;
+exports.offrirPoints = onCall({ region: REGION }, async (req) => {
+  const uid = req.auth && req.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi.");
+  const moi = await db.doc(`admins/${uid}`).get();
+  if (!moi.exists) throw new HttpsError("permission-denied", "Reserve a l'administrateur.");
+
+  const cible = String((req.data && req.data.uid) || "").trim();
+  if (!/^[A-Za-z0-9_-]{6,128}$/.test(cible)) throw new HttpsError("invalid-argument", "Identifiant invalide.");
+  const montant = Math.round(Number((req.data && req.data.montant) || 0));
+  if (!isFinite(montant) || montant === 0) throw new HttpsError("invalid-argument", "Montant invalide.");
+  if (Math.abs(montant) > DON_MAX) throw new HttpsError("invalid-argument", "Au-dela de " + DON_MAX + " points, fais-le en plusieurs fois.");
+  const motif = String((req.data && req.data.motif) || "").slice(0, 200);
+
+  const ref = db.doc(`users/${cible}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "Cette personne n'a pas de profil.");
+  const pseudo = (snap.data() || {}).pseudo || null;
+
+  await ref.set({ pointsOfferts: FieldValue.increment(montant) }, { merge: true });
+  await db.collection("pointsDons").add({
+    par: uid, pour: cible, pseudo: pseudo,
+    montant: montant, motif: motif,
+    at: FieldValue.serverTimestamp()
+  });
+  await recalculerScore(cible);
+
+  const apres = await ref.get();
+  return { ok: true, pseudo: pseudo, offerts: (apres.data() || {}).pointsOfferts || 0,
+           score: (apres.data() || {}).points || 0 };
 });
 
 /* Bascule : fige le solde actuel de chacun pour que PERSONNE ne perde ses

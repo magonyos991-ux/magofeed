@@ -17,7 +17,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ══════════════════════════════════════════════════════════════════════════
+  # LES REGLES DE SECURITE, EPROUVEES AVANT CHAQUE MISE EN LIGNE
+  # --------------------------------------------------------------------------
+  # Les 260 epreuves de functions-a-deployer/tests-regles attaquent la base sur
+  # un emulateur jetable : elles essaient de lire le fil de quelqu'un d'autre,
+  # de s'ecrire 999 999 points, d'accepter sa propre demande d'ami, d'antidater
+  # un masquage... et echouent si l'attaque REUSSIT.
+  #
+  # Elles existaient depuis longtemps, mais ne tournaient que quand on pensait a
+  # les lancer a la main. Autrement dit : un deploiement pouvait casser la
+  # securite de la base sans que rien ne l'arrete. Elles bloquent desormais la
+  # publication, comme ESLint.
+  #
+  # Si ce controle devenait un obstacle un jour d'urgence : retirer « needs:
+  # regles » sous « deploy », livrer, puis le remettre. Ne pas supprimer le job.
+  # ══════════════════════════════════════════════════════════════════════════
+  regles:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: functions-a-deployer/tests-regles/package-lock.json
+      # L'emulateur Firestore tourne sur la machine virtuelle Java.
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Installer le banc d'essai
+        working-directory: functions-a-deployer/tests-regles
+        run: npm ci
+      # `npm test` recopie d'abord ../firestore.rules (pretest), puis lance
+      # l'emulateur et les epreuves. Sortie non nulle = deploiement annule.
+      - name: 260 epreuves sur l'emulateur Firestore
+        working-directory: functions-a-deployer/tests-regles
+        run: npm test
+
   deploy:
+    needs: regles
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

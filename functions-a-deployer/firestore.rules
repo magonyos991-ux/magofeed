@@ -74,6 +74,11 @@ service cloud.firestore {
               'emailTestDay','emailTestCount',
               'penalty','penaltyAt',
               'points','pointsHerites','pointsPreuves','pointsJour','pointsJourTotal','pointsMaj',
+              /* Points offerts par l'administrateur (offrirPoints, Admin SDK).
+                 Ils entrent dans le score officiel : s'ils etaient ecrivables
+                 depuis le client, il suffirait d'ouvrir la console pour s'en
+                 offrir. */
+              'pointsOfferts',
               'refPoints','refCount','refAt','refCode'];
     }
     /* Le langage des regles ne sait pas boucler : on verifie chaque case a la
@@ -216,6 +221,14 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    /* Journal des points OFFERTS par l'administrateur (offrirPoints, Admin
+       SDK). Ecrit par le serveur seul, lu par l'admin : un don doit toujours
+       pouvoir repondre a « pourquoi cette personne a-t-elle ces points ». */
+    match /pointsDons/{did} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     // ── Tokens push : chacun le sien. (Les Cloud Functions utilisent l'Admin
     //    SDK et contournent ces règles pour lire les tokens.)
     match /pushTokens/{uid} {
@@ -254,7 +267,16 @@ service cloud.firestore {
            pouvoir etre signalee comme le reste. Sans cette entree, le lien de
            signalement s'affichait mais l'ecriture etait refusee — un bouton qui
            ne fait rien est pire que pas de bouton du tout. */
-        && request.resource.data.cibleType in ['decouverte','photo','profil','commentaire','annonce']
+        /* 'conversation' manquait, alors que c'est le SEUL type qu'envoie le
+           signalement d'un message prive (index.html, ouvrirSignalement depuis
+           le fil). Le bouton s'affichait, l'ecriture partait, les regles la
+           refusaient — et le client traduisait ce refus par « Connecte-toi pour
+           signaler », a quelqu'un qui etait connecte. Or l'application heberge
+           une messagerie entre inconnus, avec envoi de photos : un mecanisme de
+           signalement y est obligatoire, et il doit fonctionner.
+           'vitrine' entre en meme temps : les photos d'un commerce sont
+           publiques et se signalent comme le reste. */
+        && request.resource.data.cibleType in ['decouverte','photo','profil','commentaire','annonce','conversation','vitrine']
         && request.resource.data.cibleId is string
         && request.resource.data.cibleId.size() > 0
         && request.resource.data.cibleId.size() <= 200
@@ -1222,6 +1244,57 @@ service cloud.firestore {
     match /annonces/{storeId} {
       allow read: if true;
       allow create, update: if pasAnonyme() && annonceValide() && aLePassComplet(storeId);
+      allow delete: if isAdmin() || (pasAnonyme() && aLePassComplet(storeId));
+    }
+
+    /* ── LA VITRINE D'UN COMMERCE ────────────────────────────────────────
+       Le gerant montre ce qu'il a en rayon : une photo, une legende, un prix.
+       C'est ce que la liste des boissons ne peut pas dire — le pain, le
+       sandwich, l'arrivage du jour — et c'est la premiere chose qu'un
+       commercant demande.
+
+       TROIS DECISIONS, ET LEURS RAISONS.
+
+       1. UNE SOUS-COLLECTION, JAMAIS LE DOCUMENT DU MAGASIN. stores/{id} porte
+          deja drinks, confirmations, prices, priceHistory, seenAt,
+          confirmedBy/At : il approche la limite d'un mega-octet par document.
+          Et surtout, la carte telecharge des MILLIERS de ces documents : une
+          seule photo posee la serait payee en bande passante par chaque
+          personne qui ouvre la carte.
+
+       2. DOUZE PHOTOS, COMPTEES PAR LEUR NOM. Le langage des regles ne sait pas
+          compter les documents d'une collection sans les lire. On impose donc
+          la forme de l'identifiant — p1 a p12 — et le plafond devient une
+          propriete du nom, verifiable sans une seule lecture. Treize photos
+          sont impossibles, pas seulement decouragees.
+
+       3. LA TAILLE SE BORNE EN CARACTERES, pas en kilo-octets. La photo voyage
+          en base64 : un plafond annonce en Ko et un plafond verifie en
+          caracteres ne parlent pas de la meme chose, et l'ecart (environ un
+          tiers) se decouvre en production, sur un refus incomprehensible.
+          220 000 caracteres, le meme ordre que messageValide().
+
+       La mise a jour est autorisee (contrairement a discoveryPhotos) : un
+       commercant doit pouvoir corriger un prix sans supprimer sa photo. */
+    function photoMagasinValide() {
+      return request.resource.data.keys().hasOnly(['data', 'legende', 'prix', 'par', 'maj'])
+        && request.resource.data.keys().hasAll(['data', 'par'])
+        && request.resource.data.par == request.auth.uid
+        && request.resource.data.data is string
+        && request.resource.data.data.size() > 0
+        && request.resource.data.data.size() <= 220000
+        && request.resource.data.data.matches('^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$')
+        && (!('legende' in request.resource.data)
+            || (request.resource.data.legende is string && request.resource.data.legende.size() <= 60))
+        && (!('prix' in request.resource.data)
+            || (request.resource.data.prix is string && request.resource.data.prix.size() <= 16));
+    }
+    match /stores/{storeId}/photos/{photoId} {
+      allow read: if true;
+      allow create, update: if pasAnonyme()
+        && photoId.matches('^p([1-9]|1[0-2])$')
+        && photoMagasinValide()
+        && aLePassComplet(storeId);
       allow delete: if isAdmin() || (pasAnonyme() && aLePassComplet(storeId));
     }
 

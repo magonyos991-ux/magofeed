@@ -65,6 +65,9 @@ const BROWSER = {
   devicePixelRatio: "readonly", alert: "readonly", confirm: "readonly", prompt: "readonly",
   /* Bibliothèques chargées par <script> depuis un CDN */
   L: "readonly", Quagga: "readonly", firebase: "readonly",
+  /* Injecté par la coquille native Capacitor (app des stores). Tout accès
+     réel est gardé par window.Capacitor && … : sur le web, il n'existe pas. */
+  Capacitor: "readonly",
   /* Défini par le <script> classique d'index.html, appelé depuis le <script
      type="module"> Firebase. Les deux blocs ont des portées distinctes pour
      ESLint ; au navigateur, une fonction du script classique EST une globale.
@@ -107,7 +110,7 @@ const BUG_RULES = {
 };
 
 export default [
-  { ignores: ["node_modules/**", "f/**", "promo/**", "icons/**", "android/**", "ios/**", "www/**"] },
+  { ignores: ["node_modules/**", "f/**", "promo/**", "icons/**", "android/**", "ios/**", "www/**", "mobile/**"] },
   {
     /* index.html : eslint-plugin-html extrait les blocs <script>.
        sourceType "module" pour que le bloc Firebase (import …) soit analysé

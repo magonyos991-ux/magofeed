@@ -28,7 +28,12 @@ const { getMessaging } = require("firebase-admin/messaging");
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
-const REGION = "europe-west1"; // ADAPTE si ton projet est ailleurs
+const REGION = "europe-west1";
+/* Le second tour d'une chasse qui n'a touche personne : jusqu'ou, et combien.
+   150 km parce qu'au-dela on ne se deplace plus pour une canette ; dix
+   personnes parce qu'il s'agit de trouver quelqu'un, pas de faire du bruit. */
+const SECOURS_MAX_KM = 150;
+const SECOURS_MAX_PERSONNES = 10; // ADAPTE si ton projet est ailleurs
 
 /* Envoi d'un push à un utilisateur via le token stocké dans pushTokens/{uid}
    (écrit par l'app quand l'utilisateur active les notifications). Silencieux
@@ -290,6 +295,8 @@ exports.notifyHuntNearby = onDocumentWritten(
        vague lisait la collection entiere — le cout grandit avec la base. */
     const tokensSnap = await db.collection("pushTokens").limit(3000).get();
     const msgs = [];
+    const secours = [];          // hors zone, gardes pour le second tour
+    let aideLointaine = 0;
     tokensSnap.forEach(function(d){
       if (seekerUids.has(d.id)) return;         // pas le(s) chercheur(s)
       const t = d.data();
@@ -308,7 +315,14 @@ exports.notifyHuntNearby = onDocumentWritten(
          depuis leur installation. L'app ecrit la position a chaque reponse du
          GPS, donc ce cas se resorbe de lui-meme. */
       const rayon = Math.max(1, Math.min(50, Number(t.rayon) || 15));
-      if (center && t.lat != null && _dist(center.lat, center.lng, t.lat, t.lng) > rayon) return;
+      const dKm = (center && t.lat != null) ? _dist(center.lat, center.lng, t.lat, t.lng) : null;
+      if (dKm != null && dKm > rayon) {
+        /* HORS DE SA ZONE — mais peut-etre le seul a portee. On le met de cote
+           pour un second tour, qui ne servira QUE si personne, absolument
+           personne, n'est dans sa propre zone. */
+        secours.push({ token: t.token, km: Math.round(dKm), rayon: rayon, ouvert: t.secours === true });
+        return;
+      }
       msgs.push({
         token: t.token,
         notification: { title: "Chasse pres de toi", body: "Quelqu'un cherche « " + name + " ». Si tu la vois en magasin, signale-la et gagne des points." },
@@ -316,6 +330,65 @@ exports.notifyHuntNearby = onDocumentWritten(
         webpush: { fcmOptions: { link: "https://magonyos991-ux.github.io/magofeed/" } }
       });
     });
+
+    /* ── LE SECOND TOUR : LA CAMPAGNE ────────────────────────────────────
+       Le rayon du destinataire est une promesse, et on ne la brise pas. Mais
+       la ou personne n'habite a moins de quinze kilometres, cette promesse
+       revient a supprimer la fonctionnalite : le chasseur lance sa chasse, et
+       il ne se passe RIEN, jamais, sans que personne ne le lui dise.
+       Alors quand le premier tour n'a trouve PERSONNE — et seulement dans ce
+       cas — on s'adresse a ceux qui ont dit oui a ce secours : ceux qui ont
+       coche le reglage, et ceux qui ont pousse leur zone au maximum, ce qui
+       dans cette application veut dire « je veux voir large ».
+       On prend les plus proches, pas tout le monde ; on dit la distance dans
+       le message, pour que la personne decide en connaissance de cause ; et on
+       ne depasse jamais SECOURS_MAX_KM, au-dela de quoi plus personne ne se
+       deplace pour une canette. */
+    if (!msgs.length && secours.length) {
+      const eligibles = secours
+        .filter((x) => (x.ouvert || x.rayon >= 50) && x.km <= SECOURS_MAX_KM)
+        .sort((a2, b2) => a2.km - b2.km)
+        .slice(0, SECOURS_MAX_PERSONNES);
+      for (const x of eligibles) {
+        msgs.push({
+          token: x.token,
+          notification: {
+            title: "Personne n'est plus pres",
+            body: "Quelqu'un cherche \u00ab " + name + " \u00bb \u00e0 " + x.km + " km de toi. "
+                  + "Tu es la personne la plus proche a pouvoir aider."
+          },
+          data: { type: "hunt", drinkId: String(after.drinkId || ""), secours: "1" },
+          webpush: { fcmOptions: { link: "https://magonyos991-ux.github.io/magofeed/" } }
+        });
+      }
+      aideLointaine = eligibles.length;
+    }
+
+    /* ── ET SI VRAIMENT PERSONNE : ON LE DIT AU CHASSEUR ─────────────────
+       Une chasse qui ne reveille personne n'est pas une erreur — c'est une
+       information, et c'est LA sienne. Sans elle, on attend indefiniment une
+       reponse qui ne viendra pas, en croyant que l'application travaille. */
+    if (!msgs.length && lanceur) {
+      try {
+        const moi = await db.collection("pushTokens").doc(String(lanceur)).get();
+        const tk = moi.exists && moi.data().token;
+        if (tk) {
+          await getMessaging().send({
+            token: tk,
+            notification: {
+              title: "Ta chasse est lancee, mais personne autour",
+              body: "Aucun joueur n'est assez pres pour l'instant. Elle reste visible dans "
+                    + "Decouvrir, et on previendra des que quelqu'un s'approche."
+            },
+            data: { type: "hunt", drinkId: String(after.drinkId || ""), vide: "1" },
+            webpush: { fcmOptions: { link: "https://magonyos991-ux.github.io/magofeed/" } }
+          });
+        }
+      } catch (e) { console.warn("avis chasse vide:", e && e.message); }
+      try { await event.data.after.ref.set({ sansPortee: true, sansPorteeAt: now }, { merge: true }); } catch (e) {}
+    } else {
+      try { await event.data.after.ref.set({ sansPortee: false }, { merge: true }); } catch (e) {}
+    }
     // Envoi (par lots de 500 max côté FCM)
     for (let i = 0; i < msgs.length; i += 500) {
       try { await getMessaging().sendEach(msgs.slice(i, i + 500)); } catch (e) { console.warn("hunt push batch:", e && e.message); }
@@ -325,9 +398,13 @@ exports.notifyHuntNearby = onDocumentWritten(
       "Chasse \u00ab " + name + " \u00bb",
       msgs.length
         ? (msgs.length + " personne(s) pr\u00e9venue(s) autour de " + center.lat + ", " + center.lng
+           + (aideLointaine
+              ? " \u2014 dont " + aideLointaine + " au second tour : PERSONNE n'\u00e9tait dans sa propre zone."
+              : "")
            + " \u00b7 " + tokensSnap.size + " appareil(s) enregistr\u00e9(s) au total.")
-        : ("Aucun appareil dans sa propre zone autour du centre (" + center.lat + ", " + center.lng + "). "
-           + tokensSnap.size + " appareil(s) enregistr\u00e9(s) au total, tous trop loin ou d\u00e9j\u00e0 chasseurs."),
+        : ("Personne, ni dans sa zone ni au second tour, autour du centre (" + center.lat + ", " + center.lng + "). "
+           + secours.length + " appareil(s) hors zone, dont aucun ouvert au secours ou assez proche (max "
+           + SECOURS_MAX_KM + " km). Le chasseur a \u00e9t\u00e9 pr\u00e9venu ; la chasse est marqu\u00e9e sansPortee."),
       tokensSnap.size, msgs.length);
   }
 );
