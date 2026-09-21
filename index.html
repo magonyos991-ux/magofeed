@@ -6365,6 +6365,14 @@ function setMode(mode){
   localStorage.setItem("magomode",mode);
 }
 function cycleTheme(){var m=["light","dark","auto"];setMode(m[(m.indexOf(curMode)+1)%3]);playSound("pop");}
+/* En mode auto, le telephone peut basculer clair/sombre pendant que l'app est
+   ouverte (tombee de la nuit, reglage manuel) : on suit sans rechargement. */
+try{
+  var _mqSombre=window.matchMedia("(prefers-color-scheme:dark)");
+  var _suivreOS=function(){ if(curMode==="auto")setMode("auto"); };
+  if(_mqSombre.addEventListener)_mqSombre.addEventListener("change",_suivreOS);
+  else if(_mqSombre.addListener)_mqSombre.addListener(_suivreOS);
+}catch(e){}
 function setAccent(d){accentColor=d?d.color:"#1a1714";accentLight=d?d.light:"#f0eee9";}
 
 /* ================================
@@ -8689,8 +8697,7 @@ function ensurePickerMap(cb){
   function build(){
     var center=[userLat||50.8466,userLng||4.3528];
     window._pickerMap=L.map("store-picker-map",{zoomControl:false}).setView(center,13);
-    var darkP=document.body.classList.contains("dark");
-    fondMago(darkP).addTo(window._pickerMap);
+    fondMago().addTo(window._pickerMap);
     window._pickerMarkers=L.layerGroup().addTo(window._pickerMap);
     window._pickerMap.on("click",function(e){onPickerMapClick(e.latlng);});
     if(userLat){
@@ -14241,11 +14248,10 @@ function initLeafletMap(lat,lng){
   // le bouton plein ecran (voir toggleDrinkMapFull, qui les reactive).
   map.dragging.disable();
   map.scrollWheelZoom.disable();
-  var dark=document.body.classList.contains("dark");
   /* Carto a ferme son acces gratuit (« API KEY REQUIRED » imprime sur chaque
      tuile) : OpenStreetMap, gratuit et sans cle, le remplace. Le sombre est
      rendu par un filtre CSS — OSM n'a pas de variante nocturne. */
-  fondMago(dark).addTo(map);
+  fondMago().addTo(map);
 
   // Pin position utilisateur
   if(userLat){
@@ -15960,7 +15966,7 @@ window._leafletState = window._leafletState || null;   // null | "loading" | "re
    de renvoyer toujours l'URL OSM ci-dessous pour revenir en arriere.
    ============================================================================ */
 var FOND_ATTRIB='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, commerces <a href="https://overturemaps.org">Overture Maps</a>';
-function fondMago(sombre){
+function fondMago(){
   /* UN SEUL FOND, MONDIAL, SANS CLE ET SANS FILIGRANE.
 
      Deux fournisseurs ont echoue coup sur coup, et pour deux raisons
@@ -15993,13 +15999,16 @@ function fondMago(sombre){
      cette taille, pas un service a fort trafic. Le jour ou Magofeed decolle,
      il faudra son propre serveur de tuiles ou un fournisseur payant. Ce n'est
      pas un probleme pour aujourd'hui, c'en est un pour le succes. */
-  var FILTRE=sombre
-    ? "grayscale(1) invert(1) contrast(.88) brightness(.55)"
-    : "grayscale(1) contrast(.66) brightness(1.18)";
+  /* Le filtre clair/sombre vit dans app.css (.tuile-mago), pilote par la
+     classe du body : changer de theme dans les reglages re-teinte aussitot
+     les tuiles deja posees. Fige ici a la creation (ancien style.filter),
+     la carte restait claire apres passage en sombre jusqu'au rechargement
+     complet — les cartes Explorer et selecteur ne sont construites qu'une
+     seule fois. */
   var Fond=L.TileLayer.extend({
     createTile:function(coords,done){
       var t=L.TileLayer.prototype.createTile.call(this,coords,done);
-      t.style.filter=FILTRE;
+      t.classList.add("tuile-mago");
       return t;
     }
   });
@@ -20794,8 +20803,7 @@ function openExploreMap(opts){
       // des boutons +/- visibles (clairs pour tout le monde).
       exploreMap=L.map("explore-map",{zoomControl:false,doubleClickZoom:true,touchZoom:true,tap:true});
       L.control.zoom({position:"bottomleft"}).addTo(exploreMap);
-      var darkE=document.body.classList.contains("dark");
-      fondMago(darkE).addTo(exploreMap);
+      fondMago().addTo(exploreMap);
       /* Regroupement si le greffon est la, sinon simple couche : la carte
          s'affiche dans les deux cas. */
       exploreLayer=(window.L&&L.markerClusterGroup)
@@ -27094,7 +27102,9 @@ function majLigneAmis(){
   var sub=document.getElementById("profile-amis-sub");
   var pc=document.getElementById("profile-amis-count");
   var n=amisNb(),d=amisNbDemandes();
-  if(sub)sub.textContent=amisListe()===null?tr("On charge tes amis…")
+  if(sub)sub.textContent=amisListe()===null
+    ?((!navigator.onLine||!window.fbMesAmis)?tr("Hors ligne pour l'instant")
+       :tr("On charge tes amis…"))
     :(n?(n===1?trh("{n} ami",{n:n}):trh("{n} amis",{n:n}))
        :tr("Personne pour l'instant — trouve des joueurs"));
   if(pc){ if(d>0){pc.style.display="";pc.textContent=String(d);} else pc.style.display="none"; }
