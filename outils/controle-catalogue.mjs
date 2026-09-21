@@ -56,8 +56,26 @@ const COLLISIONS_CONNUES = new Set([
   "90169762",        /* Rauch Happy Day Pomme / Rauch Pomme */
   "90169748",        /* Happy Day Multivitamin / Rauch Multivitamin */
   "5949000012031",   /* Pepsi Original / Pepsi */
+  /* LES SEPT QUE CE CONTROLE NE VOYAIT PAS, mesurees le 21 septembre 2026.
+     Elles etaient invisibles parce qu'on comparait le texte brut la ou l'app
+     compare la forme utile : un zero de tete d'un cote, pas de l'autre. Elles
+     existent depuis des mois et le controle annoncait « TOUT EST CONFORME ».
+     Elles attendent une fusion depuis l'administration (« Fusionner les
+     doublons »), qui garde l'une des deux fiches et reporte sur elle les
+     confirmations et les codes de l'autre. Retirer une ligne d'ici des que la
+     fusion est faite : c'est ce qui rend la liste utile plutot que decorative. */
+  "70847002901",     /* Monster Energy Zero Sucre (14905) / Monster Zero sucre boisson energisante (16432) */
+  "70847020905",     /* Monster Ultra Sunrise (14917) / Monster Energy Ultra Sunrise (16319) */
+  "613008730710",    /* Arizona Peach (10008) / Peach Tea Arizona (16481) */
+  "82592720153",     /* Naked Green Machine (15354) / Naked Boosted Smoothie Green Machine (16722) */
+  "82592010728",     /* Naked Green Machine (15354) / Naked Green machine boosted smoothie (17390) */
+  "51000012920",     /* V8 Jus de Legumes (15495) / V8 Original 100% Vegetable Juice (16725) */
+  "23100000220",     /* Soy Boisson Soja Vanille (15888) / Soy Lait soja vanille bio (17722) */
 ]);
 
+/* La forme utile d'un code : les chiffres, sans les zeros de tete. C'est la
+   copie exacte de codeNu() dans index.html — si l'une change, changer l'autre. */
+function cleUtile(c) { return String(c == null ? "" : c).replace(/\D/g, "").replace(/^0+/, ""); }
 function cleOk(c) {
   if (!/^\d+$/.test(c) || ![8, 12, 13, 14].includes(c.length)) return false;
   const d = c.split("").map(Number), cle = d.pop();
@@ -78,9 +96,20 @@ for (const d of DRINKS) {
   for (const b of (d.barcodes || [])) {
     const c = String(b);
     if (!cleOk(c)) pb.cle.push(c + "  (" + d.name + ")");
-    if (vusCode.has(c) && vusCode.get(c) !== d.id) {
-      if (!COLLISIONS_CONNUES.has(c)) pb.collisions.push(c + " : fiches " + vusCode.get(c) + " et " + d.id);
-    } else vusCode.set(c, d.id);
+    /* CET OUTIL COMPARAIT LE TEXTE BRUT, L'APP COMPARE LA FORME UTILE.
+       ----------------------------------------------------------------------
+       codeNu() (index.html) retire les zeros de tete : 0078000033489 et
+       078000033489 sont le MEME article pour l'application. Ici on comparait
+       « 0078000033489 » a « 078000033489 » comme deux chaines, donc comme deux
+       codes differents. Sept collisions reelles sur treize etaient invisibles,
+       et le controle annoncait « TOUT EST CONFORME » a quelqu'un dont le
+       catalogue contenait deux fiches pour la meme canette. Un outil de
+       controle qui rassure a tort est pire que pas d'outil. */
+    const k = cleUtile(c);
+    if (!k) continue;
+    if (vusCode.has(k) && vusCode.get(k) !== d.id) {
+      if (!COLLISIONS_CONNUES.has(k)) pb.collisions.push(k + " : fiches " + vusCode.get(k) + " et " + d.id);
+    } else vusCode.set(k, d.id);
   }
 }
 
@@ -91,6 +120,8 @@ for (const [k, v] of Object.entries(pb)) {
   console.log((v.length ? "PROBLEME  " : "ok        ") + k.padEnd(13) + v.length);
   v.slice(0, 8).forEach((x) => console.log("       " + x));
 }
-if (COLLISIONS_CONNUES.size) console.log("\n(" + COLLISIONS_CONNUES.size + " collisions connues, en attente d'une fusion depuis l'administration)");
+if (COLLISIONS_CONNUES.size) console.log("\n(" + COLLISIONS_CONNUES.size + " collisions connues : " + COLLISIONS_CONNUES.size
+  + " paires de fiches pour un meme article, en attente d'une fusion depuis l'administration.\n"
+  + " Elles ne font pas echouer ce controle, mais un scan de ces canettes est un tirage au sort entre deux fiches.)");
 console.log("\n" + (ko ? "A CORRIGER" : "TOUT EST CONFORME"));
 process.exitCode = ko ? 1 : 0;
