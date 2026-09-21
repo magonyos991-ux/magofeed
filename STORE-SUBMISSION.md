@@ -51,6 +51,35 @@ Chaque permission iOS DOIT avoir un texte d'usage, sinon rejet immédiat :
 
 > Notifications push iOS : elles ne passent pas par Info.plist mais par la capability **Push Notifications** (Xcode → Signing & Capabilities) + un certificat APNs relié à Firebase. À configurer seulement si tu veux les notifs sur iOS.
 
+### Notifications push natives — DÉJÀ CÂBLÉES dans le code
+
+Les greffons `@capacitor/push-notifications` et `@capacitor-community/fcm` sont
+installés et synchronisés (Podfile + plugins Android à jour). L'interrupteur
+« Notifications » des réglages de l'app détecte tout seul qu'il tourne dans
+l'app du store et passe par le greffon natif : le jeton FCM atterrit dans la
+même collection `pushTokens` que le web — **aucune modification serveur**.
+
+Il ne reste que la configuration Firebase, à faire UNE fois :
+
+**Android** (obligatoire pour que le push marche) :
+1. Console Firebase → Paramètres du projet → Tes applications → **Ajouter une
+   application Android** avec le paquet `com.magofeed.app`.
+2. Télécharge le fichier `google-services.json` proposé.
+3. Pose-le dans `android/app/google-services.json` (le build le détecte tout
+   seul ; sans lui, l'app marche mais le push reste muet).
+
+**iOS** (sur le Mac, dans Xcode) :
+1. Console Firebase → Paramètres du projet → **Ajouter une application iOS**
+   avec le bundle `com.magofeed.app`, télécharge `GoogleService-Info.plist`
+   et glisse-le dans Xcode, dans le dossier `App/App` (coche « Copy items if
+   needed »). L'app démarre sans lui — le push reste juste inactif.
+2. Xcode → cible App → Signing & Capabilities → **+ Capability** →
+   « Push Notifications », puis « Background Modes » avec la case
+   **Remote notifications**.
+3. Console Apple Developer → Keys → crée une **clé APNs** (.p8), puis
+   console Firebase → Paramètres du projet → Cloud Messaging → cible iOS →
+   téléverse cette clé (avec son Key ID et ton Team ID).
+
 ---
 
 ## 2. Play Store — Déclaration de confidentialité (Data Safety)

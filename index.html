@@ -4863,7 +4863,7 @@ window.fbApproveFormat = async function(sug) {
    (Parametres du projet > Cloud Messaging). Vide = push desactive, veille
    locale inchangee. */
 window.MAGO_VAPID_KEY = "BAD8RGLIfKqzp0E1VDki9TGwoCPDT_wzVzaUrfP86WW4CbtF7WWO2269SekrDkhMxR9Y8WY7yD7ntGRA8sEYZ8A";
-window.fbEnablePush = async function(lat, lng) {
+window.fbEnablePush = async function(lat, lng, silencieux) {
   try {
     // GARDE-FOU DE CONSENTEMENT. Plusieurs endroits de l'app rallument le push
     // "au cas ou" quand le telephone l'autorise. Si la personne a mis
@@ -4872,6 +4872,50 @@ window.fbEnablePush = async function(lat, lng) {
     // (togglePush pose l'intention a ON avant d'appeler : l'activation
     //  volontaire passe donc sans probleme.)
     if (window.pushWanted && !window.pushWanted()) return { ok: false, reason: "off" };
+    /* ── APP INSTALLEE DEPUIS UN STORE (Capacitor) ──
+       Pas d'API web Notification dans WKWebView / WebView Android : le jeton
+       vient du greffon PushNotifications. Sur Android c'est directement un
+       jeton FCM ; sur iOS le greffon rend le jeton APNs, que le greffon
+       @capacitor-community/fcm convertit en jeton FCM — le meme que le
+       serveur sait deja servir (pushTokens/{uid}, notifications-push.js).
+       `silencieux` : a la restauration au demarrage, on ne demande JAMAIS la
+       permission — on restaure seulement si elle est deja accordee. */
+    if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform()) {
+      var PN = Capacitor.Plugins && Capacitor.Plugins.PushNotifications;
+      if (!PN) return { ok: false, reason: "unsupported" };
+      var etat = await PN.checkPermissions();
+      if (etat.receive !== "granted") {
+        if (silencieux) { return { ok: false, reason: "prompt" }; }
+        etat = await PN.requestPermissions();
+      }
+      window._pushPermNative = etat.receive === "granted" ? "granted" : "denied";
+      if (etat.receive !== "granted") return { ok: false, reason: "denied" };
+      var jeton = await new Promise(function(res) {
+        var fini = false;
+        var t = setTimeout(function() { if (!fini) { fini = true; res(null); } }, 12000);
+        PN.addListener("registration", function(ev) {
+          if (!fini) { fini = true; clearTimeout(t); res(ev && ev.value); }
+        });
+        PN.addListener("registrationError", function() {
+          if (!fini) { fini = true; clearTimeout(t); res(null); }
+        });
+        PN.register();
+      });
+      try {
+        if (jeton && Capacitor.getPlatform && Capacitor.getPlatform() === "ios" &&
+            Capacitor.Plugins.FCM) {
+          var conv = await Capacitor.Plugins.FCM.getToken();
+          if (conv && conv.token) jeton = conv.token;
+        }
+      } catch (eF) { console.warn("Push natif : conversion FCM iOS", eF); }
+      if (!jeton) return { ok: false, reason: "notoken" };
+      var userN = await ensureAuthed();
+      var chargeN = { token: jeton, updatedAt: serverTimestamp(), natif: true };
+      if (lat != null && lng != null) { chargeN.lat = lat; chargeN.lng = lng; }
+      await setDoc(doc(db, "pushTokens", userN.uid), chargeN, { merge: true });
+      window._pushToken = jeton;
+      return { ok: true };
+    }
     if (!window.MAGO_VAPID_KEY) { console.warn("Push: VAPID key absente"); return { ok: false, reason: "novapid" }; }
     if (!(await isSupported())) return { ok: false, reason: "unsupported" };
     var perm = await Notification.requestPermission();
@@ -4914,6 +4958,29 @@ window.fbDisablePush = async function() {
     await setDoc(doc(db, "pushTokens", user.uid), { token: null, updatedAt: serverTimestamp() }, { merge: true });
   } catch (e) { console.warn("Push off:", e); }
 };
+/* App installee (Capacitor) : la permission se lit en asynchrone, on la met
+   en cache pour l'interrupteur des reglages, et si elle est deja accordee
+   avec l'interrupteur sur ON, on restaure le jeton en silence — le pendant
+   natif de la restauration web faite a la connexion (voir onAuthStateChanged).
+   Le troisieme argument (silencieux) garantit qu'aucune demande de permission
+   ne surgit au demarrage. */
+try {
+  if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform() &&
+      Capacitor.Plugins && Capacitor.Plugins.PushNotifications) {
+    Capacitor.Plugins.PushNotifications.checkPermissions().then(function(st) {
+      window._pushPermNative = st && st.receive === "granted" ? "granted"
+        : (st && st.receive === "denied" ? "denied" : "prompt");
+      try { if (window.refreshNotifState) window.refreshNotifState(); } catch (e) {}
+      if (window._pushPermNative === "granted" && !window._pushToken &&
+          (!window.pushWanted || window.pushWanted())) {
+        window.fbEnablePush(window.userLat, window.userLng, true).then(function(r) {
+          window._pushRestoreFailed = !(r && r.ok);
+          try { if (window.refreshNotifState) window.refreshNotifState(); } catch (e) {}
+        });
+      }
+    }).catch(function() {});
+  }
+} catch (e) {}
 /* LE RAYON, LA OU LE SERVEUR LE LIT. La fonction de notification parcourt
    pushTokens : c'est donc dans le document de CHAQUE personne que doit vivre
    son propre choix. Ecrit a chaque changement, et rejoue au demarrage pour les
@@ -22185,15 +22252,27 @@ window.pushWanted = function(){
   try{ return localStorage.getItem("magoPushWanted")!=="0"; }catch(e){ return true; }
 };
 function setPushWanted(v){ try{ localStorage.setItem("magoPushWanted", v?"1":"0"); }catch(e){} }
+/* ── NATIF (Capacitor) ─────────────────────────────────────────────────────
+   Dans l'app installee depuis un store, l'API web Notification n'existe pas
+   (WKWebView iOS, WebView Android) : tout passe par le greffon
+   PushNotifications. Sa permission se lit en asynchrone : elle est mise en
+   cache dans window._pushPermNative (au demarrage et apres chaque demande),
+   et ces trois aides remplacent les lectures directes de Notification. */
+function pushNatif(){ try{ return !!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform()); }catch(e){ return false; } }
+function pushSupporte(){ return pushNatif()||("Notification" in window); }
+function pushPerm(){
+  if(pushNatif())return window._pushPermNative||"prompt";
+  return ("Notification" in window)?Notification.permission:"unsupported";
+}
 function pushIsOn(){
-  if(!("Notification" in window)) return false;
-  return Notification.permission==="granted" && window.pushWanted();
+  if(!pushSupporte()) return false;
+  return pushPerm()==="granted" && window.pushWanted();
 }
 function refreshNotifState(){
   var sub=document.getElementById("notif-state");
   var sw=document.getElementById("push-toggle");
-  var supported=("Notification" in window);
-  var perm=supported?Notification.permission:"unsupported";
+  var supported=pushSupporte();
+  var perm=supported?pushPerm():"unsupported";
   var on=pushIsOn();
   if(sw)sw.classList.toggle("on",on);
   var row=document.getElementById("push-row");
@@ -22223,7 +22302,7 @@ function refreshNotifState(){
 }
 /* Un tap = on allume ou on éteint. Plus de « appuie sur le texte ». */
 function togglePush(){
-  if(!("Notification" in window)){toast("Non supportées sur ce navigateur");playSound("err");return;}
+  if(!pushSupporte()){toast("Non supportées sur ce navigateur");playSound("err");return;}
   if(pushIsOn()){
     // Extinction : on efface le jeton côté serveur, donc plus AUCUN envoi.
     // (La permission du téléphone, elle, ne se retire que dans ses réglages —
@@ -22236,7 +22315,7 @@ function togglePush(){
     playSound("pop");
     return;
   }
-  if(Notification.permission==="denied"){
+  if(pushPerm()==="denied"){
     toast("Bloquées par le téléphone : Réglages › Notifications › Magofeed");
     playSound("err");refreshNotifState();return;
   }
@@ -26167,7 +26246,10 @@ function updateAccountUI(user){
 /* ================================
    PWA — INSTALLATION & SERVICE WORKER
 ================================ */
-function isStandaloneMode(){return window.matchMedia("(display-mode: standalone)").matches||window.navigator.standalone===true;}
+/* L'app d'un store EST deja installee : sans ce test, la coquille native
+   proposait « ajoute l'app a l'ecran d'accueil » et le guide iOS. */
+function isStandaloneMode(){try{if(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform())return true;}catch(e){}
+  return window.matchMedia("(display-mode: standalone)").matches||window.navigator.standalone===true;}
 function isIOSDevice(){return /iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;}
 function updateInstallUI(){
   var section=document.getElementById("install-app-section");if(!section)return;
