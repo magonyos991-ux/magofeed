@@ -383,6 +383,29 @@ const r = await page.evaluate(async () => {
     dit("cela ne cree toujours pas de stock", !magasinConfirmePour(usa, dew.id));
   }
 
+  /* ── 9 quinquies. Un nom de produit n'est pas du HTML ──────────────── */
+  {
+    /* sanitize() est un echappeur d'AFFICHAGE. Applique a la source, sur une
+       valeur qui part en base et sera echappee une seconde fois au rendu, il
+       grave « &amp; » dans le nom. Open Food Facts dit « Dr Pepper & Cream
+       Soda » ; la base de Magofeed contenait « Dr Pepper &amp;amp; Cream
+       Soda ». Ce n'etait pas qu'une faute a l'ecran : le dedoublonnage du
+       catalogue comparait les noms, et le mot parasite « amp » a suffi a faire
+       croire a deux boissons differentes. */
+    const r = offBestProduct({ product_name: "Dr Pepper & Cream Soda", brands: "Dr Pepper" });
+    dit("le nom garde son esperluette telle quelle", r.name.indexOf("&amp;") === -1 && r.name.indexOf("&") !== -1);
+    dit("la marque aussi", offBestProduct({ product_name: "X", brands: "Ben & Jerry's" }).brand.indexOf("&amp;") === -1);
+
+    /* Et comme la valeur n'est plus echappee a la source, chaque affichage doit
+       l'echapper lui-meme — sinon un nom venu d'Open Food Facts, que n'importe
+       qui peut modifier, deviendrait du HTML execute chez les autres. */
+    const piege = offBestProduct({ product_name: '<img src=x onerror=alert(1)>', brands: "" });
+    const bac = document.createElement("div");
+    bac.innerHTML = '<div>' + sanitize(piege.name) + '</div>';
+    dit("un nom piege ne devient pas une balise", bac.querySelector("img") === null);
+    dit("mais il reste lisible tel quel", (bac.textContent || "").indexOf("onerror") !== -1);
+  }
+
   /* ── 9 ter. Deux fiches pour un magasin, et le journal du scanner ──── */
   {
     /* Mesure sur la base : 981 lieux portent deux fiches au meme nom et aux

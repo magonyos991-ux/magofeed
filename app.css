@@ -79,6 +79,24 @@ body{
   flex-direction:column;
 }
 
+/* ── App installée : l'app EST l'écran ─────────────────────────────────
+   La coque ci-dessus (body en padding, #app en carte arrondie de 402 px)
+   est la présentation du SITE — un prototype qu'on regarde dans une page.
+   Installée (app native Capacitor, ou PWA ajoutée à l'écran d'accueil),
+   l'app doit remplir le verre bord à bord, comme n'importe quelle app du
+   store. La classe est posée sur <html> par index.html au démarrage. */
+/* En natif, le fond de PAGE est celui de l'app : sur iPhone, la zone de la
+   barre d'accueil et l'elasticite du defilement laissent voir la page sous
+   l'app — en sombre, elle restait creme (--cr n'est pas redefini par le
+   theme) et dessinait une bande claire en bas de l'ecran. */
+html.natif body{padding:0;display:block;min-height:100dvh;background:var(--app-bg)}
+html.natif #app{
+  max-width:none;
+  height:100vh;height:100dvh;
+  max-height:none;
+  border-radius:0;
+}
+
 /* ── Screen system ── */
 .screen{
   display:none;
@@ -96,7 +114,10 @@ body{
 .screen.on{display:flex}
 .screen.s-enter{opacity:0;transform:translateY(12px)}
 .screen.s-leave{opacity:0;transform:translateY(-7px)}
-.scroll{flex:1;overflow-y:auto;overflow-x:hidden;padding:56px 20px calc(92px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
+/* Le haut compte l'encoche (env(safe-area-inset-top)) : en mode installe
+   plein ecran, 56px fixes passaient sous la barre de statut du telephone.
+   Sur le web env() vaut 0 — rendu inchange. */
+.scroll{flex:1;overflow-y:auto;overflow-x:hidden;padding:calc(56px + env(safe-area-inset-top,0px)) 20px calc(92px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
 /* Les defilements des ecrans passent SOUS la barre translucide : chaque
    conteneur garde une respiration en bas pour que le dernier element
    remonte au-dessus du dock quand on arrive en fin de liste. */
@@ -363,7 +384,7 @@ body.dark .dcard{background:#2a2a2a}
 .back-ico:active{background:var(--bg3)}
 
 /* ── Results header ── */
-.res-hd{padding:50px 20px 18px;background:linear-gradient(135deg,#1a1714,#3a3330)}
+.res-hd{padding:calc(50px + env(safe-area-inset-top,0px)) 20px 18px;background:linear-gradient(135deg,#1a1714,#3a3330)}
 .res-back{display:flex;align-items:center;gap:10px;margin-bottom:16px;cursor:pointer}
 .res-product{display:flex;align-items:center;gap:14px}
 .res-emoji{
@@ -433,6 +454,13 @@ body.dark .map-locate-btn{background:#2a2a2a}
 #explore-sheet-grip{width:48px;height:6px;border-radius:99px;background:var(--s3);opacity:.55;margin:0 auto 11px;transition:background .15s,opacity .15s}
 #explore-sheet-head:active #explore-sheet-grip{opacity:1;background:var(--s2)}
 #explore-sheet-list{overflow-y:auto;flex:1;padding:0 14px 14px;-webkit-overflow-scrolling:touch;touch-action:pan-y;overscroll-behavior:contain}
+/* Fond de carte OpenStreetMap : desature en clair, inverse en sombre.
+   La classe est posee tuile par tuile (fondMago, index.html) ; le filtre vit
+   ici pour que changer de theme re-teinte les cartes deja construites.
+   Double classe exigee : leaflet.css (charge apres ce fichier) pose
+   .leaflet-tile{filter:inherit}, qui ecraserait une regle a classe seule. */
+.tuile-mago.leaflet-tile{filter:grayscale(1) contrast(.66) brightness(1.18)}
+body.dark .tuile-mago.leaflet-tile{filter:grayscale(1) invert(1) contrast(.88) brightness(.55)}
 /* Boutons de zoom +/- de la carte explore : plus gros, thematises, au-dessus du sheet. */
 #explore-map .leaflet-bottom.leaflet-left{bottom:calc(104px + env(safe-area-inset-bottom,0px));left:10px}
 #explore-map .leaflet-control-zoom{border:none!important;box-shadow:0 3px 12px rgba(0,0,0,.28);border-radius:12px}
@@ -673,6 +701,7 @@ body.dark .disc-card{background:#2a2a2a}
   width:58px;height:58px;border-radius:14px;
   display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;
   background:var(--bg2);
+  overflow:hidden; /* la photo qui remplace le dessin garde les coins ronds */
 }
 .vote-btn{
   padding:9px 16px;border-radius:999px;
@@ -1041,7 +1070,7 @@ body.dark .leaflet-control-zoom a{background:rgba(42,42,42,.85)!important;color:
   position:fixed;top:0;left:0;right:0;
   background:#1a1714;color:#c69a57;
   font-size:12px;font-weight:600;
-  text-align:center;padding:8px;
+  text-align:center;padding:calc(8px + env(safe-area-inset-top,0px)) 8px 8px;
   z-index:9999;
   display:none;
 }
@@ -1703,7 +1732,7 @@ body.dark .lvl-go{color:#e5a93a}
    variables : le fil doit rester lisible dans les deux themes, et la bulle
    « moi » est simplement l'inverse du fond (var(--s1) sur var(--app-bg)),
    ce qui garantit le contraste sans couleur nouvelle. ── */
-.msg-hd{display:flex;align-items:center;gap:12px;padding:24px 20px 12px}
+.msg-hd{display:flex;align-items:center;gap:12px;padding:calc(24px + env(safe-area-inset-top,0px)) 20px 12px}
 .msg-seg{display:flex;background:var(--bg2);border-radius:14px;padding:4px;margin:0 20px 12px}
 .msg-seg button{flex:1;min-height:38px;border-radius:11px;font-size:13px;font-weight:800;color:var(--s2);
   font-family:inherit;cursor:pointer;background:none;border:none;transition:background .18s,color .18s}
