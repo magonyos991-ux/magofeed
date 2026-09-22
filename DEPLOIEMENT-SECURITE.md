@@ -54,11 +54,20 @@ La clé que Firebase vient de te donner sait lire et écrire dans la base, mais
 elle n'a pas encore le droit de **remplacer des fonctions**. C'est un réglage
 Google, pas Firebase, et il se fait sur une seule page.
 
-Symptôme si tu sautes cette étape — l'étape « Déployer » s'arrête sur :
+Deux symptômes, même cause. Sur « tout » ou « fonctions seulement » :
 
 > `Missing permissions required for functions deploy. You must have permission`
 > `iam.serviceAccounts.ActAs on service account`
 > `magofeed-7f621@appspot.gserviceaccount.com`
+
+Sur « règles et index seulement » — vérifié, la clé neuve ne passe pas non plus :
+
+> `Request to https://firebaserules.googleapis.com/v1/projects/magofeed-7f621:test`
+> `had HTTP Error: 403, The caller does not have permission`
+
+Donc tant que cette page n'est pas faite, **rien** ne part : ni les règles, ni
+les fonctions. Ce n'est pas le fichier de déploiement qui coince — ses neuf
+étapes passent, le serveur démarre, les 280 épreuves sont vertes.
 
 Comment le régler :
 
