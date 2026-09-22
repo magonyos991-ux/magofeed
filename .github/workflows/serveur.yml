@@ -129,6 +129,25 @@ jobs:
         working-directory: deploiement/functions
         run: npm install --omit=dev --no-audit --no-fund
 
+      # LE PAQUET DOIT DEMARRER AVANT D'ETRE ENVOYE.
+      # La premiere tentative a echoue ici, sur une version de dependance qui
+      # n'existait pas — on l'a su en trente secondes. Mais une version qui
+      # s'installe peut tout de meme casser le code (une API renommee d'un
+      # majeur a l'autre), et ca, on ne le decouvrirait qu'en production, sur
+      # des fonctions a moitie deployees. On charge donc index.js pour de vrai :
+      # s'il ne demarre pas ici, rien ne part.
+      - name: Vérifier que le serveur démarre
+        working-directory: deploiement/functions
+        env:
+          GCLOUD_PROJECT: magofeed-7f621
+        run: |
+          node -e '
+            const ex = require("./index.js");
+            const noms = Object.keys(ex);
+            if (!noms.length) { console.error("index.js n\'exporte aucune fonction."); process.exit(1); }
+            console.log(noms.length + " fonctions prêtes : " + noms.sort().join(", "));
+          '
+
       # Le JSON du compte de service vit dans un secret GitHub, jamais dans le
       # depot. On l'ecrit hors de l'arborescence du code, le temps du
       # deploiement, et le runner est detruit juste apres.
