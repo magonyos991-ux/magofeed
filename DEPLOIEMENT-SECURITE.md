@@ -48,6 +48,49 @@ depuis ta machine.
 
 C'est tout. Tu ne referas jamais ces quatre étapes.
 
+### Une seule fois aussi : donner les droits à cette clé
+
+La clé que Firebase vient de te donner sait lire et écrire dans la base, mais
+elle n'a pas encore le droit de **remplacer des fonctions**. C'est un réglage
+Google, pas Firebase, et il se fait sur une seule page.
+
+Symptôme si tu sautes cette étape — l'étape « Déployer » s'arrête sur :
+
+> `Missing permissions required for functions deploy. You must have permission`
+> `iam.serviceAccounts.ActAs on service account`
+> `magofeed-7f621@appspot.gserviceaccount.com`
+
+Comment le régler :
+
+1. Ouvre **console.cloud.google.com/iam-admin/iam?project=magofeed-7f621**
+   (c'est la console Google Cloud, le même compte que Firebase — c'est le même
+   projet vu de l'autre côté).
+2. Repère la ligne dont le nom commence par **firebase-adminsdk-** et finit par
+   **@magofeed-7f621.iam.gserviceaccount.com**. C'est ta clé.
+3. Clique sur le **crayon** au bout de sa ligne.
+4. **AJOUTER UN AUTRE RÔLE**, et ajoute ces quatre-là, un par un :
+   - **Éditeur** (*Editor*)
+   - **Utilisateur du compte de service** (*Service Account User*)
+   - **Administrateur Firebase** (*Firebase Admin*)
+   - **Administrateur Secret Manager** (*Secret Manager Admin*)
+5. **ENREGISTRER**.
+
+Pourquoi ces quatre, et pas un seul : *Éditeur* couvre les fonctions, Cloud
+Run, la construction des images et les déclencheurs. *Utilisateur du compte de
+service* est celui que l'erreur réclame : il autorise la clé à installer une
+fonction **au nom** du compte qui la fera tourner. *Administrateur Firebase*
+couvre les règles et les index. *Secret Manager* est nécessaire parce que tes
+fonctions lisent des secrets — `BREVO_API_KEY`, `ANTHROPIC_API_KEY`,
+`KOFI_JETON`, `STRIPE_CLE` — et que Firebase doit les rattacher à chaque
+fonction au moment du déploiement.
+
+**Ce que ça veut dire, honnêtement.** Cette clé devient puissante sur ton
+projet — c'est le prix d'un déploiement automatique. Elle ne vit qu'à deux
+endroits : chez Google, et dans le secret GitHub que personne ne peut relire,
+pas même toi. Si un jour tu as un doute, tu la révoques en une fois : sur la
+même page IAM, la corbeille au bout de sa ligne. Le bouton cesse de marcher,
+rien d'autre ne casse, et tu en regénères une neuve en trois minutes.
+
 ### À chaque fois : appuyer
 
 **github.com/magonyos991-ux/magofeed** → onglet **Actions** → dans la colonne
