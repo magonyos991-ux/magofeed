@@ -129,6 +129,36 @@ jobs:
         working-directory: deploiement/functions
         run: npm install --omit=dev --no-audit --no-fund
 
+      # LE PAQUET DOIT DEMARRER AVANT D'ETRE ENVOYE.
+      # La premiere tentative a echoue ici, sur une version de dependance qui
+      # n'existait pas — on l'a su en trente secondes. Mais une version qui
+      # s'installe peut tout de meme casser le code (une API renommee d'un
+      # majeur a l'autre), et ca, on ne le decouvrirait qu'en production, sur
+      # des fonctions a moitie deployees. On charge donc index.js pour de vrai :
+      # s'il ne demarre pas ici, rien ne part.
+      - name: Vérifier que le serveur démarre
+        working-directory: deploiement/functions
+        env:
+          GCLOUD_PROJECT: magofeed-7f621
+        run: |
+          # Le script passe par un HEREDOC plutot que par « node -e '...' ».
+          # La premiere version tenait dans des apostrophes, et contenait une
+          # apostrophe francaise : le shell fermait la chaine au milieu du code
+          # et sortait en erreur 2. Le deploiement a echoue sur MA syntaxe, pas
+          # sur celle du serveur. Ici, rien n'est interprete par le shell.
+          cat > verif-demarrage.cjs <<'FIN'
+          const ex = require("./index.js");
+          const noms = Object.keys(ex);
+          if (!noms.length) {
+            console.error("index.js n\u2019exporte aucune fonction.");
+            process.exit(1);
+          }
+          console.log(noms.length + " fonctions pretes :");
+          console.log(noms.sort().join(", "));
+          FIN
+          node verif-demarrage.cjs
+          rm -f verif-demarrage.cjs
+
       # Le JSON du compte de service vit dans un secret GitHub, jamais dans le
       # depot. On l'ecrit hors de l'arborescence du code, le temps du
       # deploiement, et le runner est detruit juste apres.
@@ -142,7 +172,7 @@ jobs:
           fi
           printf '%s' "$COMPTE" > "$RUNNER_TEMP/compte.json"
           node -e 'JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/compte.json","utf8"))' \
-            || { echo "::error::Le secret n'"'"'est pas un JSON valide — recopie le fichier entier, accolades comprises."; exit 1; }
+            || { echo "::error::Le secret n'est pas un JSON valide — recopie le fichier entier, accolades comprises."; exit 1; }
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/compte.json" >> "$GITHUB_ENV"
 
       - name: Déployer
