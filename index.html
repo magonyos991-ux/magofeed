@@ -6841,6 +6841,15 @@ function moveNavPill(animate){
   var nr=nav.getBoundingClientRect(),tr=on.getBoundingClientRect();
   if(!nr.width||!tr.width){pill.classList.remove("ready");return;}
   var x=(tr.left-nr.left)+tr.width/2-28;
+  /* L'axe Y se mesure sur l'onglet REEL. Le CSS centrait la pastille sur la
+     hauteur totale de la barre (top:50%) — juste tant que le padding vertical
+     etait symetrique. En natif, le bas porte la zone de la barre d'accueil :
+     la pastille glissait de la moitie de cette zone SOUS l'icone active.
+     offsetTop de l'onglet est mesure dans le meme repere que le top de la
+     pastille (le padding-box de #nav) : le centrage reste juste quel que
+     soit le padding. 22 = moitie de la hauteur CSS de la pastille (44px). */
+  pill.style.top=(on.offsetTop+on.offsetHeight/2-22)+"px";
+  pill.style.marginTop="0";
   var wasReady=pill.classList.contains("ready");
   if(animate&&wasReady){
     pill.style.transform="translateX("+x+"px) scaleX(1.32) scaleY(.84)";
@@ -13088,7 +13097,21 @@ function drinkIconHTML(d){
     }
     return drinkCanSVG(d,15);
   }
-  return '<img src="'+url+'" alt="" style="width:100%;height:100%;object-fit:contain;background:#fff;padding:7%;box-sizing:border-box;border-radius:inherit" onerror="if(this.parentNode)this.parentNode.innerHTML=window._genBottle">';
+  /* La photo se pose PAR-DESSUS la canette dessinee, jamais a sa place.
+     L'ancien <img> seul (fond blanc immediat) laissait un carre blanc vide
+     des que la photo trainait, que l'URL etait morte, ou qu'une reponse
+     opaque vide rejouee par le service worker « chargeait » sans image
+     (aucun onerror dans ce cas — d'ou le test naturalWidth). Le fond blanc
+     n'apparait qu'une fois la photo reellement affichee. */
+  var artFond=null;
+  try{ if(window.artPourBoisson)artFond=artPourBoisson(d); }catch(e){}
+  var fond=artFond
+    ?'<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:6%;box-sizing:border-box">'+artFond+'</span>'
+    :'<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">'+drinkCanSVG(d,15)+'</span>';
+  return '<span style="position:relative;display:block;width:100%;height:100%;border-radius:inherit;overflow:hidden">'+fond+
+    '<img src="'+url+'" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent;padding:7%;box-sizing:border-box;border-radius:inherit" '+
+    'onload="if(!this.naturalWidth)this.remove();else this.style.background=\'#fff\'" onerror="this.remove()">'+
+    '</span>';
 }
 /* Verification stricte du produit OpenFoodFacts avant d'accepter sa photo :
    1) la marque doit correspondre MOT POUR MOT ;
@@ -15067,6 +15090,27 @@ function toggleWatch(d){
 /* LE LANCEMENT PROPREMENT DIT, sorti de toggleWatch : la feuille « elle est
    deja la » doit pouvoir l'appeler quand la personne choisit de chercher quand
    meme. Deux copies de ce code auraient diverge au premier correctif. */
+/* « Elle m'interesse aussi » : suivre la chasse d'un autre sans en devenir
+   le chasseur. C'est une veille ordinaire (Tes alertes, marquee follow) :
+   des que la boisson est reperee pres de TOI, l'alerte in-app et la push
+   serveur « Trouvee pres de toi » partent exactement comme pour le chasseur
+   d'origine — le serveur parcourt la collection watches, pas les chasseurs.
+   On ne rejoint PAS la hunt : un suiveur ne gonfle pas le compteur de
+   chercheurs et n'ouvre pas droit aux points d'entraide. */
+function suivreChasse(id){
+  var d=(DRINKS||[]).find(function(x){return Number(x.id)===Number(id);});
+  if(!d)return;
+  var deja=(drinkWatches||[]).find(function(x){return Number(x.id)===Number(d.id)&&!x.triggered;});
+  if(deja){toast("Déjà dans tes alertes");playSound("pop");return;}
+  drinkWatches.push({id:d.id,name:d.name,emoji:d.emoji,lat:userLat||null,lng:userLng||null,created:Date.now(),triggered:false,follow:true});
+  saveWatches();
+  try{ if(window.fbSyncWatch)window.fbSyncWatch(true,d.id,d.name,userLat,userLng); }catch(e){}
+  try{ if(window.fbEnablePush&&!window._pushToken&&(!window.pushWanted||window.pushWanted()))window.fbEnablePush(userLat,userLng); }catch(e){}
+  toast("On te prévient dès qu’elle est repérée près de toi");
+  playSound("win");
+  try{renderChasse();}catch(e){}
+  try{renderAlertsCard();}catch(e){}
+}
 function lancerChasse(d){
     /* LA CHASSE PARTAIT SANS POSITION, ET PERSONNE N'ETAIT PREVENU.
        refreshLocation() est ASYNCHRONE : la ligne suivante lisait userLat
@@ -22938,6 +22982,10 @@ function renderChasse(){
   if(window.STORES&&STORES.length){
     (drinkWatches||[]).forEach(function(w){
       if(w.triggered)return;
+      /* Une veille posee via « Elle m'interesse aussi » sur la chasse d'un
+         AUTRE n'est pas ma chasse : sans ce garde, la carte basculait en
+         « C'est ta chasse » et perdait ses boutons d'aide. */
+      if(w.follow)return;
       demande[String(w.id)]={id:Number(w.id),chercheurs:1,moi:true,distKm:0,lastAt:w.created||null};
     });
   }
@@ -23035,6 +23083,14 @@ function _peindreChasse(demande){
         ?'<div class="ch-actions"><button class="ch-btn main" onclick="event.stopPropagation();chasseJeLaiVue('+d.id+',\'vue\')">'+_tr("seenInStore")+'</button><button class="ch-btn" onclick="event.stopPropagation();chasseJeLaiVue('+d.id+',\'sais\')">'+_tr("knowWhere")+'</button></div>'
         :'');
     var pill=(!x.moi&&i>0)?'<button class="ch-pill" onclick="event.stopPropagation();chasseJeLaiVue('+d.id+',\'vue\')"><b>+5</b><span class="ch-dot">·</span>'+_tr("seenShort")+' \u2192</button>':'';
+    /* La chasse d'un autre peut aussi M'interesser : suivre = etre prevenu
+       des qu'elle est reperee pres de MOI, sans devenir chasseur (compteur
+       et points d'entraide intacts). */
+    var suivie=!x.moi&&(drinkWatches||[]).some(function(w){return Number(w.id)===Number(d.id)&&w.follow&&!w.triggered;});
+    var suivre=!x.moi?(suivie
+      ?'<div class="ch-mine">Tu la veux aussi \u2014 on te pr\u00e9vient d\u00e8s qu\u2019elle est rep\u00e9r\u00e9e pr\u00e8s de toi</div>'
+      :'<button class="ch-suivre" onclick="event.stopPropagation();suivreChasse('+d.id+')">Elle m\u2019int\u00e9resse aussi \u2014 pr\u00e9viens-moi</button>')
+      :'';
     return '<div class="ch-card'+(i===0?" first":"")+'" role="button" tabindex="0" aria-label="'+attr(d.name)+' \u2014 '+attr(qui.replace(/<[^>]+>/g,""))+'" onclick="chasseOuvrir('+d.id+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();chasseOuvrir('+d.id+');}">'+
       '<div class="ch-row">'+
         '<span class="ch-thumb">'+drinkIconHTML(d)+'</span>'+
@@ -23044,7 +23100,7 @@ function _peindreChasse(demande){
           (i===0&&quand?'<span class="ch-when">'+quand+'</span>':'')+
         '</span>'+
         (i===0&&!x.moi?'<span class="ch-reward">+5 pts</span>':pill)+
-      '</div>'+actions+
+      '</div>'+actions+suivre+
     '</div>';
   }).join("");
   host.innerHTML='<div class="ch-head">'+_tr("huntHead")+'</div>'+
