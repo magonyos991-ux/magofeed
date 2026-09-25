@@ -266,7 +266,10 @@ exports.chercherCommerces = onCall(
       if (typeof s.lat !== "number") return false;
       const proche = distanceM(s.lat, s.lng, c.lat, c.lng) < 60;
       if (!proche) return false;
-      const a = normTxt(s.name), b = normTxt(c.name);
+      /* Espaces et ponctuation retires avant comparaison : « Sweet Shop » et
+         « SweetShop » sont le meme commerce — vu en production a Lille, un
+         releve manuel et un import a 14 m que ce filtre laissait passer. */
+      const a = normTxt(s.name).replace(/[^a-z0-9]/g, ""), b = normTxt(c.name).replace(/[^a-z0-9]/g, "");
       return a === b || (a.length > 3 && b.includes(a)) || (b.length > 3 && a.includes(b));
     }));
 

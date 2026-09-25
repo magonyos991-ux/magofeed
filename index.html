@@ -2212,7 +2212,11 @@ function fusionnerRayonEnseigne(stores) {
 function applyStores(stores, banner, fromCache) {
   /* Apres slimStores : inutile de fusionner le rayon de magasins qui seront
      jetes dans la foulee (la liste est plafonnee a 1400 par distance). */
-  window.STORES = fusionnerRayonEnseigne(slimStores(stores));
+  /* fusionnerDoublons AVANT le plafonnement : sans lui, le chemin principal
+     laissait passer les paires manuel/import (deux « Sweet Shop » a 14 m
+     dans « Ou l'as-tu trouve ? »), alors que la carte explore, elle,
+     dedoublonnait deja. */
+  window.STORES = fusionnerRayonEnseigne(slimStores(fusionnerDoublons(stores)));
   try{if(typeof checkWatches==="function")checkWatches();}catch(e){}
   window._fbStoresLoaded = stores;
   window._fbReady = true;
@@ -3801,10 +3805,19 @@ async function _marquerBoisson(liste, box, did) {
    Le magasin garde la liste de ses identifiants (_idsFusionnes) : c'est par
    la que « qui a cette boisson ? » retrouve la reponse, quel que soit le
    document sur lequel elle a ete enregistree. */
+/* Cle de RAPPROCHEMENT : le nom seul, durci (minuscules, accents, espaces et
+   ponctuation retires) — « Sweet Shop », « SweetShop » et « sweet-shop »
+   tombent ensemble. La position ne fait plus partie de la cle : l'ancienne
+   la gardait a 5 decimales (~1 m), et le moindre ecart de pointage entre
+   deux sources fabriquait deux magasins — vu en production a Lille, deux
+   « Sweet Shop » a 14 m, un cree dans l'app et un importe par le robot.
+   La distance se juge dans fusionnerDoublons, par amas sous 45 m. */
 function _cleLieu(o) {
-  var n = String(o.name || "").trim().toLowerCase();
+  var n = String(o.name || "").trim().toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "");
   if (!n || o.lat == null || o.lng == null) return null;
-  return n + "@" + Number(o.lat).toFixed(5) + "," + Number(o.lng).toFixed(5);
+  return n;
 }
 /* Laquelle des deux fiches en sait le plus ? Une confirmation humaine pese
    plus que tout le reste : c'est la seule donnee que personne ne peut
@@ -3847,11 +3860,28 @@ function fusionnerDoublons(list) {
   var out = [];
   for (var j = 0; j < ordre.length; j++) {
     var g = groupes[ordre[j]];
-    var garde = g[0];
-    for (var m = 1; m < g.length; m++) if (_richesseFiche(g[m]) > _richesseFiche(garde)) garde = g[m];
-    garde._idsFusionnes = [String(garde.fbId || garde.id)];
-    for (var n = 0; n < g.length; n++) if (g[n] !== garde) _absorber(garde, g[n]);
-    out.push(garde);
+    /* Meme nom ne suffit pas : deux « Carrefour Express » aux deux bouts de
+       la ville sont bien deux magasins. On agrege de proche en proche sous
+       45 m — au-dela, chaque amas garde sa fiche. */
+    var amas = [];
+    for (var m = 0; m < g.length; m++) {
+      var s2 = g[m], place = null;
+      for (var a = 0; a < amas.length && !place; a++) {
+        for (var b = 0; b < amas[a].length; b++) {
+          var t = amas[a][b];
+          var dLa = (s2.lat - t.lat) * 111000, dLo = (s2.lng - t.lng) * 111000 * Math.cos(t.lat * Math.PI / 180);
+          if (Math.sqrt(dLa * dLa + dLo * dLo) < 45) { place = amas[a]; break; }
+        }
+      }
+      if (place) place.push(s2); else amas.push([s2]);
+    }
+    for (var q = 0; q < amas.length; q++) {
+      var gr = amas[q], garde = gr[0];
+      for (var m2 = 1; m2 < gr.length; m2++) if (_richesseFiche(gr[m2]) > _richesseFiche(garde)) garde = gr[m2];
+      garde._idsFusionnes = [String(garde.fbId || garde.id)];
+      for (var n2 = 0; n2 < gr.length; n2++) if (gr[n2] !== garde) _absorber(garde, gr[n2]);
+      out.push(garde);
+    }
   }
   return out.concat(hors);
 }
@@ -6746,6 +6776,39 @@ function refreshLocation(cb,opts){
   // VRAIE lecture capteur — sinon le navigateur ressert le meme point en cache.
   {enableHighAccuracy:true,timeout:8000,maximumAge:(opts&&opts.fresh)?0:15000});
 }
+/* ── LA POSITION SUIT LES DEPLACEMENTS ─────────────────────────────────────
+   Vu sur la route : app ouverte a Lille, trente minutes d'autoroute, retour
+   au premier plan sur une aire — l'app affichait toujours Lille (magasins,
+   « pres de toi », carte), jusqu'a etre TUEE puis relancee. La position
+   n'etait lue qu'au demarrage a froid : aucun retour au premier plan ne
+   re-geolocalisait, et le cache magoLastPos resservait l'ancien point. Ici,
+   a chaque retour (onglet redevenu visible, page ressortie du cache, app
+   native reactivee), on relit le capteur en silence — refreshLocation
+   refait tout le reste : distances, magasins de la zone, rendus, position
+   push cote serveur. Garde-fous : au plus une fois toutes les 15 s, jamais
+   pendant une navigation (elle a son propre suivi), et jamais au point de
+   declencher la fenetre de permission iOS hors d'un geste — on ne relit que
+   si la permission est deja accordee ou qu'une position existe deja. */
+var _fgRelocT=0;
+function _fgRelocate(){
+  if(Date.now()-_fgRelocT<15000)return;
+  _fgRelocT=Date.now();
+  if(window._navWatchId!=null)return;
+  geoEtat(function(etat){
+    if(etat!=="granted"&&!(typeof userLat==="number"&&userLat))return;
+    refreshLocation(null,{fresh:true});
+  });
+}
+document.addEventListener("visibilitychange",function(){
+  if(document.visibilityState==="visible")_fgRelocate();
+});
+window.addEventListener("pageshow",function(e){ if(e&&e.persisted)_fgRelocate(); });
+try{
+  if(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform()&&
+     Capacitor.Plugins&&Capacitor.Plugins.App){
+    Capacitor.Plugins.App.addListener("appStateChange",function(st){ if(st&&st.isActive)_fgRelocate(); });
+  }
+}catch(e){}
 
 /* ================================
    NAVIGATION
@@ -19005,7 +19068,7 @@ function osmAnalyze(){
             if(typeof s.lat!=="number")return false;
             var dLa=(s.lat-c.lat)*111000,dLo=(s.lng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
             var dist=Math.sqrt(dLa*dLa+dLo*dLo);
-            return dist<60&&(normTxt(s.name)===normTxt(c.name)||fuzzyIncludes(c.name,s.name)||fuzzyIncludes(s.name,c.name));
+            return dist<60&&(normTxt(s.name).replace(/[^a-z0-9]/g,"")===normTxt(c.name).replace(/[^a-z0-9]/g,"")||fuzzyIncludes(c.name,s.name)||fuzzyIncludes(s.name,c.name));
           });
         });
         osmCandidates=news;
@@ -19207,7 +19270,7 @@ function autoImportZone(cLat,cLng){
             if(memeMagasinOsm(s,c))return true;
             if(typeof s.lat!=="number")return false;
             var dLa=(s.lat-c.lat)*111000,dLo=(s.lng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
-            return Math.sqrt(dLa*dLa+dLo*dLo)<60&&(normTxt(s.name)===normTxt(c.name)||fuzzyIncludes(c.name,s.name)||fuzzyIncludes(s.name,c.name));
+            return Math.sqrt(dLa*dLa+dLo*dLo)<60&&(normTxt(s.name).replace(/[^a-z0-9]/g,"")===normTxt(c.name).replace(/[^a-z0-9]/g,"")||fuzzyIncludes(c.name,s.name)||fuzzyIncludes(s.name,c.name));
           });
         }).slice(0,150);
         if(!news.length){_relaisMonde(found.length);return;}
@@ -19321,7 +19384,7 @@ function autoOsmForArea(lat,lng,zoom){
             if(typeof s.lat!=="number")return false;
             var dLa=(s.lat-c.lat)*111000,dLo=(s.lng-c.lng)*111000*Math.cos(c.lat*Math.PI/180);
             var dist=Math.sqrt(dLa*dLa+dLo*dLo);
-            return dist<60&&(normTxt(s.name)===normTxt(c.name)||fuzzyIncludes(c.name,s.name)||fuzzyIncludes(s.name,c.name));
+            return dist<60&&(normTxt(s.name).replace(/[^a-z0-9]/g,"")===normTxt(c.name).replace(/[^a-z0-9]/g,"")||fuzzyIncludes(c.name,s.name)||fuzzyIncludes(s.name,c.name));
           });
         });
         if(!news.length){_autoOsmBusy=false;return;}
