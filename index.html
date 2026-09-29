@@ -2527,13 +2527,20 @@ window.fbSetCatalogBarcodes = async function(drinkId, barcodes) {
 window.fbProposerCodeChasse = async function(drinkId, drinkName, barcode) {
   var user = await ensureAuthed();
   if (user.isAnonymous) throw new Error("compte requis");
-  var ref = doc(db, "chasseCodes", String(barcode));
+  /* Le nom du document est le code sous la forme que l'app compare partout
+     (codeNu : chiffres, sans zeros de tete). Selon le decodeur, le meme UPC-A
+     arrive en 12 ou en 13 chiffres : ecrit tel quel, il ouvrait deux chasses
+     dont les confirmations ne s'additionnaient jamais. Les regles refusent
+     desormais toute autre forme. */
+  var code = String(barcode == null ? "" : barcode).replace(/\D/g, "").replace(/^0+/, "");
+  if (!code) throw new Error("code illisible");
+  var ref = doc(db, "chasseCodes", code);
   var snap = await getDoc(ref);
   if (!snap.exists()) {
     await setDoc(ref, {
       drinkId: Number(drinkId) || drinkId,
       drinkName: String(drinkName).slice(0, 60),
-      barcode: String(barcode),
+      barcode: code,
       par: [user.uid],
       etat: "attente",
       createdAt: serverTimestamp()
@@ -2542,7 +2549,10 @@ window.fbProposerCodeChasse = async function(drinkId, drinkName, barcode) {
   }
   var d = snap.data() || {};
   var par = Array.isArray(d.par) ? d.par : [];
-  if (d.etat !== "attente") return { nb: par.length, deja: true, pose: true };
+  /* Seul « pose » veut dire pose. Un document classe sans suite (code deja
+     porte par une autre fiche, fiche disparue) n'a rien pose : l'annoncer
+     « pour tout le monde » mentait. */
+  if (d.etat !== "attente") return { nb: par.length, deja: true, pose: d.etat === "pose" };
   if (par.indexOf(user.uid) !== -1) return { nb: par.length, deja: true };
   /* On envoie la liste complete plutot qu'un arrayUnion : les regles exigent
      exactement « l'ancienne liste + moi », ce qui rend impossible d'ajouter

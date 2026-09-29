@@ -9,19 +9,25 @@
      - index.html:23294  renderChasseCodes()      la liste affichee a Alice
      - index.html:23375  boissonsOrphelines()     qui entre dans la chasse
      - index.html:23351  proposerChasse()         l'ecran « Oui, c'est bien elle »
-     - index.html:2504   window.fbProposerCodeChasse()   l'ecriture, telle quelle
-     - index.html:2529   window.fbChargerChasseCodes()   la lecture, telle quelle
+     - window.fbProposerCodeChasse()   l'ecriture, DECOUPEE dans index.html
+     - window.fbChargerChasseCodes()   la lecture, DECOUPEE dans index.html
      - index.html:9474   validGTIN()              la cle de controle GS1
      - index.html:23451  renderFichesSansCode()   le chemin ADMIN, pour comparer
      - index.html:2493   window.fbSetCatalogBarcodes()   ecriture catalogue
      - functions-a-deployer/chasse-codes.js       la Cloud Function poserCodeChasse
-     - functions-a-deployer/firestore.rules:1254  match /chasseCodes/{barcode}
+     - functions-a-deployer/firestore.rules       match /chasseCodes/{barcode}
 
-   Le banc n'execute pas les Cloud Functions : poserCodeChasse() est donc
-   recopiee ici a l'identique (meme ordre, memes champs, meme verrou) et jouee
-   avec l'Admin SDK, exactement comme en production.
+   Le banc n'execute pas les Cloud Functions. poserCodeChasse() etait donc
+   recopiee ici « a l'identique » — et une copie ne teste qu'elle-meme : le
+   jour ou la fonction a change, la copie aurait continue de raconter
+   l'ancienne. Elle est desormais chargee TELLE QU'ELLE EST LIVREE, avec des
+   doublures de l'Admin SDK branchees sur l'emulateur (../fonction-serveur.mjs).
+   Meme chose pour les deux fonctions du client : on les decoupe dans
+   index.html au lieu de les recopier.
 ============================================================================ */
+import { readFileSync } from "node:fs";
 import { banc, doit, doitEchouer, note, bilan } from "../banc.mjs";
+import { fonctionServeur, compte } from "../fonction-serveur.mjs";
 import { doc, setDoc, updateDoc, getDoc, getDocs, collection, query, where,
          serverTimestamp, increment, deleteDoc } from "firebase/firestore";
 
@@ -29,6 +35,9 @@ const env  = await banc("chasse-codes-barres");
 const alice   = env.authenticatedContext("alice").firestore();
 const bob     = env.authenticatedContext("bob").firestore();
 const carl    = env.authenticatedContext("carl").firestore();
+/* Dan et Eve : de vrais comptes e-mail, mais crees aujourd'hui. */
+const dan     = env.authenticatedContext("dan").firestore();
+const eve     = env.authenticatedContext("eve").firestore();
 const anon    = env.unauthenticatedContext().firestore();
 /* Un compte ANONYME : c'est ce que l'app cree toute seule a la premiere
    ouverture, sans e-mail ni mot de passe (auth anonyme). fbProposerCodeChasse
@@ -52,6 +61,12 @@ const admin = async (fn) => {
 const ID_A = 1700000000001;  // orpheline : « Cusa Cola Zero »
 const ID_B = 1700000000002;  // orpheline : « Cusa Cola Cherry »
 const ID_C = 1700000000003;  // fiche complete : « Fritz-Kola », code deja pose
+/* Des orphelines de plus : une fiche qui recoit son code sort de la chasse, et
+   les regles refusent desormais d'en viser une qui a deja le sien. */
+const ID_D = 1700000000004;  // orpheline : « Cusa Cola Lime »
+const ID_E = 1700000000005;  // orpheline : « Club-Mate Granatapfel »
+const ID_F = 1700000000006;  // orpheline : « Mountain Dew Baja Blast » (UPC-A)
+const ID_G = 1700000000007;  // orpheline : « Jarritos Mandarina » (documents herites)
 
 const CODE_A     = "5449000000996";  // cle GS1 valide
 const CODE_B     = "5000112637922";  // cle GS1 valide
@@ -74,75 +89,57 @@ await admin(async (db) => {
   await setDoc(doc(db, "catalog", String(ID_A)), { id: ID_A, name: "Cusa Cola Zero",   brand: "Cusa", cat: "Soda", createdAt: serverTimestamp() });
   await setDoc(doc(db, "catalog", String(ID_B)), { id: ID_B, name: "Cusa Cola Cherry", brand: "Cusa", cat: "Soda", createdAt: serverTimestamp() });
   await setDoc(doc(db, "catalog", String(ID_C)), { id: ID_C, name: "Fritz-Kola",       brand: "Fritz", cat: "Soda", barcodes: [CODE_C], createdAt: serverTimestamp() });
+  await setDoc(doc(db, "catalog", String(ID_D)), { id: ID_D, name: "Cusa Cola Lime",   brand: "Cusa", cat: "Soda", createdAt: serverTimestamp() });
+  await setDoc(doc(db, "catalog", String(ID_E)), { id: ID_E, name: "Club-Mate Granatapfel", brand: "Club-Mate", cat: "Soda", barcodes: [], createdAt: serverTimestamp() });
+  await setDoc(doc(db, "catalog", String(ID_F)), { id: ID_F, name: "Mountain Dew Baja Blast", brand: "Mountain Dew", cat: "Soda", createdAt: serverTimestamp() });
+  await setDoc(doc(db, "catalog", String(ID_G)), { id: ID_G, name: "Jarritos Mandarina", brand: "Jarritos", cat: "Soda", createdAt: serverTimestamp() });
 });
 
-/* ── window.fbProposerCodeChasse — index.html:2504, recopiee a l'identique ── */
+/* ── Les deux fonctions du client, DECOUPEES dans index.html ────────────────
+   Pour seules doublures : le compte connecte (ensureAuthed) et la base de la
+   personne. Le compte n'est jamais dit anonyme ici : c'est la garde du CLIENT
+   (« compte requis »), et ce scenario veut savoir ce que disent les REGLES
+   quand on la contourne. */
+const SOURCE_APP = readFileSync(new URL("../../../index.html", import.meta.url), "utf8");
+function morceau(depart, fin) {
+  const a = SOURCE_APP.indexOf(depart);
+  if (a === -1) throw new Error("introuvable dans index.html : " + depart);
+  const b = SOURCE_APP.indexOf(fin, a);
+  if (b === -1) throw new Error("fin introuvable apres : " + depart);
+  return SOURCE_APP.slice(a, b + fin.length);
+}
+const fabriquerClient = new Function(
+  "window", "ensureAuthed", "db", "doc", "getDoc", "setDoc", "updateDoc", "getDocs",
+  "query", "collection", "where", "serverTimestamp",
+  morceau("window.fbProposerCodeChasse = async function", "\n};") + "\n" +
+  morceau("window.fbChargerChasseCodes = async function", "\n};") + "\n" +
+  "return window;");
+const client = (db, uid) => fabriquerClient({}, async () => ({ uid, isAnonymous: false }), db,
+  doc, getDoc, setDoc, updateDoc, getDocs, query, collection, where, serverTimestamp);
 async function fbProposerCodeChasse(db, uid, drinkId, drinkName, barcode) {
-  var ref = doc(db, "chasseCodes", String(barcode));
-  var snap = await getDoc(ref);
-  if (!snap.exists()) {
-    await setDoc(ref, {
-      drinkId: Number(drinkId) || drinkId,
-      drinkName: String(drinkName).slice(0, 60),
-      barcode: String(barcode),
-      par: [uid],
-      etat: "attente",
-      createdAt: serverTimestamp()
-    });
-    return { nb: 1, deja: false };
-  }
-  var d = snap.data() || {};
-  var par = Array.isArray(d.par) ? d.par : [];
-  if (d.etat !== "attente") return { nb: par.length, deja: true, pose: true };
-  if (par.indexOf(uid) !== -1) return { nb: par.length, deja: true };
-  await updateDoc(ref, { par: par.concat([uid]) });
-  return { nb: par.length + 1, deja: false };
+  return client(db, uid).fbProposerCodeChasse(drinkId, drinkName, barcode);
 }
-
-/* ── window.fbChargerChasseCodes — index.html:2529, recopiee a l'identique ── */
 async function fbChargerChasseCodes(db) {
-  var snap = await getDocs(query(collection(db, "chasseCodes"), where("etat", "==", "attente")));
-  var out = {};
-  snap.forEach(function (d) {
-    var v = d.data() || {};
-    out[String(v.barcode || d.id)] = { drinkId: v.drinkId, nb: (v.par || []).length };
-  });
-  return out;
+  return client(db, "lecteur").fbChargerChasseCodes();
 }
 
-/* ── functions-a-deployer/chasse-codes.js — poserCodeChasse, a l'identique ──
-   Meme seuil (2), memes points (5), meme verrou 'attente' -> 'pose', meme
-   ordre : verrou, fiche, codes, points. */
-const CONFIRMATIONS_REQUISES = 2;
-const POINTS_PAR_CONFIRMANT  = 5;
+/* ── functions-a-deployer/chasse-codes.js — LA fonction, pas une copie ──────
+   Alice, Bob et Carl sont des habitues (comptes e-mail d'un mois). Dan et Eve
+   ont cree leur compte aujourd'hui. Les fantomes sont des comptes anonymes. */
+const POINTS_PAR_CONFIRMANT = 5;
+const serveur = fonctionServeur(env, new URL("../../chasse-codes.js", import.meta.url), {
+  comptes: {
+    alice: compte("alice"), bob: compte("bob"), carl: compte("carl"),
+    dan: compte("dan", { jours: 1 }), eve: compte("eve", { jours: 1 }),
+    fantome1: compte("fantome1", { anonyme: true }), fantome2: compte("fantome2", { anonyme: true }),
+  },
+});
+/* Rejoue le declenchement sur le document tel qu'il est, et rend son etat
+   d'arrivee : « pose », « attente », « sans-suite », ou « absent ». */
 async function poserCodeChasse(barcodeDocId) {
-  return admin(async (db) => {
-    const ref = doc(db, "chasseCodes", String(barcodeDocId));
-    const s = await getDoc(ref);
-    if (!s.exists()) return "supprime";
-    const d = s.data() || {};
-    if (d.etat !== "attente") return "deja-traite";
-    const par = Array.isArray(d.par) ? d.par : [];
-    if (par.length < CONFIRMATIONS_REQUISES) return "pas-assez";
-    const code = String(d.barcode || barcodeDocId || "");
-    const drinkId = String(d.drinkId || "");
-    if (!code || !drinkId) return "document-incomplet";
-    await updateDoc(ref, { etat: "pose", poseLe: serverTimestamp() });   // le verrou
-    const fiche = await getDoc(doc(db, "catalog", drinkId));
-    if (!fiche.exists()) {
-      await updateDoc(ref, { etat: "sans-suite", raison: "fiche-absente" });
-      return "sans-suite";
-    }
-    const codes = (fiche.data() || {}).barcodes || [];
-    if (codes.indexOf(code) === -1) {
-      await setDoc(doc(db, "catalog", drinkId),
-        { barcodes: codes.concat([code]), updatedAt: serverTimestamp() }, { merge: true });
-    }
-    for (const uid of par) {
-      await setDoc(doc(db, "users", String(uid)), { pts: increment(POINTS_PAR_CONFIRMANT) }, { merge: true });
-    }
-    return "pose";
-  });
+  await serveur.declencher("poserCodeChasse", "chasseCodes/" + barcodeDocId);
+  const d = await admin(async (db) => { const s = await getDoc(doc(db, "chasseCodes", String(barcodeDocId))); return s.exists() ? s.data() : null; });
+  return d ? d.etat + (d.raison ? " (" + d.raison + ")" : "") : "absent";
 }
 
 const lireCatalogue = (id) => admin(async (db) => (await getDoc(doc(db, "catalog", String(id)))).data() || {});
@@ -229,8 +226,12 @@ note("4. validGTIN(\"" + CODE_TEXTE + "\") = " + validGTIN(CODE_TEXTE) + "  (ind
 await doitEchouer("4. les regles refusent un code dont la cle de controle GS1 est fausse", async () => {
   await fbProposerCodeChasse(bob, "bob", ID_B, "Cusa Cola Cherry", CODE_FAUX);
 });
+/* Le client, lui, ne fabrique plus ce document (codeNu ne laisse rien de
+   « PAS-UN-CODE ») : on l'ecrit donc a la main, garde client contournee. */
 await doitEchouer("4. les regles refusent un « code » qui n'est meme pas une suite de chiffres", async () => {
-  await fbProposerCodeChasse(carl, "carl", ID_B, "Cusa Cola Cherry", CODE_TEXTE);
+  await setDoc(doc(carl, "chasseCodes", CODE_TEXTE), {
+    drinkId: ID_B, drinkName: "Cusa Cola Cherry", barcode: CODE_TEXTE,
+    par: ["carl"], etat: "attente", createdAt: serverTimestamp() });
 });
 await doit("4. consequence : ce qui a ete accepte ci-dessus atteint 2 confirmations et part au catalogue", async () => {
   await fbProposerCodeChasse(alice, "alice", ID_B, "Cusa Cola Cherry", CODE_TEXTE).catch(() => {});
@@ -243,11 +244,13 @@ await doit("4. consequence : ce qui a ete accepte ci-dessus atteint 2 confirmati
 
 /* ═══ 5. LE MEME CODE POUR DEUX BOISSONS / UN CODE VOLE ══════════════════ */
 
-/* Alice se trompe de variante et propose CODE_B pour la Zero.
+/* Alice se trompe de variante et propose CODE_B pour la Lime.
    Bob, lui, a la Cherry en main : le scan la reconnait (proposerChasse,
-   index.html:23351) et il repond « Oui, c'est bien elle ». */
-await doit("5. Alice propose CODE_B pour « Cusa Cola Zero » (elle s'est trompee de variante)", async () => {
-  const r = await fbProposerCodeChasse(alice, "alice", ID_A, "Cusa Cola Zero", CODE_B);
+   index.html:23351) et il repond « Oui, c'est bien elle ».
+   (La Zero a recu son code au 3 : elle n'est plus dans la chasse, et les
+   regles refusent desormais qu'on la vise.) */
+await doit("5. Alice propose CODE_B pour « Cusa Cola Lime » (elle s'est trompee de variante)", async () => {
+  const r = await fbProposerCodeChasse(alice, "alice", ID_D, "Cusa Cola Lime", CODE_B);
   if (r.nb !== 1) throw new Error("nb attendu 1, recu " + r.nb);
 });
 await doit("5. Bob a la CHERRY en main et repond « Oui, c'est bien elle » : l'app lui dit que c'est note", async () => {
@@ -265,23 +268,23 @@ await doit("5. la confirmation de Bob pour la CHERRY doit viser la CHERRY", asyn
 await doit("5. et le code doit finir sur la CHERRY, pas ailleurs", async () => {
   await poserCodeChasse(CODE_B);
   const cherry = await lireCatalogue(ID_B);
-  const zero   = await lireCatalogue(ID_A);
+  const lime   = await lireCatalogue(ID_D);
   note("5. -> catalog/" + ID_B + " (Cherry).barcodes = " + JSON.stringify(cherry.barcodes || []) +
-       " ; catalog/" + ID_A + " (Zero).barcodes = " + JSON.stringify(zero.barcodes || []));
+       " ; catalog/" + ID_D + " (Lime).barcodes = " + JSON.stringify(lime.barcodes || []));
   if (!(cherry.barcodes || []).includes(CODE_B))
-    throw new Error("CODE_B a ete pose sur « " + (zero.name || "?") + " » alors que Bob confirmait la Cherry");
+    throw new Error("CODE_B a ete pose sur « " + (lime.name || "?") + " » alors que Bob confirmait la Cherry");
 });
 
 /* Le vol : CODE_C appartient DEJA a « Fritz-Kola » (fiche C, complete).
    Le chemin ADMIN refuse ce cas (index.html:23451 : « Ce code est deja sur
    ... »). Le chemin communautaire, lui ? */
-await doit("5. deux personnes proposent CODE_C — deja porte par « Fritz-Kola » — pour la Zero", async () => {
-  await fbProposerCodeChasse(bob, "bob", ID_A, "Cusa Cola Zero", CODE_C);
-  const r = await fbProposerCodeChasse(carl, "carl", ID_A, "Cusa Cola Zero", CODE_C);
+await doit("5. deux personnes proposent CODE_C — deja porte par « Fritz-Kola » — pour la Cherry", async () => {
+  await fbProposerCodeChasse(bob, "bob", ID_B, "Cusa Cola Cherry", CODE_C);
+  const r = await fbProposerCodeChasse(carl, "carl", ID_B, "Cusa Cola Cherry", CODE_C);
   if (r.nb !== 2) throw new Error("nb attendu 2, recu " + r.nb);
 });
 await doit("5. apres la pose, UN SEUL produit du catalogue porte CODE_C (sinon le scan est un tirage au sort)", async () => {
-  await poserCodeChasse(CODE_C);
+  note("5. -> poserCodeChasse(CODE_C) : « " + (await poserCodeChasse(CODE_C)) + " »");
   const porteurs = await admin(async (db) => {
     const snap = await getDocs(collection(db, "catalog"));
     const out = [];
@@ -304,7 +307,7 @@ await doitEchouer("5. les regles exigent que le nom du document soit le code (co
 await doit("5. consequence : deux documents ne peuvent pas viser le MEME code pour deux boissons", async () => {
   /* Bob, lui, passe par l'app : elle ecrit sous le nom = le code. Les deux
      documents coexistent, chacun avec sa boisson, chacun avec son compteur. */
-  await fbProposerCodeChasse(bob, "bob", ID_A, "Cusa Cola Zero", "5449000054197").catch(() => {});
+  await fbProposerCodeChasse(bob, "bob", ID_B, "Cusa Cola Cherry", "5449000054197").catch(() => {});
   const vus = await admin(async (db) => {
     const snap = await getDocs(collection(db, "chasseCodes"));
     const out = [];
@@ -357,10 +360,12 @@ note("6. la liste des confirmants est infalsifiable : seul « l'ancienne liste +
 await doitEchouer("B. un compte ANONYME ne devrait pas pouvoir proposer un code (client : « compte requis »)", async () => {
   await fbProposerCodeChasse(fantome1, "fantome1", ID_B, "Cusa Cola Cherry", "90311017");
 });
+/* Avec un VRAI compte : un anonyme serait refuse pour une autre raison, et le
+   test ne dirait rien de la fiche visee. */
 await doitEchouer("B. les regles devraient exiger que la boisson visee soit une fiche SANS code (boissonsOrphelines, index.html:23375)", async () => {
-  await setDoc(doc(fantome1, "chasseCodes", "5449000054227"), {
+  await setDoc(doc(carl, "chasseCodes", "5449000054227"), {
     drinkId: ID_C, drinkName: "Fritz-Kola", barcode: "5449000054227",
-    par: ["fantome1"], etat: "attente", createdAt: serverTimestamp() });
+    par: ["carl"], etat: "attente", createdAt: serverTimestamp() });
 });
 await doit("B. consequence : deux comptes anonymes du meme telephone suffisent a poser un code sur une fiche deja complete", async () => {
   await fbProposerCodeChasse(fantome2, "fantome2", ID_C, "Fritz-Kola", "5449000054227").catch(() => {});
@@ -370,6 +375,73 @@ await doit("B. consequence : deux comptes anonymes du meme telephone suffisent a
   note("B. -> points verses aux deux comptes anonymes : fantome1=" + (await lirePoints("fantome1")) + " fantome2=" + (await lirePoints("fantome2")));
   if ((fiche.barcodes || []).includes("5449000054227"))
     throw new Error("un code etranger a ete ajoute a « Fritz-Kola » par deux comptes anonymes");
+});
+
+/* ═══ C. CE QUE LA FONCTION VERIFIE, ELLE ════════════════════════════════
+   Les regles ne connaissent ni l'age d'un compte, ni le reste du catalogue, ni
+   les documents ecrits avant elles. poserCodeChasse, si. */
+
+const CODE_E = "4029764001807";   // « Club-Mate Granatapfel »
+await doit("C. deux VRAIS comptes crees aujourd'hui ne suffisent pas : la chasse reste ouverte", async () => {
+  await fbProposerCodeChasse(dan, "dan", ID_E, "Club-Mate Granatapfel", CODE_E);
+  const r = await fbProposerCodeChasse(eve, "eve", ID_E, "Club-Mate Granatapfel", CODE_E);
+  if (r.nb !== 2) throw new Error("nb attendu 2, recu " + r.nb);
+  const etat = await poserCodeChasse(CODE_E);
+  if (etat !== "attente") throw new Error("la chasse devait rester ouverte, etat « " + etat + " »");
+  if (((await lireCatalogue(ID_E)).barcodes || []).length) throw new Error("un code a ete pose sur la parole de deux comptes du jour");
+  if (await lirePoints("dan") || await lirePoints("eve")) throw new Error("des points ont ete verses");
+});
+await doit("C. un habitue confirme a son tour : le code est pose, et les trois sont payes", async () => {
+  const avant = await lirePoints("alice");
+  const r = await fbProposerCodeChasse(alice, "alice", ID_E, "Club-Mate Granatapfel", CODE_E);
+  if (r.nb !== 3) throw new Error("nb attendu 3, recu " + r.nb);
+  const etat = await poserCodeChasse(CODE_E);
+  if (etat !== "pose") throw new Error("etat « " + etat + " »");
+  if (!((await lireCatalogue(ID_E)).barcodes || []).includes(CODE_E)) throw new Error("code absent de la fiche");
+  if (await lirePoints("alice") !== avant + POINTS_PAR_CONFIRMANT) throw new Error("Alice n'a pas ses points");
+  if (await lirePoints("dan") !== POINTS_PAR_CONFIRMANT || await lirePoints("eve") !== POINTS_PAR_CONFIRMANT)
+    throw new Error("Dan et Eve, qui ont bien confirme, ne sont pas payes");
+});
+
+/* Le meme UPC-A, lu en 12 chiffres par un telephone et en 13 par l'autre. */
+await doit("C. un UPC-A lu en 12 chiffres et le meme lu en 13 rejoignent la MEME chasse", async () => {
+  await fbProposerCodeChasse(bob, "bob", ID_F, "Mountain Dew Baja Blast", "049000028911");
+  const r = await fbProposerCodeChasse(carl, "carl", ID_F, "Mountain Dew Baja Blast", "0049000028911");
+  if (r.nb !== 2) throw new Error("deux chasses separees : la deuxieme lecture compte " + r.nb);
+});
+await doit("C. ... et le code pose sur la fiche est la forme EAN-13 complete", async () => {
+  const etat = await poserCodeChasse("49000028911");
+  if (etat !== "pose") throw new Error("etat « " + etat + " »");
+  const codes = (await lireCatalogue(ID_F)).barcodes || [];
+  note("C. -> catalog/" + ID_F + " (Baja Blast).barcodes = " + JSON.stringify(codes));
+  if (codes.length !== 1 || codes[0] !== "0049000028911") throw new Error("recu " + JSON.stringify(codes));
+});
+
+/* Des documents ecrits AVANT les regles d'aujourd'hui, tels qu'ils peuvent
+   encore dormir en production. L'Admin SDK les ecrit ici, puisque les regles
+   ne le permettent plus. */
+await admin(async (db) => {
+  await setDoc(doc(db, "chasseCodes", "8437019462024"), { drinkId: ID_G, drinkName: "Jarritos Mandarina",
+    barcode: "8437019462024", par: ["fantome1", "fantome2", "bob"], etat: "attente", createdAt: serverTimestamp() });
+  await setDoc(doc(db, "chasseCodes", "4062139001149"), { drinkId: ID_G, drinkName: "Jarritos Mandarina",
+    barcode: "5449000000996", par: ["alice", "bob"], etat: "attente", createdAt: serverTimestamp() });
+  await setDoc(doc(db, "chasseCodes", "PAS-UN-CODE"), { drinkId: ID_G, drinkName: "Jarritos Mandarina",
+    barcode: "PAS-UN-CODE", par: ["alice", "bob"], etat: "attente", createdAt: serverTimestamp() });
+});
+await doit("C. document herite : deux fantomes et un habitue ne font pas deux personnes", async () => {
+  const etat = await poserCodeChasse("8437019462024");
+  if (etat !== "attente") throw new Error("etat « " + etat + " »");
+  if (((await lireCatalogue(ID_G)).barcodes || []).length) throw new Error("code pose");
+});
+await doit("C. document herite dont le champ barcode n'est pas son nom : classe sans suite", async () => {
+  const etat = await poserCodeChasse("4062139001149");
+  if (etat !== "sans-suite (code-incoherent)") throw new Error("etat « " + etat + " »");
+});
+await doit("C. document herite au « code » sans cle de controle : classe sans suite", async () => {
+  const etat = await poserCodeChasse("PAS-UN-CODE");
+  if (etat !== "sans-suite (code-invalide)") throw new Error("etat « " + etat + " »");
+  if (((await lireCatalogue(ID_G)).barcodes || []).length) throw new Error("code pose");
+  if (await lirePoints("fantome1") || await lirePoints("fantome2")) throw new Error("des fantomes ont ete payes");
 });
 
 await bilan(env);

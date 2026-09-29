@@ -366,6 +366,16 @@ await doit('legitime : Alice lit son propre soutien',
    sont donc celles qu'il faut le plus attaquer. Ce qu'on verifie ici, c'est
    qu'on ne peut ni se compter deux fois, ni ajouter quelqu'un d'autre, ni
    detourner un lien vers une autre boisson une fois les confirmations reunies. */
+/* La chasse ne vise que des fiches du catalogue qui n'ont encore aucun code. */
+await env.withSecurityRulesDisabled(async (c)=>{
+  const db=c.firestore();
+  await setDoc(doc(db,'catalog','1783615414484'),{name:'Golden Power',barcodes:[]});
+  await setDoc(doc(db,'catalog','1700000000556'),{name:'Mountain Dew Baja Blast'});
+  await setDoc(doc(db,'catalog','1700000000555'),{name:'Fritz-Kola',barcodes:['3068320123264']});
+});
+/* Le compte que l'app cree toute seule a la premiere ouverture. */
+const fantome = env.authenticatedContext('fantome1',
+  {firebase:{sign_in_provider:'anonymous',identities:{}}}).firestore();
 await doit('legitime : Alice propose un code pour une boisson orpheline',
   ()=>assertSucceeds(setDoc(doc(a,'chasseCodes','5000112637939'),
       {drinkId:1783615414484,drinkName:'Golden Power',barcode:'5000112637939',
@@ -394,6 +404,44 @@ await doit('bloque : un anonyme confirme un code',
       {par:[ALICE,MALLORY,'anon']})));
 await doit('legitime : tout le monde peut LIRE la chasse (sans compte)',
   ()=>assertSucceeds(getDoc(doc(anon,'chasseCodes','5000112637939'))));
+/* Ce que le rejeu de la chasse sur l'emulateur a trouve (scenarios/
+   chasse-codes-barres.mjs) : les regles laissaient passer ce que le client,
+   lui, refusait. */
+await doit('bloque : un compte anonyme propose un code',
+  ()=>assertFails(setDoc(doc(fantome,'chasseCodes','5449000000996'),
+      {drinkId:1783615414484,drinkName:'Golden Power',barcode:'5449000000996',
+       par:['fantome1'],etat:'attente',createdAt:serverTimestamp()})));
+await doit('bloque : un compte anonyme confirme un code',
+  ()=>assertFails(updateDoc(doc(fantome,'chasseCodes','5000112637939'),
+      {par:[ALICE,MALLORY,'fantome1']})));
+await doit('bloque : le champ barcode differe du nom du document',
+  ()=>assertFails(setDoc(doc(m,'chasseCodes','4062139001132'),
+      {drinkId:1783615414484,drinkName:'Golden Power',barcode:'5449000000996',
+       par:[MALLORY],etat:'attente',createdAt:serverTimestamp()})));
+await doit('bloque : un nom de document a zeros de tete (le meme code ouvrirait deux chasses)',
+  ()=>assertFails(setDoc(doc(m,'chasseCodes','0049000028911'),
+      {drinkId:1700000000556,drinkName:'Mountain Dew Baja Blast',barcode:'0049000028911',
+       par:[MALLORY],etat:'attente',createdAt:serverTimestamp()})));
+await doit('bloque : un code dont la cle de controle GS1 est fausse',
+  ()=>assertFails(setDoc(doc(m,'chasseCodes','5449000000997'),
+      {drinkId:1783615414484,drinkName:'Golden Power',barcode:'5449000000997',
+       par:[MALLORY],etat:'attente',createdAt:serverTimestamp()})));
+await doit('bloque : un code qui n est pas une suite de chiffres',
+  ()=>assertFails(setDoc(doc(m,'chasseCodes','PAS-UN-CODE'),
+      {drinkId:1783615414484,drinkName:'Golden Power',barcode:'PAS-UN-CODE',
+       par:[MALLORY],etat:'attente',createdAt:serverTimestamp()})));
+await doit('bloque : viser une fiche qui a deja son code',
+  ()=>assertFails(setDoc(doc(m,'chasseCodes','5449000054227'),
+      {drinkId:1700000000555,drinkName:'Fritz-Kola',barcode:'5449000054227',
+       par:[MALLORY],etat:'attente',createdAt:serverTimestamp()})));
+await doit('bloque : viser une fiche qui n existe pas',
+  ()=>assertFails(setDoc(doc(m,'chasseCodes','5449000054227'),
+      {drinkId:42424242,drinkName:'Inventee',barcode:'5449000054227',
+       par:[MALLORY],etat:'attente',createdAt:serverTimestamp()})));
+await doit('legitime : un UPC-A propose sous la forme que l app compare (sans zero de tete)',
+  ()=>assertSucceeds(setDoc(doc(m,'chasseCodes','49000028911'),
+      {drinkId:1700000000556,drinkName:'Mountain Dew Baja Blast',barcode:'49000028911',
+       par:[MALLORY],etat:'attente',createdAt:serverTimestamp()})));
 
 await doit('bloque : se declarer administrateur',
   ()=>assertFails(setDoc(doc(m,'admins',MALLORY),{ok:true})));

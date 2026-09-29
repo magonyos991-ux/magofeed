@@ -1359,16 +1359,50 @@ service cloud.firestore {
          vers une autre boisson une fois les confirmations reunies.
        Poser reellement le code sur la fiche catalogue reste hors de portee du
        client (catalog est en ecriture isAdmin()) : c'est la Cloud Function qui
-       le fait, a deux confirmations, avec l'Admin SDK. */
+       le fait, a deux confirmations, avec l'Admin SDK.
+
+       ET CE QUI MANQUAIT, trouve en rejouant la chasse sur l'emulateur :
+       - pasAnonyme() : le client disait « compte requis », les regles non.
+         Deux comptes anonymes du meme telephone posaient un code dans le
+         catalogue partage, et chacun etait paye.
+       - le nom du document EST le code, sous la forme que l'app compare
+         (codeNu : chiffres, sans zeros de tete). Sinon deux documents visaient
+         le meme code pour deux boissons, et un UPC-A lu en 12 chiffres ouvrait
+         une autre chasse que le meme code lu en 13.
+       - la cle de controle GS1 : « PAS-UN-CODE » atteignait deux confirmations
+         et devenait un code-barre du catalogue.
+       - la fiche visee existe et n'a encore AUCUN code : c'est tout le sens de
+         la chasse, et sans cela un code etranger s'ajoutait a une fiche
+         complete. */
+    function codeCanonique(c) {
+      return c.matches('^[1-9][0-9]{5,13}$');
+    }
+    function cleGS1Valide(c) {
+      /* Sur la forme a 14 chiffres : les zeros de tete ne changent pas la cle.
+         Meme calcul que validGTIN (index.html) et chasse-codes.js. */
+      let p = '00000000000000' + c;
+      let g = p[p.size() - 14:p.size()];
+      let s = 3 * (int(g[0]) + int(g[2]) + int(g[4]) + int(g[6]) + int(g[8]) + int(g[10]) + int(g[12]))
+            + int(g[1]) + int(g[3]) + int(g[5]) + int(g[7]) + int(g[9]) + int(g[11]);
+      return (10 - s % 10) % 10 == int(g[13]);
+    }
+    function ficheSansCode(drinkId) {
+      let f = get(/databases/$(database)/documents/catalog/$(string(drinkId)));
+      return f != null && (!('barcodes' in f.data) || f.data.barcodes.size() == 0);
+    }
     match /chasseCodes/{barcode} {
       allow read: if true;
-      allow create: if isSignedIn()
+      allow create: if pasAnonyme()
         && request.resource.data.keys().hasOnly(['drinkId','drinkName','barcode','par','etat','createdAt'])
+        && request.resource.data.barcode == barcode
+        && codeCanonique(barcode)
+        && cleGS1Valide(barcode)
         && request.resource.data.par == [request.auth.uid]
         && request.resource.data.etat == 'attente'
-        && request.resource.data.barcode is string
-        && request.resource.data.barcode.size() <= 20;
-      allow update: if isSignedIn()
+        && request.resource.data.drinkName is string
+        && request.resource.data.drinkName.size() <= 60
+        && ficheSansCode(request.resource.data.drinkId);
+      allow update: if pasAnonyme()
         && resource.data.etat == 'attente'
         && !(request.auth.uid in resource.data.par)
         && request.resource.data.par == resource.data.par.concat([request.auth.uid])
