@@ -341,7 +341,7 @@ try{
       <div id="chasse-card"></div>
       <div id="deals-wrap"></div>
       <div id="top-rail-wrap" style="display:none">
-        <div class="sec-hd"><div class="t-section"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3 2.5.5 5 2.5 5 5.5a4.5 4.5 0 1 1-9 0c0-1.15.43-2.2 1-3 .28.6.5 1.5 1.5 3z"/><path d="M12 2c1 3 4 4.5 4 8.5"/><path d="M12 2C8 5 6 8 6 11.5"/></svg> <span id="t-toprail">Tes plus recherchées</span></div></div>
+        <div class="sec-hd"><div class="t-section"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3 2.5.5 5 2.5 5 5.5a4.5 4.5 0 1 1-9 0c0-1.15.43-2.2 1-3 .28.6.5 1.5 1.5 3z"/><path d="M12 2c1 3 4 4.5 4 8.5"/><path d="M12 2C8 5 6 8 6 11.5"/></svg> <span id="t-toprail">Les plus scannées</span></div></div>
         <div id="top-rail" style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 12px;margin:0 -2px;scrollbar-width:none;-webkit-overflow-scrolling:touch"></div>
       </div>
       </div><!-- /home-extras -->
@@ -7800,6 +7800,69 @@ function refreshLeaderboard(){
 var dailyStats={date:"",scans:0,photos:0,confirms:0,signals:0};
 try{var _dd=JSON.parse(localStorage.getItem("magoDaily")||"{}");if(_dd.date)dailyStats=_dd;}catch(e){}
 function _dailyKey(){var d=new Date();return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate();}
+/* ── LE TIRAGE DU JOUR ──────────────────────────────────────────────────────
+   L'ACCUEIL NE CHANGEAIT JAMAIS, ET C'ETAIT ECRIT DANS LE CODE. La grille
+   « A decouvrir » etait gelee dans window._homeTop8 ; le calcul sous le gel
+   etait de toute facon purement deterministe (le catalogue dans son ordre,
+   entrelace par marque, les huit premieres) : la date n'entrait nulle part.
+   D'ou le meme Coca-Cola Original et le meme Prime, tous les jours, a vie.
+   Les « missions du jour » etaient, elles aussi, les trois memes phrases
+   ecrites en dur.
+
+   CE MOTEUR NE STOCKE RIEN, ET C'EST VOULU. Le tirage se recalcule a partir du
+   seul numero du jour : deux personnes de la meme ville voient donc la meme
+   chose le meme jour — c'est ce qui permet d'en parler entre elles — et rien ne
+   peut diverger entre deux telephones ni se perdre au vidage du cache.
+
+   COMMENT IL TOURNE. Pour n entrees, on derive du nom du bloc un pas « a »
+   PREMIER AVEC n et un decalage « b ». L'entree du jour est (a x jour + b + k)
+   modulo n. Comme a est premier avec n, la suite des jours visite TOUTES les
+   entrees avant d'en revoir une seule : sur les 4 127 fiches a photo, une
+   boisson ne peut pas revenir avant onze ans. Le pas est force au-dessus du
+   quart de n, sinon deux jours voisins tireraient des entrees voisines et la
+   grille d'aujourd'hui ressemblerait a celle d'hier. Le k sert aux blocs qui
+   tirent plusieurs entrees d'un coup : k distincts donnent des entrees
+   distinctes tant qu'on en demande moins que n.
+
+   Le jour se compte en heure LOCALE : minuit a Bruxelles, pas a Londres. */
+function _jourIndex(){
+  var d=new Date();
+  return Math.floor(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())/86400000);
+}
+function _grain(t){
+  var h=2166136261;t=String(t);
+  for(var i=0;i<t.length;i++){h^=t.charCodeAt(i);h=(h*16777619)>>>0;}
+  return h>>>0;
+}
+function _pgcd(a,b){while(b){var t=a%b;a=b;b=t;}return a;}
+function tirageDuJour(n,bloc,k,parJour){
+  n=Math.floor(n);
+  if(!(n>1))return 0;
+  k=k||0;parJour=parJour||1;
+  var quart=Math.floor(n/4)||1;
+  var a=quart+(_grain(bloc)%(n-quart));
+  var garde=0;
+  while(_pgcd(a,n)!==1){a++;if(a>=n)a=1;if(++garde>n)return (_jourIndex()+k)%n;}
+  var b=_grain("decalage:"+bloc)%n;
+  /* Les k d'un meme jour sont ECARTES d'un n-ieme du lot, pas colles l'un a
+     l'autre : sans ca les huit cases de la grille etaient huit entrees voisines
+     du meme classement, donc huit boissons du meme coin du catalogue. */
+  var pas=(parJour>1)?Math.max(1,Math.floor(n/parJour)):1;
+  return ((a*(_jourIndex()%n)+b+k*pas)%n+n)%n;
+}
+/* Une fiche a-t-elle une VRAIE photo ? On regarde la donnee du catalogue
+   (d.img, ou une photo de format), jamais getCachedDrinkImage() : celui-la lit
+   un cache local rempli au fil des ouvertures, donc different d'un telephone a
+   l'autre et VIDE au premier lancement. Une selection assise dessus ne serait
+   ni la meme pour deux personnes, ni stable pendant la session. */
+function _aPhotoFiche(d){
+  if(!d)return false;
+  if(d.img)return true;
+  var f=d.formats||[];
+  for(var i=0;i<f.length;i++)if(f[i]&&f[i].img)return true;
+  return false;
+}
+window._jourIndex=_jourIndex;window.tirageDuJour=tirageDuJour;window._aPhotoFiche=_aPhotoFiche;
 function bumpDaily(kind){
   if(dailyStats.date!==_dailyKey()){dailyStats={date:_dailyKey(),scans:0,photos:0,confirms:0,signals:0};}
   dailyStats[kind]=(dailyStats[kind]||0)+1;
@@ -11827,7 +11890,26 @@ function renderBrandsRail(){
   lb.querySelectorAll(".bl-chip").forEach(function(bt){bt.onclick=function(){var v=bt.getAttribute("data-l");brandLetterFilter=v||null;try{playSound("pop");}catch(e){}renderBrandsRail();};});
   try{var _on=lb.querySelector(".bl-chip.on");if(_on)lb.scrollTo({left:_on.offsetLeft-lb.clientWidth/2+_on.clientWidth/2,behavior:"smooth"});}catch(e){}
   var groups=brandLetterFilter?all.filter(function(g){return _brandLetter(g.brand)===brandLetterFilter;}):all;
-  if(cnt)cnt.textContent=groups.length+" marque"+(groups.length>1?"s":"")+(brandLetterFilter?" · "+brandLetterFilter:"");
+  /* SANS LETTRE CHOISIE, ON EN MONTRE DIX-HUIT, ET PAS LES MEMES DEMAIN.
+     Le rail posait les 924 marques d'un coup, dans le meme ordre a chaque
+     ouverture : personne ne faisait defiler jusqu'au bout, et les dix
+     premieres etaient les dix memes depuis toujours. Les lettres A-Z
+     juste au-dessus donnent toujours acces a la totalite — c'est pour ca
+     qu'on peut se permettre de n'en montrer que dix-huit ici.
+     Le compteur dit les deux nombres : « 18 sur 924 » n'a pas le meme sens
+     que « 924 marques » au-dessus de dix-huit tuiles. */
+  var tourne=!brandLetterFilter&&groups.length>18;
+  if(tourne){
+    var jourM=groups.slice(),choix=[],prisM={};
+    for(var mi=0;mi<18;mi++){
+      var im=tirageDuJour(jourM.length,"marques-du-jour",mi,18);
+      if(prisM[im])continue;
+      prisM[im]=1;choix.push(jourM[im]);
+    }
+    groups=choix;
+  }
+  if(cnt)cnt.textContent=tourne?trh("{n} sur {t}",{n:groups.length,t:all.length})
+    :(groups.length+" marque"+(groups.length>1?"s":"")+(brandLetterFilter?" \u00b7 "+brandLetterFilter:""));
   el.innerHTML="";
   groups.forEach(function(g){
     var div=document.createElement("div");div.className="brand-tile";
@@ -11883,13 +11965,38 @@ function interleaveByBrand(list){
    de l'ecran Decouvrir (compteur local de consultations). */
 /* Les missions du jour : 3 micro-objectifs quotidiens qui menent la main.
    Toutes remplies -> +10 pts bonus, une seule fois par jour. */
+/* LES MISSIONS DU JOUR ETAIENT LES MEMES TOUS LES JOURS. Trois phrases ecrites
+   en dur — scanne 1 boisson, signale 1 boisson, confirme 1 magasin — servies a
+   l'identique du premier jour au dernier. La carte s'appelait pourtant
+   « Missions du jour ».
+
+   Le pot compte quatre familles, une par compteur que l'app sait deja tenir
+   (voir bumpDaily). Trois sont tirees chaque matin, et la quantite demandee —
+   une ou deux — se tire aussi. On ne va pas au-dela de deux : une mission
+   qu'on ne peut pas finir le jour meme n'est pas une mission, c'est une dette,
+   et elle bloquerait le bonus de fin de journee.
+
+   Le compteur « photos » existait depuis le debut et n'avait JAMAIS servi a une
+   mission ; il est ici, et c'est celui qui remplit le mieux la base — une fiche
+   sans image est une fiche qu'on ne reconnait pas en rayon. */
+var MISSIONS_POT=[
+  {key:"scans",   un:"Scanne 1 boisson",                  deux:"Scanne 2 boissons"},
+  {key:"signals", un:"Signale o\u00F9 trouver 1 boisson", deux:"Signale o\u00F9 trouver 2 boissons"},
+  {key:"confirms",un:"Confirme 1 magasin",                deux:"Confirme 2 magasins"},
+  {key:"photos",  un:"Ajoute 1 photo de boisson",         deux:"Ajoute 2 photos de boisson"}
+];
 function missionDefs(){
   if(dailyStats.date!==_dailyKey()){dailyStats={date:_dailyKey(),scans:0,photos:0,confirms:0,signals:0};}
-  return[
-    {key:"scans",emoji:"",label:"Scanne 1 boisson",need:1,have:dailyStats.scans||0},
-    {key:"signals",emoji:"",label:"Signale o\u00F9 trouver 1 boisson",need:1,have:dailyStats.signals||0},
-    {key:"confirms",emoji:"\u2713",label:"Confirme 1 magasin",need:1,have:dailyStats.confirms||0}
-  ];
+  var n=MISSIONS_POT.length,out=[],vus={};
+  for(var k=0;k<3;k++){
+    var i=tirageDuJour(n,"missions-du-jour",k,3);
+    if(vus[i]){ i=(i+1)%n; if(vus[i])i=(i+1)%n; }
+    vus[i]=1;
+    var m=MISSIONS_POT[i];
+    var deux=tirageDuJour(2,"quantite-"+m.key,0,1)===1;
+    out.push({key:m.key,emoji:"",label:deux?m.deux:m.un,need:deux?2:1,have:dailyStats[m.key]||0});
+  }
+  return out;
 }
 /* Petite touche perso : salutation selon l'heure + pseudo (en FR ; les autres
    langues gardent la salutation traduite). Rend l'accueil plus chaleureux. */
@@ -11924,13 +12031,13 @@ function renderMissions(){
     var ok=m.have>=m.need;
     return '<div style="display:flex;align-items:center;gap:10px;padding:7px 0;'+(ok?"opacity:.55":"")+'">'+
       '<span style="width:18px;height:18px;border-radius:50%;border:1.5px solid '+(ok?"#16a34a":"var(--border)")+';display:flex;align-items:center;justify-content:center;font-size:11px;color:#16a34a;flex-shrink:0">'+(ok?"\u2713":"")+'</span>'+
-      '<span style="flex:1;font-size:12.5px;font-weight:700;color:var(--s1);'+(ok?"text-decoration:line-through":"")+'">'+m.label+'</span>'+
+      '<span style="flex:1;font-size:12.5px;font-weight:700;color:var(--s1);'+(ok?"text-decoration:line-through":"")+'">'+sanitize(tr(m.label))+'</span>'+
       '</div>';
   }).join("");
   host.innerHTML='<div style="background:var(--bg2);border:1.5px solid '+(all?"#c69a57":"var(--border)")+';border-radius:18px;padding:13px 16px 9px">'+
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">'+
-      '<div style="font-size:13px;font-weight:800;color:var(--s1)">Missions du jour</div>'+
-      '<div style="font-size:11px;font-weight:800;color:'+(all?"#c69a57":"var(--s2)")+'">'+(all?"\u2713 +10 pts !":done+"/"+defs.length)+'</div>'+
+      '<div style="font-size:13px;font-weight:800;color:var(--s1)">'+sanitize(tr("Missions du jour"))+'</div>'+
+      '<div style="font-size:11px;font-weight:800;color:'+(all?"#c69a57":"var(--s2)")+'">'+(all?"\u2713 +10 pts":done+"/"+defs.length)+'</div>'+
     '</div>'+rows+'</div>';
   try{renderChasse();}catch(e){}
 }
@@ -12560,28 +12667,79 @@ function renderTrends(){
   // Sur "Tous", une selection variee suffit : le reste est accessible via
   // les marques, les categories et la recherche
   if(curCat==="Tous"&&f.length>8){
-    // Credibilite de la vitrine : les boissons avec une VRAIE photo passent
-    // devant les vignettes dessinees. La selection est FIGEE pour la session
-    // (window._homeTop8) : sans ce gel, chaque photo qui arrivait en asynchrone
-    // re-partitionnait la grille et les cartes sautaient sous les yeux.
-    // L'entrelacement par marque est refait DANS chaque groupe, sinon la
-    // partition recreait les murs de variantes qu'il est cense empecher.
-    if(!window._homeTop8){
-      var wp=f.filter(function(d){return !!getCachedDrinkImage(d);});
-      var np=f.filter(function(d){return !getCachedDrinkImage(d);});
-      window._homeTop8=interleaveByBrand(wp).concat(interleaveByBrand(np)).slice(0,8).map(function(d){return Number(d.id);});
+    /* HUIT BOISSONS DU JOUR, PAS HUIT BOISSONS POUR TOUJOURS.
+       Cette selection etait figee dans window._homeTop8 « pour la session » —
+       mais le calcul dessous ne dependait que du catalogue, dans son ordre fixe.
+       Elle rendait donc les memes huit fiches a chaque ouverture, et a chaque
+       jour : c'est de la que venaient le Coca-Cola Original et le Prime qu'on
+       retrouvait tous les matins.
+
+       Le pool reste « les fiches qui ont une vraie photo » — la vitrine doit
+       etre credible — mais mesure sur la DONNEE du catalogue (_aPhotoFiche),
+       pas sur le cache d'images local : celui-ci se remplit au fil des
+       ouvertures, il est vide au premier lancement et different d'un telephone
+       a l'autre. C'est aussi ce qui remplace le gel : le pool ne bouge plus
+       pendant la session, donc les cartes ne sautent plus quand une photo
+       arrive. Le tirage, lui, est refait au changement de jour. */
+    /* LE POOL. Tirer dans les 4 582 fiches donnait des journees entieres de
+       « Top Budget Jus d'Ananas » et de « Carrefour Classic Cola zero* » : le
+       catalogue porte 2 400 fiches importees en lot, sans note, dont beaucoup
+       de marques de distributeur. Sur un ecran qui promet des boissons rares,
+       c'est l'inverse de ce qu'on vient y chercher.
+       On tire donc parmi les fiches QUI ONT UNE PHOTO ET UNE NOTE. La note ne
+       sert pas ici de jugement — elle n'est d'ailleurs affichee que quand elle
+       est reelle, voir realAgg() — mais de marque de fabrique : les fiches
+       notees sont celles qui ont ete montees a la main, avec une vraie image.
+       Il en reste 2 151, soit 269 jours avant de revoir la premiere. Tout le
+       reste du catalogue est toujours la : recherche, categories, marques. */
+    var choisies=f.filter(function(d){return _aPhotoFiche(d)&&(d.stars||0)>0;});
+    if(choisies.length<8)choisies=f.filter(_aPhotoFiche);
+    var avecPhoto=interleaveByBrand(choisies);
+    var base=(avecPhoto.length>=8)?avecPhoto:f;
+    if(window._grilleJour!==_dailyKey()||!window._grilleDuJour){
+      /* HUIT MARQUES DIFFERENTES, PAS HUIT VARIANTES DE LA MEME.
+         interleaveByBrand distribue une boisson par marque a chaque tour : les
+         premiers rangs portent donc toutes les marques, et les derniers ne
+         portent plus que celles qui ont beaucoup de references — les laits
+         vegetaux et les jus. Tirer huit rangs ecartes dans la liste tombait
+         donc presque toujours dans cette queue, et l'accueil affichait quatre
+         boissons de soja a la suite. On avance jusqu'a une marque pas encore
+         prise : l'ecart large est conserve, la variete est garantie. */
+      var tires=[],marques={},cats={},L=base.length;
+      for(var gi=0;gi<8;gi++){
+        var pos=tirageDuJour(L,"grille-du-jour",gi,8);
+        for(var pas=0;pas<L;pas++){
+          var dg=base[(pos+pas)%L];
+          if(!dg)continue;
+          var mq=String(dg.brand||"?").toLowerCase();
+          if(marques[mq])continue;
+          /* Et pas plus de trois boissons de la meme categorie : sans ce
+             plafond, un jour tombait sur cinq laits vegetaux d'affilee, ce
+             qui donne exactement l'impression qu'on cherche a corriger. */
+          var ct=String(dg.cat||"?");
+          if((cats[ct]||0)>=3)continue;
+          marques[mq]=1;cats[ct]=(cats[ct]||0)+1;tires.push(Number(dg.id));break;
+        }
+      }
+      window._grilleDuJour=tires;window._grilleJour=_dailyKey();
     }
     var byId={};f.forEach(function(d){byId[Number(d.id)]=d;});
-    var picked=window._homeTop8.map(function(id){return byId[id];}).filter(Boolean);
+    var picked=[],vus={};
+    window._grilleDuJour.forEach(function(id){
+      var d=byId[id];
+      if(d&&!vus[id]){vus[id]=1;picked.push(d);}
+    });
     // Complement si des elus ont disparu (fusion de fiches, filtre)
     if(picked.length<8){
-      var have={};picked.forEach(function(d){have[Number(d.id)]=1;});
-      f.forEach(function(d){if(picked.length<8&&!have[Number(d.id)])picked.push(d);});
+      base.forEach(function(d){if(picked.length<8&&!vus[Number(d.id)]){vus[Number(d.id)]=1;picked.push(d);}});
     }
     f=picked.slice(0,8);capped=true;
   }
   var cnt=document.getElementById("trends-count");
-  if(cnt)cnt.textContent=capped?"Top "+f.length+" \u00B7 "+all.length+" au total":all.length+" boissons";
+  /* « Top 8 » affirmait un classement qui n'existait pas. Ce sont huit fiches
+     tirees pour la journee : le compteur le dit, et il dit aussi combien il y
+     en a en tout, pour que « 8 » ne passe pas pour le catalogue entier. */
+  if(cnt)cnt.textContent=capped?trh("{n} du jour \u00B7 {t} en tout",{n:f.length,t:all.length}):(all.length+" boissons");
   f.forEach(function(d){
     queueImageFetch(d);
     var div=document.createElement("div");div.className="dcard";div.dataset.id=d.id;
@@ -28760,6 +28918,11 @@ try{
   // qu'après être allé sur un autre onglet puis revenu à l'accueil).
   try{updateGreeting();}catch(e){}
   try{renderMissions();}catch(e){}
+  /* LA BOISSON DU JOUR TOURNAIT DEJA, ET PERSONNE NE LA VOYAIT JAMAIS.
+     renderWantedDrink() n'etait appelee que par show("home") — donc pas au
+     demarrage, c'est-a-dire pas sur l'ecran qu'on ouvre. Le seul bloc
+     reellement quotidien de l'accueil etait absent de l'accueil. */
+  try{renderWantedDrink();}catch(e){}
   try{checkWatches();renderAlertsCard();}catch(e){}
   try{renderChasse();}catch(e){}
   /* Le badge de l'onglet Decouvrir se calcule dans _peindreChasse, qui n'est
@@ -28941,9 +29104,10 @@ try{
     });
     if(applied){
       try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(err){}
-      // Le lot de photos communautaires vient d'arriver : UNE recomposition de
-      // la vitrine (puis la selection reste figee pour la session).
-      window._homeTop8=null;
+      /* Le lot de photos communautaires vient d'arriver : on REPEINT la
+         vitrine, on ne la retire pas. La selection du jour ne depend plus du
+         cache d'images (voir _aPhotoFiche) : la remettre a zero ici ferait
+         sauter les cartes sous les yeux sans rien changer au choix. */
       renderTrends();
       var sEl=document.getElementById("s-search");
       if(sEl&&sEl.classList.contains("on"))renderList();
