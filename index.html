@@ -6346,6 +6346,30 @@ window.fbLoadCommunityData();
    dans lequel « Hawai Ananas » est tombee. Le controle du catalogue verifie
    desormais que chaque cible existe. */
 window.DRINK_MERGES = { 11287: 3300,
+  /* 29/09 — dix-sept doublons NATIFS reveles par l'uniformisation des noms
+     (la marque preposee a fait tomber les paires nez a nez : deux
+     « Club-Mate Original », deux « San Pellegrino Limonata »...). Les
+     fiches en double sont retirees de data/drinks.js, leurs photos et
+     codes-barres reunis sur la fiche gardee ; ces fusions remappent les
+     magasins qui referencaient l'ancien identifiant. */
+  11055: 3500,   // Club-Mate Original
+  11061: 2401,   // Jarritos Tamarindo
+  11110: 10079,  // Hamoud Boualem Selecto
+  11126: 10049,  // Rauch Happy Day Orange
+  11149: 11430,  // Cécémel Original
+  11235: 14,     // Mecca-Cola
+  13088: 11347,  // Mogu Mogu Bubble Gum
+  15193: 2300,   // San Pellegrino Limonata
+  15388: 2301,   // San Pellegrino Aranciata
+  16147: 10018,  // Chaudfontaine Fusion Citron
+  16167: 16069,  // Carrefour Eau Minérale Naturelle Pétillante
+  16177: 10017,  // Chaudfontaine Pétillante
+  16267: 16142,  // Oasis Aqua fruit
+  16427: 16426,  // Lidl Kongstrong
+  16500: 10006,  // Fuze Tea thé vert mangue & camomille
+  16541: 16505,  // Estathé Limone
+  17748: 17747,  // Luxlait Milkshake
+  16502: 16,     // « boisson the glace peche Lipton » -> Lipton Ice Tea Pêche
   11433: 10068,                 // Hawai Tropical -> Hawaï Tropical
   /* 11434 pointait vers 11224, un identifiant qui n'a JAMAIS existe — verifie
      sur tout l'historique de data/drinks.js. La fiche « Hawaï Ananas » etait
@@ -11273,6 +11297,11 @@ function fuzzyHit(text,q){
   var t=normTxt(text);
   if(t.includes(q))return true;
   if(q.length<4)return false;
+  /* Frappes collees : « redbull » doit trouver « Red Bull » (l'inverse
+     marchait deja par lev1). Comparaison ecrasee, sans espaces ni
+     ponctuation, des deux cotes. */
+  var qs=q.replace(/[^a-z0-9]+/g,"");
+  if(qs.length>=4&&t.replace(/[^a-z0-9]+/g,"").includes(qs))return true;
   var toks=t.split(/[^a-z0-9]+/);
   for(var k=0;k<toks.length;k++){
     var w=toks[k];
@@ -11806,6 +11835,40 @@ function classifyDrink(name,brand){
 // remplace la categorie existante que si le classifieur est SUR de lui
 // (resultat != "Autre") : un rare cas non reconnu garde son etiquette d'origine.
 try{DRINKS.forEach(function(d){var c=classifyDrink(d.name,d.brand);if(c&&c!=="Autre")d.cat=c;});}catch(e){}
+/* Graphies de marque des fiches communautaires : ecrites a la main, elles
+   arrivent collees ou doublees (« RedBull », nom « RedBull Red Bull
+   pasteque » — vus en production). Quand la version collee correspond a une
+   marque NATIVE, on adopte sa graphie ; et si le nom commence par une
+   variante de la marque, on retire les repetitions et on remet la graphie
+   propre une seule fois. Un nom qui ne mentionne pas la marque n'est pas
+   touche. Resultat : chercher « red bull » (ou « redbull ») trouve TOUTES
+   les editions, quelle que soit la frappe d'origine. */
+function _marquesNatives(){
+  if(window._marquesColleesMap)return window._marquesColleesMap;
+  var m={};
+  (DRINKS||[]).forEach(function(d){
+    if(d.brand&&!d.community){
+      var k=normTxt(d.brand).replace(/[^a-z0-9]/g,"");
+      if(k&&!m[k])m[k]=d.brand;
+    }
+  });
+  window._marquesColleesMap=m;
+  return m;
+}
+function _grapheCommunautaire(nom,marque){
+  var kM=normTxt(String(marque||"")).replace(/[^a-z0-9]/g,"");
+  var propre=_marquesNatives()[kM]||String(marque||"").trim();
+  var n=String(nom||"").trim();
+  if(propre&&kM){
+    var re=new RegExp("^\\s*(?:"+propre.replace(/[.*+?^${}()|[\]\\]/g,"\\$&").replace(/[\s-]+/g,"[\\s-]*")+")[\\s:,-]*","i");
+    if(re.test(n)){
+      var n2=n.replace(re,"");
+      while(n2!==n){n=n2;n2=n.replace(re,"");}
+      n=(propre+" "+n).replace(/\s+/g," ").trim();
+    }
+  }
+  return {nom:n,marque:propre};
+}
 function mergeCatalog(rows){
   if(!rows||!rows.length)return 0;
   var added=0;
@@ -11863,9 +11926,12 @@ function mergeCatalog(rows){
     var _nouvelle={
       id:rid,
       /* nomPropre et pas sanitize : garder « & » nu en memoire, sinon chaque
-         rendu (qui echappe deja) affichait « &amp; » meme sur une base saine. */
-      name:nomPropre(String(r.name).slice(0,60)),
-      brand:nomPropre(String(r.brand||"Autre").slice(0,30)),
+         rendu (qui echappe deja) affichait « &amp; » meme sur une base saine.
+         Puis _grapheCommunautaire : marque collee/doublee ramenee a la
+         graphie native (« RedBull Red Bull pasteque » -> « Red Bull
+         Pasteque » n'est qu'a une majuscule pres). */
+      name:(function(){var g=_grapheCommunautaire(nomPropre(String(r.name)),nomPropre(String(r.brand||"Autre")));return g.nom.slice(0,60);})(),
+      brand:(function(){var g=_grapheCommunautaire("",nomPropre(String(r.brand||"Autre")));return (g.marque||"Autre").slice(0,30);})(),
       emoji:r.emoji&&String(r.emoji).length<=4?r.emoji:def.emoji,
       color:/^#[0-9a-fA-F]{6}$/.test(r.color||"")?r.color:def.color,
       light:/^#[0-9a-fA-F]{6}$/.test(r.light||"")?r.light:def.light,
@@ -11890,11 +11956,21 @@ function mergeCatalog(rows){
   return added;
 }
 function getBrandGroups(){
-  var map={};
+  /* Regroupement par cle ECRASEE (minuscules, accents, espaces et
+     ponctuation retires) : « MayTea » et « May Tea » sont un seul groupe,
+     affiche sous la graphie la plus repandue. Le catalogue natif est
+     desormais canonise, mais les fiches communautaires se tapent a la
+     main — sans cette tolerance, chaque variante rouvrait sa carte dans
+     le rail des marques. */
+  var map={},compte={};
   DRINKS.forEach(function(d){
     var b=d.brand||"Autre";
-    if(!map[b])map[b]={brand:b,drinks:[]};
-    map[b].drinks.push(d);
+    var k=(b==="Autre")?"Autre":normTxt(b).replace(/[^a-z0-9]/g,"")||"Autre";
+    if(!map[k])map[k]={brand:b,drinks:[]};
+    map[k].drinks.push(d);
+    var c=compte[k]=compte[k]||{};
+    c[b]=(c[b]||0)+1;
+    if(c[b]>(c[map[k].brand]||0))map[k].brand=b;
   });
   var groups=Object.keys(map).map(function(k){
     map[k].drinks.sort(function(a,b){return b.stars-a.stars;});
@@ -13927,6 +14003,11 @@ function submitAddDrinks(){
    geste : on va droit au partage par le telephone. */
 function partagerMagasin(s){
   if(!s){try{toast(tr("Aucun magasin \u00e0 envoyer"));}catch(e){}return;}
+  /* Un partage-depuis-fil est en cours (la messagerie attend un magasin) :
+     ce magasin est SA reponse \u2014 il part directement dans la discussion
+     d'origine, au lieu d'ouvrir \u00ab Envoyer ce magasin \u00bb qui redemandait le
+     destinataire. Sans rappel en attente, rien ne change. */
+  if(window._choixMagasinCb){choisirCeMagasin(s);return;}
   if(typeof msgAmisPourPartage==="function"&&msgAmisPourPartage().length){partagerMagasinAmis(s);return;}
   partagerMagasinLien(s);
 }
@@ -22163,8 +22244,8 @@ function exploreLoadStores(useCache){
         // Mais seulement s'il reste quelque chose a designer : sinon on sort
         // du mode et le pin reprend son role normal, au lieu de ne rien faire.
         if(window._choixMagasin){
-          if(lastScanContext){ choisirCeMagasin(s); return; }
-          window._choixMagasin=false; try{_majBandeauChoix();}catch(_e){}
+          if(lastScanContext||window._choixMagasinCb){ choisirCeMagasin(s); return; }
+          window._choixMagasin=false; window._choixMagasinCb=null; try{_majBandeauChoix();}catch(_e){}
         }
         try{if(exploreMap.panTo)exploreMap.panTo([s.lat,s.lng]);}catch(_e){}
         // Clic sur un pin = tracer l'itineraire directement (le "traçage partout").
@@ -28744,13 +28825,20 @@ function msgOuvrirSpot(pre){
       '<div id="spot-res" class="spot-list" role="listbox"></div>';
     var qi=document.getElementById("spot-q");
     if(qi)qi.addEventListener("input",function(){
-      var q=String(qi.value||"").trim().toLowerCase(),box=document.getElementById("spot-res");if(!box)return;
+      var q=normTxt(String(qi.value||"")).trim(),box=document.getElementById("spot-res");if(!box)return;
       if(q.length<2){box.innerHTML="";return;}
       /* TOUTE la marque : « red » doit montrer les vingt Red Bull, pas six.
-         La marque qui commence par la recherche passe devant, puis le nom. */
-      boissons=(DRINKS||[]).filter(function(d){return (String(d.name||"")+" "+String(d.brand||"")).toLowerCase().indexOf(q)!==-1;})
+         La marque qui commence par la recherche passe devant, puis le nom.
+         La comparaison se fait normalisee (accents) ET ecrasee (sans espaces
+         ni ponctuation) : « redbull » colle trouve « Red Bull », et
+         l'inverse — les fiches communautaires se tapent a la main. */
+      var qs=q.replace(/[^a-z0-9]+/g,"");
+      boissons=(DRINKS||[]).filter(function(d){
+        var t=normTxt(String(d.name||"")+" "+String(d.brand||""));
+        return t.indexOf(q)!==-1||(qs.length>=2&&t.replace(/[^a-z0-9]+/g,"").indexOf(qs)!==-1);
+      })
         .sort(function(a,b){
-          var ab=String(a.brand||"").toLowerCase().indexOf(q)===0,bb=String(b.brand||"").toLowerCase().indexOf(q)===0;
+          var ab=normTxt(String(a.brand||"")).indexOf(q)===0,bb=normTxt(String(b.brand||"")).indexOf(q)===0;
           if(ab!==bb)return ab?-1:1;
           var c=String(a.brand||"").localeCompare(String(b.brand||""),"fr");
           return c||String(a.name||"").localeCompare(String(b.name||""),"fr");
@@ -28761,10 +28849,13 @@ function msgOuvrirSpot(pre){
   var listeMagasins=function(q){
     var d=etat.d,tous=(typeof STORES!=="undefined"?STORES:[]),out=[],vus={};
     var pousser=function(m){if(!m||vus[m.id])return;vus[m.id]=true;out.push(m);};
-    var deM=function(s){return {id:String(s.fbId||s.id),name:String(s.name||"").slice(0,60),dist:typeof s.dist==="number"?s.dist:null,deja:!!(d&&(s.drinks||[]).some(function(x){return String(x)===String(d.id);}))};};
-    var filtre=function(m){return !q||m.name.toLowerCase().indexOf(q)!==-1;};
+    /* « l'a deja » lit la meme verite que les pins de la carte
+       (magasinALaBoisson : rayon releve, assortiment probable, requete
+       ciblee) — s.drinks seul ratait des magasins pourtant en stock. */
+    var deM=function(s){return {id:String(s.fbId||s.id),name:String(s.name||"").slice(0,60),dist:typeof s.dist==="number"?s.dist:null,deja:!!(d&&typeof magasinALaBoisson==="function"&&magasinALaBoisson(s,d.id))};};
+    var filtre=function(m){return !q||normTxt(m.name).indexOf(normTxt(q))!==-1;};
     // 1) ceux qui l'ont deja, les plus proches d'abord
-    tous.filter(function(s){return d&&(s.drinks||[]).some(function(x){return String(x)===String(d.id);});})
+    tous.filter(function(s){return d&&typeof magasinALaBoisson==="function"&&magasinALaBoisson(s,d.id);})
       .sort(function(a,b){return (a.dist||1e9)-(b.dist||1e9);}).slice(0,3).map(deM).filter(filtre).forEach(pousser);
     // 2) les magasins recents de la personne
     msgMagasinsRecents().map(function(r){return r.s?deM(r.s):{id:r.id,name:r.name,dist:null,deja:false};}).filter(filtre).forEach(pousser);
@@ -28805,7 +28896,11 @@ function msgOuvrirSpot(pre){
         if(st&&!(typeof STORES!=="undefined"&&STORES.some(function(x){return String(x.fbId||x.id)===String(st.fbId||st.id);}))){try{STORES.push(st);}catch(err){}}
         setTimeout(function(){msgOuvrirSpot({d:dMap,sid:String(st.fbId||st.id),sname:String(st.name||"").slice(0,60),deja:deja});},250);
       };
-      try{openExploreMap({});setTimeout(_majBandeauChoix,300);setTimeout(_majBandeauChoix,1200);}catch(err){window._choixMagasin=false;window._choixMagasinCb=null;toast(_tr("msgStoreFar"));}
+      /* La carte s'ouvre AVEC la boisson ciblee : pins verts « en stock »,
+         gris estompe pour les autres — la meme lecture que partout. Sans
+         drinkId, le selecteur montrait des pins neutres et l'utilisateur ne
+         voyait pas le magasin qu'il sait etre en stock. */
+      try{openExploreMap(dMap?{drinkId:dMap.id,name:dMap.name}:{});setTimeout(_majBandeauChoix,300);setTimeout(_majBandeauChoix,1200);}catch(err){window._choixMagasin=false;window._choixMagasinCb=null;toast(_tr("msgStoreFar"));}
       return;
     }
     if(t.closest("[data-spot-back]")){etat.sid=null;etat.sname=null;peindre1();return;}
