@@ -11046,6 +11046,11 @@ function fuzzyHit(text,q){
   var t=normTxt(text);
   if(t.includes(q))return true;
   if(q.length<4)return false;
+  /* Frappes collees : « redbull » doit trouver « Red Bull » (l'inverse
+     marchait deja par lev1). Comparaison ecrasee, sans espaces ni
+     ponctuation, des deux cotes. */
+  var qs=q.replace(/[^a-z0-9]+/g,"");
+  if(qs.length>=4&&t.replace(/[^a-z0-9]+/g,"").includes(qs))return true;
   var toks=t.split(/[^a-z0-9]+/);
   for(var k=0;k<toks.length;k++){
     var w=toks[k];
@@ -13642,6 +13647,11 @@ function submitAddDrinks(){
    geste : on va droit au partage par le telephone. */
 function partagerMagasin(s){
   if(!s){try{toast(tr("Aucun magasin \u00e0 envoyer"));}catch(e){}return;}
+  /* Un partage-depuis-fil est en cours (la messagerie attend un magasin) :
+     ce magasin est SA reponse \u2014 il part directement dans la discussion
+     d'origine, au lieu d'ouvrir \u00ab Envoyer ce magasin \u00bb qui redemandait le
+     destinataire. Sans rappel en attente, rien ne change. */
+  if(window._choixMagasinCb){choisirCeMagasin(s);return;}
   if(typeof msgAmisPourPartage==="function"&&msgAmisPourPartage().length){partagerMagasinAmis(s);return;}
   partagerMagasinLien(s);
 }
@@ -21878,8 +21888,8 @@ function exploreLoadStores(useCache){
         // Mais seulement s'il reste quelque chose a designer : sinon on sort
         // du mode et le pin reprend son role normal, au lieu de ne rien faire.
         if(window._choixMagasin){
-          if(lastScanContext){ choisirCeMagasin(s); return; }
-          window._choixMagasin=false; try{_majBandeauChoix();}catch(_e){}
+          if(lastScanContext||window._choixMagasinCb){ choisirCeMagasin(s); return; }
+          window._choixMagasin=false; window._choixMagasinCb=null; try{_majBandeauChoix();}catch(_e){}
         }
         try{if(exploreMap.panTo)exploreMap.panTo([s.lat,s.lng]);}catch(_e){}
         // Clic sur un pin = tracer l'itineraire directement (le "traçage partout").
@@ -28459,13 +28469,20 @@ function msgOuvrirSpot(pre){
       '<div id="spot-res" class="spot-list" role="listbox"></div>';
     var qi=document.getElementById("spot-q");
     if(qi)qi.addEventListener("input",function(){
-      var q=String(qi.value||"").trim().toLowerCase(),box=document.getElementById("spot-res");if(!box)return;
+      var q=normTxt(String(qi.value||"")).trim(),box=document.getElementById("spot-res");if(!box)return;
       if(q.length<2){box.innerHTML="";return;}
       /* TOUTE la marque : « red » doit montrer les vingt Red Bull, pas six.
-         La marque qui commence par la recherche passe devant, puis le nom. */
-      boissons=(DRINKS||[]).filter(function(d){return (String(d.name||"")+" "+String(d.brand||"")).toLowerCase().indexOf(q)!==-1;})
+         La marque qui commence par la recherche passe devant, puis le nom.
+         La comparaison se fait normalisee (accents) ET ecrasee (sans espaces
+         ni ponctuation) : « redbull » colle trouve « Red Bull », et
+         l'inverse — les fiches communautaires se tapent a la main. */
+      var qs=q.replace(/[^a-z0-9]+/g,"");
+      boissons=(DRINKS||[]).filter(function(d){
+        var t=normTxt(String(d.name||"")+" "+String(d.brand||""));
+        return t.indexOf(q)!==-1||(qs.length>=2&&t.replace(/[^a-z0-9]+/g,"").indexOf(qs)!==-1);
+      })
         .sort(function(a,b){
-          var ab=String(a.brand||"").toLowerCase().indexOf(q)===0,bb=String(b.brand||"").toLowerCase().indexOf(q)===0;
+          var ab=normTxt(String(a.brand||"")).indexOf(q)===0,bb=normTxt(String(b.brand||"")).indexOf(q)===0;
           if(ab!==bb)return ab?-1:1;
           var c=String(a.brand||"").localeCompare(String(b.brand||""),"fr");
           return c||String(a.name||"").localeCompare(String(b.name||""),"fr");
@@ -28476,10 +28493,13 @@ function msgOuvrirSpot(pre){
   var listeMagasins=function(q){
     var d=etat.d,tous=(typeof STORES!=="undefined"?STORES:[]),out=[],vus={};
     var pousser=function(m){if(!m||vus[m.id])return;vus[m.id]=true;out.push(m);};
-    var deM=function(s){return {id:String(s.fbId||s.id),name:String(s.name||"").slice(0,60),dist:typeof s.dist==="number"?s.dist:null,deja:!!(d&&(s.drinks||[]).some(function(x){return String(x)===String(d.id);}))};};
-    var filtre=function(m){return !q||m.name.toLowerCase().indexOf(q)!==-1;};
+    /* « l'a deja » lit la meme verite que les pins de la carte
+       (magasinALaBoisson : rayon releve, assortiment probable, requete
+       ciblee) — s.drinks seul ratait des magasins pourtant en stock. */
+    var deM=function(s){return {id:String(s.fbId||s.id),name:String(s.name||"").slice(0,60),dist:typeof s.dist==="number"?s.dist:null,deja:!!(d&&typeof magasinALaBoisson==="function"&&magasinALaBoisson(s,d.id))};};
+    var filtre=function(m){return !q||normTxt(m.name).indexOf(normTxt(q))!==-1;};
     // 1) ceux qui l'ont deja, les plus proches d'abord
-    tous.filter(function(s){return d&&(s.drinks||[]).some(function(x){return String(x)===String(d.id);});})
+    tous.filter(function(s){return d&&typeof magasinALaBoisson==="function"&&magasinALaBoisson(s,d.id);})
       .sort(function(a,b){return (a.dist||1e9)-(b.dist||1e9);}).slice(0,3).map(deM).filter(filtre).forEach(pousser);
     // 2) les magasins recents de la personne
     msgMagasinsRecents().map(function(r){return r.s?deM(r.s):{id:r.id,name:r.name,dist:null,deja:false};}).filter(filtre).forEach(pousser);
@@ -28520,7 +28540,11 @@ function msgOuvrirSpot(pre){
         if(st&&!(typeof STORES!=="undefined"&&STORES.some(function(x){return String(x.fbId||x.id)===String(st.fbId||st.id);}))){try{STORES.push(st);}catch(err){}}
         setTimeout(function(){msgOuvrirSpot({d:dMap,sid:String(st.fbId||st.id),sname:String(st.name||"").slice(0,60),deja:deja});},250);
       };
-      try{openExploreMap({});setTimeout(_majBandeauChoix,300);setTimeout(_majBandeauChoix,1200);}catch(err){window._choixMagasin=false;window._choixMagasinCb=null;toast(_tr("msgStoreFar"));}
+      /* La carte s'ouvre AVEC la boisson ciblee : pins verts « en stock »,
+         gris estompe pour les autres — la meme lecture que partout. Sans
+         drinkId, le selecteur montrait des pins neutres et l'utilisateur ne
+         voyait pas le magasin qu'il sait etre en stock. */
+      try{openExploreMap(dMap?{drinkId:dMap.id,name:dMap.name}:{});setTimeout(_majBandeauChoix,300);setTimeout(_majBandeauChoix,1200);}catch(err){window._choixMagasin=false;window._choixMagasinCb=null;toast(_tr("msgStoreFar"));}
       return;
     }
     if(t.closest("[data-spot-back]")){etat.sid=null;etat.sname=null;peindre1();return;}
