@@ -11579,6 +11579,40 @@ function classifyDrink(name,brand){
 // remplace la categorie existante que si le classifieur est SUR de lui
 // (resultat != "Autre") : un rare cas non reconnu garde son etiquette d'origine.
 try{DRINKS.forEach(function(d){var c=classifyDrink(d.name,d.brand);if(c&&c!=="Autre")d.cat=c;});}catch(e){}
+/* Graphies de marque des fiches communautaires : ecrites a la main, elles
+   arrivent collees ou doublees (« RedBull », nom « RedBull Red Bull
+   pasteque » — vus en production). Quand la version collee correspond a une
+   marque NATIVE, on adopte sa graphie ; et si le nom commence par une
+   variante de la marque, on retire les repetitions et on remet la graphie
+   propre une seule fois. Un nom qui ne mentionne pas la marque n'est pas
+   touche. Resultat : chercher « red bull » (ou « redbull ») trouve TOUTES
+   les editions, quelle que soit la frappe d'origine. */
+function _marquesNatives(){
+  if(window._marquesColleesMap)return window._marquesColleesMap;
+  var m={};
+  (DRINKS||[]).forEach(function(d){
+    if(d.brand&&!d.community){
+      var k=normTxt(d.brand).replace(/[^a-z0-9]/g,"");
+      if(k&&!m[k])m[k]=d.brand;
+    }
+  });
+  window._marquesColleesMap=m;
+  return m;
+}
+function _grapheCommunautaire(nom,marque){
+  var kM=normTxt(String(marque||"")).replace(/[^a-z0-9]/g,"");
+  var propre=_marquesNatives()[kM]||String(marque||"").trim();
+  var n=String(nom||"").trim();
+  if(propre&&kM){
+    var re=new RegExp("^\\s*(?:"+propre.replace(/[.*+?^${}()|[\]\\]/g,"\\$&").replace(/[\s-]+/g,"[\\s-]*")+")[\\s:,-]*","i");
+    if(re.test(n)){
+      var n2=n.replace(re,"");
+      while(n2!==n){n=n2;n2=n.replace(re,"");}
+      n=(propre+" "+n).replace(/\s+/g," ").trim();
+    }
+  }
+  return {nom:n,marque:propre};
+}
 function mergeCatalog(rows){
   if(!rows||!rows.length)return 0;
   var added=0;
@@ -11636,9 +11670,12 @@ function mergeCatalog(rows){
     var _nouvelle={
       id:rid,
       /* nomPropre et pas sanitize : garder « & » nu en memoire, sinon chaque
-         rendu (qui echappe deja) affichait « &amp; » meme sur une base saine. */
-      name:nomPropre(String(r.name).slice(0,60)),
-      brand:nomPropre(String(r.brand||"Autre").slice(0,30)),
+         rendu (qui echappe deja) affichait « &amp; » meme sur une base saine.
+         Puis _grapheCommunautaire : marque collee/doublee ramenee a la
+         graphie native (« RedBull Red Bull pasteque » -> « Red Bull
+         Pasteque » n'est qu'a une majuscule pres). */
+      name:(function(){var g=_grapheCommunautaire(nomPropre(String(r.name)),nomPropre(String(r.brand||"Autre")));return g.nom.slice(0,60);})(),
+      brand:(function(){var g=_grapheCommunautaire("",nomPropre(String(r.brand||"Autre")));return (g.marque||"Autre").slice(0,30);})(),
       emoji:r.emoji&&String(r.emoji).length<=4?r.emoji:def.emoji,
       color:/^#[0-9a-fA-F]{6}$/.test(r.color||"")?r.color:def.color,
       light:/^#[0-9a-fA-F]{6}$/.test(r.light||"")?r.light:def.light,
