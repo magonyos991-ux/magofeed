@@ -2017,6 +2017,10 @@ var TEXTES = {
   "Ajoute 2 photos de boisson": {ar:"أضف صورتي مشروب",de:"Füge 2 Getränkefotos hinzu",en:"Add 2 drink photos",es:"Añade 2 fotos de bebida",it:"Aggiungi 2 foto di bevande",nl:"Voeg 2 drankfoto's toe",pl:"Dodaj 2 zdjęcia napojów",pt:"Adiciona 2 fotos de bebida",tr:"2 içecek fotoğrafı ekle",zh:"添加 2 张饮料照片"},
   "{n} du jour \u00B7 {t} en tout": {ar:"{n} اليوم · {t} إجمالًا",de:"{n} heute · {t} insgesamt",en:"{n} today · {t} in all",es:"{n} de hoy · {t} en total",it:"{n} di oggi · {t} in tutto",nl:"{n} vandaag · {t} in totaal",pl:"{n} na dziś · {t} łącznie",pt:"{n} de hoje · {t} no total",tr:"bugün {n} · toplam {t}",zh:"今日 {n} 款 · 共 {t} 款"},
   "{n} sur {t}": {ar:"{n} من أصل {t}",de:"{n} von {t}",en:"{n} of {t}",es:"{n} de {t}",it:"{n} su {t}",nl:"{n} van {t}",pl:"{n} z {t}",pt:"{n} de {t}",tr:"{t} içinden {n}",zh:"{t} 个中的 {n} 个"},
+  /* La fete du passage de niveau : le verre qui se remplit. */
+  "Niveau supérieur": {ar:"مستوى أعلى",de:"Nächste Stufe",en:"Level up",es:"Subes de nivel",it:"Livello superiore",nl:"Niveau omhoog",pl:"Nowy poziom",pt:"Sobes de nível",tr:"Seviye atladın",zh:"升级"},
+  "Niveau {n} sur {t} · {p} points": {ar:"المستوى {n} من {t} · {p} نقطة",de:"Stufe {n} von {t} · {p} Punkte",en:"Level {n} of {t} · {p} points",es:"Nivel {n} de {t} · {p} puntos",it:"Livello {n} su {t} · {p} punti",nl:"Niveau {n} van {t} · {p} punten",pl:"Poziom {n} z {t} · {p} pkt",pt:"Nível {n} de {t} · {p} pontos",tr:"Seviye {n}/{t} · {p} puan",zh:"第 {n} 级 / 共 {t} 级 · {p} 分"},
+  "Continuer": {ar:"متابعة",de:"Weiter",en:"Continue",es:"Continuar",it:"Continua",nl:"Doorgaan",pl:"Dalej",pt:"Continuar",tr:"Devam",zh:"继续"},
 };
 
 /* Rend le texte dans la langue courante. Inconnu ou langue sans traduction :

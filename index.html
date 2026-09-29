@@ -7896,40 +7896,123 @@ function confettiBurst(){
   document.body.appendChild(host);
   setTimeout(function(){try{host.remove();}catch(e){}},2700);
 }
-/* Animation plein écran de passage de niveau : le nouveau niveau s'affiche au
-   centre, une grande barre se remplit à 100%, confettis + son. Ne se déclenche
-   QUE sur un vrai passage de niveau (voir checkLevelUp), y compris au démarrage
-   si le niveau a été gagné pendant que l'app était fermée. */
+/* ── LA FETE DU PASSAGE DE NIVEAU : UN VERRE QU'ON REMPLIT ─────────────────
+   Il y avait deja une fete ici : une barre doree qui se remplissait de 0 a
+   100 %, plus des confettis. Une barre de progression, c'est-a-dire le meme
+   objet que dans n'importe quelle application. Dans une app de boissons, le
+   niveau se remplit comme un verre — et on l'ENTEND se remplir.
+
+   LE SON. playSound("verser") le fabrique par synthese, sans aucun fichier
+   audio : pas de telechargement, pas de question de droits. Ce qui rend un
+   versement reconnaissable, c'est que la resonance MONTE a mesure que la
+   colonne d'air raccourcit (voir sonVersement, dans data/ui.js). Il passe par
+   playSound, donc il respecte l'interrupteur « Effets sonores » : une fete qui
+   sonne alors qu'on a coupe le son n'est pas une fete, c'est un bug.
+
+   LE MOUVEMENT. Tout est en SVG et en CSS, rien d'anime a part transform et
+   opacity. Sous « mouvement reduit », le verre est plein d'emblee, sans onde
+   ni bulles — mais le son, lui, reste : le reglage du systeme parle du
+   mouvement, pas de l'audio, et c'est a l'interrupteur de l'app de decider.
+
+   CE QUI N'EST PAS AFFIRME. On ne montre ni classement, ni comparaison, ni
+   nombre de joueurs : seulement le palier atteint et les points reels. */
+var LEVEL_LIQUIDE=[
+  ["#f6dd6a","#e3ad1c"], // Curieux — citron
+  ["#ffb14a","#e2661a"], // Explorateur — orange
+  ["#f5915c","#c8541a"], // Chasseur — peche
+  ["#f2606f","#b3213c"], // Connaisseur — grenadine
+  ["#5fd6a0","#12915f"], // Expert — menthe
+  ["#56aef2","#1657b2"], // Maitre des rayons — bleu
+  ["#f7d97c","#bf8a0e"]  // Legende — or
+];
 function celebrateLevelUp(lv){
-  try{if(typeof playSound==="function")playSound("win");}catch(e){}
-  var reduce=false;try{reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;}catch(e){}
+  var reduit=false;try{reduit=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;}catch(e){}
   var prevName=(LEVELS[lv.idx-1]&&LEVELS[lv.idx-1][1])||"Débutant";
+  var teinte=LEVEL_LIQUIDE[lv.idx]||LEVEL_LIQUIDE[LEVEL_LIQUIDE.length-1];
+  var cup="M30 20 L102 20 L94 150 Q93 160 84 160 L48 160 Q39 160 38 150 Z";
+  var uid="lvq"+(lv.idx);
   var ov=document.createElement("div");
-  ov.style.cssText="position:fixed;inset:0;z-index:10002;display:flex;align-items:center;justify-content:center;padding:30px;background:rgba(10,8,6,.66);backdrop-filter:blur(4px);opacity:0;transition:opacity .35s ease";
-  ov.innerHTML='<div style="max-width:330px;width:100%;text-align:center">'+
-    '<div style="font-size:12px;font-weight:900;letter-spacing:2px;text-transform:uppercase;color:#f0b840;margin-bottom:10px">★ Niveau supérieur ★</div>'+
-    '<div style="font-size:13px;font-weight:600;color:rgba(255,255,255,.55);text-decoration:line-through;margin-bottom:3px">'+sanitize(prevName)+'</div>'+
-    '<div id="lvup-name" style="font-size:32px;font-weight:900;color:#fff;line-height:1.1;margin-bottom:18px;opacity:0;transform:scale(.6) translateY(8px);transition:opacity .45s ease,transform .55s cubic-bezier(.2,1.5,.4,1)">'+sanitize(lv.name)+'</div>'+
-    '<div style="height:16px;border-radius:9px;background:rgba(255,255,255,.16);overflow:hidden;box-shadow:inset 0 1px 3px rgba(0,0,0,.3)">'+
-      '<div id="lvup-bar" style="height:100%;width:0%;border-radius:9px;background:linear-gradient(90deg,#e67e22,#f0b840);box-shadow:0 0 14px rgba(240,184,64,.7);transition:width 1.15s cubic-bezier(.25,.8,.3,1)"></div>'+
-    '</div>'+
-    '<div style="font-size:12px;font-weight:800;color:rgba(255,255,255,.7);margin-top:11px">Niveau '+(lv.idx+1)+' / '+LEVELS.length+'</div>'+
-    '<button id="lvup-close" style="margin-top:24px;padding:13px 34px;border-radius:14px;border:none;background:#fff;color:#111;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">Continuer</button>'+
+  ov.className="lvup-ov";
+  ov.setAttribute("role","dialog");
+  ov.setAttribute("aria-modal","true");
+  ov.setAttribute("aria-label",tr("Niveau supérieur")+" : "+lv.name);
+  ov.innerHTML='<div class="lvup-box">'+
+    '<div class="lvup-kick">'+sanitize(tr("Niveau supérieur"))+'</div>'+
+    '<div class="lvup-old">'+sanitize(prevName)+'</div>'+
+    '<svg class="lvup-verre" width="150" height="200" viewBox="0 0 132 176" aria-hidden="true">'+
+      '<defs>'+
+        '<clipPath id="'+uid+'c"><path d="'+cup+'"/></clipPath>'+
+        '<linearGradient id="'+uid+'g" x1="0" y1="0" x2="0" y2="1">'+
+          '<stop offset="0%" stop-color="'+teinte[0]+'"/><stop offset="100%" stop-color="'+teinte[1]+'"/>'+
+        '</linearGradient>'+
+      '</defs>'+
+      '<rect class="lvup-filet" x="63" y="0" width="6" height="26" rx="3" fill="'+teinte[0]+'"/>'+
+      '<g clip-path="url(#'+uid+'c)">'+
+        '<rect x="0" y="0" width="132" height="176" fill="rgba(255,255,255,.07)"/>'+
+        '<g class="lvup-liq">'+
+          '<path class="lvup-onde" d="M-160 9 q40 -10 80 0 t80 0 t80 0 t80 0 t80 0 t80 0 v176 h-480 z" fill="url(#'+uid+'g)"/>'+
+          '<rect x="-160" y="17" width="480" height="190" fill="url(#'+uid+'g)"/>'+
+          /* La mousse SUIT l'onde. Une bande droite posee au-dessus du liquide
+             faisait une dalle grise qui ne bougeait pas avec la surface : on
+             reprend exactement le meme trace, decale vers le haut, et la meme
+             animation — donc en phase, image par image. */
+          '<path class="lvup-onde" d="M-160 6 q40 -10 80 0 t80 0 t80 0 t80 0 t80 0 t80 0 v9 h-480 z" fill="rgba(255,255,255,.42)"/>'+
+        '</g>'+
+        '<g class="lvup-bulles"></g>'+
+      '</g>'+
+      '<path d="'+cup+'" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="3.5" stroke-linejoin="round"/>'+
+      '<path d="M30 20 L102 20" stroke="rgba(255,255,255,.95)" stroke-width="5" stroke-linecap="round"/>'+
+    '</svg>'+
+    '<div class="lvup-name">'+sanitize(lv.name)+'</div>'+
+    '<div class="lvup-sub">'+sanitize(trh("Niveau {n} sur {t} · {p} points",{n:lv.idx+1,t:LEVELS.length,p:ptsNets()}))+'</div>'+
+    '<button class="lvup-btn" type="button">'+sanitize(tr("Continuer"))+'</button>'+
   '</div>';
   document.body.appendChild(ov);
-  function close(){ov.style.opacity="0";setTimeout(function(){if(ov.parentNode)ov.remove();},360);}
-  var cb=ov.querySelector("#lvup-close");if(cb)cb.onclick=close;
+  var ferme=false;
+  function close(){
+    if(ferme)return;ferme=true;
+    ov.classList.remove("on");
+    setTimeout(function(){if(ov.parentNode)ov.remove();},380);
+  }
+  var bt=ov.querySelector(".lvup-btn");
+  if(bt){bt.onclick=close;try{setTimeout(function(){bt.focus();},400);}catch(e){}}
   ov.addEventListener("click",function(e){if(e.target===ov)close();});
+  var verre=ov.querySelector(".lvup-verre"),bulles=ov.querySelector(".lvup-bulles");
   requestAnimationFrame(function(){
-    ov.style.opacity="1";
-    var bar=ov.querySelector("#lvup-bar"),nm=ov.querySelector("#lvup-name");
-    if(reduce){if(bar)bar.style.transition="none";if(nm)nm.style.transition="none";}
-    setTimeout(function(){if(bar)bar.style.width="100%";},reduce?0:180);
-    setTimeout(function(){if(nm){nm.style.opacity="1";nm.style.transform="scale(1) translateY(0)";}},reduce?0:650);
-    if(!reduce)setTimeout(function(){try{confettiBurst();}catch(e){}},1050);
+    ov.classList.add("on");
+    if(reduit){
+      verre.classList.add("plein");
+      var nmR=ov.querySelector(".lvup-name");if(nmR){nmR.style.transition="none";nmR.classList.add("on");}
+      try{playSound("verser");}catch(e){}
+      return;
+    }
+    // Le versement commence : le filet coule, le son part, le verre monte.
+    verre.classList.add("coule");
+    try{playSound("verser");}catch(e){}
+    setTimeout(function(){verre.classList.add("plein");},60);
+    // Les bulles remontent pendant que ca se remplit.
+    for(var i=0;i<7;i++){
+      (function(k){setTimeout(function(){
+        if(ferme||!bulles.parentNode)return;
+        var c=document.createElementNS("http://www.w3.org/2000/svg","circle");
+        c.setAttribute("cx",String(46+Math.random()*40));
+        c.setAttribute("cy","152");
+        c.setAttribute("r",String(1.6+Math.random()*2.2));
+        c.setAttribute("fill","rgba(255,255,255,.72)");
+        c.style.animation="lvupBulle "+(0.7+Math.random()*0.6)+"s ease-out forwards";
+        bulles.appendChild(c);
+      },300+k*140);})(i);
+    }
+    setTimeout(function(){verre.classList.remove("coule");},1480);
+    // Le verre est plein : le nouveau nom arrive, puis les confettis.
+    setTimeout(function(){
+      var nm=ov.querySelector(".lvup-name");if(nm)nm.classList.add("on");
+    },1480);
+    setTimeout(function(){try{confettiBurst();}catch(e){}},1700);
   });
-  setTimeout(function(){if(ov.parentNode&&document.body.contains(ov))close();},8000);
+  setTimeout(function(){if(ov.parentNode&&document.body.contains(ov))close();},9000);
 }
+window.celebrateLevelUp=celebrateLevelUp;
 /* Détecte un vrai passage de niveau et déclenche l'animation UNE seule fois par
    niveau, via une mémoire persistante (magoLevelSeen). Fonctionne en session ET
    au démarrage (si on a gagné le niveau pendant que l'app était fermée). */
