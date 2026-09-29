@@ -6293,6 +6293,30 @@ window.fbLoadCommunityData();
    dans lequel « Hawai Ananas » est tombee. Le controle du catalogue verifie
    desormais que chaque cible existe. */
 window.DRINK_MERGES = { 11287: 3300,
+  /* 29/09 — dix-sept doublons NATIFS reveles par l'uniformisation des noms
+     (la marque preposee a fait tomber les paires nez a nez : deux
+     « Club-Mate Original », deux « San Pellegrino Limonata »...). Les
+     fiches en double sont retirees de data/drinks.js, leurs photos et
+     codes-barres reunis sur la fiche gardee ; ces fusions remappent les
+     magasins qui referencaient l'ancien identifiant. */
+  11055: 3500,   // Club-Mate Original
+  11061: 2401,   // Jarritos Tamarindo
+  11110: 10079,  // Hamoud Boualem Selecto
+  11126: 10049,  // Rauch Happy Day Orange
+  11149: 11430,  // Cécémel Original
+  11235: 14,     // Mecca-Cola
+  13088: 11347,  // Mogu Mogu Bubble Gum
+  15193: 2300,   // San Pellegrino Limonata
+  15388: 2301,   // San Pellegrino Aranciata
+  16147: 10018,  // Chaudfontaine Fusion Citron
+  16167: 16069,  // Carrefour Eau Minérale Naturelle Pétillante
+  16177: 10017,  // Chaudfontaine Pétillante
+  16267: 16142,  // Oasis Aqua fruit
+  16427: 16426,  // Lidl Kongstrong
+  16500: 10006,  // Fuze Tea thé vert mangue & camomille
+  16541: 16505,  // Estathé Limone
+  17748: 17747,  // Luxlait Milkshake
+  16502: 16,     // « boisson the glace peche Lipton » -> Lipton Ice Tea Pêche
   11433: 10068,                 // Hawai Tropical -> Hawaï Tropical
   /* 11434 pointait vers 11224, un identifiant qui n'a JAMAIS existe — verifie
      sur tout l'historique de data/drinks.js. La fiche « Hawaï Ananas » etait
@@ -11705,11 +11729,21 @@ function mergeCatalog(rows){
   return added;
 }
 function getBrandGroups(){
-  var map={};
+  /* Regroupement par cle ECRASEE (minuscules, accents, espaces et
+     ponctuation retires) : « MayTea » et « May Tea » sont un seul groupe,
+     affiche sous la graphie la plus repandue. Le catalogue natif est
+     desormais canonise, mais les fiches communautaires se tapent a la
+     main — sans cette tolerance, chaque variante rouvrait sa carte dans
+     le rail des marques. */
+  var map={},compte={};
   DRINKS.forEach(function(d){
     var b=d.brand||"Autre";
-    if(!map[b])map[b]={brand:b,drinks:[]};
-    map[b].drinks.push(d);
+    var k=(b==="Autre")?"Autre":normTxt(b).replace(/[^a-z0-9]/g,"")||"Autre";
+    if(!map[k])map[k]={brand:b,drinks:[]};
+    map[k].drinks.push(d);
+    var c=compte[k]=compte[k]||{};
+    c[b]=(c[b]||0)+1;
+    if(c[b]>(c[map[k].brand]||0))map[k].brand=b;
   });
   var groups=Object.keys(map).map(function(k){
     map[k].drinks.sort(function(a,b){return b.stars-a.stars;});
