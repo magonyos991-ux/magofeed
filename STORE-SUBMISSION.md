@@ -84,6 +84,49 @@ Il ne reste que la configuration Firebase, à faire UNE fois :
 
 ## 2. Play Store — Déclaration de confidentialité (Data Safety)
 
+### Publier sur Google Play — le bouton, pas à pas
+
+Le chemin normal, sans Android Studio et sans Mac. L'app se construit sur
+GitHub, signée, prête pour la Play Console.
+
+**Une seule fois : les quatre secrets de signature.** Sur
+github.com/magonyos991-ux/magofeed → Settings → Secrets and variables →
+Actions → « New repository secret », crée ces quatre secrets (les valeurs
+te sont fournies dans la conversation Claude qui a généré la clé) :
+
+| Nom | Contenu |
+|---|---|
+| `ANDROID_KEYSTORE` | le fichier de signature encodé en base64 (un long bloc de texte) |
+| `ANDROID_KEYSTORE_PASSWORD` | son mot de passe |
+| `ANDROID_KEY_ALIAS` | `magofeed` |
+| `ANDROID_KEY_PASSWORD` | le même mot de passe |
+
+Facultatif, pour activer les notifications push Android : un cinquième
+secret `GOOGLE_SERVICES_JSON` contenant tout le fichier
+`google-services.json` téléchargé depuis la console Firebase (application
+Android `com.magofeed.app`). Sans lui, l'app marche — les push attendront.
+
+**À chaque version :**
+1. Onglet **Actions** → **« Construire l'app Android (Play Store) »** →
+   **Run workflow**.
+2. Attends la coche verte (~5-8 min), ouvre la page du run : en bas,
+   section **Artifacts**, télécharge `magofeed-play-N` (contient
+   `app-release.aab`).
+3. Play Console → ton app → **Production** (ou **Tests internes** pour
+   commencer) → **Créer une version** → glisse le `.aab` → Envoyer.
+   Le numéro de version monte tout seul à chaque build.
+
+**Une seule fois : le compte et la fiche.**
+1. **play.google.com/console** → compte développeur personnel (25 $, une
+   fois pour toujours).
+2. « Créer une application » → Magofeed, français, application, gratuite.
+3. La fiche se remplit avec ce qui est déjà prêt dans le dépôt :
+   les textes dans `STORE-LISTING.md`, les captures dans
+   `promo/stores/play-*.png` (1080×1920), l'icône est dans l'app.
+4. « Sécurité des données » : recopie le tableau de la section ci-dessous.
+5. Politique de confidentialité : l'URL de la page privacy du site
+   (https://magonyos991-ux.github.io/magofeed/privacy/).
+
 Dans la Play Console → « Sécurité des données », déclare :
 
 | Donnée | Collectée ? | Partagée ? | Raison |
