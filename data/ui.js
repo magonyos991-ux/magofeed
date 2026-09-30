@@ -230,6 +230,30 @@ function pluieEtincelles(ac,t,duree,dest){
   e.connect(eh);eh.connect(eg);eg.connect(dest);e.start(t);e.stop(t+duree+0.08);
 }
 
+/* LA MONTEE — CE QUI ANNONCE QUE QUELQUE CHOSE ARRIVE.
+   C'etait la derniere piece qui manquait a Legende. Un final peut etre long,
+   fort et bien rempli, il tombe quand meme a plat si rien ne l'a ANNONCE :
+   l'oreille n'a pas eu le temps de se preparer, donc rien ne se resout.
+   Une montee est un bruit filtre dont la coupure et le volume grimpent
+   ensemble, et qui s'arrete NET a l'instant du sommet — ici, l'instant ou le
+   verre est plein. C'est le vide laisse par son arret qui fait exister le coup
+   suivant. Elle ne s'entend pas comme un son, elle s'entend comme une attente.
+   Reservee aux deux derniers paliers : ailleurs, ce serait promettre une fete
+   qui n'arrive pas. */
+function montee(ac,t,duree,force,dest){
+  dest=dest||ac.destination;
+  var s=ac.createBufferSource();s.buffer=bruitBlanc(ac,1.2);s.loop=true;
+  var bp=ac.createBiquadFilter();bp.type="bandpass";bp.Q.value=1.6;
+  bp.frequency.setValueAtTime(240,t);
+  bp.frequency.exponentialRampToValueAtTime(3600,t+duree);
+  var g=ac.createGain();
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.exponentialRampToValueAtTime(0.13*force,t+duree*0.92);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+duree);   // coupe net au sommet
+  s.connect(bp);bp.connect(g);g.connect(dest);
+  s.start(t);s.stop(t+duree+0.02);
+}
+
 /* LA CANETTE QU'ON OUVRE — le vocabulaire deja en place dans l'app
    (playSound("can")), rejoue ici a 0,62 de son volume pour qu'elle ponctue la
    derniere goutte sans passer devant le versement. */
@@ -304,8 +328,8 @@ var LEVEL_SON=[
 /* 2 Chasseur          */ {f0:335,f1:1060,bulles:16,queue:0.85,canette:0,   fanf:null,                        tirs:[],                                              etincelles:0},
 /* 3 Connaisseur       */ {f0:340,f1:1150,bulles:17,queue:1.00,canette:0.52,fanf:[392,587],                   tirs:[],                                              etincelles:0},
 /* 4 Expert            */ {f0:340,f1:1250,bulles:18,queue:1.15,canette:0.60,fanf:[392,523,784],               tirs:[[-0.20,0.85]],                                  etincelles:0},
-/* 5 Maitre des rayons */ {f0:345,f1:1360,bulles:19,queue:1.30,canette:0.68,fanf:[294,392,587,784],           tirs:[[-0.38,0.85],[-0.04,1.00]],                     etincelles:0},
-/* 6 Legende           */ {f0:350,f1:1500,bulles:22,queue:1.70,canette:0.80,fanf:[196,392,523,659,784,1047],  tirs:[[-0.46,0.90],[-0.20,1.00],[0.10,1.10],[0.48,1.30]],etincelles:2.0}
+/* 5 Maitre des rayons */ {f0:345,f1:1360,bulles:19,queue:1.30,canette:0.68,montee:0.55,fanf:[294,392,587,784],           tirs:[[-0.38,0.85],[-0.04,1.00]],                     etincelles:0},
+/* 6 Legende           */ {f0:350,f1:1500,bulles:22,queue:1.70,canette:0.80,montee:1.00,fanf:[196,392,523,659,784,1047],  tirs:[[-0.46,0.90],[-0.20,1.00],[0.10,1.10],[0.48,1.30]],etincelles:2.0}
 ];
 
 /* LE SON D'UN PASSAGE DE NIVEAU. Un seul point d'entree.
@@ -320,6 +344,7 @@ var LEVEL_SON=[
 
    TEMPS DE LEGENDE, pour que la vibration et l'image se calent dessus :
      0,00 s  le versement commence  (l'animation du verre dure 1,5 s)
+     0,70 s  la montee demarre : elle grimpe et s'arrete NET au sommet
      1,04 s  premier feu            \ ils partent PENDANT que le verre finit
      1,30 s  deuxieme feu           /  de se remplir
      1,50 s  le verre est plein : la canette, puis la fanfare
@@ -331,6 +356,8 @@ function sonPalierNiveau(ac,t,idx,dest){
   var duree=1.5, tp=t+duree;                 // tp = l'instant ou le verre est plein
   var sortie=ac.createGain();sortie.gain.value=1;sortie.connect(dest||ac.destination);
   sonRemplissage(ac,t,{duree:duree,f0:p.f0,f1:p.f1,bulles:p.bulles,queue:p.queue,vol:1},sortie);
+  /* La montee se cale pour FINIR a l'instant du sommet, jamais apres. */
+  if(p.montee)montee(ac,tp-0.80,0.80,p.montee,sortie);
   if(p.canette)canetteDouce(ac,tp+0.02,p.canette,sortie);
   if(p.fanf)fanfare(ac,tp+0.06,p.fanf,1,sortie);
   for(var i=0;i<p.tirs.length;i++)feuFestif(ac,tp+p.tirs[i][0],p.tirs[i][1],sortie);
