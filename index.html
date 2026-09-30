@@ -28488,7 +28488,7 @@ function msgOuvrirSpot(pre){
       '<span style="font-size:13px;color:var(--s3)">\u203A</span></button>';
   };
   var optMagasin=function(m,i){
-    var sel=etat.sid===m.id;
+    var sel=String(etat.sid)===String(m.id)&&etat.sid!=null;
     return '<button class="msg-opt'+(sel?" sel":"")+'" data-m="'+i+'" role="radio" aria-checked="'+(!!sel)+'">'+
       '<span class="msg-opt-i" style="background:var(--bg2)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--cta-bg)"><path d="M12 21s-6-5.7-6-10a6 6 0 0 1 12 0c0 4.3-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg></span>'+
       '<span style="flex:1;min-width:0"><span class="msg-opt-t" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(m.name)+'</span><span class="msg-opt-s" style="display:block">'+(m.dist!=null?fmtDist(m.dist):"")+(m.deja?(m.dist!=null?" \u00B7 ":"")+'<span style="color:var(--ok-txt);font-weight:800">'+_tr("msgSpotHas")+'</span>':"")+'</span></span>'+
@@ -28554,6 +28554,22 @@ function msgOuvrirSpot(pre){
     var rendreListe=function(){
       var q=String((document.getElementById("spot-sq")||{}).value||"").trim().toLowerCase();
       magasins=listeMagasins(q);
+      /* Le magasin deja choisi — le plus souvent designe sur la carte —
+         reste EN TETE et coche, meme s'il n'est pas dans le classement.
+         Sans ca, le retour de la carte affichait une liste ou le choix
+         n'apparaissait nulle part : l'utilisateur croyait avoir tout perdu
+         et re-selectionnait a la main. */
+      if(etat.sid){
+        var idx=-1;
+        for(var ii=0;ii<magasins.length;ii++)if(String(magasins[ii].id)===String(etat.sid)){idx=ii;break;}
+        var choisi;
+        if(idx>=0){choisi=magasins.splice(idx,1)[0];}
+        else{
+          var sPin=(typeof STORES!=="undefined"?STORES:[]).find(function(x){return String(x.fbId||x.id)===String(etat.sid);});
+          choisi={id:String(etat.sid),name:etat.sname||(sPin?String(sPin.name||"").slice(0,60):""),dist:(sPin&&typeof sPin.dist==="number")?sPin.dist:null,deja:!!etat.deja};
+        }
+        magasins.unshift(choisi);
+      }
       var box=document.getElementById("spot-stores");if(!box)return;
       box.innerHTML=magasins.length?magasins.map(optMagasin).join(""):'<div class="msg-vide">'+_tr(q?"msgSpotNoStoreQ":"msgSpotNoStores")+'</div>';
     };
@@ -28570,7 +28586,7 @@ function msgOuvrirSpot(pre){
       var dMap=etat.d;ov.fermer();
       window._choixBoisson=dMap;window._choixMagasin=true;
       window._choixMagasinCb=function(st){
-        var deja=!!(st&&(st.drinks||[]).some(function(x){return String(x)===String(dMap.id);}));
+        var deja=!!(st&&((typeof magasinALaBoisson==="function"&&magasinALaBoisson(st,dMap.id))||(st.drinks||[]).some(function(x){return String(x)===String(dMap.id);})));
         if(st&&!(typeof STORES!=="undefined"&&STORES.some(function(x){return String(x.fbId||x.id)===String(st.fbId||st.id);}))){try{STORES.push(st);}catch(err){}}
         setTimeout(function(){msgOuvrirSpot({d:dMap,sid:String(st.fbId||st.id),sname:String(st.name||"").slice(0,60),deja:deja});},250);
       };
