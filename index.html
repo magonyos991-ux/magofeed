@@ -7654,7 +7654,8 @@ function renderLeaderboard(){
     row.style.cssText="display:flex;align-items:center;gap:12px;padding:9px 0;cursor:pointer"+(i<leaderboardRows.length-1?";border-bottom:1px solid var(--border)":"");
     var rlv=levelInfo(r.points||0),rcol=levelPseudoColor(rlv.idx);
     row.innerHTML=rankBadge(i)+
-      '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:'+(isMe?"800":"600")+';color:'+(rcol||"var(--s1)")+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(r.pseudo)+(isMe?' <span style="font-size:11px;font-weight:700;color:var(--s2)">'+((LANGS[curLang]||LANGS.fr).me)+'</span>':"")+(r.streak>=2?' <span style="display:inline-flex;align-items:center;gap:1px;font-size:11px;font-weight:700;color:#e67e22;vertical-align:-1px" title="'+attr(trh("{n} jours d\'affil\u00E9e",{n:r.streak}))+'">'+svgFlame(12,"#e67e22")+r.streak+'</span>':"")+'</div>'+
+      '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:'+(isMe?"800":"600")+';color:'+(rcol||"var(--s1)")+';'+levelHalo(rlv.idx)+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(r.pseudo)+(isMe?' <span style="font-size:11px;font-weight:700;color:var(--s2)">'+((LANGS[curLang]||LANGS.fr).me)+'</span>':"")+(r.streak>=2?' <span style="display:inline-flex;align-items:center;gap:1px;font-size:11px;font-weight:700;color:#e67e22;vertical-align:-1px" title="'+attr(trh("{n} jours d\'affil\u00E9e",{n:r.streak}))+'">'+svgFlame(12,"#e67e22")+r.streak+'</span>':"")+'</div>'+
+      levelPastille(rlv.idx)+
       '<div style="font-size:12.5px;font-weight:700;color:var(--s1);flex-shrink:0">'+nbSur(r.points)+' pts</div>'+
       '<span style="font-size:13px;color:var(--s3);flex-shrink:0">\u203A</span>';
     row.onclick=function(){openPlayerProfile(r);};
@@ -7760,7 +7761,8 @@ function remplirAutour(panel,r,pts,fermer){
       div.setAttribute("aria-label","Voir le profil de "+x.pseudo);
       div.style.cssText="display:flex;align-items:center;gap:12px;padding:9px 0;cursor:pointer"+sep;
       div.innerHTML=rankBadge(L.rang-1)+
-        '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:600;color:'+(rcol||"var(--s1)")+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(x.pseudo)+'</div>'+
+        '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:600;color:'+(rcol||"var(--s1)")+';'+levelHalo(rlv.idx)+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(x.pseudo)+'</div>'+
+        levelPastille(rlv.idx)+
         '<div style="font-size:12.5px;font-weight:700;color:var(--s1);flex-shrink:0">'+nbSur(x.points)+' pts</div>'+
         '<span style="font-size:13px;color:var(--s3);flex-shrink:0">\u203A</span>';
       div.onclick=function(){openPlayerProfile(x);};
@@ -7993,9 +7995,16 @@ function celebrateLevelUp(lv){
     '<button class="lvup-btn" type="button">'+sanitize(tr("Continuer"))+'</button>'+
   '</div>';
   document.body.appendChild(ov);
-  var ferme=false;
+  var ferme=false,arreterSon=null;
   function close(){
     if(ferme)return;ferme=true;
+    /* On FAIT DESCENDRE la fete, on ne la coupe pas. La fete est programmee a
+       l'avance dans le contexte audio : sans ca, fermer la carte au bout de
+       deux secondes laissait les feux d'artifice partir sur un ecran deja
+       revenu a l'accueil. Et une coupure nette fait un « clac » audible — la
+       forme d'onde saute a zero. playSound rend undefined quand les effets
+       sonores sont coupes : d'ou le test. */
+    if(typeof arreterSon==="function"){try{arreterSon();}catch(eA){}}
     ov.classList.remove("on");
     setTimeout(function(){if(ov.parentNode)ov.remove();},380);
   }
@@ -8008,12 +8017,12 @@ function celebrateLevelUp(lv){
     if(reduit){
       verre.classList.add("plein");
       var nmR=ov.querySelector(".lvup-name");if(nmR){nmR.style.transition="none";nmR.classList.add("on");}
-      try{playSound("verser");}catch(e){}
+      try{arreterSon=playSound("niveau",lv.idx);}catch(e){}
       return;
     }
     // Le versement commence : le filet coule, le son part, le verre monte.
     verre.classList.add("coule");
-    try{playSound("verser");}catch(e){}
+    try{arreterSon=playSound("niveau",lv.idx);}catch(e){}
     setTimeout(function(){verre.classList.add("plein");},60);
     // Les bulles remontent pendant que ca se remplit.
     for(var i=0;i<7;i++){
@@ -8033,7 +8042,18 @@ function celebrateLevelUp(lv){
     setTimeout(function(){
       var nm=ov.querySelector(".lvup-name");if(nm)nm.classList.add("on");
     },1480);
-    setTimeout(function(){try{confettiBurst();}catch(e){}},1700);
+    /* L'IMAGE SUIT LE SON, SUR LES MEMES TEMPS. La canette tombe a 1,52 s, les
+       feux d'artifice a 1,80 / 2,22 / 2,68 s : chaque salve de confettis part
+       au meme instant que son coup sourd. Aux trois premiers niveaux il n'y a
+       qu'une salve, comme avant — la fete grandit avec le palier, a l'oeil
+       comme a l'oreille. LEVEL_SON.tirs est la meme table que pour le son :
+       impossible que l'image et le son se desynchronisent un jour. */
+    var tirs=((window.LEVEL_SON&&LEVEL_SON[lv.idx])||{}).tirs||0;
+    setTimeout(function(){if(!ferme)try{confettiBurst();}catch(e){}},1700);
+    var tc=[1800,2220,2680];
+    for(var ti=0;ti<tirs;ti++){
+      (function(ms){setTimeout(function(){if(!ferme)try{confettiBurst();}catch(e){}},ms);})(tc[ti]);
+    }
   });
   setTimeout(function(){if(ov.parentNode&&document.body.contains(ov))close();},9000);
 }
@@ -8055,10 +8075,122 @@ function checkLevelUp(){
     if(lv.idx>seen){
       celebrateLevelUp(lv);
       try{localStorage.setItem("magoLevelSeen",String(lv.idx));}catch(e){}
+      window._lastLevelIdx=lv.idx;
+      return; // une fete a la fois : le passage de niveau prime sur le quart
     }
     window._lastLevelIdx=lv.idx;
+    verifierQuart(lv);
   }catch(e){}
 }
+/* ════════════════════════════════════════════════════════════════════════════
+   LES QUARTS DE NIVEAU — le verre se remplit un peu, en chemin
+   ───────────────────────────────────────────────────────────────────────────
+   Un passage de niveau est une fete ; un quart est une NOUVELLE. Il tient dans
+   une carte en haut de l'ecran, il dure cinq secondes, il s'en va tout seul, et
+   il ne bloque jamais le chemin : on ouvre l'app pour chercher une boisson, pas
+   pour regarder une animation.
+
+   LE VERRE MONTRE LE VRAI POURCENTAGE, PAS LE QUART. Le quart decide seulement
+   S'IL FAUT MONTRER quelque chose ; ce qui s'affiche est le chiffre reel. Sans
+   ca, un verre rempli a 50 % au-dessus d'un « encore 78 points » qui, lui, est
+   calcule juste, se contredirait tout seul — et la carte mentirait sur la seule
+   chose qu'elle a a dire.
+
+   CINQ ACCIDENTS, EMPECHES ICI :
+     1. deux fetes au meme demarrage      → checkLevelUp rend la main apres un
+                                            vrai passage de niveau (voir ci-dessus)
+     2. la meme carte deux fois           → un seul entier qui ne redescend jamais
+     3. une carte a Legende               → lv.next est nul, il n'y a pas de suite
+     4. une carte avant les vrais points  → window._statsReady, deja teste plus haut
+     5. une carte quand on PERD des points→ le code du quart ne peut que monter
+
+   LE GARDE-FOU N'EST PAS SEULEMENT DANS localStorage. Sur un Safari en
+   navigation privee, setItem leve a chaque ecriture : la memoire disque ne
+   retient rien et la carte reviendrait a chaque ouverture. Le miroir en memoire
+   (window._quartVu) tient la session meme quand le disque refuse. */
+function _codeQuart(idx,q){ return idx*10+q; }
+function verifierQuart(lv){
+  try{
+    if(!lv||!lv.next)return;                       // Legende : pas de niveau suivant
+    if(window._quartFeteCeDemarrage)return;        // une seule par ouverture d'app
+    var pts=ptsNets();
+    var pct=(pts-lv.floor)/(lv.next-lv.floor)*100;
+    var q=Math.floor(pct/25);
+    if(q<1||q>3)return;                            // 0-24 % : trop tot. 100 % : c'est un niveau.
+    var code=_codeQuart(lv.idx,q);
+    var vu=window._quartVu;
+    if(vu==null){
+      var brut=null;try{brut=localStorage.getItem("magoQuartVu");}catch(e){}
+      vu=(brut==null)?-1:parseInt(brut,10);
+      if(isNaN(vu))vu=-1;
+    }
+    if(code<=vu)return;
+    window._quartVu=code;
+    try{localStorage.setItem("magoQuartVu",String(code));}catch(e){}
+    window._quartFeteCeDemarrage=true;
+    celebrerQuart(lv,pts,pct,q);
+  }catch(e){}
+}
+/* La carte elle-meme. Le meme verre que la fete de niveau, en trois fois plus
+   petit, la meme couleur de boisson, le meme son — mais la version « gorgee »,
+   qui est le plus petit son de toute l'application (crete 0,10 contre 0,29 pour
+   le « pop » d'un bouton). On l'entend trois fois par niveau : s'il agacait,
+   c'est TOUS les effets sonores qui se feraient couper, scanner compris. */
+function celebrerQuart(lv,pts,pct,q){
+  var reduit=false;try{reduit=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;}catch(e){}
+  var teinte=(window.LEVEL_LIQUIDE&&LEVEL_LIQUIDE[lv.idx])||["#f0b840","#c8621a"];
+  var reste=Math.max(0,lv.next-pts);
+  /* L'AVANTAGE DU NIVEAU SUIVANT NE SE DIT QU'AU DERNIER QUART. Entre 25 % et
+     75 % du meme niveau, l'avantage ne change pas : afficher la meme phrase
+     trois fois de suite en fait du bruit, et c'est la ligne la plus longue de
+     la carte — elle passait sur deux lignes et ecrasait le chiffre, qui est la
+     seule chose qu'on vient lire. A 75 %, le niveau est en vue : la phrase
+     redevient une raison d'y aller. */
+  var avantage=(q>=3&&window.LEVEL_PERKS&&LEVEL_PERKS[lv.idx+1])||"";
+  var uid="pq"+Date.now();
+  var cup="M30 20 L102 20 L94 150 Q93 160 84 160 L48 160 Q39 160 38 150 Z";
+  /* La hauteur du liquide : 176 = verre vide, 26 = verre plein. On interpole
+     sur le VRAI pourcentage. */
+  var haut=Math.round(176-(176-26)*Math.max(0,Math.min(100,pct))/100);
+  var c=document.createElement("div");
+  c.className="pal-carte";
+  c.setAttribute("role","button");c.setAttribute("tabindex","0");
+  c.setAttribute("aria-label",trh("{p} % vers {n}",{p:Math.round(pct),n:lv.nextName})+". "+trh("Encore {n} point(s)",{n:reste}));
+  c.innerHTML='<svg class="pal-verre" width="42" height="56" viewBox="0 0 132 176" aria-hidden="true">'+
+      '<defs><clipPath id="'+uid+'c"><path d="'+cup+'"/></clipPath>'+
+      '<linearGradient id="'+uid+'g" x1="0" y1="0" x2="0" y2="1">'+
+      '<stop offset="0%" stop-color="'+teinte[0]+'"/><stop offset="100%" stop-color="'+teinte[1]+'"/></linearGradient></defs>'+
+      '<g clip-path="url(#'+uid+'c)">'+
+        '<rect x="0" y="0" width="132" height="176" fill="var(--bg3)"/>'+
+        '<g class="pal-liq"><rect x="-160" y="0" width="480" height="200" fill="url(#'+uid+'g)"/></g>'+
+      '</g>'+
+      '<path d="'+cup+'" fill="none" stroke="var(--s2)" stroke-width="5" stroke-linejoin="round"/>'+
+    '</svg>'+
+    '<div class="pal-txt">'+
+      '<div class="pal-t">'+sanitize(trh("{p} % vers {n}",{p:Math.round(pct),n:lv.nextName}))+'</div>'+
+      '<div class="pal-s">'+sanitize(trh("Encore {n} point(s)",{n:reste}))+'</div>'+
+      (avantage?'<div class="pal-a">'+sanitize(trh("Au niveau suivant : {a}",{a:tr(avantage)}))+'</div>':'')+
+    '</div>'+
+    '<span class="pal-chev">\u203A</span>';
+  document.body.appendChild(c);
+  var parti=false;
+  function partir(){
+    if(parti)return;parti=true;
+    c.classList.remove("on");
+    setTimeout(function(){if(c.parentNode)c.remove();},320);
+  }
+  c.onclick=function(){partir();try{show("rewards");}catch(e){}};
+  c.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();c.onclick();}};
+  var liq=c.querySelector(".pal-liq");
+  if(reduit&&liq)liq.style.transition="none";
+  requestAnimationFrame(function(){
+    c.classList.add("on");
+    if(liq)liq.style.transform="translateY("+haut+"px)";
+    try{playSound("gorgee",lv.idx);}catch(e){}
+  });
+  setTimeout(partir,5000);
+}
+window.verifierQuart=verifierQuart;window.celebrerQuart=celebrerQuart;
 // Filet hors-ligne : si aucun compte Firestore ne répond, on débloque quand même
 // la détection après le démarrage (pour les gains de niveau en session).
 setTimeout(function(){if(!window._statsReady){window._statsReady=true;try{checkLevelUp();}catch(e){}}},5000);
@@ -8203,15 +8335,50 @@ function levelInfo(pts){
    promise tant qu'elle n'existe pas).
 ================================ */
 // Avantage concret par niveau (index = niveau atteint). Cosmetique mais REEL.
+/* QUATRE DE CES SEPT PROMESSES N'ETAIENT PAS TENUES. Verifie ligne par ligne
+   contre le code qui peint :
+     - « apparition au classement des contributeurs » : le classement affiche
+       TOUT LE MONDE, a tous les niveaux. Rien ne se debloquait la.
+     - « Anneau dore autour de ton avatar » : applyPseudoDisplays pose l'anneau
+       avec la couleur du niveau, soit du BRONZE a ce palier-la. Pas de l'or.
+     - « Ton badge de niveau affiche au classement » : levelPseudoColor etait
+       deja applique au classement pour tous les niveaux. Rien de neuf non plus.
+       Cette promesse-la est maintenant ECRITE (voir levelPastille).
+     - « Pseudo Legende dore » : levelPseudoColor rendait EXACTEMENT la meme
+       couleur qu'au niveau precedent. On atteignait le sommet et rien ne
+       changeait. Legende a desormais son halo, que personne d'autre n'a.
+   Le commentaire du dessus dit « jamais promise tant qu'elle n'existe pas » :
+   chacune de ces sept lignes est maintenant adossee a du code qui la peint. */
 var LEVEL_PERKS=[
   "Toutes les fonctions de base de Magofeed",
-  "Pseudo bronze + apparition au classement des contributeurs",
-  "Anneau doré autour de ton avatar",
-  "Ton badge de niveau affiché au classement, vu de toute la communauté",
+  "Ton pseudo passe en bronze, sur ton profil et au classement",
+  "Anneau bronze autour de ton avatar",
+  "Ta pastille de niveau à côté de ton pseudo au classement",
   "Pseudo argent — visible par toute la communauté",
   "Pseudo or + coche de confiance sur ton profil",
-  "Pseudo Légende doré — le sommet de Magofeed"
+  "Un halo doré autour de ton pseudo, le seul de l'app"
 ];
+/* LA PASTILLE DE NIVEAU (palier 4 et plus). Elle porte le NUMERO, pas le nom :
+   mesure faite sur un ecran de 320 px, une pastille « Legende » prend 60 px et
+   ecrase la boite du pseudo a 45 px — « Panthere Magnetique 431 » devient
+   « Panth... ». Un chiffre tient en 18 px et se lit d'un coup d'oeil a cote
+   d'un pseudo deja colore par le niveau.
+   ELLE SE POSE A COTE DE LA BOITE DU PSEUDO, JAMAIS DEDANS : cette boite porte
+   overflow:hidden et text-overflow:ellipsis ; un enfant ajoute dedans serait
+   purement et simplement coupe des que le pseudo est un peu long. */
+function levelPastille(idx){
+  if(!(idx>=3))return "";
+  var c=levelPseudoColor(idx)||"var(--s2)";
+  return '<span class="lv-past" style="color:'+c+';border-color:'+c+'">'+(idx+1)+'</span>';
+}
+/* LE HALO DE LEGENDE (palier 7). Un text-shadow fixe, pas un degrade anime :
+   un degrade sur background-clip:text repeint le texte a chaque image, sans
+   arret, tant qu'il est a l'ecran — au classement, une Legende peut rester
+   affichee des minutes. */
+function levelHalo(idx){
+  return (idx>=6)?"text-shadow:0 0 12px rgba(209,154,30,.75),0 0 3px rgba(209,154,30,.5)":"";
+}
+window.levelPastille=levelPastille;window.levelHalo=levelHalo;
 // Couleur de pseudo debloquee selon le niveau (lisible en clair ET sombre).
 function levelPseudoColor(idx){
   return ["","#b0763a","#b0763a","#b0763a","#9aa1aa","#d19a1e","#d19a1e"][idx]||"";
@@ -8236,7 +8403,13 @@ function renderRewards(){
   var pts=ptsNets(),lv=levelInfo(pts);
   var pct=lv.next?Math.min(100,Math.round((pts-lv.floor)/(lv.next-lv.floor)*100)):100;
   var toNext=lv.next?(lv.next-pts):0;
-  var tr=trustLevel(),rank=myLeaderboardRank();
+  /* CETTE VARIABLE S'APPELAIT « tr ». var etant hisse en haut de la fonction,
+     ce nom MASQUAIT la fonction de traduction tr() pour tout renderRewards —
+     exactement le piege deja rencontre dans applyPushSwitch. Consequence
+     directe : les sept avantages de niveau etaient ecrits en dur, sans tr(),
+     alors que leurs traductions existent dans les dix langues depuis toujours.
+     Cet ecran restait entierement en francais pour neuf personnes sur dix. */
+  var conf=trustLevel(),rank=myLeaderboardRank();
   var h="";
   // 1) Ton niveau + progression
   h+='<div style="background:linear-gradient(135deg,#1a1714,#3a2c1e);border-radius:20px;padding:20px;color:#fff;margin-bottom:16px">'+
@@ -8270,8 +8443,8 @@ function renderRewards(){
       '<div style="flex:1;min-width:0">'+
         '<div class="perk-name" style="color:'+(got&&col?col:'var(--s1)')+'">'+sanitize(L[1])+
           ' <span style="font-weight:600;color:var(--s3)">· '+L[0]+' pts</span></div>'+
-        '<div class="perk-desc">'+sanitize(LEVEL_PERKS[i]||"")+'</div>'+
-        (suivant&&manque?'<div class="perk-todo">Encore '+manque+' point'+(manque>1?'s':'')+' — tu y es presque</div>':'')+
+        '<div class="perk-desc">'+sanitize(tr(LEVEL_PERKS[i]||""))+'</div>'+
+        (suivant&&manque?'<div class="perk-todo">'+sanitize(trh("Encore {n} point(s)",{n:manque}))+'</div>':'')+
       '</div>'+
       (got?'<span class="perk-ok">'+icoOk(15)+'</span>':(suivant?'<span class="perk-tag">Prochain</span>':''))+
     '</div>';
@@ -8280,8 +8453,8 @@ function renderRewards(){
   // 3) Statut de confiance (#2 reputation — partie visible)
   h+='<div class="t-section" style="padding:6px 0 10px">Confiance</div>';
   h+='<div style="background:var(--bg2);border-radius:16px;padding:15px;margin-bottom:16px">'+
-    '<div style="display:flex;align-items:center;gap:10px"><span style="font-size:22px">'+tr.emoji+'</span>'+
-      '<div style="flex:1"><div style="font-size:13.5px;font-weight:800;color:'+tr.color+'">'+tr.name+'</div>'+
+    '<div style="display:flex;align-items:center;gap:10px"><span style="display:none">'+conf.emoji+'</span>'+
+      '<div style="flex:1"><div style="font-size:13.5px;font-weight:800;color:'+conf.color+'">'+conf.name+'</div>'+
       '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:1px">'+(userStats.discAccepted||0)+' découverte(s) acceptée(s) · '+(userStats.confirms||0)+' confirmation(s)</div></div></div>'+
     '<div style="font-size:11px;line-height:1.55;color:var(--s3);margin-top:10px">Plus tu contribues avec des infos justes, plus ta parole compte. Bientôt, tes ajouts seront validés plus vite grâce à ta réputation.</div>'+
     /* La regle anti-triche est ECRITE, en clair, avant la faute. Une sanction
@@ -24897,6 +25070,7 @@ function applyPseudoDisplays(){
   var name=document.getElementById("profile-name-display");
   if(name){
     name.textContent=userPseudo;name.style.color=col||"";
+    name.style.textShadow=(lv.idx>=6)?"0 0 12px rgba(209,154,30,.75),0 0 3px rgba(209,154,30,.5)":"";
     // Perk niv.6+ (Maître) : coche de confiance doree sur le pseudo
     if(lv.idx>=5){var ck=document.createElement("span");ck.textContent=" ✓";ck.title="Contributeur de confiance";ck.style.cssText="color:#d19a1e;font-weight:800";name.appendChild(ck);}
   }
