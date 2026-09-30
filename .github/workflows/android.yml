@@ -1,0 +1,127 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CONSTRUIRE L'APP ANDROID POUR LE PLAY STORE, EN APPUYANT SUR UN BOUTON
+#
+# Meme principe que « Déployer le serveur » : declenchement MANUEL depuis
+# l'onglet Actions (bouton « Run workflow »). Le resultat est un fichier
+# .aab SIGNE, a telecharger en bas de la page du run (section « Artifacts »),
+# puis a televerser tel quel dans la Play Console.
+#
+# CE QU'IL FAUT, UNE SEULE FOIS : quatre secrets GitHub (Settings → Secrets
+# and variables → Actions) :
+#   ANDROID_KEYSTORE           le fichier de signature, encode en base64
+#   ANDROID_KEYSTORE_PASSWORD  son mot de passe
+#   ANDROID_KEY_ALIAS          le nom de la cle (magofeed)
+#   ANDROID_KEY_PASSWORD       le mot de passe de la cle
+# Et, facultatif, pour les notifications push Android :
+#   GOOGLE_SERVICES_JSON       le contenu du fichier google-services.json
+#                              (console Firebase, application Android)
+# Sans lui, l'app se construit et marche — seules les push restent muettes.
+#
+# LE NUMERO DE VERSION monte tout seul a chaque build (base 100 + numero de
+# run) : deux envois successifs sur la Play Console ne se marchent jamais
+# dessus.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Construire l'app Android (Play Store)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: construire-android
+  cancel-in-progress: false
+
+jobs:
+  construire:
+    name: AAB signé pour la Play Console
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm ci --no-audit --no-fund
+
+      # Le site embarque dans l'app : meme liste blanche que partout.
+      - name: Assembler le site embarqué
+        run: npm run build:web
+
+      - name: Synchroniser Capacitor
+        run: npx cap sync android
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # Les push Android ne marchent qu'avec ce fichier. Il vit dans un
+      # secret, jamais dans le depot. Absent = l'app se construit quand meme.
+      - name: Poser google-services.json (facultatif)
+        env:
+          GS: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GS" ]; then
+            printf '%s' "$GS" > android/app/google-services.json
+            echo "google-services.json pose : les push Android seront actives."
+          else
+            echo "Pas de secret GOOGLE_SERVICES_JSON : app sans push (ajoutable plus tard, voir STORE-SUBMISSION.md)."
+          fi
+
+      # La cle de signature sort des secrets, vit le temps du build, et le
+      # runner est detruit juste apres. Sans elle, on s'arrete net : un .aab
+      # non signe ne sert a rien sur la Play Console.
+      - name: Poser la clé de signature
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KS" ] || [ -z "$KS_PASS" ] || [ -z "$KS_ALIAS" ] || [ -z "$KEY_PASS" ]; then
+            echo "::error::Un des quatre secrets ANDROID_* est absent. Voir STORE-SUBMISSION.md, section Play Store."
+            exit 1
+          fi
+          printf '%s' "$KS" | base64 -d > android/upload.keystore
+          {
+            echo "storeFile=upload.keystore"
+            echo "storePassword=$KS_PASS"
+            echo "keyAlias=$KS_ALIAS"
+            echo "keyPassword=$KEY_PASS"
+          } > android/keystore.properties
+          echo "Cle de signature en place."
+
+      - name: Construire l'AAB signé
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew bundleRelease --no-daemon \
+            -PmagoVersionCode=$((100 + GITHUB_RUN_NUMBER)) \
+            -PmagoVersionName="1.0.${GITHUB_RUN_NUMBER}"
+
+      - name: Vérifier la signature
+        run: |
+          AAB=android/app/build/outputs/bundle/release/app-release.aab
+          if [ ! -f "$AAB" ]; then
+            echo "::error::Le fichier .aab n'a pas ete produit."
+            exit 1
+          fi
+          if ! jarsigner -verify "$AAB" >/dev/null 2>&1; then
+            echo "::error::L'AAB n'est pas signe — verifie les secrets ANDROID_*."
+            exit 1
+          fi
+          echo "AAB signe et pret : $(du -h "$AAB" | cut -f1)"
+
+      - name: Déposer l'AAB (section Artifacts de cette page)
+        uses: actions/upload-artifact@v4
+        with:
+          name: magofeed-play-${{ github.run_number }}
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Refermer la porte
+        if: always()
+        run: rm -f android/upload.keystore android/keystore.properties android/app/google-services.json

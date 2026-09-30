@@ -1,5 +1,21 @@
 apply plugin: 'com.android.application'
 
+/* Version de l'app : posee par le bouton GitHub « Construire l'app Android »
+   (-PmagoVersionCode / -PmagoVersionName, derives du numero de build), avec
+   des valeurs par defaut pour un build local dans Android Studio. */
+def magoVersionCode = (project.findProperty('magoVersionCode') ?: '1').toInteger()
+def magoVersionName = project.findProperty('magoVersionName') ?: '1.0'
+
+/* Signature de release : android/keystore.properties + android/upload.keystore
+   sont ecrits par le bouton GitHub depuis les secrets du depot, et effaces
+   apres le build. Sans eux, le build reste possible (non signe) — Android
+   Studio et les verifications locales ne cassent pas. */
+def ksProps = new Properties()
+def ksFile = rootProject.file('keystore.properties')
+if (ksFile.exists()) {
+    ksProps.load(new FileInputStream(ksFile))
+}
+
 android {
     namespace "com.magofeed.app"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +23,8 @@ android {
         applicationId "com.magofeed.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode magoVersionCode
+        versionName magoVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +32,23 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (ksFile.exists()) {
+                storeFile rootProject.file(ksProps['storeFile'])
+                storePassword ksProps['storePassword']
+                keyAlias ksProps['keyAlias']
+                keyPassword ksProps['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (ksFile.exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
