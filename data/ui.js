@@ -212,21 +212,22 @@ function feuFestif(ac,t,force,dest){
    sont la SALVE DU FEU relue trois fois moins vite — 0,62 s etiree a 1,5 s,
    donc des craquements espaces au lieu d'une gerbe, pour zero calcul de plus.
    Tres bas en volume : c'est une trainee, pas un son. */
-function pluieEtincelles(ac,t,dest){
+function pluieEtincelles(ac,t,duree,dest){
   dest=dest||ac.destination;
+  duree=duree||1.40;
   var s=ac.createBufferSource();s.buffer=bruitBlanc(ac,1.2);s.loop=true;
   var hp=ac.createBiquadFilter();hp.type="highpass";hp.frequency.value=5200;
   var g=ac.createGain();
   g.gain.setValueAtTime(0.0001,t);
   g.gain.exponentialRampToValueAtTime(0.034,t+0.06);
-  g.gain.exponentialRampToValueAtTime(0.0001,t+1.40);
-  s.connect(hp);hp.connect(g);g.connect(dest);s.start(t);s.stop(t+1.45);
-  var e=ac.createBufferSource();e.buffer=salveBuf(ac);e.playbackRate.value=0.42;
+  g.gain.exponentialRampToValueAtTime(0.0001,t+duree);
+  s.connect(hp);hp.connect(g);g.connect(dest);s.start(t);s.stop(t+duree+0.05);
+  var e=ac.createBufferSource();e.buffer=salveBuf(ac);e.playbackRate.value=Math.max(0.2,0.62/duree);
   var eh=ac.createBiquadFilter();eh.type="highpass";eh.frequency.value=3000;
   var eg=ac.createGain();
   eg.gain.setValueAtTime(0.085,t);
-  eg.gain.linearRampToValueAtTime(0.028,t+1.40);
-  e.connect(eh);eh.connect(eg);eg.connect(dest);e.start(t);e.stop(t+1.48);
+  eg.gain.linearRampToValueAtTime(0.028,t+duree);
+  e.connect(eh);eh.connect(eg);eg.connect(dest);e.start(t);e.stop(t+duree+0.08);
 }
 
 /* LA CANETTE QU'ON OUVRE — le vocabulaire deja en place dans l'app
@@ -253,46 +254,87 @@ function canetteDouce(ac,t,vol,dest){
    duree : toujours 1,5 s — collee a l'animation du verre.
    f1    : la hauteur d'arrivee. LE curseur principal.
    ============================================================================ */
+/* LA FANFARE — CE QUI MANQUAIT A LEGENDE.
+   Des feux d'artifice, c'est du BRUIT : ca claque, et ca ne resout rien. Une
+   montee de niveau au sommet sans note tenue sonne comme un petard, pas comme
+   une arrivee. La fanfare est l'accord qui arrive quand le verre est plein :
+   les notes entrent l'une apres l'autre, du grave vers l'aigu, et tiennent.
+   C'est elle qui fait la difference entre « ca a fait du bruit » et « j'y suis
+   arrive ».
+
+   Registre choisi : sinus et triangle, pas de cuivres. L'app parle de boissons,
+   pas de tournoi. Chaque note monte legerement en entrant (un demi-pour-cent),
+   ce qui donne le petit gonflement d'un souffle plutot qu'une note posee a
+   plat. Les notes se CUMULENT : d'ou un volume par note tres bas (0,05), sinon
+   six notes ensemble saturent a elles seules. */
+function fanfare(ac,t,notes,force,dest){
+  dest=dest||ac.destination;
+  force=(force==null?1:force);
+  for(var i=0;i<notes.length;i++){
+    var f=notes[i], td=t+i*0.085;
+    var o=ac.createOscillator(),g=ac.createGain();
+    o.type=(i===0)?"sine":"triangle";
+    o.frequency.setValueAtTime(f*0.994,td);
+    o.frequency.linearRampToValueAtTime(f,td+0.10);
+    var v=0.050*force*(i===0?1.35:1);   // la fondamentale porte le poids
+    g.gain.setValueAtTime(0.0001,td);
+    g.gain.exponentialRampToValueAtTime(v,td+0.05);
+    g.gain.setValueAtTime(v,td+0.45);
+    g.gain.exponentialRampToValueAtTime(0.0001,td+1.55);
+    o.connect(g);g.connect(dest);
+    o.start(td);o.stop(td+1.60);
+  }
+}
+
+/* ============================================================================
+   LA TABLE DES SEPT PALIERS. Un index = un niveau de LEVELS.
+   duree : toujours 1,5 s — collee a l'animation du verre.
+   f1    : la hauteur d'arrivee du versement. LE curseur du son de base.
+
+   LE FINAL NE VIENT PLUS APRES LE VERSEMENT, IL LE RECOUVRE. Dans la premiere
+   version, il commencait 0,30 s APRES la derniere goutte : on entendait
+   « ca coule... silence... pop, pop, pop ». Trois petards espaces, pas une
+   fete. Les temps sont maintenant comptes par rapport a la fin du versement, et
+   les premiers tirs sont NEGATIFS : ils partent pendant que le verre finit de
+   se remplir. Tout converge sur l'instant ou le verre est plein.
+   ============================================================================ */
 var LEVEL_SON=[
-/* 0 Curieux           */ {f0:330,f1:900, bulles:12,queue:0.55,canette:0,   tirs:0,etincelles:0},
-/* 1 Explorateur       */ {f0:330,f1:980, bulles:14,queue:0.70,canette:0,   tirs:0,etincelles:0},
-/* 2 Chasseur          */ {f0:335,f1:1060,bulles:16,queue:0.85,canette:0,   tirs:0,etincelles:0},
-/* 3 Connaisseur       */ {f0:340,f1:1150,bulles:17,queue:1.00,canette:0.52,tirs:0,etincelles:0},
-/* 4 Expert            */ {f0:340,f1:1250,bulles:18,queue:1.15,canette:0.60,tirs:1,etincelles:0},
-/* 5 Maitre des rayons */ {f0:345,f1:1360,bulles:19,queue:1.30,canette:0.68,tirs:2,etincelles:0},
-/* 6 Legende           */ {f0:350,f1:1500,bulles:21,queue:1.50,canette:0.75,tirs:3,etincelles:1}
+/* 0 Curieux           */ {f0:330,f1:900, bulles:12,queue:0.55,canette:0,   fanf:null,                        tirs:[],                                              etincelles:0},
+/* 1 Explorateur       */ {f0:330,f1:980, bulles:14,queue:0.70,canette:0,   fanf:null,                        tirs:[],                                              etincelles:0},
+/* 2 Chasseur          */ {f0:335,f1:1060,bulles:16,queue:0.85,canette:0,   fanf:null,                        tirs:[],                                              etincelles:0},
+/* 3 Connaisseur       */ {f0:340,f1:1150,bulles:17,queue:1.00,canette:0.52,fanf:[392,587],                   tirs:[],                                              etincelles:0},
+/* 4 Expert            */ {f0:340,f1:1250,bulles:18,queue:1.15,canette:0.60,fanf:[392,523,784],               tirs:[[-0.20,0.85]],                                  etincelles:0},
+/* 5 Maitre des rayons */ {f0:345,f1:1360,bulles:19,queue:1.30,canette:0.68,fanf:[294,392,587,784],           tirs:[[-0.38,0.85],[-0.04,1.00]],                     etincelles:0},
+/* 6 Legende           */ {f0:350,f1:1500,bulles:22,queue:1.70,canette:0.80,fanf:[196,392,523,659,784,1047],  tirs:[[-0.46,0.90],[-0.20,1.00],[0.10,1.10],[0.48,1.30]],etincelles:2.0}
 ];
-var FORCE_TIR=[0.70,0.85,1.00]; // le bouquet monte tir par tir
 
 /* LE SON D'UN PASSAGE DE NIVEAU. Un seul point d'entree.
 
    TOUT PASSE PAR UN SEUL ROBINET. La fete est programmee a l'avance dans le
    contexte audio : si la personne appuie sur « Continuer » au bout de deux
    secondes, les feux d'artifice continuent de partir sur une carte deja
-   fermee. On branche donc les quatre briques sur UN gain commun, et la
+   fermee. On branche donc toutes les briques sur UN gain commun, et la
    fonction rend de quoi le refermer. Fermer la carte fait descendre la fete en
    0,12 s — une descente, pas une coupure : couper net un son en cours fait un
    « clac » audible (la forme d'onde saute a zero).
 
-   TIMES-CODES, pour que la vibration et l'image se calent dessus :
-     0,00 s  le versement commence      (l'animation du verre dure 1,5 s)
-     1,52 s  la canette, sur la derniere goutte   (niveaux 3 et plus)
-     1,80 s  premier feu                          (niveaux 4 et plus)
-     2,22 s  deuxieme feu                         (niveaux 5 et plus)
-     2,68 s  troisieme feu                        (Legende)
-     3,08 s  la pluie d'etincelles                (Legende) */
+   TEMPS DE LEGENDE, pour que la vibration et l'image se calent dessus :
+     0,00 s  le versement commence  (l'animation du verre dure 1,5 s)
+     1,04 s  premier feu            \ ils partent PENDANT que le verre finit
+     1,30 s  deuxieme feu           /  de se remplir
+     1,50 s  le verre est plein : la canette, puis la fanfare
+     1,60 s  troisieme feu
+     1,98 s  quatrieme feu, le plus gros
+     2,35 s  la pluie d'etincelles, deux secondes */
 function sonPalierNiveau(ac,t,idx,dest){
   var p=LEVEL_SON[idx]||LEVEL_SON[LEVEL_SON.length-1];
-  var duree=1.5;
+  var duree=1.5, tp=t+duree;                 // tp = l'instant ou le verre est plein
   var sortie=ac.createGain();sortie.gain.value=1;sortie.connect(dest||ac.destination);
   sonRemplissage(ac,t,{duree:duree,f0:p.f0,f1:p.f1,bulles:p.bulles,queue:p.queue,vol:1},sortie);
-  if(p.canette)canetteDouce(ac,t+duree+0.02,p.canette,sortie);
-  var tf=t+duree+0.30;
-  for(var i=0;i<p.tirs;i++){
-    feuFestif(ac,tf,FORCE_TIR[i]||1,sortie);
-    tf+=0.42+i*0.04;
-  }
-  if(p.etincelles)pluieEtincelles(ac,t+duree+0.30+1.28,sortie);
+  if(p.canette)canetteDouce(ac,tp+0.02,p.canette,sortie);
+  if(p.fanf)fanfare(ac,tp+0.06,p.fanf,1,sortie);
+  for(var i=0;i<p.tirs.length;i++)feuFestif(ac,tp+p.tirs[i][0],p.tirs[i][1],sortie);
+  if(p.etincelles)pluieEtincelles(ac,tp+0.85,p.etincelles,sortie);
   return function(){try{
     var n=ac.currentTime;
     sortie.gain.cancelScheduledValues(n);

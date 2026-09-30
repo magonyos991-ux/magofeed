@@ -7889,7 +7889,37 @@ function _aPhotoFiche(d){
   for(var i=0;i<f.length;i++)if(f[i]&&f[i].img)return true;
   return false;
 }
+/* CE QU'ON NE MET PAS EN VITRINE — et pourquoi la liste est si courte.
+   Le catalogue porte le nom REEL de chaque produit, celui qui est imprime sur
+   la bouteille : c'est toute l'utilite de l'app, reconnaitre en rayon ce qu'on
+   a vu a l'ecran. On ne renomme donc RIEN. Renommer « Granini Sex On The
+   Beach » en « Granini Cocktail Peche » rendrait la fiche introuvable pour la
+   personne qui tient la bouteille dans la main, et ce serait un mensonge sur
+   le produit.
+
+   Mais la vitrine du jour est autre chose qu'une fiche : c'est la premiere
+   chose qu'on voit en ouvrant l'app, et Magofeed se veut familial. Ce nom-la
+   n'y a pas sa place. La fiche reste entiere : recherche, code-barre, marque,
+   categorie, chasse — tout marche. Elle ne fait simplement pas la une.
+
+   LA LISTE EST VOLONTAIREMENT MINUSCULE, et ce n'est pas un filtre sur les
+   cocktails : « Mojito sans alcool », « Pina Colada », « Virgin Mojito »,
+   « Spritz » sont exactement ce que cette app existe pour trouver. J'ai
+   balaye les 4 571 fiches avec vingt motifs : une seule pose probleme. */
+/* La comparaison se fait sur le nom REDUIT — minuscules, sans espaces ni
+   ponctuation. « Sex on the Beach », « Sex On The Beach » et « Sex-on-the-
+   Beach » donnent alors la meme chaine, et un nom qui change de graphie au
+   prochain import ne fait pas rentrer la fiche en vitrine par la bande. */
+function _reduit(t){ return String(t||"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+var VITRINE_ECARTEES=["sexonthebeach"];
+function _vitrineConvenable(d){
+  if(!d||!d.name)return false;
+  var n=_reduit(d.name);
+  for(var i=0;i<VITRINE_ECARTEES.length;i++)if(n.indexOf(VITRINE_ECARTEES[i])!==-1)return false;
+  return true;
+}
 window._jourIndex=_jourIndex;window.tirageDuJour=tirageDuJour;window._aPhotoFiche=_aPhotoFiche;
+window._vitrineConvenable=_vitrineConvenable;
 function bumpDaily(kind){
   if(dailyStats.date!==_dailyKey()){dailyStats={date:_dailyKey(),scans:0,photos:0,confirms:0,signals:0};}
   dailyStats[kind]=(dailyStats[kind]||0)+1;
@@ -8048,11 +8078,20 @@ function celebrateLevelUp(lv){
        qu'une salve, comme avant — la fete grandit avec le palier, a l'oeil
        comme a l'oreille. LEVEL_SON.tirs est la meme table que pour le son :
        impossible que l'image et le son se desynchronisent un jour. */
-    var tirs=((window.LEVEL_SON&&LEVEL_SON[lv.idx])||{}).tirs||0;
-    setTimeout(function(){if(!ferme)try{confettiBurst();}catch(e){}},1700);
-    var tc=[1800,2220,2680];
-    for(var ti=0;ti<tirs;ti++){
-      (function(ms){setTimeout(function(){if(!ferme)try{confettiBurst();}catch(e){}},ms);})(tc[ti]);
+    /* LES TEMPS VIENNENT DE LA TABLE DU SON, pas d'une liste recopiee ici.
+       Une liste a part avait deja pris du retard : les tirs ont ete avances
+       pour recouvrir la fin du versement, et les confettis, eux, partaient
+       toujours aux anciens temps. On lit donc les memes decalages que
+       sonPalierNiveau — impossible de les desynchroniser a nouveau.
+       1500 ms = l'instant ou le verre est plein ; les decalages negatifs sont
+       les tirs qui partent pendant qu'il finit de se remplir. */
+    var tirs=((window.LEVEL_SON&&LEVEL_SON[lv.idx])||{}).tirs||[];
+    if(!tirs.length){
+      setTimeout(function(){if(!ferme)try{confettiBurst();}catch(e){}},1700);
+    }else{
+      for(var ti=0;ti<tirs.length;ti++){
+        (function(ms){setTimeout(function(){if(!ferme)try{confettiBurst();}catch(e){}},ms);})(Math.max(0,Math.round(1500+tirs[ti][0]*1000)));
+      }
     }
   });
   setTimeout(function(){if(ov.parentNode&&document.body.contains(ov))close();},9000);
@@ -12855,7 +12894,7 @@ function pickMissionDrink(){
        cote passait pour « introuvable » et devenait la mission du jour. */
     try{ (window.rayonProbableIds?window.rayonProbableIds(s):[]).forEach(function(id){have[Number(id)]=1;}); }catch(e){}
   });
-  var cands=DRINKS.filter(function(d){return !have[Number(d.id)]&&!(typeof nameLooksAlcoholic==="function"&&nameLooksAlcoholic(d.name,d.brand));});
+  var cands=DRINKS.filter(function(d){return !have[Number(d.id)]&&!(typeof nameLooksAlcoholic==="function"&&nameLooksAlcoholic(d.name,d.brand))&&(typeof _vitrineConvenable!=="function"||_vitrineConvenable(d));});
   if(!cands.length)cands=DRINKS.slice();
   var day=_dailyKey(),h=0;
   for(var i=0;i<day.length;i++)h=(h*31+day.charCodeAt(i))>>>0;
@@ -13025,8 +13064,8 @@ function renderTrends(){
        notees sont celles qui ont ete montees a la main, avec une vraie image.
        Il en reste 2 151, soit 269 jours avant de revoir la premiere. Tout le
        reste du catalogue est toujours la : recherche, categories, marques. */
-    var choisies=f.filter(function(d){return _aPhotoFiche(d)&&(d.stars||0)>0;});
-    if(choisies.length<8)choisies=f.filter(_aPhotoFiche);
+    var choisies=f.filter(function(d){return _aPhotoFiche(d)&&(d.stars||0)>0&&_vitrineConvenable(d);});
+    if(choisies.length<8)choisies=f.filter(function(d){return _aPhotoFiche(d)&&_vitrineConvenable(d);});
     var avecPhoto=interleaveByBrand(choisies);
     var base=(avecPhoto.length>=8)?avecPhoto:f;
     if(window._grilleJour!==_dailyKey()||!window._grilleDuJour){
