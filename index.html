@@ -8716,6 +8716,50 @@ function startScan(){
          manquer. Sans ce garde, l'erreur remontait dans le .catch du bas et
          affichait « Accès caméra refusé » — un message faux, qui envoyait la
          personne fouiller les réglages de son téléphone pour rien. */
+      /* ══ LE LECTEUR DU TELEPHONE D'ABORD ════════════════════════════════
+         BarcodeDetector est le decodeur integre au telephone (Chrome Android,
+         Edge, Chrome de bureau). Il lit la camera avec le materiel, il est
+         nettement plus sur que Quagga, et il ne coute aucun telechargement.
+         Il n'etait utilise nulle part.
+
+         ON NE PREVOIT AUCUN REPLI UNE FOIS QU'IL TOURNE, et c'est volontaire :
+         un decodeur qui marche et ne voit rien rend simplement un tableau vide
+         — le cas normal quand il n'y a pas de code dans le cadre. Un repli
+         declenche sur « il n'a rien vu depuis N secondes » rendrait donc la
+         main a Quagga chaque fois qu'on cherche encore son angle. On tranche
+         AVANT de commencer : si le constructeur repond et que les formats qui
+         nous interessent sont pris en charge, c'est lui et lui seul. Sinon
+         Quagga, sans jamais ouvrir de seconde camera.
+
+         Safari ne le propose toujours pas : les iPhone passent par Quagga,
+         qui vient d'etre repare juste au-dessus. */
+      var _formatsVoulus=["ean_13","ean_8","upc_a","upc_e"];
+      function _demarrerNatif(){
+        if(!("BarcodeDetector" in window))return Promise.resolve(false);
+        return window.BarcodeDetector.getSupportedFormats().then(function(dispo){
+          var pris=_formatsVoulus.filter(function(f){return dispo.indexOf(f)!==-1;});
+          if(!pris.length)return false;
+          var det=new window.BarcodeDetector({formats:pris});
+          window._scanNatif=true;
+          var occupe=false;
+          window._boucleNative=setInterval(function(){
+            if(!scanActive||occupe)return;
+            if(!video.videoWidth)return;            // la camera n'a pas encore d'image
+            occupe=true;
+            det.detect(video).then(function(res){
+              occupe=false;
+              if(!res||!res.length||!scanActive)return;
+              /* On rend le resultat dans la forme que onBarcodeDetected attend
+                 deja : un seul chemin de validation pour les deux lecteurs,
+                 avec la meme confirmation a trois lectures. */
+              onBarcodeDetected({codeResult:{code:String(res[0].rawValue||""),format:String(res[0].format||"")}});
+            }).catch(function(){ occupe=false; });
+          },100);
+          return true;
+        }).catch(function(){ return false; });
+      }
+      _demarrerNatif().then(function(natif){ if(natif)return; _demarrerQuagga(); });
+      function _demarrerQuagga(){
       if(typeof Quagga==="undefined"){
         hint.textContent=tr("\u2715 Lecteur de code-barre indisponible \u2014 v\u00e9rifie ta connexion");
         btn.style.display="";
@@ -8736,14 +8780,58 @@ function startScan(){
          avant de chercher le code ; on passait donc 640x360 au localisateur, ce
          qui est juste pour un code-barre dense photographie de biais. On lui en
          donne 960x540 pour le meme travail. */
-      Quagga.init({inputStream:{type:"LiveStream",target:video,constraints:{facingMode:"environment",width:{ideal:1920},height:{ideal:1080}}},locator:{patchSize:"medium",halfSample:true},decoder:{readers:["ean_reader","ean_8_reader","upc_reader","upc_e_reader"]}},
+      /* ══ CE QU'ON VOYAIT N'ETAIT PAS CE QU'ON LISAIT ═════════════════════════════
+         Ce « target: video » designait la balise <video> elle-meme. Or Quagga
+         traite sa cible comme un CONTENEUR : il y cherche un <video>, et s'il
+         n'en trouve pas, il en cree un. Dans un <video>, il n'en trouve
+         evidemment aucun — il en fabriquait donc un second, INVISIBLE, a
+         l'interieur du premier, et ouvrait une DEUXIEME camera pour l'alimenter.
+
+         MESURE, dans un navigateur, sur le code tel qu'il etait : deux appels a
+         getUserMedia, deux pistes video vivantes en meme temps, deux balises
+         <video> — celle qu'on voit, et celle, cachee, que Quagga decodait.
+         Autrement dit : l'image que la personne cadrait n'etait pas celle qui
+         etait lue. Viser etait une devinette. C'est la premiere cause du
+         « des fois ca ne marche pas ».
+
+         On lui passe donc le CONTENEUR (.scan-area). Quagga y trouve
+         #scan-video, le reutilise, et pose son flux dessus : une seule camera,
+         et on lit exactement ce qu'on cadre. Le flux d'apercu ouvert juste
+         avant est relache a la ligne du dessus, sinon il resterait allume dans
+         le vide — deux cameras ouvertes, c'est aussi ce qui fige l'apercu sur
+         iPhone. */
+      try{
+        var _ancien=video.srcObject;
+        if(_ancien&&_ancien.getTracks)_ancien.getTracks().forEach(function(t){try{t.stop();}catch(e){}});
+      }catch(e){}
+      /* frequency : sans lui, Quagga decode AUSSI VITE QUE POSSIBLE — mesure a
+         60 images par seconde, pour un code-barres qui ne bouge pas. Dix
+         suffisent largement (la confirmation demande trois lectures, soit trois
+         dixiemes de seconde), et le telephone cesse de chauffer pour rien.
+         numOfWorkers : Quagga en lance quatre par defaut et JETTE l'image quand
+         aucun n'est libre ; deux suffisent a tenir dix images par seconde. */
+      Quagga.init({inputStream:{type:"LiveStream",target:(video.parentElement||video),constraints:{facingMode:"environment",width:{ideal:1920},height:{ideal:1080}}},frequency:10,numOfWorkers:2,locator:{patchSize:"medium",halfSample:true},decoder:{readers:["ean_reader","ean_8_reader","upc_reader","upc_e_reader"]}},
         function(err){
           if(err){hint.textContent="✕ "+err;return;}
           _scanVotes={code:null,count:0};
           var fr=document.querySelector(".scan-frame");if(fr)fr.classList.remove("reading");
           quaggaRunning=true;Quagga.start();
+          /* La torche suit la camera REELLE, celle que Quagga vient d'ouvrir —
+             l'ancienne est eteinte. Sans ca, le bouton flash pilotait une piste
+             morte et ne faisait plus rien. */
+          try{
+            var _nf=video.srcObject;
+            if(_nf){
+              window._scanStream=_nf;window._torchOn=false;
+              var _nt=_nf.getVideoTracks()[0];
+              var _nc=(_nt&&_nt.getCapabilities)?_nt.getCapabilities():{};
+              var _nb=document.getElementById("scan-torch");
+              if(_nb)_nb.style.display=(_nc&&_nc.torch)?"flex":"none";
+            }
+          }catch(e){}
           Quagga.offDetected(onBarcodeDetected);Quagga.onDetected(onBarcodeDetected);
         });
+      }
     }).catch(function(){
       hint.textContent=tr("✕ Accès caméra refusé");
       // Pas de camera : on revient a la carte et on ouvre la saisie manuelle
@@ -8776,6 +8864,10 @@ function stopScan(){
   var sa=document.querySelector("#s-scan .scan-area");if(sa)sa.classList.remove("live");
   var tb=document.getElementById("scan-torch");if(tb)tb.style.display="none";
   window._torchOn=false;
+  /* La boucle du lecteur natif s'arrete AVEC la camera : sinon elle continue
+     d'interroger une <video> sans flux, indefiniment, en arriere-plan. */
+  try{clearInterval(window._boucleNative);}catch(e){}
+  window._boucleNative=null;window._scanNatif=false;
   try{Quagga.stop();quaggaRunning=false;Quagga.offDetected(onBarcodeDetected);}catch(e){}
   // a) le flux qu'on a ouvert nous-memes
   try{
@@ -10706,10 +10798,57 @@ function linkBarcodeLocally(code,drinkId){
    catalogue charge, PUIS les liens poses par la personne. Le desaveu
    (barcodeDisavowed) l'emporte toujours sur les deux — dire « non » doit rester
    plus fort que dire « oui ». */
+/* ══ LES PETITES CANETTES AMERICAINES NE SE SCANNAIENT JAMAIS ══════════════
+   Un UPC-E est un code a HUIT chiffres qui est en realite un code a douze,
+   COMPRIME : les zeros du milieu sont retires, et sa cle de controle se calcule
+   sur la forme longue, pas sur les huit chiffres imprimes. L'app, elle,
+   verifiait la cle sur les huit chiffres — donc la plupart des UPC-E etaient
+   refuses en silence, et les rares qui passaient ne correspondaient a rien.
+   Mesure : le catalogue porte 6 650 codes et PAS UN SEUL UPC-E. Un Sprite
+   americain de 50 cl ne pouvait pas etre trouve, et l'app proposait de creer
+   une boisson qui existe deja — c'est une des facons dont les doublons
+   naissent.
+
+   LA DILATATION EST UN DERNIER RECOURS, JAMAIS UN REFLEXE. Dilater tout code a
+   huit chiffres serait pire que le mal : mesure sur data/drinks.js, 328 des 551
+   codes a huit chiffres du catalogue sont de vrais EAN-8 dont la dilatation
+   donne un UPC-A d'apparence VALIDE — et aucune de ces 328 dilatations ne
+   correspond a quoi que ce soit au catalogue. Les corrompre rendrait 328
+   produits muets pour reparer les UPC-E. On cherche donc d'abord la forme lue,
+   telle quelle ; la forme longue n'est essayee QUE si la premiere n'a rien
+   trouve. Ce chemin ne peut donc rien casser de ce qui marche aujourd'hui. */
+function upceVersUpca(u){
+  if(!/^\d{8}$/.test(u))return null;
+  var sys=u.charAt(0),m=u.slice(1,7),cle=u.charAt(7),der=m.charAt(5),corps;
+  if(der==="0"||der==="1"||der==="2")      corps=m.slice(0,2)+der+"0000"+m.slice(2,5);
+  else if(der==="3")                        corps=m.slice(0,3)+"00000"+m.slice(3,5);
+  else if(der==="4")                        corps=m.slice(0,4)+"00000"+m.charAt(4);
+  else                                      corps=m.slice(0,5)+"0000"+der;
+  return sys+corps+cle;
+}
+/* Les formes sous lesquelles un meme code imprime peut exister. La premiere est
+   toujours celle qui a ete lue : on ne reecrit jamais ce que la personne a
+   scanne, on ajoute seulement une piste de secours. */
+function formesDuCode(code){
+  var c=String(code),out=[c];
+  if(/^\d{8}$/.test(c)){
+    var l=upceVersUpca(c);
+    if(l&&l!==c&&validGTIN(l))out.push(l);
+  }
+  return out;
+}
+window.upceVersUpca=upceVersUpca;window.formesDuCode=formesDuCode;
 function drinkForBarcode(code){
   var c=String(code);
   var d=DRINKS.find(function(x){return porteCode(x.barcodes,c)&&!barcodeDisavowed(c,x.id);});
   if(d)return d;
+  /* Dernier recours : la forme longue d'un UPC-E. Jamais avant la forme lue. */
+  var autres=formesDuCode(c);
+  for(var ai=1;ai<autres.length;ai++){
+    var alt=autres[ai];
+    var da=DRINKS.find(function(x){return porteCode(x.barcodes,alt)&&!barcodeDisavowed(alt,x.id);});
+    if(da)return da;
+  }
   var liens=ownLinks(), k=cleCode(liens,c);
   var id=k==null?null:liens[k];
   if(id==null||barcodeDisavowed(c,id))return undefined;
@@ -10846,7 +10985,18 @@ function qualiteLecture(r){
 function onBarcodeDetected(r){
   var rawCode=r&&r.codeResult&&r.codeResult.code;
   if(!rawCode)return;
-  if(!validGTIN(rawCode))return;              // verrou 1 : longueur ou cle invalide
+  /* UN UPC-E N'EST PAS UN EAN-8. Les huit chiffres imprimes sur une petite
+     canette americaine sont un code a douze COMPRIME, et sa cle de controle se
+     calcule sur la forme longue. validGTIN la verifiait sur les huit chiffres :
+     la plupart des UPC-E etaient donc refuses ICI, en silence, avant meme
+     d'atteindre le catalogue. On ne dilate QUE si les huit chiffres ne sont pas
+     deja un EAN-8 valide — sinon on casserait les 328 vrais EAN-8 du catalogue
+     dont la dilatation donne, par hasard, un UPC-A d'apparence valide. */
+  if(!validGTIN(rawCode)){
+    var _long=(typeof upceVersUpca==="function")?upceVersUpca(rawCode):null;
+    if(_long&&validGTIN(_long))rawCode=_long;
+    else return;                              // verrou 1 : longueur ou cle invalide
+  }
   if(qualiteLecture(r)>SCAN_ERREUR_MAX){      // verrou 2 : la camera n'est pas sure d'elle
     _scanVotes={code:null,count:0};           // on repart de zero : une lecture douteuse
     return;                                    // ne doit pas compter comme un vote
