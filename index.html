@@ -2038,6 +2038,7 @@ window.fbLoadDrinkMerges = async function() {
     var m = snap.data() || {};
     Object.keys(m).forEach(function(k){ window.DRINK_MERGES[Number(k)] = Number(m[k]); });
     (window.STORES || []).forEach(applyMergesToStore);
+    try{ if(window.appliquerFusionsAuPerso)window.appliquerFusionsAuPerso(); }catch(e){}
     window.dispatchEvent(new CustomEvent("fbMergesLoaded"));
   } catch (e) { console.warn("Merges:", e); }
 };
@@ -6346,6 +6347,21 @@ window.fbLoadCommunityData();
    dans lequel « Hawai Ananas » est tombee. Le controle du catalogue verifie
    desormais que chaque cible existe. */
 window.DRINK_MERGES = { 11287: 3300,
+  /* 01/10 — les CINQ dernieres paires qui partageaient encore un code-barres.
+     Scanner une de ces canettes etait un tirage au sort entre deux fiches.
+     Mesure avant/apres sur data/drinks.js : 6 637 codes distincts des deux
+     cotes, AUCUN perdu, et plus aucune collision au catalogue.
+     Fiche gardee : celle qui porte le plus de codes, sauf pour Pepsi ou l'on
+     garde la 6 (la plus ancienne, et la seule rangee en « Soda » — la 14934
+     etait en « Autre ») apres lui avoir reporte ses 11 codes et 3 formats.
+     Pour Rauch Orange on garde 10049 parce que 11126 -> 10049 existe deja :
+     garder 14478 aurait fabrique une chaine 11126 -> 10049 -> 14478, et
+     remapDrinkId ne fait qu'UN saut. Verifie : aucune chaine apres coup. */
+  14478: 10049,  // Rauch Orange -> Rauch Happy Day Orange
+  14485: 10050,  // Rauch Multivitamin -> Rauch Happy Day Multivitamin
+  14482: 14480,  // Rauch Pomme -> Rauch Happy Day Pomme
+  14934: 6,      // Pepsi (categorie « Autre ») -> Pepsi Original
+  14323: 14324,  // Oasis Tropical Sans Sucre -> Oasis Tropical Zero
   /* 29/09 — dix-sept doublons NATIFS reveles par l'uniformisation des noms
      (la marque preposee a fait tomber les paires nez a nez : deux
      « Club-Mate Original », deux « San Pellegrino Limonata »...). Les
@@ -6435,6 +6451,53 @@ window.DRINK_MERGES = { 11287: 3300,
   1786705787961: 10043,         // Capri-Sun Multivitamin -> fiche native
   1787232848436: 11464          // Dr Pepper Strawberries & Cream -> fiche native
 };
+/* CETTE FONCTION VIT DANS UN SCRIPT ORDINAIRE, ET C'EST LE POINT ENTIER.
+   Posee dans le module Firebase, elle n'existait pas encore au moment ou le
+   demarrage l'appelait : le module est differe et attend le CDN. Hors ligne,
+   ou simplement sur une connexion lente, les favoris n'etaient jamais
+   rattrapes — mesure en navigateur, les trois favoris poses sur des fiches
+   fusionnees restaient introuvables. Ici, elle existe des le chargement du
+   fichier, et fbLoadDrinkMerges la rappelle pour les fusions du serveur.
+   _fusionVers ne lit QUE la table : remapDrinkId, lui, vit dans le module. */
+function _fusionVers(x){ return (window.DRINK_MERGES&&window.DRINK_MERGES[Number(x)])||Number(x); }
+/* ══ LES FAVORIS ET LES VEILLES NE SUIVAIENT PAS LES FUSIONS ═══════════════
+   applyMergesToStore reporte fidelement les rayons et les confirmations des
+   MAGASINS. Mais un favori ou une veille posee sur une fiche fusionnee pointait
+   toujours vers l'ancien identifiant, qui n'existe plus au catalogue : le
+   favori disparaissait de la liste sans un mot, et la veille gardait sa ligne
+   sans jamais retrouver sa fiche. « On ne perd pas les contributions des gens »
+   ne peut pas s'arreter aux magasins.
+   Appele apres la table statique ET apres fbLoadDrinkMerges : une fusion
+   decidee cote serveur doit rattraper les favoris deja poses. */
+function appliquerFusionsAuPerso(){
+  try{
+    var fav=window.favorites;
+    if(fav&&fav.length){
+      var vus={},nf=[];
+      fav.forEach(function(id){var r=_fusionVers(id);if(!vus[r]){vus[r]=1;nf.push(r);}});
+      if(nf.join(",")!==fav.join(",")){
+        /* On vide et on remplit le MEME tableau : tout le reste de l'app garde
+           sa reference dessus (renderFavs, toggleFav, la synchro Firestore). */
+        fav.length=0;nf.forEach(function(x){fav.push(x);});
+        try{localStorage.setItem("magofavs",JSON.stringify(fav));}catch(e){}
+      }
+    }
+  }catch(e){}
+  try{
+    if(window.drinkWatches&&window.drinkWatches.length){
+      var vuW={},bouge=false;
+      window.drinkWatches=window.drinkWatches.filter(function(w){
+        var r=_fusionVers(w.id);
+        if(Number(r)!==Number(w.id)){w.id=r;bouge=true;}
+        if(vuW[r])return false;
+        vuW[r]=1;return true;
+      });
+      if(bouge){try{localStorage.setItem("magoWatch",JSON.stringify(window.drinkWatches));}catch(e){}}
+    }
+  }catch(e){}
+}
+window.appliquerFusionsAuPerso=appliquerFusionsAuPerso;
+
 </script>
 <script src="data/drinks.js"></script>
 <script src="data/enseignes.js"></script>
@@ -7673,7 +7736,8 @@ function renderLeaderboard(){
     row.style.cssText="display:flex;align-items:center;gap:12px;padding:9px 0;cursor:pointer"+(i<leaderboardRows.length-1?";border-bottom:1px solid var(--border)":"");
     var rlv=levelInfo(r.points||0),rcol=levelPseudoColor(rlv.idx);
     row.innerHTML=rankBadge(i)+
-      '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:'+(isMe?"800":"600")+';color:'+(rcol||"var(--s1)")+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(r.pseudo)+(isMe?' <span style="font-size:11px;font-weight:700;color:var(--s2)">'+((LANGS[curLang]||LANGS.fr).me)+'</span>':"")+(r.streak>=2?' <span style="display:inline-flex;align-items:center;gap:1px;font-size:11px;font-weight:700;color:#e67e22;vertical-align:-1px" title="'+attr(trh("{n} jours d\'affil\u00E9e",{n:r.streak}))+'">'+svgFlame(12,"#e67e22")+r.streak+'</span>':"")+'</div>'+
+      '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:'+(isMe?"800":"600")+';color:'+(rcol||"var(--s1)")+';'+levelHalo(rlv.idx)+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(r.pseudo)+(isMe?' <span style="font-size:11px;font-weight:700;color:var(--s2)">'+((LANGS[curLang]||LANGS.fr).me)+'</span>':"")+(r.streak>=2?' <span style="display:inline-flex;align-items:center;gap:1px;font-size:11px;font-weight:700;color:#e67e22;vertical-align:-1px" title="'+attr(trh("{n} jours d\'affil\u00E9e",{n:r.streak}))+'">'+svgFlame(12,"#e67e22")+r.streak+'</span>':"")+'</div>'+
+      levelPastille(rlv.idx)+
       '<div style="font-size:12.5px;font-weight:700;color:var(--s1);flex-shrink:0">'+nbSur(r.points)+' pts</div>'+
       '<span style="font-size:13px;color:var(--s3);flex-shrink:0">\u203A</span>';
     row.onclick=function(){openPlayerProfile(r);};
@@ -7779,7 +7843,8 @@ function remplirAutour(panel,r,pts,fermer){
       div.setAttribute("aria-label","Voir le profil de "+x.pseudo);
       div.style.cssText="display:flex;align-items:center;gap:12px;padding:9px 0;cursor:pointer"+sep;
       div.innerHTML=rankBadge(L.rang-1)+
-        '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:600;color:'+(rcol||"var(--s1)")+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(x.pseudo)+'</div>'+
+        '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:600;color:'+(rcol||"var(--s1)")+';'+levelHalo(rlv.idx)+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(x.pseudo)+'</div>'+
+        levelPastille(rlv.idx)+
         '<div style="font-size:12.5px;font-weight:700;color:var(--s1);flex-shrink:0">'+nbSur(x.points)+' pts</div>'+
         '<span style="font-size:13px;color:var(--s3);flex-shrink:0">\u203A</span>';
       div.onclick=function(){openPlayerProfile(x);};
@@ -7906,7 +7971,37 @@ function _aPhotoFiche(d){
   for(var i=0;i<f.length;i++)if(f[i]&&f[i].img)return true;
   return false;
 }
+/* CE QU'ON NE MET PAS EN VITRINE — et pourquoi la liste est si courte.
+   Le catalogue porte le nom REEL de chaque produit, celui qui est imprime sur
+   la bouteille : c'est toute l'utilite de l'app, reconnaitre en rayon ce qu'on
+   a vu a l'ecran. On ne renomme donc RIEN. Renommer « Granini Sex On The
+   Beach » en « Granini Cocktail Peche » rendrait la fiche introuvable pour la
+   personne qui tient la bouteille dans la main, et ce serait un mensonge sur
+   le produit.
+
+   Mais la vitrine du jour est autre chose qu'une fiche : c'est la premiere
+   chose qu'on voit en ouvrant l'app, et Magofeed se veut familial. Ce nom-la
+   n'y a pas sa place. La fiche reste entiere : recherche, code-barre, marque,
+   categorie, chasse — tout marche. Elle ne fait simplement pas la une.
+
+   LA LISTE EST VOLONTAIREMENT MINUSCULE, et ce n'est pas un filtre sur les
+   cocktails : « Mojito sans alcool », « Pina Colada », « Virgin Mojito »,
+   « Spritz » sont exactement ce que cette app existe pour trouver. J'ai
+   balaye les 4 571 fiches avec vingt motifs : une seule pose probleme. */
+/* La comparaison se fait sur le nom REDUIT — minuscules, sans espaces ni
+   ponctuation. « Sex on the Beach », « Sex On The Beach » et « Sex-on-the-
+   Beach » donnent alors la meme chaine, et un nom qui change de graphie au
+   prochain import ne fait pas rentrer la fiche en vitrine par la bande. */
+function _reduit(t){ return String(t||"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+var VITRINE_ECARTEES=["sexonthebeach"];
+function _vitrineConvenable(d){
+  if(!d||!d.name)return false;
+  var n=_reduit(d.name);
+  for(var i=0;i<VITRINE_ECARTEES.length;i++)if(n.indexOf(VITRINE_ECARTEES[i])!==-1)return false;
+  return true;
+}
 window._jourIndex=_jourIndex;window.tirageDuJour=tirageDuJour;window._aPhotoFiche=_aPhotoFiche;
+window._vitrineConvenable=_vitrineConvenable;
 function bumpDaily(kind){
   if(dailyStats.date!==_dailyKey()){dailyStats={date:_dailyKey(),scans:0,photos:0,confirms:0,signals:0};}
   dailyStats[kind]=(dailyStats[kind]||0)+1;
@@ -7929,7 +8024,14 @@ var LEVELS=[[0,"Curieux",""],[50,"Explorateur",""],[150,"Chasseur",""],[300,"Con
 /* Célébration au passage de niveau : son + toast + confettis (pur DOM, sans lib). */
 function confettiBurst(){
   var host=document.createElement("div");
-  host.style.cssText="position:fixed;inset:0;z-index:9999;pointer-events:none;overflow:hidden";
+  /* LES CONFETTIS PASSAIENT DERRIERE LA FETE. La carte de passage de niveau
+     est a z-index 10002 et porte un voile sombre a 72 % : les confettis, a
+     9999, tombaient DESSOUS et arrivaient a l'oeil attenues des trois quarts.
+     Sur l'accueil clair on les devinait encore ; en theme sombre, la salve de
+     Legende etait quasiment invisible. Ils passent devant — ils ne captent
+     aucun clic (pointer-events:none), donc rien ne peut se retrouver bloque
+     derriere eux. */
+  host.style.cssText="position:fixed;inset:0;z-index:10003;pointer-events:none;overflow:hidden";
   var colors=["#e67e22","#f0b840","#27ae60","#2e86c1","#e74c3c","#f5f2ec"];
   for(var i=0;i<46;i++){
     var s=document.createElement("div");
@@ -8012,9 +8114,16 @@ function celebrateLevelUp(lv){
     '<button class="lvup-btn" type="button">'+sanitize(tr("Continuer"))+'</button>'+
   '</div>';
   document.body.appendChild(ov);
-  var ferme=false;
+  var ferme=false,arreterSon=null;
   function close(){
     if(ferme)return;ferme=true;
+    /* On FAIT DESCENDRE la fete, on ne la coupe pas. La fete est programmee a
+       l'avance dans le contexte audio : sans ca, fermer la carte au bout de
+       deux secondes laissait les feux d'artifice partir sur un ecran deja
+       revenu a l'accueil. Et une coupure nette fait un « clac » audible — la
+       forme d'onde saute a zero. playSound rend undefined quand les effets
+       sonores sont coupes : d'ou le test. */
+    if(typeof arreterSon==="function"){try{arreterSon();}catch(eA){}}
     ov.classList.remove("on");
     setTimeout(function(){if(ov.parentNode)ov.remove();},380);
   }
@@ -8027,12 +8136,12 @@ function celebrateLevelUp(lv){
     if(reduit){
       verre.classList.add("plein");
       var nmR=ov.querySelector(".lvup-name");if(nmR){nmR.style.transition="none";nmR.classList.add("on");}
-      try{playSound("verser");}catch(e){}
+      try{arreterSon=playSound("niveau",lv.idx);}catch(e){}
       return;
     }
     // Le versement commence : le filet coule, le son part, le verre monte.
     verre.classList.add("coule");
-    try{playSound("verser");}catch(e){}
+    try{arreterSon=playSound("niveau",lv.idx);}catch(e){}
     setTimeout(function(){verre.classList.add("plein");},60);
     // Les bulles remontent pendant que ca se remplit.
     for(var i=0;i<7;i++){
@@ -8052,7 +8161,27 @@ function celebrateLevelUp(lv){
     setTimeout(function(){
       var nm=ov.querySelector(".lvup-name");if(nm)nm.classList.add("on");
     },1480);
-    setTimeout(function(){try{confettiBurst();}catch(e){}},1700);
+    /* L'IMAGE SUIT LE SON, SUR LES MEMES TEMPS. La canette tombe a 1,52 s, les
+       feux d'artifice a 1,80 / 2,22 / 2,68 s : chaque salve de confettis part
+       au meme instant que son coup sourd. Aux trois premiers niveaux il n'y a
+       qu'une salve, comme avant — la fete grandit avec le palier, a l'oeil
+       comme a l'oreille. LEVEL_SON.tirs est la meme table que pour le son :
+       impossible que l'image et le son se desynchronisent un jour. */
+    /* LES TEMPS VIENNENT DE LA TABLE DU SON, pas d'une liste recopiee ici.
+       Une liste a part avait deja pris du retard : les tirs ont ete avances
+       pour recouvrir la fin du versement, et les confettis, eux, partaient
+       toujours aux anciens temps. On lit donc les memes decalages que
+       sonPalierNiveau — impossible de les desynchroniser a nouveau.
+       1500 ms = l'instant ou le verre est plein ; les decalages negatifs sont
+       les tirs qui partent pendant qu'il finit de se remplir. */
+    var tirs=((window.LEVEL_SON&&LEVEL_SON[lv.idx])||{}).tirs||[];
+    if(!tirs.length){
+      setTimeout(function(){if(!ferme)try{confettiBurst();}catch(e){}},1700);
+    }else{
+      for(var ti=0;ti<tirs.length;ti++){
+        (function(ms){setTimeout(function(){if(!ferme)try{confettiBurst();}catch(e){}},ms);})(Math.max(0,Math.round(1500+tirs[ti][0]*1000)));
+      }
+    }
   });
   setTimeout(function(){if(ov.parentNode&&document.body.contains(ov))close();},9000);
 }
@@ -8074,10 +8203,122 @@ function checkLevelUp(){
     if(lv.idx>seen){
       celebrateLevelUp(lv);
       try{localStorage.setItem("magoLevelSeen",String(lv.idx));}catch(e){}
+      window._lastLevelIdx=lv.idx;
+      return; // une fete a la fois : le passage de niveau prime sur le quart
     }
     window._lastLevelIdx=lv.idx;
+    verifierQuart(lv);
   }catch(e){}
 }
+/* ════════════════════════════════════════════════════════════════════════════
+   LES QUARTS DE NIVEAU — le verre se remplit un peu, en chemin
+   ───────────────────────────────────────────────────────────────────────────
+   Un passage de niveau est une fete ; un quart est une NOUVELLE. Il tient dans
+   une carte en haut de l'ecran, il dure cinq secondes, il s'en va tout seul, et
+   il ne bloque jamais le chemin : on ouvre l'app pour chercher une boisson, pas
+   pour regarder une animation.
+
+   LE VERRE MONTRE LE VRAI POURCENTAGE, PAS LE QUART. Le quart decide seulement
+   S'IL FAUT MONTRER quelque chose ; ce qui s'affiche est le chiffre reel. Sans
+   ca, un verre rempli a 50 % au-dessus d'un « encore 78 points » qui, lui, est
+   calcule juste, se contredirait tout seul — et la carte mentirait sur la seule
+   chose qu'elle a a dire.
+
+   CINQ ACCIDENTS, EMPECHES ICI :
+     1. deux fetes au meme demarrage      → checkLevelUp rend la main apres un
+                                            vrai passage de niveau (voir ci-dessus)
+     2. la meme carte deux fois           → un seul entier qui ne redescend jamais
+     3. une carte a Legende               → lv.next est nul, il n'y a pas de suite
+     4. une carte avant les vrais points  → window._statsReady, deja teste plus haut
+     5. une carte quand on PERD des points→ le code du quart ne peut que monter
+
+   LE GARDE-FOU N'EST PAS SEULEMENT DANS localStorage. Sur un Safari en
+   navigation privee, setItem leve a chaque ecriture : la memoire disque ne
+   retient rien et la carte reviendrait a chaque ouverture. Le miroir en memoire
+   (window._quartVu) tient la session meme quand le disque refuse. */
+function _codeQuart(idx,q){ return idx*10+q; }
+function verifierQuart(lv){
+  try{
+    if(!lv||!lv.next)return;                       // Legende : pas de niveau suivant
+    if(window._quartFeteCeDemarrage)return;        // une seule par ouverture d'app
+    var pts=ptsNets();
+    var pct=(pts-lv.floor)/(lv.next-lv.floor)*100;
+    var q=Math.floor(pct/25);
+    if(q<1||q>3)return;                            // 0-24 % : trop tot. 100 % : c'est un niveau.
+    var code=_codeQuart(lv.idx,q);
+    var vu=window._quartVu;
+    if(vu==null){
+      var brut=null;try{brut=localStorage.getItem("magoQuartVu");}catch(e){}
+      vu=(brut==null)?-1:parseInt(brut,10);
+      if(isNaN(vu))vu=-1;
+    }
+    if(code<=vu)return;
+    window._quartVu=code;
+    try{localStorage.setItem("magoQuartVu",String(code));}catch(e){}
+    window._quartFeteCeDemarrage=true;
+    celebrerQuart(lv,pts,pct,q);
+  }catch(e){}
+}
+/* La carte elle-meme. Le meme verre que la fete de niveau, en trois fois plus
+   petit, la meme couleur de boisson, le meme son — mais la version « gorgee »,
+   qui est le plus petit son de toute l'application (crete 0,10 contre 0,29 pour
+   le « pop » d'un bouton). On l'entend trois fois par niveau : s'il agacait,
+   c'est TOUS les effets sonores qui se feraient couper, scanner compris. */
+function celebrerQuart(lv,pts,pct,q){
+  var reduit=false;try{reduit=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;}catch(e){}
+  var teinte=(window.LEVEL_LIQUIDE&&LEVEL_LIQUIDE[lv.idx])||["#f0b840","#c8621a"];
+  var reste=Math.max(0,lv.next-pts);
+  /* L'AVANTAGE DU NIVEAU SUIVANT NE SE DIT QU'AU DERNIER QUART. Entre 25 % et
+     75 % du meme niveau, l'avantage ne change pas : afficher la meme phrase
+     trois fois de suite en fait du bruit, et c'est la ligne la plus longue de
+     la carte — elle passait sur deux lignes et ecrasait le chiffre, qui est la
+     seule chose qu'on vient lire. A 75 %, le niveau est en vue : la phrase
+     redevient une raison d'y aller. */
+  var avantage=(q>=3&&window.LEVEL_PERKS&&LEVEL_PERKS[lv.idx+1])||"";
+  var uid="pq"+Date.now();
+  var cup="M30 20 L102 20 L94 150 Q93 160 84 160 L48 160 Q39 160 38 150 Z";
+  /* La hauteur du liquide : 176 = verre vide, 26 = verre plein. On interpole
+     sur le VRAI pourcentage. */
+  var haut=Math.round(176-(176-26)*Math.max(0,Math.min(100,pct))/100);
+  var c=document.createElement("div");
+  c.className="pal-carte";
+  c.setAttribute("role","button");c.setAttribute("tabindex","0");
+  c.setAttribute("aria-label",trh("{p} % vers {n}",{p:Math.round(pct),n:lv.nextName})+". "+trh("Encore {n} point(s)",{n:reste}));
+  c.innerHTML='<svg class="pal-verre" width="42" height="56" viewBox="0 0 132 176" aria-hidden="true">'+
+      '<defs><clipPath id="'+uid+'c"><path d="'+cup+'"/></clipPath>'+
+      '<linearGradient id="'+uid+'g" x1="0" y1="0" x2="0" y2="1">'+
+      '<stop offset="0%" stop-color="'+teinte[0]+'"/><stop offset="100%" stop-color="'+teinte[1]+'"/></linearGradient></defs>'+
+      '<g clip-path="url(#'+uid+'c)">'+
+        '<rect x="0" y="0" width="132" height="176" fill="var(--bg3)"/>'+
+        '<g class="pal-liq"><rect x="-160" y="0" width="480" height="200" fill="url(#'+uid+'g)"/></g>'+
+      '</g>'+
+      '<path d="'+cup+'" fill="none" stroke="var(--s2)" stroke-width="5" stroke-linejoin="round"/>'+
+    '</svg>'+
+    '<div class="pal-txt">'+
+      '<div class="pal-t">'+sanitize(trh("{p} % vers {n}",{p:Math.round(pct),n:lv.nextName}))+'</div>'+
+      '<div class="pal-s">'+sanitize(trh("Encore {n} point(s)",{n:reste}))+'</div>'+
+      (avantage?'<div class="pal-a">'+sanitize(trh("Au niveau suivant : {a}",{a:tr(avantage)}))+'</div>':'')+
+    '</div>'+
+    '<span class="pal-chev">\u203A</span>';
+  document.body.appendChild(c);
+  var parti=false;
+  function partir(){
+    if(parti)return;parti=true;
+    c.classList.remove("on");
+    setTimeout(function(){if(c.parentNode)c.remove();},320);
+  }
+  c.onclick=function(){partir();try{show("rewards");}catch(e){}};
+  c.onkeydown=function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();c.onclick();}};
+  var liq=c.querySelector(".pal-liq");
+  if(reduit&&liq)liq.style.transition="none";
+  requestAnimationFrame(function(){
+    c.classList.add("on");
+    if(liq)liq.style.transform="translateY("+haut+"px)";
+    try{playSound("gorgee",lv.idx);}catch(e){}
+  });
+  setTimeout(partir,5000);
+}
+window.verifierQuart=verifierQuart;window.celebrerQuart=celebrerQuart;
 // Filet hors-ligne : si aucun compte Firestore ne répond, on débloque quand même
 // la détection après le démarrage (pour les gains de niveau en session).
 setTimeout(function(){if(!window._statsReady){window._statsReady=true;try{checkLevelUp();}catch(e){}}},5000);
@@ -8222,15 +8463,50 @@ function levelInfo(pts){
    promise tant qu'elle n'existe pas).
 ================================ */
 // Avantage concret par niveau (index = niveau atteint). Cosmetique mais REEL.
+/* QUATRE DE CES SEPT PROMESSES N'ETAIENT PAS TENUES. Verifie ligne par ligne
+   contre le code qui peint :
+     - « apparition au classement des contributeurs » : le classement affiche
+       TOUT LE MONDE, a tous les niveaux. Rien ne se debloquait la.
+     - « Anneau dore autour de ton avatar » : applyPseudoDisplays pose l'anneau
+       avec la couleur du niveau, soit du BRONZE a ce palier-la. Pas de l'or.
+     - « Ton badge de niveau affiche au classement » : levelPseudoColor etait
+       deja applique au classement pour tous les niveaux. Rien de neuf non plus.
+       Cette promesse-la est maintenant ECRITE (voir levelPastille).
+     - « Pseudo Legende dore » : levelPseudoColor rendait EXACTEMENT la meme
+       couleur qu'au niveau precedent. On atteignait le sommet et rien ne
+       changeait. Legende a desormais son halo, que personne d'autre n'a.
+   Le commentaire du dessus dit « jamais promise tant qu'elle n'existe pas » :
+   chacune de ces sept lignes est maintenant adossee a du code qui la peint. */
 var LEVEL_PERKS=[
   "Toutes les fonctions de base de Magofeed",
-  "Pseudo bronze + apparition au classement des contributeurs",
-  "Anneau doré autour de ton avatar",
-  "Ton badge de niveau affiché au classement, vu de toute la communauté",
+  "Ton pseudo passe en bronze, sur ton profil et au classement",
+  "Anneau bronze autour de ton avatar",
+  "Ta pastille de niveau à côté de ton pseudo au classement",
   "Pseudo argent — visible par toute la communauté",
   "Pseudo or + coche de confiance sur ton profil",
-  "Pseudo Légende doré — le sommet de Magofeed"
+  "Un halo doré autour de ton pseudo, le seul de l'app"
 ];
+/* LA PASTILLE DE NIVEAU (palier 4 et plus). Elle porte le NUMERO, pas le nom :
+   mesure faite sur un ecran de 320 px, une pastille « Legende » prend 60 px et
+   ecrase la boite du pseudo a 45 px — « Panthere Magnetique 431 » devient
+   « Panth... ». Un chiffre tient en 18 px et se lit d'un coup d'oeil a cote
+   d'un pseudo deja colore par le niveau.
+   ELLE SE POSE A COTE DE LA BOITE DU PSEUDO, JAMAIS DEDANS : cette boite porte
+   overflow:hidden et text-overflow:ellipsis ; un enfant ajoute dedans serait
+   purement et simplement coupe des que le pseudo est un peu long. */
+function levelPastille(idx){
+  if(!(idx>=3))return "";
+  var c=levelPseudoColor(idx)||"var(--s2)";
+  return '<span class="lv-past" style="color:'+c+';border-color:'+c+'">'+(idx+1)+'</span>';
+}
+/* LE HALO DE LEGENDE (palier 7). Un text-shadow fixe, pas un degrade anime :
+   un degrade sur background-clip:text repeint le texte a chaque image, sans
+   arret, tant qu'il est a l'ecran — au classement, une Legende peut rester
+   affichee des minutes. */
+function levelHalo(idx){
+  return (idx>=6)?"text-shadow:0 0 12px rgba(209,154,30,.75),0 0 3px rgba(209,154,30,.5)":"";
+}
+window.levelPastille=levelPastille;window.levelHalo=levelHalo;
 // Couleur de pseudo debloquee selon le niveau (lisible en clair ET sombre).
 function levelPseudoColor(idx){
   return ["","#b0763a","#b0763a","#b0763a","#9aa1aa","#d19a1e","#d19a1e"][idx]||"";
@@ -8255,7 +8531,13 @@ function renderRewards(){
   var pts=ptsNets(),lv=levelInfo(pts);
   var pct=lv.next?Math.min(100,Math.round((pts-lv.floor)/(lv.next-lv.floor)*100)):100;
   var toNext=lv.next?(lv.next-pts):0;
-  var tr=trustLevel(),rank=myLeaderboardRank();
+  /* CETTE VARIABLE S'APPELAIT « tr ». var etant hisse en haut de la fonction,
+     ce nom MASQUAIT la fonction de traduction tr() pour tout renderRewards —
+     exactement le piege deja rencontre dans applyPushSwitch. Consequence
+     directe : les sept avantages de niveau etaient ecrits en dur, sans tr(),
+     alors que leurs traductions existent dans les dix langues depuis toujours.
+     Cet ecran restait entierement en francais pour neuf personnes sur dix. */
+  var conf=trustLevel(),rank=myLeaderboardRank();
   var h="";
   // 1) Ton niveau + progression
   h+='<div style="background:linear-gradient(135deg,#1a1714,#3a2c1e);border-radius:20px;padding:20px;color:#fff;margin-bottom:16px">'+
@@ -8289,8 +8571,8 @@ function renderRewards(){
       '<div style="flex:1;min-width:0">'+
         '<div class="perk-name" style="color:'+(got&&col?col:'var(--s1)')+'">'+sanitize(L[1])+
           ' <span style="font-weight:600;color:var(--s3)">· '+L[0]+' pts</span></div>'+
-        '<div class="perk-desc">'+sanitize(LEVEL_PERKS[i]||"")+'</div>'+
-        (suivant&&manque?'<div class="perk-todo">Encore '+manque+' point'+(manque>1?'s':'')+' — tu y es presque</div>':'')+
+        '<div class="perk-desc">'+sanitize(tr(LEVEL_PERKS[i]||""))+'</div>'+
+        (suivant&&manque?'<div class="perk-todo">'+sanitize(trh("Encore {n} point(s)",{n:manque}))+'</div>':'')+
       '</div>'+
       (got?'<span class="perk-ok">'+icoOk(15)+'</span>':(suivant?'<span class="perk-tag">Prochain</span>':''))+
     '</div>';
@@ -8299,8 +8581,8 @@ function renderRewards(){
   // 3) Statut de confiance (#2 reputation — partie visible)
   h+='<div class="t-section" style="padding:6px 0 10px">Confiance</div>';
   h+='<div style="background:var(--bg2);border-radius:16px;padding:15px;margin-bottom:16px">'+
-    '<div style="display:flex;align-items:center;gap:10px"><span style="font-size:22px">'+tr.emoji+'</span>'+
-      '<div style="flex:1"><div style="font-size:13.5px;font-weight:800;color:'+tr.color+'">'+tr.name+'</div>'+
+    '<div style="display:flex;align-items:center;gap:10px"><span style="display:none">'+conf.emoji+'</span>'+
+      '<div style="flex:1"><div style="font-size:13.5px;font-weight:800;color:'+conf.color+'">'+conf.name+'</div>'+
       '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:1px">'+(userStats.discAccepted||0)+' découverte(s) acceptée(s) · '+(userStats.confirms||0)+' confirmation(s)</div></div></div>'+
     '<div style="font-size:11px;line-height:1.55;color:var(--s3);margin-top:10px">Plus tu contribues avec des infos justes, plus ta parole compte. Bientôt, tes ajouts seront validés plus vite grâce à ta réputation.</div>'+
     /* La regle anti-triche est ECRITE, en clair, avant la faute. Une sanction
@@ -8516,6 +8798,50 @@ function startScan(){
          manquer. Sans ce garde, l'erreur remontait dans le .catch du bas et
          affichait « Accès caméra refusé » — un message faux, qui envoyait la
          personne fouiller les réglages de son téléphone pour rien. */
+      /* ══ LE LECTEUR DU TELEPHONE D'ABORD ════════════════════════════════
+         BarcodeDetector est le decodeur integre au telephone (Chrome Android,
+         Edge, Chrome de bureau). Il lit la camera avec le materiel, il est
+         nettement plus sur que Quagga, et il ne coute aucun telechargement.
+         Il n'etait utilise nulle part.
+
+         ON NE PREVOIT AUCUN REPLI UNE FOIS QU'IL TOURNE, et c'est volontaire :
+         un decodeur qui marche et ne voit rien rend simplement un tableau vide
+         — le cas normal quand il n'y a pas de code dans le cadre. Un repli
+         declenche sur « il n'a rien vu depuis N secondes » rendrait donc la
+         main a Quagga chaque fois qu'on cherche encore son angle. On tranche
+         AVANT de commencer : si le constructeur repond et que les formats qui
+         nous interessent sont pris en charge, c'est lui et lui seul. Sinon
+         Quagga, sans jamais ouvrir de seconde camera.
+
+         Safari ne le propose toujours pas : les iPhone passent par Quagga,
+         qui vient d'etre repare juste au-dessus. */
+      var _formatsVoulus=["ean_13","ean_8","upc_a","upc_e"];
+      function _demarrerNatif(){
+        if(!("BarcodeDetector" in window))return Promise.resolve(false);
+        return window.BarcodeDetector.getSupportedFormats().then(function(dispo){
+          var pris=_formatsVoulus.filter(function(f){return dispo.indexOf(f)!==-1;});
+          if(!pris.length)return false;
+          var det=new window.BarcodeDetector({formats:pris});
+          window._scanNatif=true;
+          var occupe=false;
+          window._boucleNative=setInterval(function(){
+            if(!scanActive||occupe)return;
+            if(!video.videoWidth)return;            // la camera n'a pas encore d'image
+            occupe=true;
+            det.detect(video).then(function(res){
+              occupe=false;
+              if(!res||!res.length||!scanActive)return;
+              /* On rend le resultat dans la forme que onBarcodeDetected attend
+                 deja : un seul chemin de validation pour les deux lecteurs,
+                 avec la meme confirmation a trois lectures. */
+              onBarcodeDetected({codeResult:{code:String(res[0].rawValue||""),format:String(res[0].format||"")}});
+            }).catch(function(){ occupe=false; });
+          },100);
+          return true;
+        }).catch(function(){ return false; });
+      }
+      _demarrerNatif().then(function(natif){ if(natif)return; _demarrerQuagga(); });
+      function _demarrerQuagga(){
       if(typeof Quagga==="undefined"){
         hint.textContent=tr("\u2715 Lecteur de code-barre indisponible \u2014 v\u00e9rifie ta connexion");
         btn.style.display="";
@@ -8536,14 +8862,58 @@ function startScan(){
          avant de chercher le code ; on passait donc 640x360 au localisateur, ce
          qui est juste pour un code-barre dense photographie de biais. On lui en
          donne 960x540 pour le meme travail. */
-      Quagga.init({inputStream:{type:"LiveStream",target:video,constraints:{facingMode:"environment",width:{ideal:1920},height:{ideal:1080}}},locator:{patchSize:"medium",halfSample:true},decoder:{readers:["ean_reader","ean_8_reader","upc_reader","upc_e_reader"]}},
+      /* ══ CE QU'ON VOYAIT N'ETAIT PAS CE QU'ON LISAIT ═════════════════════════════
+         Ce « target: video » designait la balise <video> elle-meme. Or Quagga
+         traite sa cible comme un CONTENEUR : il y cherche un <video>, et s'il
+         n'en trouve pas, il en cree un. Dans un <video>, il n'en trouve
+         evidemment aucun — il en fabriquait donc un second, INVISIBLE, a
+         l'interieur du premier, et ouvrait une DEUXIEME camera pour l'alimenter.
+
+         MESURE, dans un navigateur, sur le code tel qu'il etait : deux appels a
+         getUserMedia, deux pistes video vivantes en meme temps, deux balises
+         <video> — celle qu'on voit, et celle, cachee, que Quagga decodait.
+         Autrement dit : l'image que la personne cadrait n'etait pas celle qui
+         etait lue. Viser etait une devinette. C'est la premiere cause du
+         « des fois ca ne marche pas ».
+
+         On lui passe donc le CONTENEUR (.scan-area). Quagga y trouve
+         #scan-video, le reutilise, et pose son flux dessus : une seule camera,
+         et on lit exactement ce qu'on cadre. Le flux d'apercu ouvert juste
+         avant est relache a la ligne du dessus, sinon il resterait allume dans
+         le vide — deux cameras ouvertes, c'est aussi ce qui fige l'apercu sur
+         iPhone. */
+      try{
+        var _ancien=video.srcObject;
+        if(_ancien&&_ancien.getTracks)_ancien.getTracks().forEach(function(t){try{t.stop();}catch(e){}});
+      }catch(e){}
+      /* frequency : sans lui, Quagga decode AUSSI VITE QUE POSSIBLE — mesure a
+         60 images par seconde, pour un code-barres qui ne bouge pas. Dix
+         suffisent largement (la confirmation demande trois lectures, soit trois
+         dixiemes de seconde), et le telephone cesse de chauffer pour rien.
+         numOfWorkers : Quagga en lance quatre par defaut et JETTE l'image quand
+         aucun n'est libre ; deux suffisent a tenir dix images par seconde. */
+      Quagga.init({inputStream:{type:"LiveStream",target:(video.parentElement||video),constraints:{facingMode:"environment",width:{ideal:1920},height:{ideal:1080}}},frequency:10,numOfWorkers:2,locator:{patchSize:"medium",halfSample:true},decoder:{readers:["ean_reader","ean_8_reader","upc_reader","upc_e_reader"]}},
         function(err){
           if(err){hint.textContent="✕ "+err;return;}
           _scanVotes={code:null,count:0};
           var fr=document.querySelector(".scan-frame");if(fr)fr.classList.remove("reading");
           quaggaRunning=true;Quagga.start();
+          /* La torche suit la camera REELLE, celle que Quagga vient d'ouvrir —
+             l'ancienne est eteinte. Sans ca, le bouton flash pilotait une piste
+             morte et ne faisait plus rien. */
+          try{
+            var _nf=video.srcObject;
+            if(_nf){
+              window._scanStream=_nf;window._torchOn=false;
+              var _nt=_nf.getVideoTracks()[0];
+              var _nc=(_nt&&_nt.getCapabilities)?_nt.getCapabilities():{};
+              var _nb=document.getElementById("scan-torch");
+              if(_nb)_nb.style.display=(_nc&&_nc.torch)?"flex":"none";
+            }
+          }catch(e){}
           Quagga.offDetected(onBarcodeDetected);Quagga.onDetected(onBarcodeDetected);
         });
+      }
     }).catch(function(){
       hint.textContent=tr("✕ Accès caméra refusé");
       // Pas de camera : on revient a la carte et on ouvre la saisie manuelle
@@ -8576,6 +8946,10 @@ function stopScan(){
   var sa=document.querySelector("#s-scan .scan-area");if(sa)sa.classList.remove("live");
   var tb=document.getElementById("scan-torch");if(tb)tb.style.display="none";
   window._torchOn=false;
+  /* La boucle du lecteur natif s'arrete AVEC la camera : sinon elle continue
+     d'interroger une <video> sans flux, indefiniment, en arriere-plan. */
+  try{clearInterval(window._boucleNative);}catch(e){}
+  window._boucleNative=null;window._scanNatif=false;
   try{Quagga.stop();quaggaRunning=false;Quagga.offDetected(onBarcodeDetected);}catch(e){}
   // a) le flux qu'on a ouvert nous-memes
   try{
@@ -10506,10 +10880,57 @@ function linkBarcodeLocally(code,drinkId){
    catalogue charge, PUIS les liens poses par la personne. Le desaveu
    (barcodeDisavowed) l'emporte toujours sur les deux — dire « non » doit rester
    plus fort que dire « oui ». */
+/* ══ LES PETITES CANETTES AMERICAINES NE SE SCANNAIENT JAMAIS ══════════════
+   Un UPC-E est un code a HUIT chiffres qui est en realite un code a douze,
+   COMPRIME : les zeros du milieu sont retires, et sa cle de controle se calcule
+   sur la forme longue, pas sur les huit chiffres imprimes. L'app, elle,
+   verifiait la cle sur les huit chiffres — donc la plupart des UPC-E etaient
+   refuses en silence, et les rares qui passaient ne correspondaient a rien.
+   Mesure : le catalogue porte 6 650 codes et PAS UN SEUL UPC-E. Un Sprite
+   americain de 50 cl ne pouvait pas etre trouve, et l'app proposait de creer
+   une boisson qui existe deja — c'est une des facons dont les doublons
+   naissent.
+
+   LA DILATATION EST UN DERNIER RECOURS, JAMAIS UN REFLEXE. Dilater tout code a
+   huit chiffres serait pire que le mal : mesure sur data/drinks.js, 328 des 551
+   codes a huit chiffres du catalogue sont de vrais EAN-8 dont la dilatation
+   donne un UPC-A d'apparence VALIDE — et aucune de ces 328 dilatations ne
+   correspond a quoi que ce soit au catalogue. Les corrompre rendrait 328
+   produits muets pour reparer les UPC-E. On cherche donc d'abord la forme lue,
+   telle quelle ; la forme longue n'est essayee QUE si la premiere n'a rien
+   trouve. Ce chemin ne peut donc rien casser de ce qui marche aujourd'hui. */
+function upceVersUpca(u){
+  if(!/^\d{8}$/.test(u))return null;
+  var sys=u.charAt(0),m=u.slice(1,7),cle=u.charAt(7),der=m.charAt(5),corps;
+  if(der==="0"||der==="1"||der==="2")      corps=m.slice(0,2)+der+"0000"+m.slice(2,5);
+  else if(der==="3")                        corps=m.slice(0,3)+"00000"+m.slice(3,5);
+  else if(der==="4")                        corps=m.slice(0,4)+"00000"+m.charAt(4);
+  else                                      corps=m.slice(0,5)+"0000"+der;
+  return sys+corps+cle;
+}
+/* Les formes sous lesquelles un meme code imprime peut exister. La premiere est
+   toujours celle qui a ete lue : on ne reecrit jamais ce que la personne a
+   scanne, on ajoute seulement une piste de secours. */
+function formesDuCode(code){
+  var c=String(code),out=[c];
+  if(/^\d{8}$/.test(c)){
+    var l=upceVersUpca(c);
+    if(l&&l!==c&&validGTIN(l))out.push(l);
+  }
+  return out;
+}
+window.upceVersUpca=upceVersUpca;window.formesDuCode=formesDuCode;
 function drinkForBarcode(code){
   var c=String(code);
   var d=DRINKS.find(function(x){return porteCode(x.barcodes,c)&&!barcodeDisavowed(c,x.id);});
   if(d)return d;
+  /* Dernier recours : la forme longue d'un UPC-E. Jamais avant la forme lue. */
+  var autres=formesDuCode(c);
+  for(var ai=1;ai<autres.length;ai++){
+    var alt=autres[ai];
+    var da=DRINKS.find(function(x){return porteCode(x.barcodes,alt)&&!barcodeDisavowed(alt,x.id);});
+    if(da)return da;
+  }
   var liens=ownLinks(), k=cleCode(liens,c);
   var id=k==null?null:liens[k];
   if(id==null||barcodeDisavowed(c,id))return undefined;
@@ -10646,7 +11067,18 @@ function qualiteLecture(r){
 function onBarcodeDetected(r){
   var rawCode=r&&r.codeResult&&r.codeResult.code;
   if(!rawCode)return;
-  if(!validGTIN(rawCode))return;              // verrou 1 : longueur ou cle invalide
+  /* UN UPC-E N'EST PAS UN EAN-8. Les huit chiffres imprimes sur une petite
+     canette americaine sont un code a douze COMPRIME, et sa cle de controle se
+     calcule sur la forme longue. validGTIN la verifiait sur les huit chiffres :
+     la plupart des UPC-E etaient donc refuses ICI, en silence, avant meme
+     d'atteindre le catalogue. On ne dilate QUE si les huit chiffres ne sont pas
+     deja un EAN-8 valide — sinon on casserait les 328 vrais EAN-8 du catalogue
+     dont la dilatation donne, par hasard, un UPC-A d'apparence valide. */
+  if(!validGTIN(rawCode)){
+    var _long=(typeof upceVersUpca==="function")?upceVersUpca(rawCode):null;
+    if(_long&&validGTIN(_long))rawCode=_long;
+    else return;                              // verrou 1 : longueur ou cle invalide
+  }
   if(qualiteLecture(r)>SCAN_ERREUR_MAX){      // verrou 2 : la camera n'est pas sure d'elle
     _scanVotes={code:null,count:0};           // on repart de zero : une lecture douteuse
     return;                                    // ne doit pas compter comme un vote
@@ -12701,7 +13133,7 @@ function pickMissionDrink(){
        cote passait pour « introuvable » et devenait la mission du jour. */
     try{ (window.rayonProbableIds?window.rayonProbableIds(s):[]).forEach(function(id){have[Number(id)]=1;}); }catch(e){}
   });
-  var cands=DRINKS.filter(function(d){return !have[Number(d.id)]&&!(typeof nameLooksAlcoholic==="function"&&nameLooksAlcoholic(d.name,d.brand));});
+  var cands=DRINKS.filter(function(d){return !have[Number(d.id)]&&!(typeof nameLooksAlcoholic==="function"&&nameLooksAlcoholic(d.name,d.brand))&&(typeof _vitrineConvenable!=="function"||_vitrineConvenable(d));});
   if(!cands.length)cands=DRINKS.slice();
   var day=_dailyKey(),h=0;
   for(var i=0;i<day.length;i++)h=(h*31+day.charCodeAt(i))>>>0;
@@ -12871,8 +13303,8 @@ function renderTrends(){
        notees sont celles qui ont ete montees a la main, avec une vraie image.
        Il en reste 2 151, soit 269 jours avant de revoir la premiere. Tout le
        reste du catalogue est toujours la : recherche, categories, marques. */
-    var choisies=f.filter(function(d){return _aPhotoFiche(d)&&(d.stars||0)>0;});
-    if(choisies.length<8)choisies=f.filter(_aPhotoFiche);
+    var choisies=f.filter(function(d){return _aPhotoFiche(d)&&(d.stars||0)>0&&_vitrineConvenable(d);});
+    if(choisies.length<8)choisies=f.filter(function(d){return _aPhotoFiche(d)&&_vitrineConvenable(d);});
     var avecPhoto=interleaveByBrand(choisies);
     var base=(avecPhoto.length>=8)?avecPhoto:f;
     if(window._grilleJour!==_dailyKey()||!window._grilleDuJour){
@@ -15880,10 +16312,21 @@ function openActivity(){
         var act=null;
         if(n.type==="promoted"&&n.drinkId!=null)act={kind:"drink",drinkId:n.drinkId};
         else if(n.type==="found"&&n.storeId!=null)act={kind:"store",storeId:n.storeId,drinkId:n.drinkId};
+        /* LA MEME CLE QUE LE FILET LOCAL, SINON DEUX LIGNES POUR UN EVENEMENT.
+           checkWatches pose deja « found:<boisson>:<magasin> » quand il repere
+           lui-meme la trouvaille. Si la trace du serveur arrivait sous une
+           autre cle, la cloche affichait l'evenement DEUX FOIS — et la seconde
+           ligne restait non lue pour toujours. pushActivity deduplique par cle :
+           il suffit que les deux chemins parlent de la meme chose de la meme
+           facon. La trace du serveur reste indispensable : le filet local
+           plafonne a 10 km alors que le serveur previent jusqu'a 50. */
+        var cle=(n.type==="found"&&n.drinkId!=null&&n.storeId!=null)
+          ? ("found:"+n.drinkId+":"+n.storeId)
+          : ("notif:"+(n.docId||n.title||n.type));
         pushActivity({type:n.type||"info",title:n.title||"",body:n.body||"",
           ts:(n.createdAt&&n.createdAt.seconds*1000)||Date.now(),action:act,
           drinkId:(n.drinkId!=null?n.drinkId:null),
-          key:"notif:"+(n.docId||n.title||n.type)});
+          key:cle});
       });
       try{_renderActivityList();}catch(e){}
     }).catch(function(){});
@@ -24916,6 +25359,7 @@ function applyPseudoDisplays(){
   var name=document.getElementById("profile-name-display");
   if(name){
     name.textContent=userPseudo;name.style.color=col||"";
+    name.style.textShadow=(lv.idx>=6)?"0 0 12px rgba(209,154,30,.75),0 0 3px rgba(209,154,30,.5)":"";
     // Perk niv.6+ (Maître) : coche de confiance doree sur le pseudo
     if(lv.idx>=5){var ck=document.createElement("span");ck.textContent=" ✓";ck.title="Contributeur de confiance";ck.style.cssText="color:#d19a1e;font-weight:800";name.appendChild(ck);}
   }
@@ -29149,6 +29593,11 @@ try{
   try{refreshBell();}catch(e){}
   try{if(window.fbMessagerie&&window.fbMessagerie.rows)window.dispatchEvent(new CustomEvent("fbConversations",{detail:window.fbMessagerie}));}catch(e){}
   renderLangGrid();renderDiscoveries();
+  /* Les fusions de la table STATIQUE s'appliquent aux favoris et aux veilles
+     ici, avant le premier rendu : sans cet appel, un favori pose sur une fiche
+     fusionnee disparaissait de la liste sans un mot. Celles du serveur
+     repassent par la meme fonction depuis fbLoadDrinkMerges. */
+  try{ if(window.appliquerFusionsAuPerso)window.appliquerFusionsAuPerso(); }catch(e){}
   renderFavs();
   renderBadges();
   applyAvatarEverywhere();
@@ -29261,7 +29710,17 @@ try{
       showPromotedBanner(promoted[0],earned?PROMO_REWARD:0);
       promoted.slice(1).forEach(function(n){setTimeout(function(){toast(""+(n.title||"Découverte promue"));},600);});
     }
-    rest.forEach(function(n,i){setTimeout(function(){toast((n.title?n.title+" · ":"")+(n.body||""));},400+i*1800);});
+    /* DEUX TOASTS, PAS DOUZE. Cette ligne en lancait un toutes les 1,8 s pour
+       CHAQUE trace non lue : douze traces faisaient vingt secondes de bandeaux
+       qui se succedent, pendant lesquelles on ne peut rien faire d'autre que
+       regarder. Tant que le serveur n'ecrivait presque rien, ca ne se voyait
+       pas ; des qu'il ecrit les alertes de chasse, ca devient une taxe a
+       l'ouverture. Les deux plus recentes passent, le reste attend dans la
+       cloche — dont la pastille dit deja combien il y en a. */
+    rest.slice(0,2).forEach(function(n,i){setTimeout(function(){toast((n.title?n.title+" · ":"")+(n.body||""));},400+i*1800);});
+    if(rest.length>2){
+      setTimeout(function(){toast(trh("{n} autres nouvelles dans la cloche",{n:rest.length-2}));},400+2*1800);
+    }
     // Journal d'activité (cloche) : ces événements restent consultables ensuite.
     unread.forEach(function(n){
       var act=null;

@@ -47,7 +47,7 @@
  * Firebase Functions v2 (Node 18+).
  */
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
-const { pushToUser } = require("./outils-admin");
+const { prevenir } = require("./outils-admin");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
@@ -469,11 +469,17 @@ exports.direMerci = onDocumentUpdated(
       const c = await db.doc(`catalog/${String(ap.drinkId)}`).get();
       if (c.exists && (c.data() || {}).name) nom = String(c.data().name).slice(0, 40);
     } catch (e) { /* le catalogue natif n'est pas dans Firestore : on reste vague */ }
-    await pushToUser(
+    /* LA TRACE DU MERCI VIVAIT DU MAUVAIS COTE. Le geste est enregistre dans
+       coupsDeMain/<CHERCHEUR>/recus — chez celui qui remercie. L'aidant, lui,
+       n'avait que la poussee : refusee, le remerciement n'existait plus nulle
+       part. C'est le seul retour qu'on recoit quand on depanne quelqu'un. */
+    await prevenir(
       String(ap.aidantUid),
       "Quelqu'un te remercie",
       "Ton coup de main pour " + nom + " a servi.",
-      { type: "merci" }
+      { type: "merci", drinkId: String(ap.drinkId || "") },
+      undefined,
+      "merci__" + String(event.params.id || ap.drinkId || "")
     );
   }
 );

@@ -162,4 +162,53 @@ async function pushToUser(uid, title, body, data, link) {
   }
 }
 
-module.exports = { sendToAdmins, pushToUser };
+/* ══ PREVENIR : POUSSER, ET LAISSER UNE TRACE ══════════════════════════════
+   pushToUser envoie une poussée et rien d'autre. Si la personne a refusé les
+   notifications ou si son jeton a expiré, le message est perdu pour toujours.
+   Un remerciement perdu, c'est le seul retour qu'on avait pour celui qui a
+   rendu service — et il ne le saura jamais.
+
+   prevenir() pousse, PUIS écrit une ligne dans userNotifs : la collection que
+   la cloche de l'en-tête lit déjà. Même mécanique que la promotion d'une
+   découverte, aucune règle Firestore à changer.
+
+   L'identifiant du document est DÉTERMINISTE (« <uid>__<clé> ») : si le
+   déclencheur se rejoue — Firestore le fait — on réécrit la même ligne au lieu
+   d'en empiler une seconde. Et read vaut vrai quand la poussée est partie :
+   celui qui a déjà vu la notification n'a pas en plus une pastille à éteindre. */
+async function prevenir(uid, titre, corps, data, lien, cle) {
+  if (!uid) return;
+  let pousse = false;
+  try {
+    const snap = await db.collection("pushTokens").doc(String(uid)).get();
+    const token = snap.exists && snap.data().token;
+    if (token) {
+      await getMessaging().send({
+        token: token,
+        notification: { title: titre, body: corps },
+        data: data || {},
+        webpush: {
+          notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png" },
+          fcmOptions: { link: lien || "https://magonyos991-ux.github.io/magofeed/" }
+        }
+      });
+      pousse = true;
+    }
+  } catch (e) {
+    if (e && (e.code === "messaging/registration-token-not-registered" ||
+              e.code === "messaging/invalid-registration-token")) {
+      try { await db.collection("pushTokens").doc(String(uid)).delete(); } catch (_) {}
+    } else {
+      console.warn("push error:", e && e.message);
+    }
+  }
+  try {
+    const ligne = Object.assign({
+      to: String(uid), title: titre, body: corps,
+      read: pousse, createdAt: FieldValue.serverTimestamp()
+    }, data || {});
+    await db.collection("userNotifs").doc(String(uid) + "__" + String(cle)).set(ligne, { merge: true });
+  } catch (e) { console.warn("trace userNotifs:", e && e.message); }
+}
+
+module.exports = { sendToAdmins, pushToUser, prevenir };

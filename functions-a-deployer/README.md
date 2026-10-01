@@ -75,6 +75,48 @@ plus bas.
 | `points-et-parrainage.js` porte aussi | `direMerci` : le merci d'un coup de main, envoyé sans nom | aucun |
 | `outils-admin.js` | **pas une fonction** : l'outil partagé qui prévient les admins | aucun |
 
+### Une alerte de chasse laisse désormais une trace dans l'app
+
+Jusqu'ici, « quelqu'un vient de repérer la boisson que tu cherches » ne passait
+que par la notification push. Push refusé, bloqué par le téléphone ou jeton
+expiré : l'information était perdue pour toujours. C'était le trou le plus
+sérieux de la chasse, qui est la raison d'être de l'app.
+
+Trois événements écrivent maintenant une ligne dans `userNotifs` — la
+collection que la cloche de l'en-tête lit déjà, et qui sert à la promotion
+d'une découverte depuis toujours : **la boisson repérée près de toi**, **ta
+chasse lancée sans personne autour** (le champ `sansPortee` existait mais
+n'était lu nulle part), et **le merci d'un coup de main** (sa seule trace
+vivait du côté de celui qui remercie, jamais chez l'aidant).
+
+Aucune règle Firestore à changer : `userNotifs` est déjà en lecture-destinataire
+et écriture-serveur. Aucun index à créer.
+
+**La commande, à coller telle quelle dans PowerShell.** Elle ne touche QUE les
+trois fichiers modifiés et ne déploie QUE les trois fonctions concernées — ni
+les règles, ni les index, ni les autres fonctions :
+
+```powershell
+cd C:\Users\ilias\magofeed-functions\functions; $b="https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"; foreach ($f in @("notifications-push.js","points-et-parrainage.js","outils-admin.js")) { Invoke-WebRequest -UseBasicParsing -Uri ($b+$f) -OutFile $f; Write-Host "ok $f" }; cd ..; firebase deploy --only functions:notifyStockToWatchers,functions:notifyHuntNearby,functions:direMerci
+```
+
+Attendu : trois lignes `ok`, puis `Deploy complete!`.
+
+**NE PAS lancer `firebase deploy --only firestore:indexes` pour cette
+livraison.** Cette commande REMPLACE la liste complète des index du projet par
+celle du fichier lu (voir INDEX-FIRESTORE.md) ; elle n'a rien à faire ici, et
+rien dans ce changement n'en demande.
+
+**Vérifier en deux minutes, sans provoquer de vraie chasse.** Dans la console
+Firestore, crée le document `coupsDeMain/<TON UID>/recus/essai` avec
+`aidantUid` = ton propre identifiant, `drinkId` = 200, `merci` = false. Repasse
+ensuite `merci` à true. La notification arrive, et le document
+`userNotifs/<TON UID>__merci__essai` apparaît avec `read: true` — pas de
+pastille, mais la ligne est dans la cloche. Supprime ensuite
+`pushTokens/<TON UID>` et refais la bascule : cette fois `read` vaut false, et
+la pastille s'allume à la prochaine ouverture de l'app. Pense à supprimer le
+document d'essai après.
+
 ## Ce qui attend, et ce qui l'attend
 
 | Fichier | Ce qui manque |

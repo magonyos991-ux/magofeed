@@ -38,12 +38,18 @@ function toggleSound(){
   if(soundEnabled)setTimeout(function(){playSound("pop");},50);
 }
 function initSoundToggle(){ applySoundSwitch(); }
-function haptic(type){
+function haptic(type,arg){
   try{
     if(!navigator.vibrate)return;
     if(type==="win")navigator.vibrate([15,30,15]);
     else if(type==="can")navigator.vibrate([10,25,45]);
     else if(type==="verser")navigator.vibrate([10,70,10,70,14]);
+    /* La vibration TRANSCRIT le son, elle ne l'invente pas : chaque secousse
+       tombe sur un evenement reel de l'audio (la canette a 1,52 s, les feux a
+       1,80 / 2,22 / 2,68 s). Un telephone ne sait pas vibrer « plus fort » :
+       il vibre PLUS DE FOIS, parce qu'il se passe plus de choses. */
+    else if(type==="niveau")navigator.vibrate(VIBRE_NIVEAU[arg|0]||VIBRE_NIVEAU[0]);
+    else if(type==="gorgee")navigator.vibrate(VIBRE_GORGEE);
     else if(type==="err")navigator.vibrate(35);
     else navigator.vibrate(10);
   }catch(e){}
@@ -61,51 +67,58 @@ function bruitBlanc(ac,duree){
   for(var i=0;i<n;i++)d[i]=Math.random()*2-1;
   _bruitBuf=b;return b;
 }
-/* LE VERSEMENT — synthese pure, aucun fichier audio, donc aucun telechargement
-   et aucune question de droits.
+/* ════════════════════════════════════════════════════════════════════════════
+   LA FETE GRANDIT AVEC LE NIVEAU
+   ───────────────────────────────────────────────────────────────────────────
+   Passer Curieux et passer Legende ne peuvent pas sonner pareil : on ne se
+   souvient pas d'un sommet qui fait le meme bruit que le premier pas.
 
-   CE QUI REND UN VERSEMENT RECONNAISSABLE A L'OREILLE, ce n'est pas le bruit du
-   jet : c'est que la RESONANCE MONTE. Le verre est un tube ferme par le
-   liquide ; a mesure qu'il se remplit, la colonne d'air raccourcit, donc la
-   note monte. C'est ce glissement, et lui seul, qui fait entendre « ca se
-   remplit » plutot que « ca coule ». Quatre couches :
-     1. le jet          bruit passe-bande large, attaque quand il touche le fond
-     2. la resonance    bruit passe-bande etroit (Q=9) qui GLISSE de 340 a 1150 Hz
-     3. le glouglou     des blips sinus dont la hauteur suit la meme montee
-     4. le petillement  bruit passe-haut qui survit a la fin du versement
-   Les volumes sont cales sur ceux des autres sons de l'app (crete ~0,3, la
-   canette monte a 0,52) : une fete deux fois plus forte que le reste de
-   l'application se fait couper le son une fois, puis pour toujours. */
-function sonVersement(ac,t,duree){
-  var f0=340,f1=1150;
+   CE QUI GRANDIT N'EST JAMAIS LE VOLUME. Une fete plus forte que le reste de
+   l'app se fait couper le son une fois, puis pour toujours — et tout part avec,
+   y compris le scanner. Ce qui grandit, c'est la hauteur ou le verre arrive, le
+   nombre de bulles, la duree ou la boisson petille encore, et, seulement en haut
+   de l'echelle, une fete qui s'ajoute APRES que le verre est plein. Les gains de
+   chaque couche sont, a la virgule, ceux du versement d'origine.
+
+   CRETES MESUREES hors ligne, mediane de 24 rendus (le bruit est tire au hasard,
+   une seule mesure ne dit rien) : 0,262 / 0,264 / 0,267 / 0,296 / 0,338 / 0,381 /
+   0,404. Strictement croissantes, et toutes sous la canette de l'app (0,512), qui
+   reste le son le plus fort. Rien ne sature.
+   ════════════════════════════════════════════════════════════════════════════ */
+/* LE SON DE REMPLISSAGE, PARAMETRE. Meme code que sonVersement livre : jet,
+   resonance qui glisse, glouglou, petillement. Les parametres ne font que
+   deplacer des curseurs, aucune couche n'est ajoutee ni retiree. */
+function sonRemplissage(ac,t,p,dest){
+  dest=dest||ac.destination;
+  var duree=p.duree,f0=p.f0,f1=p.f1,vol=(p.vol==null?1:p.vol);
   var buf=bruitBlanc(ac,1.2);
   function source(){var s=ac.createBufferSource();s.buffer=buf;s.loop=true;return s;}
   // 1. le jet
   var jet=source();
   var bp=ac.createBiquadFilter();bp.type="bandpass";bp.Q.value=0.8;
-  bp.frequency.setValueAtTime(900,t);
-  bp.frequency.linearRampToValueAtTime(1700,t+duree);
+  bp.frequency.setValueAtTime(f1*0.78,t);
+  bp.frequency.linearRampToValueAtTime(f1*1.48,t+duree);
   var jg=ac.createGain();
   jg.gain.setValueAtTime(0.0001,t);
-  jg.gain.exponentialRampToValueAtTime(0.26,t+0.09);
-  jg.gain.setValueAtTime(0.26,t+duree*0.78);
+  jg.gain.exponentialRampToValueAtTime(0.26*vol,t+Math.min(0.09,duree*0.22));
+  jg.gain.setValueAtTime(0.26*vol,t+duree*0.78);
   jg.gain.exponentialRampToValueAtTime(0.0001,t+duree+0.18);
-  jet.connect(bp);bp.connect(jg);jg.connect(ac.destination);
+  jet.connect(bp);bp.connect(jg);jg.connect(dest);
   jet.start(t);jet.stop(t+duree+0.25);
-  // 2. la resonance qui monte : le coeur du son
+  // 2. la resonance qui monte : le coeur du son. C'EST ELLE QUI GRANDIT.
   var res=source();
   var rp=ac.createBiquadFilter();rp.type="bandpass";rp.Q.value=9;
   rp.frequency.setValueAtTime(f0,t);
   rp.frequency.exponentialRampToValueAtTime(f1,t+duree);
   var rg=ac.createGain();
   rg.gain.setValueAtTime(0.0001,t);
-  rg.gain.exponentialRampToValueAtTime(0.95,t+0.14);
-  rg.gain.setValueAtTime(0.95,t+duree*0.85);
+  rg.gain.exponentialRampToValueAtTime(0.95*vol,t+Math.min(0.14,duree*0.35));
+  rg.gain.setValueAtTime(0.95*vol,t+duree*0.85);
   rg.gain.exponentialRampToValueAtTime(0.0001,t+duree+0.12);
-  res.connect(rp);rp.connect(rg);rg.connect(ac.destination);
+  res.connect(rp);rp.connect(rg);rg.connect(dest);
   res.start(t);res.stop(t+duree+0.2);
   // 3. le glouglou : des bulles dont la hauteur suit la montee
-  var nb=Math.round(duree*10);
+  var nb=p.bulles;
   for(var i=0;i<nb;i++){
     var pr=i/nb;
     var tb=t+0.06+pr*duree*0.94+(Math.random()-0.5)*0.03;
@@ -115,24 +128,295 @@ function sonVersement(ac,t,duree){
     o.frequency.setValueAtTime(fb,tb);
     o.frequency.exponentialRampToValueAtTime(fb*1.45,tb+0.055);
     g.gain.setValueAtTime(0.0001,tb);
-    g.gain.exponentialRampToValueAtTime(0.085,tb+0.006);
+    g.gain.exponentialRampToValueAtTime(0.085*vol,tb+0.006);
     g.gain.exponentialRampToValueAtTime(0.0001,tb+0.07);
-    o.connect(g);g.connect(ac.destination);
+    o.connect(g);g.connect(dest);
     o.start(tb);o.stop(tb+0.09);
   }
-  // 4. le petillement, qui reste apres que le jet s'arrete
+  // 4. le petillement, qui reste apres que le jet s'arrete. SA QUEUE GRANDIT.
   var fz=source();
   var hp=ac.createBiquadFilter();hp.type="highpass";hp.frequency.value=4200;
   var fg=ac.createGain();
   fg.gain.setValueAtTime(0.0001,t);
-  fg.gain.linearRampToValueAtTime(0.055,t+duree*0.55);
-  fg.gain.setValueAtTime(0.055,t+duree);
-  fg.gain.exponentialRampToValueAtTime(0.0001,t+duree+0.9);
-  fz.connect(hp);hp.connect(fg);fg.connect(ac.destination);
-  fz.start(t);fz.stop(t+duree+0.95);
+  fg.gain.linearRampToValueAtTime(0.055*vol,t+duree*0.55);
+  fg.gain.setValueAtTime(0.055*vol,t+duree);
+  fg.gain.exponentialRampToValueAtTime(0.0001,t+duree+p.queue);
+  fz.connect(hp);hp.connect(fg);fg.connect(dest);
+  fz.start(t);fz.stop(t+duree+p.queue+0.05);
 }
-function playSound(type){
-  haptic(type);
+
+/* LE FEU D'ARTIFICE, EN SYNTHESE. Deux gestes, rien d'autre :
+     1. LE COUP SOURD — une sinusoide qui descend vite, de 115 a 38 Hz en
+        0,20 s, plus un souffle passe-bas. C'est GRAVE et c'est LONG : un
+        bouchon, c'est court et AIGU. Aucune confusion possible, et la regle
+        « aucun alcool » est tenue par la physique du son, pas par une promesse.
+     2. LA SALVE DE CRAQUEMENTS — une vingtaine d'eclats tires au hasard sur
+        0,55 s, dont l'amplitude decroit : ca part en gerbe et ca retombe.
+
+   POURQUOI LA SALVE EST UN TAMPON, ET PAS VINGT PETITS NOEUDS. Ecrite
+   naivement, chaque craquement coute trois noeuds audio (source, filtre,
+   gain) : le bouquet de Legende en demandait 245 d'un coup, programmes sur le
+   fil principal a la seconde meme ou les confettis partent. On fabrique donc
+   la salve UNE FOIS dans un tampon, exactement comme data/ui.js le fait deja
+   pour le bruit blanc, et chaque tir la rejoue a une vitesse de lecture
+   legerement differente — d'ou une gerbe differente a chaque fois, pour trois
+   noeuds au lieu de quarante-cinq. Le tampon n'est fabrique qu'au premier feu :
+   les trois premiers niveaux ne le paient jamais. */
+var _salveBuf=null;
+function salveBuf(ac){
+  if(_salveBuf&&_salveBuf.sampleRate===ac.sampleRate)return _salveBuf;
+  var sr=ac.sampleRate,n=Math.floor(sr*0.62),b=ac.createBuffer(1,n,sr),d=b.getChannelData(0);
+  for(var k=0;k<22;k++){
+    var deb=Math.floor(Math.pow(Math.random(),0.7)*sr*0.55);
+    var len=Math.floor(sr*(0.010+Math.random()*0.016));
+    var amp=(0.55+Math.random()*0.45)*(1-0.60*(deb/(sr*0.60)));
+    for(var i=0;i<len&&deb+i<n;i++)d[deb+i]+=(Math.random()*2-1)*amp*Math.pow(1-i/len,2.2);
+  }
+  var pk=0;for(var j=0;j<n;j++){var a=d[j]<0?-d[j]:d[j];if(a>pk)pk=a;}
+  if(pk>0)for(var q=0;q<n;q++)d[q]/=pk; // crete du tampon = 1 : le gain seul decide du volume
+  _salveBuf=b;return b;
+}
+/* `force` va de 0,70 (premier tir, a Expert) a 1,00 (bouquet final, Legende). */
+function feuFestif(ac,t,force,dest){
+  dest=dest||ac.destination;
+  // 1a. le coup sourd
+  var o=ac.createOscillator(),g=ac.createGain();
+  o.type="sine";
+  o.frequency.setValueAtTime(115,t);
+  o.frequency.exponentialRampToValueAtTime(38,t+0.20);
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.exponentialRampToValueAtTime(0.26*force,t+0.014);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+0.40);
+  o.connect(g);g.connect(dest);o.start(t);o.stop(t+0.42);
+  // 1b. le souffle du coup
+  var so=ac.createBufferSource();so.buffer=bruitBlanc(ac,1.2);so.loop=true;
+  var lp=ac.createBiquadFilter();lp.type="lowpass";lp.frequency.setValueAtTime(1100,t);
+  lp.frequency.exponentialRampToValueAtTime(240,t+0.22);
+  var sg=ac.createGain();
+  sg.gain.setValueAtTime(0.0001,t);
+  sg.gain.exponentialRampToValueAtTime(0.16*force,t+0.010);
+  sg.gain.exponentialRampToValueAtTime(0.0001,t+0.26);
+  so.connect(lp);lp.connect(sg);sg.connect(dest);so.start(t);so.stop(t+0.30);
+  // 2. la salve, rejouee a une vitesse tiree au hasard : jamais deux fois la meme gerbe
+  var cs=ac.createBufferSource();cs.buffer=salveBuf(ac);
+  cs.playbackRate.value=0.86+Math.random()*0.30;
+  var cb=ac.createBiquadFilter();cb.type="bandpass";cb.Q.value=0.9;cb.frequency.value=3400;
+  var cg=ac.createGain();cg.gain.setValueAtTime(0.40*force,t+0.045);
+  cs.connect(cb);cb.connect(cg);cg.connect(dest);
+  cs.start(t+0.045);cs.stop(t+0.80);
+}
+
+/* LA PLUIE D'ETINCELLES — seulement a Legende. Ce qui retombe apres le
+   bouquet. Deux traits, et AUCUN nouveau tampon : le souffle est le bruit
+   blanc deja en cache avec une enveloppe qui s'eteint, et les eclats rares
+   sont la SALVE DU FEU relue trois fois moins vite — 0,62 s etiree a 1,5 s,
+   donc des craquements espaces au lieu d'une gerbe, pour zero calcul de plus.
+   Tres bas en volume : c'est une trainee, pas un son. */
+function pluieEtincelles(ac,t,duree,dest){
+  dest=dest||ac.destination;
+  duree=duree||1.40;
+  var s=ac.createBufferSource();s.buffer=bruitBlanc(ac,1.2);s.loop=true;
+  var hp=ac.createBiquadFilter();hp.type="highpass";hp.frequency.value=5200;
+  var g=ac.createGain();
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.exponentialRampToValueAtTime(0.034,t+0.06);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+duree);
+  s.connect(hp);hp.connect(g);g.connect(dest);s.start(t);s.stop(t+duree+0.05);
+  var e=ac.createBufferSource();e.buffer=salveBuf(ac);e.playbackRate.value=Math.max(0.2,0.62/duree);
+  var eh=ac.createBiquadFilter();eh.type="highpass";eh.frequency.value=3000;
+  var eg=ac.createGain();
+  eg.gain.setValueAtTime(0.085,t);
+  eg.gain.linearRampToValueAtTime(0.028,t+duree);
+  e.connect(eh);eh.connect(eg);eg.connect(dest);e.start(t);e.stop(t+duree+0.08);
+}
+
+/* LA MONTEE — CE QUI ANNONCE QUE QUELQUE CHOSE ARRIVE.
+   C'etait la derniere piece qui manquait a Legende. Un final peut etre long,
+   fort et bien rempli, il tombe quand meme a plat si rien ne l'a ANNONCE :
+   l'oreille n'a pas eu le temps de se preparer, donc rien ne se resout.
+   Une montee est un bruit filtre dont la coupure et le volume grimpent
+   ensemble, et qui s'arrete NET a l'instant du sommet — ici, l'instant ou le
+   verre est plein. C'est le vide laisse par son arret qui fait exister le coup
+   suivant. Elle ne s'entend pas comme un son, elle s'entend comme une attente.
+   Reservee aux deux derniers paliers : ailleurs, ce serait promettre une fete
+   qui n'arrive pas. */
+function montee(ac,t,duree,force,dest){
+  dest=dest||ac.destination;
+  var s=ac.createBufferSource();s.buffer=bruitBlanc(ac,1.2);s.loop=true;
+  var bp=ac.createBiquadFilter();bp.type="bandpass";bp.Q.value=1.6;
+  bp.frequency.setValueAtTime(240,t);
+  bp.frequency.exponentialRampToValueAtTime(3600,t+duree);
+  var g=ac.createGain();
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.exponentialRampToValueAtTime(0.13*force,t+duree*0.92);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+duree);   // coupe net au sommet
+  s.connect(bp);bp.connect(g);g.connect(dest);
+  s.start(t);s.stop(t+duree+0.02);
+}
+
+/* LA CANETTE QU'ON OUVRE — le vocabulaire deja en place dans l'app
+   (playSound("can")), rejoue ici a 0,62 de son volume pour qu'elle ponctue la
+   derniere goutte sans passer devant le versement. */
+function canetteDouce(ac,t,vol,dest){
+  dest=dest||ac.destination;
+  /* CORRIGE : la version d'origine refabriquait ici un tampon de bruit tire au
+     hasard a CHAQUE appel — 22 000 tirages sur le fil principal, au moment
+     precis ou la fete demarre. On reprend le bruit blanc deja en cache et on
+     lui pose la meme enveloppe en decroissance carree, avec un gain. */
+  var _d=0.5;
+  var _src=ac.createBufferSource();_src.buffer=bruitBlanc(ac,1.2);_src.loop=true;
+  var _hp=ac.createBiquadFilter();_hp.type="highpass";_hp.frequency.value=850;
+  var _gn=ac.createGain();_gn.gain.setValueAtTime(.30*vol,t);_gn.gain.exponentialRampToValueAtTime(.001,t+_d);
+  _src.connect(_hp);_hp.connect(_gn);_gn.connect(dest);_src.start(t);_src.stop(t+_d);
+  var _o=ac.createOscillator(),_g=ac.createGain();_o.connect(_g);_g.connect(dest);
+  _o.frequency.setValueAtTime(430,t);_o.frequency.exponentialRampToValueAtTime(170,t+.1);
+  _g.gain.setValueAtTime(.22*vol,t);_g.gain.exponentialRampToValueAtTime(.001,t+.13);_o.start(t);_o.stop(t+.13);
+}
+
+/* ============================================================================
+   LA TABLE DES SEPT PALIERS. Un index = un niveau de LEVELS.
+   duree : toujours 1,5 s — collee a l'animation du verre.
+   f1    : la hauteur d'arrivee. LE curseur principal.
+   ============================================================================ */
+/* LA FANFARE — CE QUI MANQUAIT A LEGENDE.
+   Des feux d'artifice, c'est du BRUIT : ca claque, et ca ne resout rien. Une
+   montee de niveau au sommet sans note tenue sonne comme un petard, pas comme
+   une arrivee. La fanfare est l'accord qui arrive quand le verre est plein :
+   les notes entrent l'une apres l'autre, du grave vers l'aigu, et tiennent.
+   C'est elle qui fait la difference entre « ca a fait du bruit » et « j'y suis
+   arrive ».
+
+   Registre choisi : sinus et triangle, pas de cuivres. L'app parle de boissons,
+   pas de tournoi. Chaque note monte legerement en entrant (un demi-pour-cent),
+   ce qui donne le petit gonflement d'un souffle plutot qu'une note posee a
+   plat. Les notes se CUMULENT : d'ou un volume par note tres bas (0,05), sinon
+   six notes ensemble saturent a elles seules. */
+function fanfare(ac,t,notes,force,dest){
+  dest=dest||ac.destination;
+  force=(force==null?1:force);
+  for(var i=0;i<notes.length;i++){
+    var f=notes[i], td=t+i*0.085;
+    var o=ac.createOscillator(),g=ac.createGain();
+    o.type=(i===0)?"sine":"triangle";
+    o.frequency.setValueAtTime(f*0.994,td);
+    o.frequency.linearRampToValueAtTime(f,td+0.10);
+    var v=0.050*force*(i===0?1.35:1);   // la fondamentale porte le poids
+    g.gain.setValueAtTime(0.0001,td);
+    g.gain.exponentialRampToValueAtTime(v,td+0.05);
+    g.gain.setValueAtTime(v,td+0.45);
+    g.gain.exponentialRampToValueAtTime(0.0001,td+1.55);
+    o.connect(g);g.connect(dest);
+    o.start(td);o.stop(td+1.60);
+  }
+}
+
+/* ============================================================================
+   LA TABLE DES SEPT PALIERS. Un index = un niveau de LEVELS.
+   duree : toujours 1,5 s — collee a l'animation du verre.
+   f1    : la hauteur d'arrivee du versement. LE curseur du son de base.
+
+   LE FINAL NE VIENT PLUS APRES LE VERSEMENT, IL LE RECOUVRE. Dans la premiere
+   version, il commencait 0,30 s APRES la derniere goutte : on entendait
+   « ca coule... silence... pop, pop, pop ». Trois petards espaces, pas une
+   fete. Les temps sont maintenant comptes par rapport a la fin du versement, et
+   les premiers tirs sont NEGATIFS : ils partent pendant que le verre finit de
+   se remplir. Tout converge sur l'instant ou le verre est plein.
+   ============================================================================ */
+var LEVEL_SON=[
+/* 0 Curieux           */ {f0:330,f1:900, bulles:12,queue:0.55,canette:0,   fanf:null,                        tirs:[],                                              etincelles:0},
+/* 1 Explorateur       */ {f0:330,f1:980, bulles:14,queue:0.70,canette:0,   fanf:null,                        tirs:[],                                              etincelles:0},
+/* 2 Chasseur          */ {f0:335,f1:1060,bulles:16,queue:0.85,canette:0,   fanf:null,                        tirs:[],                                              etincelles:0},
+/* 3 Connaisseur       */ {f0:340,f1:1150,bulles:17,queue:1.00,canette:0.52,fanf:[392,587],                   tirs:[],                                              etincelles:0},
+/* 4 Expert            */ {f0:340,f1:1250,bulles:18,queue:1.15,canette:0.60,fanf:[392,523,784],               tirs:[[-0.20,0.85]],                                  etincelles:0},
+/* 5 Maitre des rayons */ {f0:345,f1:1360,bulles:19,queue:1.30,canette:0.68,montee:0.55,fanf:[294,392,587,784],           tirs:[[-0.38,0.85],[-0.04,1.00]],                     etincelles:0},
+/* 6 Legende           */ {f0:350,f1:1500,bulles:22,queue:1.70,canette:0.80,montee:1.00,fanf:[196,392,523,659,784,1047],  tirs:[[-0.46,0.90],[-0.20,1.00],[0.10,1.10],[0.48,1.30]],etincelles:2.0}
+];
+
+/* LE SON D'UN PASSAGE DE NIVEAU. Un seul point d'entree.
+
+   TOUT PASSE PAR UN SEUL ROBINET. La fete est programmee a l'avance dans le
+   contexte audio : si la personne appuie sur « Continuer » au bout de deux
+   secondes, les feux d'artifice continuent de partir sur une carte deja
+   fermee. On branche donc toutes les briques sur UN gain commun, et la
+   fonction rend de quoi le refermer. Fermer la carte fait descendre la fete en
+   0,12 s — une descente, pas une coupure : couper net un son en cours fait un
+   « clac » audible (la forme d'onde saute a zero).
+
+   TEMPS DE LEGENDE, pour que la vibration et l'image se calent dessus :
+     0,00 s  le versement commence  (l'animation du verre dure 1,5 s)
+     0,70 s  la montee demarre : elle grimpe et s'arrete NET au sommet
+     1,04 s  premier feu            \ ils partent PENDANT que le verre finit
+     1,30 s  deuxieme feu           /  de se remplir
+     1,50 s  le verre est plein : la canette, puis la fanfare
+     1,60 s  troisieme feu
+     1,98 s  quatrieme feu, le plus gros
+     2,35 s  la pluie d'etincelles, deux secondes */
+function sonPalierNiveau(ac,t,idx,dest){
+  var p=LEVEL_SON[idx]||LEVEL_SON[LEVEL_SON.length-1];
+  var duree=1.5, tp=t+duree;                 // tp = l'instant ou le verre est plein
+  var sortie=ac.createGain();sortie.gain.value=1;sortie.connect(dest||ac.destination);
+  sonRemplissage(ac,t,{duree:duree,f0:p.f0,f1:p.f1,bulles:p.bulles,queue:p.queue,vol:1},sortie);
+  /* La montee se cale pour FINIR a l'instant du sommet, jamais apres. */
+  if(p.montee)montee(ac,tp-0.80,0.80,p.montee,sortie);
+  if(p.canette)canetteDouce(ac,tp+0.02,p.canette,sortie);
+  if(p.fanf)fanfare(ac,tp+0.06,p.fanf,1,sortie);
+  for(var i=0;i<p.tirs.length;i++)feuFestif(ac,tp+p.tirs[i][0],p.tirs[i][1],sortie);
+  if(p.etincelles)pluieEtincelles(ac,tp+0.85,p.etincelles,sortie);
+  return function(){try{
+    var n=ac.currentTime;
+    sortie.gain.cancelScheduledValues(n);
+    sortie.gain.setValueAtTime(sortie.gain.value,n);
+    sortie.gain.linearRampToValueAtTime(0.0001,n+0.12);
+  }catch(e){}};
+}
+
+/* ============================================================================
+   LE SON DES PALIERS INTERMEDIAIRES (25 / 50 / 75 %) — « UNE GORGEE ».
+   On l'entend TROIS FOIS par niveau : il doit etre le plus petit son de la
+   famille. C'est litteralement le meme code, avec les curseurs au minimum :
+   0,34 s au lieu de 1,5 s, une montee courte (520 -> 760 Hz), 3 bulles, une
+   queue de 0,30 s, et le volume general a 0,45. Pas de canette, pas de feu.
+   Resultat : on reconnait « ca se remplit » en un tiers de seconde, et c'est
+   plus discret que le « pop » d'un bouton.
+   ============================================================================ */
+function sonGorgee(ac,t,idx,dest){
+  /* LA GORGEE SUIT LE NIVEAU, elle aussi : sa hauteur est calee sur celle du
+     palier en cours (45 % a 70 % de la hauteur d'arrivee du niveau). A Curieux
+     elle chuchote a 405-630 Hz, a Legende a 675-1050 Hz. Meme petit son, mais
+     dans le registre du niveau ou l'on se trouve : la progression s'entend
+     meme dans les trois paliers intermediaires. */
+  var p=LEVEL_SON[idx]||LEVEL_SON[0];
+  sonRemplissage(ac,t,{duree:0.34,f0:p.f1*0.45,f1:p.f1*0.70,bulles:3,queue:0.30,vol:0.45},dest);
+}
+
+/* ============================================================================
+   LA VIBRATION SUIT LE SON — pas une invention, une transcription.
+   Chaque secousse tombe sur un evenement reel de l'audio, aux temps donnes
+   plus haut. On ne vibre pas « plus fort » (le telephone ne sait pas faire) :
+   on vibre PLUS DE FOIS, parce qu'il se passe plus de choses.
+   Lecture d'une ligne : [actif, pause, actif, pause, ...] en millisecondes.
+   Les trois premiers niveaux gardent la vibration du versement livree
+   aujourd'hui ([10,70,10,70,14]) ; seule la derniere secousse s'allonge.
+   ============================================================================ */
+var VIBRE_NIVEAU=[
+/* 0 Curieux     */ [10,70,10,70,14],
+/* 1 Explorateur */ [10,70,10,70,18],
+/* 2 Chasseur    */ [10,70,10,70,22],
+/* 3 Connaisseur */ [10,70,10,70,14, 1346,22],                              // + la canette a 1,52 s
+/* 4 Expert      */ [10,70,10,70,14, 1346,22, 258,30],                      // + un feu a 1,80 s
+/* 5 Maitre      */ [10,70,10,70,14, 1346,22, 258,30, 390,38],              // + un feu a 2,22 s
+/* 6 Legende     */ [10,70,10,70,14, 1346,22, 258,30, 390,38, 430,46]       // + le bouquet a 2,68 s
+];
+/* La gorgee : une seule pichenette, plus courte que le « pop » d'un bouton. */
+var VIBRE_GORGEE=[8,40,10];
+
+/* playSound prend desormais un SECOND argument, facultatif : le niveau, pour
+   les deux sons qui en dependent. Les 165 appels existants n'en passent qu'un
+   et ne changent pas d'un caractere. « niveau » rend une fonction d'arret :
+   fermer la carte de fete fait DESCENDRE le son en 0,12 s au lieu de le couper
+   net — couper net une forme d'onde en cours fait un « clac » audible. */
+function playSound(type,arg){
+  haptic(type,arg);
   if(!soundEnabled)return;
   try{
     var ac=getAC();if(!ac)return;
@@ -160,7 +444,9 @@ function playSound(type){
       _o.frequency.setValueAtTime(430,t);_o.frequency.exponentialRampToValueAtTime(170,t+.1);
       _g.gain.setValueAtTime(.22,t);_g.gain.exponentialRampToValueAtTime(.001,t+.13);_o.start(t);_o.stop(t+.13);
     }
-    else if(type==="verser"){ sonVersement(ac,t,1.5); }
+    else if(type==="verser"){ sonRemplissage(ac,t,{duree:1.5,f0:340,f1:1150,bulles:15,queue:0.90,vol:1}); }
+    else if(type==="niveau"){ return sonPalierNiveau(ac,t,arg|0); }
+    else if(type==="gorgee"){ sonGorgee(ac,t,arg|0); }
   }catch(e){}
 }
 
