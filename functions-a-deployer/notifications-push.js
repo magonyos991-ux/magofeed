@@ -67,6 +67,64 @@ async function pushToUser(uid, title, body, data, link) {
   }
 }
 
+/* ══ UNE ALERTE QUI NE LAISSE AUCUNE TRACE EST UNE ALERTE PERDUE ═══════════
+   pushToUser envoie une poussée et c'est tout. Si la personne a refusé les
+   notifications, si son téléphone les bloque, ou si le jeton a expiré,
+   l'information n'était écrite NULLE PART : « quelqu'un vient de repérer la
+   boisson que tu cherches » disparaissait pour toujours. Pour les chasses,
+   c'est-à-dire la raison d'être de l'app, c'était le trou le plus sérieux.
+
+   prevenir() fait les deux : elle pousse, puis elle écrit une ligne dans
+   userNotifs — la collection que la cloche de l'en-tête lit déjà, et que la
+   promotion d'une découverte utilise depuis toujours. Aucune mécanique
+   nouvelle, aucune règle Firestore à changer (userNotifs est déjà en
+   lecture-destinataire, écriture-serveur).
+
+   DEUX DÉTAILS QUI ÉVITENT DEUX BUGS CLASSIQUES :
+   1. L'identifiant du document est DÉTERMINISTE — « <uid>__<clé> » — au lieu
+      d'être tiré au hasard. Si le déclencheur se rejoue (Firestore le fait),
+      on réécrit la même ligne au lieu d'en empiler une deuxième.
+   2. read vaut VRAI quand la poussée est partie. Quelqu'un dont les
+      notifications marchent a déjà vu le message : lui allumer en plus une
+      pastille qu'il faut aller éteindre serait une corvée, pas un service.
+      La trace reste, consultable dans la cloche ; elle n'est « non lue » que
+      pour celui qui n'a rien reçu. */
+async function prevenir(uid, titre, corps, data, lien, cle) {
+  if (!uid) return;
+  let pousse = false;
+  try {
+    const snap = await db.collection("pushTokens").doc(String(uid)).get();
+    const token = snap.exists && snap.data().token;
+    if (token) {
+      await getMessaging().send({
+        token: token,
+        notification: { title: titre, body: corps },
+        data: data || {},
+        webpush: {
+          notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png" },
+          fcmOptions: { link: lien || APP_URL }
+        }
+      });
+      pousse = true;
+    }
+  } catch (e) {
+    if (e && (e.code === "messaging/registration-token-not-registered" ||
+              e.code === "messaging/invalid-registration-token")) {
+      try { await db.collection("pushTokens").doc(String(uid)).delete(); } catch (_) {}
+    } else {
+      console.warn("push error:", e && e.message);
+    }
+  }
+  /* La trace s'écrit MÊME si la poussée a échoué — c'est tout l'intérêt. */
+  try {
+    const doc = Object.assign({
+      to: String(uid), title: titre, body: corps,
+      read: pousse, createdAt: FieldValue.serverTimestamp()
+    }, data || {});
+    await db.collection("userNotifs").doc(String(uid) + "__" + String(cle)).set(doc, { merge: true });
+  } catch (e) { console.warn("trace userNotifs:", e && e.message); }
+}
+
 /* TEST — l'utilisateur appuie sur "Tester la notification" dans les réglages.
    On lui envoie un VRAI push FCM sur son propre téléphone : s'il ferme l'app
    juste après et voit quand même la notif, il a la preuve que tout marche
@@ -369,21 +427,24 @@ exports.notifyHuntNearby = onDocumentWritten(
        information, et c'est LA sienne. Sans elle, on attend indefiniment une
        reponse qui ne viendra pas, en croyant que l'application travaille. */
     if (!msgs.length && lanceur) {
+      /* CET AVIS N'EXISTAIT QUE DANS LA POUSSEE. Le champ `sansPortee` ecrit
+         juste en dessous n'est lu NULLE PART dans l'app : qui refusait les
+         notifications lancait sa chasse et n'apprenait jamais que personne
+         n'etait autour. Il attendait une reponse qui ne viendrait pas, en
+         croyant que l'application travaillait — exactement ce que le
+         commentaire du dessus dit vouloir eviter. prevenir() laisse la trace
+         dans la cloche ; `sansPortee` reste, il sert au serveur a ne pas
+         repeter l'avis. */
       try {
-        const moi = await db.collection("pushTokens").doc(String(lanceur)).get();
-        const tk = moi.exists && moi.data().token;
-        if (tk) {
-          await getMessaging().send({
-            token: tk,
-            notification: {
-              title: "Ta chasse est lancee, mais personne autour",
-              body: "Aucun joueur n'est assez pres pour l'instant. Elle reste visible dans "
-                    + "Decouvrir, et on previendra des que quelqu'un s'approche."
-            },
-            data: { type: "hunt", drinkId: String(after.drinkId || ""), vide: "1" },
-            webpush: { fcmOptions: { link: "https://magonyos991-ux.github.io/magofeed/" } }
-          });
-        }
+        await prevenir(
+          lanceur,
+          "Ta chasse est lancee, mais personne autour",
+          "Aucun joueur n'est assez pres pour l'instant. Elle reste visible dans "
+            + "Decouvrir, et on previendra des que quelqu'un s'approche.",
+          { type: "hunt", drinkId: String(after.drinkId || ""), vide: "1" },
+          APP_URL,
+          "huntVide__" + String(after.drinkId || "")
+        );
       } catch (e) { console.warn("avis chasse vide:", e && e.message); }
       try { await event.data.after.ref.set({ sansPortee: true, sansPorteeAt: now }, { merge: true }); } catch (e) {}
     } else {
@@ -481,14 +542,25 @@ exports.notifyStockToWatchers = onDocumentUpdated(
         if (sLat != null && wd.lat != null && _dist(sLat, sLng, wd.lat, wd.lng) > radius) continue;
         const dName = String(wd.drinkName || "Ta boisson").slice(0, 40);
         const storeId = String(event.params.id);
-        await pushToUser(
-          wd.uid,
-          "Trouvee pres de toi",
-          "« " + dName + " » vient d'être repérée chez " + sName + ". Fonce l'acheter avant qu'elle parte !",
-          { type: "found", drinkId: String(drinkId), storeId: storeId },
-          // Tap sur la notif -> ouvre directement la fiche du magasin (+ carte) :
-          APP_URL + "#store=" + encodeURIComponent(storeId)
-        );
+        const titre = "Trouvee pres de toi";
+        const corps = "« " + dName + " » vient d'être repérée chez " + sName + ". Fonce l'acheter avant qu'elle parte !";
+        const donnees = { type: "found", drinkId: String(drinkId), storeId: storeId };
+        const lien = APP_URL + "#store=" + encodeURIComponent(storeId);
+        /* LA TRACE N'EST ECRITE QUE POUR UNE VRAIE OBSERVATION.
+           Ce declencheur part sur DEUX evenements : une confirmation qui passe
+           de zero a positif (quelqu'un l'a vue de ses yeux, c'est vrai), et une
+           boisson qui ENTRE dans le tableau `drinks` — ce qui arrive aussi par
+           remplissage d'enseigne ou par import, sans que personne n'ait rien vu.
+           Une poussee est ephemere : on la garde pour les deux, comme avant.
+           Une trace, elle, RESTE, et elle affirme « elle a ete reperee chez
+           X » : l'ecrire sur un import serait un mensonge durable dans la
+           cloche de quelqu'un. La carte ne ment pas, la cloche non plus. */
+        if (confirmees.indexOf(String(drinkId)) !== -1 || confirmees.indexOf(drinkId) !== -1) {
+          await prevenir(wd.uid, titre, corps, donnees, lien,
+            "found__" + storeId + "__" + String(drinkId));
+        } else {
+          await pushToUser(wd.uid, titre, corps, donnees, lien);
+        }
       }
     }
   }

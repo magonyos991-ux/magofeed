@@ -16293,10 +16293,21 @@ function openActivity(){
         var act=null;
         if(n.type==="promoted"&&n.drinkId!=null)act={kind:"drink",drinkId:n.drinkId};
         else if(n.type==="found"&&n.storeId!=null)act={kind:"store",storeId:n.storeId,drinkId:n.drinkId};
+        /* LA MEME CLE QUE LE FILET LOCAL, SINON DEUX LIGNES POUR UN EVENEMENT.
+           checkWatches pose deja « found:<boisson>:<magasin> » quand il repere
+           lui-meme la trouvaille. Si la trace du serveur arrivait sous une
+           autre cle, la cloche affichait l'evenement DEUX FOIS — et la seconde
+           ligne restait non lue pour toujours. pushActivity deduplique par cle :
+           il suffit que les deux chemins parlent de la meme chose de la meme
+           facon. La trace du serveur reste indispensable : le filet local
+           plafonne a 10 km alors que le serveur previent jusqu'a 50. */
+        var cle=(n.type==="found"&&n.drinkId!=null&&n.storeId!=null)
+          ? ("found:"+n.drinkId+":"+n.storeId)
+          : ("notif:"+(n.docId||n.title||n.type));
         pushActivity({type:n.type||"info",title:n.title||"",body:n.body||"",
           ts:(n.createdAt&&n.createdAt.seconds*1000)||Date.now(),action:act,
           drinkId:(n.drinkId!=null?n.drinkId:null),
-          key:"notif:"+(n.docId||n.title||n.type)});
+          key:cle});
       });
       try{_renderActivityList();}catch(e){}
     }).catch(function(){});
@@ -29680,7 +29691,17 @@ try{
       showPromotedBanner(promoted[0],earned?PROMO_REWARD:0);
       promoted.slice(1).forEach(function(n){setTimeout(function(){toast(""+(n.title||"Découverte promue"));},600);});
     }
-    rest.forEach(function(n,i){setTimeout(function(){toast((n.title?n.title+" · ":"")+(n.body||""));},400+i*1800);});
+    /* DEUX TOASTS, PAS DOUZE. Cette ligne en lancait un toutes les 1,8 s pour
+       CHAQUE trace non lue : douze traces faisaient vingt secondes de bandeaux
+       qui se succedent, pendant lesquelles on ne peut rien faire d'autre que
+       regarder. Tant que le serveur n'ecrivait presque rien, ca ne se voyait
+       pas ; des qu'il ecrit les alertes de chasse, ca devient une taxe a
+       l'ouverture. Les deux plus recentes passent, le reste attend dans la
+       cloche — dont la pastille dit deja combien il y en a. */
+    rest.slice(0,2).forEach(function(n,i){setTimeout(function(){toast((n.title?n.title+" · ":"")+(n.body||""));},400+i*1800);});
+    if(rest.length>2){
+      setTimeout(function(){toast(trh("{n} autres nouvelles dans la cloche",{n:rest.length-2}));},400+2*1800);
+    }
     // Journal d'activité (cloche) : ces événements restent consultables ensuite.
     unread.forEach(function(n){
       var act=null;
