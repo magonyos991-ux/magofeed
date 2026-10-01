@@ -6599,10 +6599,11 @@ function setMode(mode){
      theme-color suit aussi : la barre de statut et le cadre systeme
      prennent la couleur du theme au lieu de rester figes. */
   try{
-    var _fondApp=getComputedStyle(document.body).backgroundColor;
+    /* Hors natif, le body lui-meme n'a pas de fond (c'est l'app qui peint) :
+       on lit la variable du theme, pas la couleur calculee du body. */
+    var _fondApp=getComputedStyle(document.body).getPropertyValue("--app-bg").trim()||getComputedStyle(document.body).backgroundColor;
     document.documentElement.style.backgroundColor=_fondApp;
-    var _mtc=document.querySelector('meta[name="theme-color"]');
-    if(_mtc)_mtc.setAttribute("content",_fondApp);
+    majCouleurStatut();
   }catch(e){}
   /* L'EN-TETE DE L'ACCUEIL PORTAIT QUATRE ICONES. Le theme en est parti : il
      vit deja dans Parametres > Preferences, avec ses trois choix nommes
@@ -6615,6 +6616,22 @@ function setMode(mode){
   ["tm-light","tm-dark","tm-auto"].forEach(function(id){var el=document.getElementById(id);if(el){el.classList.remove("on");el.style.background="";}});
   var a=document.getElementById("tm-"+mode);if(a){a.classList.add("on");a.style.background=accentColor;}
   localStorage.setItem("magomode",mode);
+}
+/* La couleur de la barre de statut suit l'ECRAN, pas seulement le theme : les
+   fiches boisson et magasin ont un bandeau sombre dans les deux themes. Si
+   theme-color restait creme (theme clair), iOS garderait une horloge foncee,
+   illisible sur ce bandeau — et le voile (app.css) serait clair par-dessus du
+   sombre. Sur ces deux ecrans, theme-color prend la couleur du bandeau ;
+   partout ailleurs, le fond effectif du theme. Appelee par setMode et a
+   chaque changement d'ecran. */
+function majCouleurStatut(){
+  try{
+    var on=document.querySelector(".screen.on");
+    var bandeauSombre=!!(on&&(on.id==="s-results"||on.id==="s-storedetail"));
+    var c=bandeauSombre?"#1a1714":(getComputedStyle(document.body).getPropertyValue("--app-bg").trim()||getComputedStyle(document.body).backgroundColor);
+    var m=document.querySelector('meta[name="theme-color"]');
+    if(m&&m.getAttribute("content")!==c)m.setAttribute("content",c);
+  }catch(e){}
 }
 function cycleTheme(){var m=["light","dark","auto"];setMode(m[(m.indexOf(curMode)+1)%3]);playSound("pop");}
 /* En mode auto, le telephone peut basculer clair/sombre pendant que l'app est
@@ -7111,11 +7128,13 @@ function _showRaw(s){
       // et sinon laisser deux écrans "on" en même temps.
       NAV_SCREENS.forEach(function(id){var el=document.getElementById("s-"+id);if(el&&el!==target)el.classList.remove("on","s-leave");});
       target.classList.add("on","s-enter");
+      try{majCouleurStatut();}catch(e){}
       requestAnimationFrame(function(){requestAnimationFrame(function(){target.classList.remove("s-enter");});});
     },140);
   } else if(target){
     NAV_SCREENS.forEach(function(id){var el=document.getElementById("s-"+id);if(el&&el!==target)el.classList.remove("on");});
     target.classList.add("on");
+    try{majCouleurStatut();}catch(e){}
   }
   var navScreens=["home","search","scan","discover","profile"];
   var activeTab=navScreens.includes(s)?s:(["settings","privacy","terms","messages"].includes(s)?"profile":null);
