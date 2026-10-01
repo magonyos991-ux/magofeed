@@ -52,38 +52,20 @@ const app = new Function(readFileSync("data/alcool.js", "utf8") + "\n" + corpsDe
 const src = readFileSync("data/drinks.js", "utf8").replace(/^\/\*[\s\S]*?\*\//, "");
 const DRINKS = new Function(src + "\nreturn DRINKS;")();
 
-/* Cinq paires de fiches font double emploi et partagent donc un code-barres.
-   Elles PRE-EXISTENT a ce controle. On ne les repare pas d'ici : fusionner
-   deux fiches doit transporter les magasins et les confirmations attachees a
-   celle qui disparait, et ca, seul l'outil « fusionner les fiches » du panneau
-   d'administration sait le faire. Les effacer du fichier ferait perdre des
-   contributions de gens reels. On les nomme donc, pour que le controle reste
-   utile : une NOUVELLE collision sera signalee, celles-ci sont en attente. */
-/* Declarees sous la forme NORMALISEE (sans zero de tete), comme la comparaison
-   ci-dessous : sinon une tolerance posee en 13 chiffres ne reconnaitrait pas la
-   collision qu'elle est censee excuser. */
-const COLLISIONS_CONNUES = new Set([
-  "3124480196774",   /* Oasis Tropical Sans Sucre / Oasis Tropical Zero */
-  "90169168", "90169380",   /* Happy Day Orange / Rauch Orange */
-  "90169762",        /* Rauch Happy Day Pomme / Rauch Pomme */
-  "90169748",        /* Happy Day Multivitamin / Rauch Multivitamin */
-  "5949000012031",   /* Pepsi Original / Pepsi */
-  /* LES SEPT QUE CE CONTROLE NE VOYAIT PAS, mesurees le 21 septembre 2026.
-     Elles etaient invisibles parce qu'on comparait le texte brut la ou l'app
-     compare la forme utile : un zero de tete d'un cote, pas de l'autre. Elles
-     existent depuis des mois et le controle annoncait « TOUT EST CONFORME ».
-     Elles attendent une fusion depuis l'administration (« Fusionner les
-     doublons »), qui garde l'une des deux fiches et reporte sur elle les
-     confirmations et les codes de l'autre. Retirer une ligne d'ici des que la
-     fusion est faite : c'est ce qui rend la liste utile plutot que decorative. */
-  "70847002901",     /* Monster Energy Zero Sucre (14905) / Monster Zero sucre boisson energisante (16432) */
-  "70847020905",     /* Monster Ultra Sunrise (14917) / Monster Energy Ultra Sunrise (16319) */
-  "613008730710",    /* Arizona Peach (10008) / Peach Tea Arizona (16481) */
-  "82592720153",     /* Naked Green Machine (15354) / Naked Boosted Smoothie Green Machine (16722) */
-  "82592010728",     /* Naked Green Machine (15354) / Naked Green machine boosted smoothie (17390) */
-  "51000012920",     /* V8 Jus de Legumes (15495) / V8 Original 100% Vegetable Juice (16725) */
-  "23100000220",     /* Soy Boisson Soja Vanille (15888) / Soy Lait soja vanille bio (17722) */
-]);
+/* PLUS AUCUNE COLLISION TOLEREE, ET C'EST VOULU.
+   Ce Set contenait treize codes excuses « en attente d'une fusion depuis le
+   panneau d'administration ». Deux choses etaient fausses. D'abord le compte :
+   treize codes designaient douze paires, et sept d'entre elles avaient deja ete
+   fusionnees sans que la liste soit mise a jour — un controle qui excuse des
+   defauts repares ne sert plus a rien. Ensuite la raison : une fusion ne
+   demande PAS le panneau d'administration. window.DRINK_MERGES (index.html,
+   « Fusions de fiches ») est applique par applyMergesToStore a chaque
+   chargement de magasin, et reporte drinks, drinksVerified ET confirmations de
+   l'ancien identifiant vers le nouveau ; appliquerFusionsAuPerso fait de meme
+   pour les favoris et les veilles. Rien ne se perd.
+   Les douze paires sont fusionnees. On ne rajoute plus de ligne ici : une
+   collision qui apparait est un defaut a reparer, pas une tolerance a ecrire. */
+const COLLISIONS_CONNUES = new Set([]);
 
 function cleOk(c) {
   if (!/^\d+$/.test(c) || ![8, 12, 13, 14].includes(c.length)) return false;
