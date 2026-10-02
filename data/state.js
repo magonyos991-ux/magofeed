@@ -127,6 +127,30 @@ var imgCache=(function(){
   }catch(e){}
   return garde;
 })();
+/* Le cache photo etait PERMANENT : chaque photo communautaire y vit en
+   base64 (~330 Ko l'une), l'objet entier est recharge en memoire a chaque
+   demarrage puis reserialise en entier a chaque ajout. Au fil des mois :
+   plusieurs Mo de RAM et des ecritures de plus en plus lourdes — le genre
+   de poids qui fait tuer une page web par iOS. On borne au demarrage :
+   au-dela de ~3 Mo, les photos base64 les plus anciennes sortent (elles se
+   rechargent depuis Firestore a la demande) ; les entrees legeres (simples
+   URLs) restent toutes. */
+(function(){
+  try{
+    var brut=localStorage.getItem(IMG_CACHE_KEY);
+    if(!brut||brut.length<3000000)return;
+    var lourdes=Object.keys(imgCache).filter(function(k){
+      var e=imgCache[k];return e&&typeof e.url==="string"&&e.url.slice(0,5)==="data:";
+    }).sort(function(a,b){return (imgCache[a].ts||0)-(imgCache[b].ts||0);});
+    var taille=brut.length;
+    while(taille>2500000&&lourdes.length){
+      var k=lourdes.shift();
+      taille-=(imgCache[k].url||"").length;
+      delete imgCache[k];
+    }
+    localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));
+  }catch(e){}
+})();
 var imgFetchInFlight={};
 var communityCatalogLoaded=false;
 var offlineDataApplied=false;

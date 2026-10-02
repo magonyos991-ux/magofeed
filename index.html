@@ -7177,6 +7177,19 @@ function _showRaw(s){
     try{var _q=document.getElementById("q");if(_q)_q.value="";var _sl=document.getElementById("search-list");if(_sl)_sl.innerHTML="";exploreFilter=null;window._exploreFromDrink=false;}catch(e){}
   }
   try{renderChasse();}catch(e){}
+  /* Retour a un onglet racine : la fiche boisson est definitivement quittee
+     (la pile de navigation repart de zero), mais sa carte Leaflet restait en
+     memoire — tuiles filtrees comprises — jusqu'a l'ouverture d'une AUTRE
+     boisson. On la detruit ici ; rouvrir une boisson la reconstruit via
+     renderMap (mapRenderedFor remis a zero). On ne touche pas aux ecrans
+     intermediaires (fiche magasin) : le retour vers la fiche doit retrouver
+     sa carte. */
+  if(TAB_SCREENS.indexOf(s)!==-1&&window._leafletMap){
+    try{window._leafletMap.remove();}catch(e){}
+    window._leafletMap=null;window._leafletCluster=null;
+    try{mapRenderedFor=null;}catch(e){}
+    try{var _mbx=document.getElementById("map-box");if(_mbx)_mbx.innerHTML="";}catch(e){}
+  }
   // Quitter l'écran scan met fin au remplissage rafale (nettoie HUD + état).
   if(s!=="scan"&&window._rafaleStore)try{endRafale(true);}catch(e){}
   if(s!=="scan"&&scanActive)stopScan();
@@ -9543,7 +9556,7 @@ function ensurePickerMap(cb){
   if(window._pickerMap){setTimeout(function(){window._pickerMap.invalidateSize();cb&&cb();},180);return;}
   function build(){
     var center=[userLat||50.8466,userLng||4.3528];
-    window._pickerMap=L.map("store-picker-map",{zoomControl:false}).setView(center,13);
+    window._pickerMap=L.map("store-picker-map",{zoomControl:false,fadeAnimation:false}).setView(center,13);
     fondMago().addTo(window._pickerMap);
     window._pickerMarkers=L.layerGroup().addTo(window._pickerMap);
     window._pickerMap.on("click",function(e){onPickerMapClick(e.latlng);});
@@ -9782,6 +9795,13 @@ function updatePickerMapMarkers(list){
 function closeStorePicker(){
   if(pickerMapFull)togglePickerMapFull();
   var ov=document.getElementById("store-picker");if(ov)ov.style.display="none";
+  /* La carte du selecteur survivait a la fermeture — tuiles et marqueurs
+     gardes en memoire (GPU compris) pour toute la session, meme invisibles.
+     On la detruit : ensurePickerMap sait la reconstruire a la prochaine
+     ouverture, et la memoire respire (c'est iOS qui tue l'app sinon). */
+  try{if(window._pickerMap)window._pickerMap.remove();}catch(e){}
+  window._pickerMap=null;window._pickerMarkers=null;
+  if(pickerMapOn)toggleStorePickerMap();
 }
 function pickerFilteredList(){
   var q=(document.getElementById("store-picker-q")||{}).value||"";
@@ -15389,7 +15409,7 @@ function centerMapOnUser(){
 }
 function initLeafletMap(lat,lng){
   if(!window.L||!document.getElementById("leaflet-map"))return;
-  var map=L.map("leaflet-map",{zoomControl:false,attributionControl:true,zoomAnimation:true,markerZoomAnimation:true}).setView([lat,lng],13);
+  var map=L.map("leaflet-map",{zoomControl:false,attributionControl:true,zoomAnimation:true,markerZoomAnimation:true,fadeAnimation:false}).setView([lat,lng],13);
   L.control.zoom({position:"bottomleft"}).addTo(map);
   window._leafletMap=map;
   // Carte embarquee = apercu : on coupe le pan tactile et le zoom molette pour que
@@ -16398,8 +16418,15 @@ function _openActivityUI(){
 
   var scroller=card.querySelector("#act-scroll");
   var ferme=false;
+  /* Chaque ouverture du panneau posait des ecouteurs mousemove/mouseup sur
+     window (et un keydown sur document) JAMAIS retires : dix ouvertures =
+     dix jeux d'ecouteurs morts, chacun retenant tout le DOM de la feuille
+     via sa fermeture. On les enregistre ici et _fermer les retire tous,
+     quel que soit le chemin de fermeture (tirer, fond, Echap). */
+  var _nettoyage=[];
   var _fermer=function(){
     if(ferme)return; ferme=true;
+    _nettoyage.forEach(function(f){try{f();}catch(e){}});
     try{document.body.classList.remove("sheet-open");}catch(e){}
     card.style.transition="transform .26s cubic-bezier(.32,.72,0,1)";
     card.style.transform="translateY(100%)";
@@ -16477,12 +16504,19 @@ function _openActivityUI(){
       if(e.button!==0)return;
       sourisActive=true; debut(e.clientY,e.target);
     });
-    window.addEventListener("mousemove",function(e){ if(sourisActive)bouge(e.clientY,e); });
-    window.addEventListener("mouseup",function(){ if(sourisActive){sourisActive=false;fin();} });
+    var _surSourisBouge=function(e){ if(sourisActive)bouge(e.clientY,e); };
+    var _surSourisFin=function(){ if(sourisActive){sourisActive=false;fin();} };
+    window.addEventListener("mousemove",_surSourisBouge);
+    window.addEventListener("mouseup",_surSourisFin);
+    _nettoyage.push(function(){
+      window.removeEventListener("mousemove",_surSourisBouge);
+      window.removeEventListener("mouseup",_surSourisFin);
+    });
 
-    // Échap ferme aussi.
-    var esc=function(e){ if(e.key==="Escape"){_fermer();document.removeEventListener("keydown",esc);} };
+    // Échap ferme aussi (retire par _fermer, comme les autres).
+    var esc=function(e){ if(e.key==="Escape")_fermer(); };
     document.addEventListener("keydown",esc);
+    _nettoyage.push(function(){document.removeEventListener("keydown",esc);});
   })();
 
   _renderActivityList();
@@ -20836,7 +20870,7 @@ function discLocate(discId){
    pin -> la fiche du magasin et ses boissons. La carte recharge les
    magasins a chaque deplacement (requete de zone, 600ms de repos).
 ================================ */
-var exploreMap=null,exploreLayer=null,_exploreTimer=null,_exploreSeen={};
+var exploreMap=null,exploreLayer=null,exploreFond=null,_exploreTimer=null,_exploreSeen={};
 var exploreFilter=null; // {drinkId,name} : la carte ne montre que les magasins qui vendent cette boisson
 function fmtDist(m){
   if(m==null)return null;
@@ -21988,9 +22022,11 @@ function openExploreMap(opts){
     if(!exploreMap){
       // doubleClickZoom + touchZoom (pincer) actifs par defaut ; on ajoute aussi
       // des boutons +/- visibles (clairs pour tout le monde).
-      exploreMap=L.map("explore-map",{zoomControl:false,doubleClickZoom:true,touchZoom:true,tap:true});
+      exploreMap=L.map("explore-map",{zoomControl:false,doubleClickZoom:true,touchZoom:true,tap:true,fadeAnimation:false});
       L.control.zoom({position:"bottomleft"}).addTo(exploreMap);
-      fondMago().addTo(exploreMap);
+      /* La couche de tuiles garde sa reference : closeExploreMap la retire
+         (liberer la memoire GPU des tuiles filtrees), on la remet ici. */
+      exploreFond=fondMago();exploreFond.addTo(exploreMap);
       /* Regroupement si le greffon est la, sinon simple couche : la carte
          s'affiche dans les deux cas. */
       exploreLayer=(window.L&&L.markerClusterGroup)
@@ -22036,7 +22072,24 @@ function openExploreMap(opts){
         try{etalerMarqueurs(exploreMap,exploreLayer);}catch(e){}
         try{renderInStockArrows();}catch(e){}
         clearTimeout(_exploreTimer);
-        _exploreTimer=setTimeout(function(){exploreLoadStores();},350);
+        /* Micro-deplacement (correction du pouce, inertie) : la vue deja
+           peinte couvre ce qu'on regarde. Reconstruire jusqu'a 3000 marqueurs
+           pour trente metres de glissement, c'est ce qui faisait chauffer —
+           puis crasher — les iPhone. On ne recharge que si la vue a VRAIMENT
+           change depuis la derniere peinture (zoom, filtre, ou centre deplace
+           de plus de ~18% de l'ecran). Les rechargements de donnees passent
+           par exploreLoadStores(true) et ne sont pas concernes. */
+        var _bouge=true;
+        try{
+          var _p=window._explorePeint;
+          if(_p&&_p.z===exploreMap.getZoom()&&_p.f===String((exploreFilter&&exploreFilter.drinkId)||"")){
+            var _c0=exploreMap.getCenter(),_b0=exploreMap.getBounds();
+            var _sLat=Math.abs(_b0.getNorth()-_b0.getSouth())||1e-9;
+            var _sLng=Math.abs(_b0.getEast()-_b0.getWest())||1e-9;
+            if(Math.abs(_c0.lat-_p.lat)<_sLat*0.18&&Math.abs(_c0.lng-_p.lng)<_sLng*0.18)_bouge=false;
+          }
+        }catch(e){}
+        if(_bouge)_exploreTimer=setTimeout(function(){exploreLoadStores();},350);
         try{var _c=exploreMap.getCenter();autoOsmForArea(_c.lat,_c.lng,exploreMap.getZoom());}catch(e){}
       });
       exploreMap.on("click",exploreHideCard);
@@ -22050,6 +22103,8 @@ function openExploreMap(opts){
         L.circleMarker([userLat,userLng],{radius:7,color:"#fff",weight:2,fillColor:"#2e86c1",fillOpacity:1}).addTo(exploreMap);
       }
     }
+    // Reouverture apres fermeture : closeExploreMap a retire les tuiles.
+    try{if(exploreFond&&!exploreMap.hasLayer(exploreFond))exploreFond.addTo(exploreMap);}catch(e){}
     if(window._exploreFocus){exploreMap.setView([window._exploreFocus.lat,window._exploreFocus.lng],window._exploreFocus.z||17);}
     else exploreMap.setView([typeof userLat==="number"&&userLat?userLat:50.8466,typeof userLng==="number"&&userLng?userLng:4.3528],14);
     try{appliquerRepere();}catch(e){}
@@ -22107,7 +22162,19 @@ function closeExploreMap(){
   var host=document.getElementById("explore-map-host");
   if(!host)return;
   host.classList.remove("in");
-  setTimeout(function(){host.style.display="none";},280);
+  setTimeout(function(){
+    host.style.display="none";
+    /* Carte fermee = memoire rendue. Avant, la carte gardait TOUTES ses
+       tuiles (filtrees au GPU) et des milliers de marqueurs en memoire pour
+       toute la session — c'est le genre de poids qui fait tuer l'app par
+       iOS. On retire la couche de tuiles (re-ajoutee a l'ouverture) et on
+       vide les couches de marqueurs (reconstruites par exploreLoadStores). */
+    try{if(exploreMap&&exploreFond&&exploreMap.hasLayer(exploreFond))exploreMap.removeLayer(exploreFond);}catch(e){}
+    try{if(exploreLayer)exploreLayer.clearLayers();}catch(e){}
+    try{if(window._haloLayer)window._haloLayer.clearLayers();}catch(e){}
+    try{if(exploreMap&&exploreMap._eventailFils)exploreMap._eventailFils.clearLayers();}catch(e){}
+    window._explorePeint=null;
+  },280);
   // Ouverte depuis une boisson : on revient a l'accueil, JAMAIS sur l'ancienne
   // page produit encombree (que l'utilisateur ne doit plus voir).
   if(window._exploreFromDrink){window._exploreFromDrink=false;try{show("home");}catch(e){}}
@@ -22473,6 +22540,9 @@ function exploreLoadStores(useCache){
      les trois repeignaient la carte. Le motif du jeton existe deja pour les
      requetes Firestore (window._fbQuerySeq) : on l'applique au rendu. */
   var _seq = (window._exploreSeq = (window._exploreSeq || 0) + 1);
+  // Memo de la vue peinte : le moveend s'en sert pour ignorer les
+  // micro-deplacements (voir le garde dans l'ecouteur moveend/zoomend).
+  try{window._explorePeint={lat:cLat,lng:cLng,z:exploreMap.getZoom(),f:String((exploreFilter&&exploreFilter.drinkId)||"")};}catch(e){}
   var q;
   /* LE CACHE ALLEGE NE PEUT PAS REPONDRE A UNE QUESTION DE BOISSON.
      Les magasins charges sans leur assortiment portent _pins : ils ne savent
