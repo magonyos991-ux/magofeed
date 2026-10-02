@@ -11753,7 +11753,14 @@ function formesFiche(d){
   var f=_FORMES[d.id];
   if(f)return f;
   var nom=canonSaveurs(normTxt(d.name||"")),mq=canonSaveurs(normTxt(d.brand||""));
-  var plat=(nom+" "+mq).replace(/[^a-z0-9]+/g," ");
+  /* LA CATEGORIE N'ETAIT JAMAIS CHERCHEE. Le texte fouille se limitait au nom
+     et a la marque, donc « soda au gingembre », « lait d'amande », « jus de
+     tomate » ou « boisson energisante mangue » ne trouvaient rien : le mot qui
+     porte le sens (« soda », « lait », « jus ») n'est nulle part dans le nom.
+     Dix categories, 4 543 fiches : c'est la famille de recherches la plus
+     naturelle qui ne marchait pas. */
+  var cat=canonSaveurs(normTxt(d.cat||""));
+  var plat=(nom+" "+mq+" "+cat).replace(/[^a-z0-9]+/g," ");
   /* La forme BRUTE, sans synonymes ni canonisation : elle sert a departager.
      « Red Bull Zero » et « Red Bull Sugarfree » se ramenent au meme texte une
      fois « sugar free » devenu « zero », donc au meme score, et l'egalite se
@@ -11870,10 +11877,24 @@ function trouverBoissonProche(nomLu, marqueLue){
 
 /* Recherche tolerante : accents ignores, et 1 faute de frappe pardonnee
    ("vinto" trouve Vimto, "pasteque" trouve Pasteque). */
+/* Une lettre en trop, une en moins, une fausse — OU DEUX LETTRES INVERSEES.
+   L'inversion manquait, et c'est la faute la plus frequente quand on tape au
+   pouce : « pespi » pour Pepsi, « fatna » pour Fanta, « ret bull » pour Red
+   Bull. Pour un calcul de distance ordinaire une inversion coute DEUX
+   modifications, donc ces mots etaient simplement hors de portee. */
 function lev1(a,b){
   if(a===b)return true;
   var la=a.length,lb=b.length;
   if(Math.abs(la-lb)>1)return false;
+  if(la===lb){
+    /* Deux lettres voisines echangees, le reste identique. */
+    var d=-1,e=-1;
+    for(var k=0;k<la;k++){
+      if(a[k]===b[k])continue;
+      if(d<0)d=k; else if(e<0)e=k; else return false;
+    }
+    if(d>=0&&e===d+1&&a[d]===b[e]&&a[e]===b[d])return true;
+  }
   var i=0,j=0,edits=0;
   while(i<la&&j<lb){
     if(a[i]===b[j]){i++;j++;continue;}
@@ -11885,12 +11906,19 @@ function lev1(a,b){
 function fuzzyHit(text,q){
   var t=normTxt(text);
   if(t.includes(q))return true;
-  if(q.length<4)return false;
+  /* Le seuil etait a quatre lettres, donc « ret bull » et « mountain due »
+     n'avaient droit a aucune tolerance. Trois lettres suffisent : le mot doit
+     de toute facon etre accompagne des autres mots de la requete. */
+  if(q.length<3)return false;
   /* Frappes collees : « redbull » doit trouver « Red Bull » (l'inverse
      marchait deja par lev1). Comparaison ecrasee, sans espaces ni
      ponctuation, des deux cotes. */
-  var qs=q.replace(/[^a-z0-9]+/g,"");
-  if(qs.length>=4&&t.replace(/[^a-z0-9]+/g,"").includes(qs))return true;
+  var qs=q.replace(/[^a-z0-9]+/g,""),ts=t.replace(/[^a-z0-9]+/g,"");
+  if(qs.length>=4&&ts.includes(qs))return true;
+  /* « cocacolla » : la faute est DANS la forme collee, donc l'inclusion echoue
+     et le decoupage en mots aussi (le texte a un trait d'union, pas la
+     requete). On compare donc aussi les deux formes collees a une faute pres. */
+  if(qs.length>=5&&lev1(ts,qs))return true;
   var toks=t.split(/[^a-z0-9]+/);
   for(var k=0;k<toks.length;k++){
     var w=toks[k];
@@ -11935,7 +11963,25 @@ var MOTS_VOISINS=[
   ["poire","pear","peer"],
   ["raisin","grape","druif"],
   ["cerise","cherry","kers"],
-  ["pasteque","watermelon","watermeloen"],
+  ["pasteque","watermelon","watermeloen","watermeloenen"],
+  /* LE NEERLANDAIS MET SES PLURIELS PARTOUT, et ils ne ressemblent pas au
+     singulier : framboos devient frambozen, bosbes devient bosbessen, druif
+     devient druiven. A Bruxelles ce n'est pas un detail. */
+  ["framboise","raspberry","framboos","frambozen"],
+  ["myrtille","blueberry","bosbes","bosbessen"],
+  ["peche","peach","perzik","perziken"],
+  ["raisin","grape","druif","druiven"],
+  ["fraise","strawberry","aardbei","aardbeien"],
+  ["cerise","cherry","kers","kersen"],
+  ["pomme","apple","appel","appels"],
+  ["orange","sinaasappel","appelsien","appelsienen"],
+  ["pamplemousse","grapefruit","pompelmoes"],
+  ["passion","maracuja","passievrucht","passion fruit"],
+  ["rhubarbe","rhubarb","rabarber"],
+  ["mure","blackberry","braam","bramen"],
+  ["gingembre","ginger","gember"],
+  ["petillante","sparkling","bruisend","petillant"],
+  ["legumes","vegetable","groente"],
   ["litchi","lychee","leechee"],
   ["myrtille","blueberry","bosbes"],
   ["cassis","blackcurrant"],
@@ -12032,7 +12078,7 @@ function fuzzyWordMatch(qw,t){
      fait mot par mot, sinon le repli echoue la ou le filtre principal
      reussissait. */
   if(qw.length>=4&&t.replace(/[^a-z0-9]+/g,"").indexOf(qw.replace(/[^a-z0-9]+/g,""))!==-1)return true;
-  if(qw.length<4)return false;
+  if(qw.length<3)return false;
   var tol=qw.length<6?1:2;
   var words=t.split(/[^a-z0-9]+/);
   for(var i=0;i<words.length;i++){
@@ -12049,7 +12095,20 @@ function fuzzyWordMatch(qw,t){
    decouper : « coca sans sucre » et « Coca-Cola Zero » finissent par partager
    le mot « zero ». */
 var PHRASES_VOISINES=[
-  [/\bsans\s*sucres?\b|\bsugar\s*free\b|\bsuikervrij\b|\bzero\s*sucres?\b/g,"zero"],
+  [/\bsans\s*sucres?\s*(?:ajoutes?)?\b|\bsugar\s*free\b|\bsuikervrij\b|\bzonder\s*suiker\b|\bzero\s*sucres?\b|\b0\s*%\s*sucres?\b|\b0\s*%/g,"zero"],
+  [/\bhavermelk\b|\boat\s*milk\b|\blait\s*d?\s*avoine\b/g,"avoine lait"],
+  [/\bamandelmelk\b|\balmond\s*milk\b|\blait\s*d?\s*amande\b/g,"amande lait"],
+  [/\brijstmelk\b|\brice\s*milk\b|\blait\s*de\s*riz\b/g,"riz lait"],
+  [/\bsojamelk\b|\bsoy\s*milk\b|\blait\s*de\s*soja\b/g,"soja lait"],
+  [/\bkokosmelk\b|\bcoconut\s*milk\b|\blait\s*de\s*coco\b/g,"coco lait"],
+  [/\bwortelsap\b|\bcarrot\s*juice\b|\bjus\s*de\s*carotte\b/g,"carotte jus"],
+  [/\btomatensap\b|\btomato\s*juice\b|\bjus\s*de\s*tomate\b/g,"tomate jus"],
+  [/\bgroentesap\b|\bvegetable\s*juice\b|\bjus\s*de\s*legumes\b/g,"legumes jus"],
+  [/\bsparkling\s*water\b|\beau\s*petillante\b|\bbruisend\s*water\b|\bspuitwater\b/g,"petillante eau"],
+  [/\bchocolademelk\b|\bchocolate\s*milk\b|\blait\s*au?\s*chocolat\b/g,"chocolat lait"],
+  [/\brode\s*vruchten\b|\bzwarte\s*bessen\b/g,"fruitsrouges"],
+  [/\bzwarte\s*thee\b|\bblack\s*tea\b|\bthe\s*noir\b/g,"noir the"],
+  [/\bgroene\s*thee\b|\bgreen\s*tea\b|\bthe\s*vert\b/g,"vert the"],
   [/\bcitron\s*verts?\b|\blimoen\b/g,"citronvert"],
   [/\bfruits?\s*(?:rouges?|des\s*bois)\b|\bred\s*berries\b|\bbosvruchten\b/g,"fruitsrouges"],
   [/\bfleur\s*de\s*sureau\b|\belderflower\b/g,"sureau"],
@@ -12198,10 +12257,15 @@ window.scoreRecherche=scoreRecherche;
    et n'y entreront pas : ils distinguent deux boissons differentes, et les
    confondre ferait trouver la mauvaise canette. */
 var MOTS_FACULTATIFS={original:1,originale:1,classic:1,classique:1,nouveau:1,nouvelle:1,"new":1,
+  et:1,and:1,en:1,avec:1,with:1,"de":1,"du":1,"la":1,"le":1,"les":1,"au":1,"aux":1,"a":1,
   edition:1,saveur:1,saveurs:1,gout:1,flavour:1,flavor:1,taste:1,boisson:1,drink:1,
   bouteille:1,canette:1,bottle:1,can:1,pack:1,pur:1,pure:1,naturel:1,naturelle:1,natural:1};
-function fuzzyIncludes(query,text){
-  var q=canonSaveurs(normTxt(query)),t=canonSaveurs(normTxt(text));
+/* `pret` : le texte DEJA normalise et canonise, pour les appels qui en ont un
+   sous la main. Sans lui, chaque fiche refaisait minuscules + accents + les
+   dix-huit reecritures de canonSaveurs a CHAQUE lettre tapee, alors que le
+   resultat est deja en cache dans formesFiche(). */
+function fuzzyIncludes(query,text,pret){
+  var q=canonSaveurs(normTxt(query)),t=(pret!=null)?pret:canonSaveurs(normTxt(text));
   if(!q)return true;
   var qWords=q.split(/\s+/).filter(function(x){return x;});
   if(!qWords.length)return true;
@@ -13969,7 +14033,7 @@ function _topBoissons(q,n){
   for(var i=0;i<base.length;i++){
     var d=base[i];
     if(!_repondAuDernierMot(d,q,mots))continue;
-    if(fuzzyHit(d.name,qn)||fuzzyHit(d.brand,qn)||fuzzyIncludes(q,d.name+" "+d.brand))gardes.push(d);
+    if(fuzzyHit(d.name,qn)||fuzzyHit(d.brand,qn)||fuzzyIncludes(q,null,formesFiche(d).cadre))gardes.push(d);
   }
   var pts={};gardes.forEach(function(d){pts[d.id]=scoreRecherche(d,q);});
   gardes.sort(function(a,b){return pts[b.id]-pts[a.id];});
@@ -14309,7 +14373,7 @@ function renderList(){
     var dedans={};
     f.forEach(function(d){dedans[d.id]=1;});
     var approchants=base.filter(function(d){
-      return !dedans[d.id]&&(curCat==="Tous"||d.cat===curCat)&&fuzzyIncludes(q,d.name+" "+d.brand);
+      return !dedans[d.id]&&(curCat==="Tous"||d.cat===curCat)&&fuzzyIncludes(q,null,formesFiche(d).cadre);
     });
     f=f.concat(approchants);
     /* UN SEUL classement, pas deux paquets. Separer « exacts » et
@@ -19269,7 +19333,7 @@ function renderStoreDetail(){
   if(q){
     var dansLa={};drinks.forEach(function(d){dansLa[d.id]=1;});
     drinks=drinks.concat(allDrinks.filter(function(d){
-      return !dansLa[d.id]&&(curStoreDetailCat==="Tous"||d.cat===curStoreDetailCat)&&fuzzyIncludes(q,d.name+" "+d.brand);
+      return !dansLa[d.id]&&(curStoreDetailCat==="Tous"||d.cat===curStoreDetailCat)&&fuzzyIncludes(q,null,formesFiche(d).cadre);
     }));
     var ptsM={};drinks.forEach(function(d){ptsM[d.id]=scoreRecherche(d,q);});
     drinks.sort(function(a,b){return ptsM[b.id]-ptsM[a.id];});
@@ -20248,7 +20312,7 @@ function _renderAddDrinkList(q){
   if(nq){
     var vus={};list.forEach(function(d){vus[d.id]=1;});
     list=list.concat((DRINKS||[]).filter(function(d){
-      return !vus[d.id]&&fuzzyIncludes(q,d.name+" "+d.brand);
+      return !vus[d.id]&&fuzzyIncludes(q,null,formesFiche(d).cadre);
     }));
   }
   // Les boissons pas encore dans ce magasin d'abord (ce sont celles qu'on veut
