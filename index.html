@@ -9228,6 +9228,11 @@ function offBestProduct(p){
     if(!generic)generic=c;
   }
   var cat=offGuessCategory(p);
+  /* ET LA MARQUE PREND LA GRAPHIE DU CATALOGUE. « RedBull » collé est la meme
+     marque que « Red Bull » : la laisser passer fabrique une marque de plus,
+     qui ne beneficie d'aucun des reperes construits sur l'autre — ni le verrou
+     de marque de la recherche, ni le garde-fou anti-doublon. */
+  brand=_marqueDuCatalogue(brand);
   if(!name){
     // Tous les noms sont generiques : la marque devient le nom principal
     // (ex : "Golden Power" plutot que "Boisson energisante"). On ne garde le
@@ -9235,7 +9240,12 @@ function offBestProduct(p){
     // sinon il ferait doublon avec la categorie affichee a cote.
     if(brand)name=brand+(generic&&!cat?" ("+generic+")":"");
     else name=generic||"Inconnu";
-  } else if(brand&&normTxt(name).indexOf(normTxt(brand))===-1){
+  } else if(brand&&_sansEspaces(name).indexOf(_sansEspaces(brand))===-1){
+    /* LA MARQUE SE RETROUVAIT ECRITE DEUX FOIS. Le test comparait « red bull
+       pasteque » a « redbull » : l'espace suffisait a le faire echouer, et la
+       fiche naissait « RedBull Red Bull pasteque ». Une vraie fiche du
+       catalogue serveur porte ce nom aujourd'hui, et le fondateur l'a vue.
+       On compare donc les deux formes sans espaces ni ponctuation. */
     name=brand+" "+name;
   }
   var finalName=nomPropre(name);
@@ -12298,6 +12308,34 @@ var MOTS_FACULTATIFS={original:1,originale:1,classic:1,classique:1,nouveau:1,nou
    sous la main. Sans lui, chaque fiche refaisait minuscules + accents + les
    dix-huit reecritures de canonSaveurs a CHAQUE lettre tapee, alors que le
    resultat est deja en cache dans formesFiche(). */
+/* Deux textes compares sans leurs espaces ni leur ponctuation. */
+function _sansEspaces(t){return normTxt(t||"").replace(/[^a-z0-9]+/g,"");}
+window._sansEspaces=_sansEspaces;
+/* La graphie que le catalogue emploie deja pour cette marque, s'il en a une.
+   « RedBull » rend « Red Bull », « FUZE TEA » rend « Fuze Tea ». */
+var _GRAPHIE_MARQUE=null;
+function _marqueDuCatalogue(b){
+  var e=_sansEspaces(b);
+  if(!e)return b;
+  if(!_GRAPHIE_MARQUE){
+    _GRAPHIE_MARQUE={};
+    var compte={};
+    (window.DRINKS||[]).forEach(function(d){
+      var k=_sansEspaces(d.brand);
+      if(!k)return;
+      compte[k]=compte[k]||{};
+      compte[k][d.brand]=(compte[k][d.brand]||0)+1;
+    });
+    /* A graphies multiples, celle que le catalogue utilise le plus. */
+    Object.keys(compte).forEach(function(k){
+      var meilleur="",n=-1;
+      Object.keys(compte[k]).forEach(function(g){if(compte[k][g]>n){n=compte[k][g];meilleur=g;}});
+      _GRAPHIE_MARQUE[k]=meilleur;
+    });
+  }
+  return _GRAPHIE_MARQUE[e]||b;
+}
+window._marqueDuCatalogue=_marqueDuCatalogue;
 function fuzzyIncludes(query,text,pret){
   var q=canonSaveurs(normTxt(query)),t=(pret!=null)?pret:canonSaveurs(normTxt(text));
   if(!q)return true;
