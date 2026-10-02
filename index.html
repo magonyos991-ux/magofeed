@@ -1337,8 +1337,9 @@ try{
       </label>
       <div id="propose-ai-status" style="display:none;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:12px;margin:-4px 0 12px;font-size:12.5px;font-weight:600;line-height:1.45"></div>
       <input id="propose-photo-input" type="file" accept="image/*" style="display:none" onchange="proposePhotoChosen(this)">
-      <input id="propose-name" type="text" maxlength="60" placeholder="Nom de la boisson *" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:'Space Grotesk',sans-serif;outline:none;margin-bottom:10px">
-      <input id="propose-brand" type="text" maxlength="30" placeholder="Marque (facultatif)" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:'Space Grotesk',sans-serif;outline:none;margin-bottom:14px">
+      <input id="propose-name" oninput="proposeDejaPlusTard()" type="text" maxlength="60" placeholder="Nom de la boisson *" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:'Space Grotesk',sans-serif;outline:none;margin-bottom:10px">
+      <input id="propose-brand" oninput="proposeDejaPlusTard()" type="text" maxlength="30" placeholder="Marque (facultatif)" style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:14px;font-weight:600;font-family:'Space Grotesk',sans-serif;outline:none;margin-bottom:14px">
+      <div id="propose-deja" style="display:none;margin:-4px 0 14px;padding:12px;border-radius:14px;background:var(--bg2);border:1.5px solid var(--border)"></div>
       <button id="propose-send" onclick="submitProposal()" style="width:100%;padding:14px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">Envoyer la proposition</button>
     </div>
   </div>
@@ -11817,8 +11818,95 @@ function fuzzyHit(text,q){
   }
   return false;
 }
+/* ══ TROIS PERSONNES, TROIS MOTS, UNE SEULE CANETTE ════════════════════
+   L'un tape « red bull vert », l'autre « red bull green », le troisieme
+   « redbull cactus ». C'est la meme boisson, et seule la deuxieme la trouvait.
+   A Bruxelles s'ajoute le neerlandais : « aardbei » pour fraise, « citroen »
+   pour citron.
+
+   CE N'EST PAS DE LA TRADUCTION. Le nom affiche ne change jamais : « Ice Tea
+   Peche » reste « Ice Tea Peche ». On ajoute seulement des PORTES D'ENTREE qui
+   menent au meme produit — exactement le principe de data/alias.js pour les
+   claviers non latins.
+
+   La liste ne contient que des mots de PARFUM et de COULEUR, jamais des mots
+   de marque ni de categorie : « vert » doit mener a « green », mais « light »
+   ne doit surtout pas mener a « zero » — ce sont deux recettes differentes, et
+   confondre les deux ferait trouver la mauvaise canette. */
+var MOTS_VOISINS=[
+  ["vert","green","groen"],
+  ["rouge","red","rood"],
+  ["bleu","blue","blauw"],
+  ["blanc","white","wit"],
+  ["noir","black","zwart"],
+  ["jaune","yellow","geel"],
+  ["rose","pink","roze"],
+  ["citron","lemon","citroen"],
+  ["citron vert","lime"],
+  ["orange","sinaasappel"],
+  ["peche","peach","perzik"],
+  ["fraise","strawberry","aardbei"],
+  ["framboise","raspberry","framboos"],
+  ["mangue","mango"],
+  ["ananas","pineapple"],
+  ["pomme","apple","appel"],
+  ["poire","pear","peer"],
+  ["raisin","grape","druif"],
+  ["cerise","cherry","kers"],
+  ["pasteque","watermelon","watermeloen"],
+  ["litchi","lychee","leechee"],
+  ["myrtille","blueberry","bosbes"],
+  ["cassis","blackcurrant"],
+  ["grenade","pomegranate","granaatappel"],
+  ["coco","coconut","kokos"],
+  ["vanille","vanilla"],
+  ["gingembre","ginger","gember"],
+  ["menthe","mint","munt"],
+  ["the","tea","thee"],
+  ["lait","milk","melk"],
+  ["jus","juice","sap"],
+  ["eau","water"],
+  ["abricot","apricot","abrikoos"],
+  ["banane","banana","banaan"],
+  ["pamplemousse","grapefruit"],
+  ["concombre","cucumber","komkommer"],
+  ["sureau","elderflower","vlierbloesem"],
+  ["fruits rouges","fruits des bois","red berries","bosvruchten"],
+  ["sans sucre","zero","sugarfree","sugar free","suikervrij"]
+];
+var _VOISIN={};
+(function(){
+  for(var g=0;g<MOTS_VOISINS.length;g++){
+    for(var i=0;i<MOTS_VOISINS[g].length;i++){
+      var m=MOTS_VOISINS[g][i];
+      (_VOISIN[m]=_VOISIN[m]||[]).push(g);
+    }
+  }
+})();
+/* Les mots qui veulent dire la meme chose que celui-ci, lui compris. */
+function motsVoisins(w){
+  var g=_VOISIN[w];
+  if(!g)return [w];
+  var out=[w];
+  for(var i=0;i<g.length;i++){
+    var l=MOTS_VOISINS[g[i]];
+    for(var k=0;k<l.length;k++)if(out.indexOf(l[k])===-1)out.push(l[k]);
+  }
+  return out;
+}
+window.motsVoisins=motsVoisins;
 function fuzzyWordMatch(qw,t){
   if(t.indexOf(qw)!==-1)return true;
+  /* Le mot voisin, avant toute tolerance de frappe : « vert » trouve
+     « green », « lychee » trouve « litchi », « peach » trouve « peche ». */
+  var vois=motsVoisins(qw);
+  for(var v=1;v<vois.length;v++)if(t.indexOf(vois[v])!==-1)return true;
+  /* Frappes collees, cote MOT cette fois : « redbull » doit trouver
+     « Red Bull » meme quand la requete porte un second mot (« redbull
+     cactus »). fuzzyHit le faisait deja sur la requete entiere ; ici on le
+     fait mot par mot, sinon le repli echoue la ou le filtre principal
+     reussissait. */
+  if(qw.length>=4&&t.replace(/[^a-z0-9]+/g,"").indexOf(qw.replace(/[^a-z0-9]+/g,""))!==-1)return true;
   if(qw.length<4)return false;
   var tol=qw.length<6?1:2;
   var words=t.split(/[^a-z0-9]+/);
@@ -11830,8 +11918,58 @@ function fuzzyWordMatch(qw,t){
   }
   return false;
 }
+/* Les tournures de PLUSIEURS mots ne survivent pas au decoupage mot a mot :
+   « sans sucre » devient « sans » + « sucre », et aucun des deux ne mene a
+   « Zero ». On les ramene donc a un seul jeton, des deux cotes, AVANT de
+   decouper : « coca sans sucre » et « Coca-Cola Zero » finissent par partager
+   le mot « zero ». */
+var PHRASES_VOISINES=[
+  [/\bsans\s*sucres?\b|\bsugar\s*free\b|\bsuikervrij\b|\bzero\s*sucres?\b/g,"zero"],
+  [/\bcitron\s*verts?\b|\blimoen\b/g,"citronvert"],
+  [/\bfruits?\s*(?:rouges?|des\s*bois)\b|\bred\s*berries\b|\bbosvruchten\b/g,"fruitsrouges"],
+  [/\bfleur\s*de\s*sureau\b|\belderflower\b/g,"sureau"],
+  [/\bthe\s*glace\b|\biced?\s*tea\b|\bijsthee\b/g,"icetea"]
+];
+function canonSaveurs(t){
+  for(var i=0;i<PHRASES_VOISINES.length;i++)t=t.replace(PHRASES_VOISINES[i][0],PHRASES_VOISINES[i][1]);
+  return t;
+}
+window.canonSaveurs=canonSaveurs;
+/* ══ CLASSER, PAS SEULEMENT TROUVER ════════════════════════════════════
+   Tant qu'il n'y avait aucun classement, la liste sortait dans l'ordre du
+   catalogue : « coca sans sucre » placait « Alpro Coco Sans Sucres » avant
+   « Coca-Cola Zero », juste parce qu'Alpro arrive plus tot dans le fichier.
+   Trouver ne suffit pas : la bonne canette doit etre la premiere.
+   La marque pese le plus lourd. Quand quelqu'un ecrit « coca », il veut du
+   Coca-Cola, pas un sosie orthographique. */
+function scoreRecherche(d,q){
+  var nom=canonSaveurs(normTxt(d.name||"")),mq=canonSaveurs(normTxt(d.brand||""));
+  /* Le trait d'union comptait comme une lettre : « Coca-Cola » ne contenait
+     donc pas le MOT « coca », et « Lime verde coca cola zero », ecrit avec de
+     vrais espaces, passait devant « Coca-Cola Zero ». Toute ponctuation
+     devient un espace avant de chercher des mots entiers. */
+  var foin=" "+(nom+" "+mq).replace(/[^a-z0-9]+/g," ")+" ";
+  var mots=canonSaveurs(normTxt(q)).split(/[^a-z0-9]+/).filter(function(x){return x;});
+  if(!mots.length)return 0;
+  var sc=0,motsMarque=mq.split(/[^a-z0-9]+/).filter(function(x){return x;});
+  for(var i=0;i<mots.length;i++){
+    var w=mots[i],voisins=motsVoisins(w),touche=0;
+    for(var v=0;v<voisins.length;v++){
+      var x=voisins[v];
+      if(foin.indexOf(" "+x+" ")!==-1){touche=40;break;}   /* mot entier */
+      if(foin.indexOf(x)!==-1&&touche<15)touche=15;         /* morceau */
+    }
+    if(motsMarque.indexOf(w)!==-1)touche+=100;             /* la marque demandee */
+    sc+=touche;
+  }
+  if(mq.indexOf(mots[0])===0)sc+=30;
+  if(nom.indexOf(mots[0])===0)sc+=10;
+  sc-=Math.min(14,Math.floor(nom.length/4));               /* a egalite, le nom le plus simple */
+  return sc;
+}
+window.scoreRecherche=scoreRecherche;
 function fuzzyIncludes(query,text){
-  var q=normTxt(query),t=normTxt(text);
+  var q=canonSaveurs(normTxt(query)),t=canonSaveurs(normTxt(text));
   if(!q)return true;
   var qWords=q.split(/\s+/).filter(function(x){return x;});
   if(!qWords.length)return true;
@@ -13619,13 +13757,38 @@ function renderList(){
      japonais, coreen ou cyrillique doit pouvoir trouver une marque qu'il ne
      peut pas ecrire en latin. Voir data/alias.js. */
   var f=base.filter(function(d){return(curCat==="Tous"||d.cat===curCat)&&(!q||fuzzyHit(d.name,normTxt(q))||fuzzyHit(d.brand,normTxt(q))||aliasTouche(d,normTxt(q)));});
-  // Repli tolerant aux fautes de frappe : uniquement si la recherche exacte ne donne rien,
-  // pour ne jamais melanger des approximations avec des resultats exacts.
-  var isFuzzy=false;
-  if(q&&!f.length){
-    f=base.filter(function(d){return(curCat==="Tous"||d.cat===curCat)&&fuzzyIncludes(q,d.name+" "+d.brand);});
-    isFuzzy=f.length>0;
+  /* ══ UN SEUL RESULTAT PAR CHANCE NE DOIT PLUS TOUT CACHER ══════════
+     Le repli mot a mot ne partait qu'avec « f » totalement vide. « perrier
+     lemon » tombait par hasard sur « Maison Perrier Lemonjito » (« lemon »
+     est dedans), donc un resultat, donc plus de repli, donc « Perrier
+     Citron » restait introuvable alors qu'il est au catalogue. Un coup de
+     chance condamnait la vraie reponse.
+     Desormais le repli tourne toujours et ce qu'il ajoute est AJOUTE, jamais
+     substitue. La promesse de depart tient quand meme : les correspondances
+     exactes gardent la tete de liste, les approchantes vivent dessous, sous
+     leur propre titre, et personne ne les confond. */
+  var exacts=f.length;
+  if(q){
+    var dedans={};
+    f.forEach(function(d){dedans[d.id]=1;});
+    var approchants=base.filter(function(d){
+      return !dedans[d.id]&&(curCat==="Tous"||d.cat===curCat)&&fuzzyIncludes(q,d.name+" "+d.brand);
+    });
+    f=f.concat(approchants);
+    /* UN SEUL classement, pas deux paquets. Separer « exacts » et
+       « approchants » rendait service au hasard : pour « perrier lemon », le
+       mot « lemon » est dans « Lemonjito », donc Lemonjito etait « exact » et
+       passait devant « Perrier Citron », qui est la vraie reponse. Le score
+       distingue la precision bien mieux que cette frontiere.
+       Le score est calcule UNE fois par fiche, pas a chaque comparaison : le
+       tri appelle le comparateur des milliers de fois et la recherche tourne
+       a chaque lettre tapee. */
+    var pts={};
+    for(var iS=0;iS<f.length;iS++)pts[f[iS].id]=scoreRecherche(f[iS],q);
+    f.sort(function(a,b){return pts[b.id]-pts[a.id];});
   }
+  /* « Resultats proches » n'est honnete que si TOUT vient du chemin tolerant. */
+  var isFuzzy=!exacts&&f.length>0;
   // Plafonnement d'affichage : a requete vide + "Tous", la liste peut faire ~600
   // boissons -> reflow massif sur telephone. On rend un lot avec un "Voir plus".
   // Le compteur se remet a zero des que la recherche/categorie/marque change.
@@ -18564,11 +18727,15 @@ function renderStoreDetail(){
   var drinks=allDrinks.filter(function(d){
     return(curStoreDetailCat==="Tous"||d.cat===curStoreDetailCat)&&(!q||fuzzyHit(d.name,normTxt(q))||fuzzyHit(d.brand,normTxt(q)));
   });
-  // Repli tolerant aux fautes de frappe (meme logique que la recherche principale)
-  if(q&&!drinks.length){
-    drinks=allDrinks.filter(function(d){
-      return(curStoreDetailCat==="Tous"||d.cat===curStoreDetailCat)&&fuzzyIncludes(q,d.name+" "+d.brand);
-    });
+  /* Meme logique que la recherche principale : le repli AJOUTE au lieu de
+     remplacer, et un seul classement decide de l'ordre. */
+  if(q){
+    var dansLa={};drinks.forEach(function(d){dansLa[d.id]=1;});
+    drinks=drinks.concat(allDrinks.filter(function(d){
+      return !dansLa[d.id]&&(curStoreDetailCat==="Tous"||d.cat===curStoreDetailCat)&&fuzzyIncludes(q,d.name+" "+d.brand);
+    }));
+    var ptsM={};drinks.forEach(function(d){ptsM[d.id]=scoreRecherche(d,q);});
+    drinks.sort(function(a,b){return ptsM[b.id]-ptsM[a.id];});
   }
   // « disponibles » etait faux : la liste contient aussi les boissons signalees
   // en rupture (chaque ligne l'affiche). On annonce donc ce qu'on compte
@@ -19511,7 +19678,15 @@ function openAddDrinkToStore(){
   ov.onclick=function(e){if(e.target===ov)ov.remove();};
   document.body.appendChild(ov);
   var inp=card.querySelector("#add-drink-q");
-  inp.addEventListener("input",function(){_renderAddDrinkList(inp.value);});
+  /* Cet ecran etait le seul a reconstruire sa liste a CHAQUE lettre, sans
+     attendre. Il parcourt tout le catalogue et le classe desormais, donc sur
+     telephone la frappe accrocherait. Meme attente que la recherche
+     principale, 150 ms. */
+  var _attAjout=null;
+  inp.addEventListener("input",function(){
+    clearTimeout(_attAjout);
+    _attAjout=setTimeout(function(){_renderAddDrinkList(inp.value);},150);
+  });
   _renderAddDrinkList("");
   setTimeout(function(){try{inp.focus();}catch(e){}},150);
 }
@@ -19527,9 +19702,26 @@ function _renderAddDrinkList(q){
     if(!nq)return true;
     return fuzzyHit(d.name,nq)||fuzzyHit(d.brand,nq);
   });
-  if(nq&&!list.length){list=(DRINKS||[]).filter(function(d){return fuzzyIncludes(q,d.name+" "+d.brand);});}
-  // Les boissons pas encore dans ce magasin d'abord (ce sont celles qu'on veut ajouter).
-  list.sort(function(a,b){return (have[Number(a.id)]?1:0)-(have[Number(b.id)]?1:0);});
+  /* ══ C'EST ICI QUE NAISSENT LES DOUBLONS ═══════════════════════════
+     Cet ecran sert a rattacher une boisson DEJA au catalogue a un magasin.
+     Quand il ne trouve rien, la personne conclut que la boisson manque et la
+     propose une seconde fois. Le repli ne devait donc surtout pas s'eteindre
+     des qu'une correspondance de hasard apparaissait : il s'ajoute, et le
+     classement met devant la fiche qui ressemble vraiment a la demande. */
+  if(nq){
+    var vus={};list.forEach(function(d){vus[d.id]=1;});
+    list=list.concat((DRINKS||[]).filter(function(d){
+      return !vus[d.id]&&fuzzyIncludes(q,d.name+" "+d.brand);
+    }));
+  }
+  // Les boissons pas encore dans ce magasin d'abord (ce sont celles qu'on veut
+  // ajouter), et a l'interieur de chaque paquet, la plus proche de la demande.
+  var ptsA={};list.forEach(function(d){ptsA[d.id]=nq?scoreRecherche(d,q):0;});
+  list.sort(function(a,b){
+    var ha=(have[Number(a.id)]?1:0),hb=(have[Number(b.id)]?1:0);
+    if(ha!==hb)return ha-hb;
+    return ptsA[b.id]-ptsA[a.id];
+  });
   list=list.slice(0,40);
   if(!list.length){host.innerHTML='<div style="text-align:center;padding:26px 14px;color:var(--s3);font-size:12.5px;line-height:1.5">Aucune boisson trouvée dans le catalogue.<br>Si elle n\'existe pas encore, <b>scanne-la</b> pour la proposer.</div>';return;}
   host.innerHTML=list.map(function(d){
@@ -20515,8 +20707,12 @@ function openProposeForm(){
   var n=document.getElementById("propose-name");if(n){if(!photoSuggestTarget)n.value="";n.disabled=!!photoSuggestTarget;}
   var b=document.getElementById("propose-brand");if(b){if(!photoSuggestTarget)b.value="";b.disabled=!!photoSuggestTarget;}
   resetProposeAi();
+  var bd=document.getElementById("propose-deja");if(bd){bd.style.display="none";bd.innerHTML="";}
   ov.style.display="block";
   playSound("pop");
+  /* Ouverture depuis une photo : les champs sont deja remplis par l'IA, donc
+     on verifie tout de suite s'il existe une jumelle. */
+  if(photoSuggestTarget)proposeDejaPlusTard();
 }
 /* Remise a zero de l'etat IA de la feuille (verdict, statut, bouton) */
 function resetProposeAi(){
@@ -20526,8 +20722,68 @@ function resetProposeAi(){
   var btn=document.getElementById("propose-send");
   if(btn)btn.textContent=tr("Envoyer la proposition");
 }
+/* ══ POUR QUE TOUT LE MONDE PARLE DE LA MEME CANETTE ═══════════════════
+   Le scan a son garde-fou contre les doublons ; la proposition ECRITE A LA
+   MAIN n'en avait aucun. Quelqu'un tape « red bull cactus », ne voit rien, et
+   cree une seconde fiche pour une boisson deja au catalogue sous « Red Bull
+   Green Edition Cactus ». Deux fiches pour une canette, et l'appli perd sa
+   precision.
+   On montre donc, pendant la frappe, ce que la recherche trouve deja, avec le
+   meme classement que partout ailleurs. Rien n'est bloque : proposer reste
+   possible, parce qu'une boisson vraiment nouvelle doit pouvoir entrer. On
+   propose seulement la fiche existante, pour que ce soit elle qu'on enrichisse
+   au lieu d'en ouvrir une jumelle. */
+var _attDeja=null;
+function proposeDejaPlusTard(){
+  clearTimeout(_attDeja);
+  _attDeja=setTimeout(proposeChercheDeja,250);
+}
+window.proposeDejaPlusTard=proposeDejaPlusTard;
+function proposeChercheDeja(){
+  var boite=document.getElementById("propose-deja");
+  if(!boite)return;
+  var n=document.getElementById("propose-name"),m=document.getElementById("propose-brand");
+  var q=((n&&n.value||"")+" "+(m&&m.value||"")).trim();
+  if(q.length<3||!window.DRINKS){boite.style.display="none";boite.innerHTML="";return;}
+  var nq=normTxt(q);
+  var trouves=DRINKS.filter(function(d){
+    return fuzzyHit(d.name,nq)||fuzzyHit(d.brand,nq)||fuzzyIncludes(q,d.name+" "+d.brand);
+  });
+  if(!trouves.length){boite.style.display="none";boite.innerHTML="";return;}
+  var pts={};trouves.forEach(function(d){pts[d.id]=scoreRecherche(d,q);});
+  trouves.sort(function(a,b){return pts[b.id]-pts[a.id];});
+  trouves=trouves.slice(0,3);
+  boite.innerHTML="";
+  var titre=document.createElement("div");
+  titre.style.cssText="font-size:12px;font-weight:800;color:var(--s1);margin-bottom:8px;line-height:1.4";
+  titre.textContent=tr("Elle est peut-\u00EAtre d\u00E9j\u00E0 au catalogue");
+  boite.appendChild(titre);
+  var dit=document.createElement("div");
+  dit.style.cssText="font-size:11.5px;color:var(--s2);margin-bottom:10px;line-height:1.45";
+  dit.textContent=tr("Touche-la pour l'ouvrir plut\u00F4t que d'en cr\u00E9er une seconde. Si aucune ne correspond, continue ta proposition.");
+  boite.appendChild(dit);
+  trouves.forEach(function(d){
+    var r=document.createElement("div");
+    r.style.cssText="display:flex;align-items:center;gap:10px;padding:8px;border-radius:11px;background:var(--card-bg);margin-bottom:6px;cursor:pointer";
+    r.setAttribute("role","button");r.setAttribute("tabindex","0");
+    var t=document.createElement("div");
+    t.style.cssText="flex:1;min-width:0;font-size:12.5px;font-weight:700;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+    t.textContent=d.name||"";
+    var sb=document.createElement("div");
+    sb.style.cssText="font-size:11px;font-weight:600;color:var(--s2);flex-shrink:0";
+    sb.textContent=d.brand||"";
+    r.appendChild(t);r.appendChild(sb);
+    var ouvrir=function(){closeProposeForm();try{pick(d);}catch(e){}};
+    r.onclick=ouvrir;
+    r.onkeydown=function(e){if(e.key==="Enter")ouvrir();};
+    boite.appendChild(r);
+  });
+  boite.style.display="block";
+}
+window.proposeChercheDeja=proposeChercheDeja;
 function closeProposeForm(){
   var ov=document.getElementById("propose-sheet");if(ov)ov.style.display="none";
+  var bd=document.getElementById("propose-deja");if(bd){bd.style.display="none";bd.innerHTML="";}
   photoSuggestTarget=null;
   resetProposeAi();
 }
