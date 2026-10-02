@@ -2322,7 +2322,13 @@ window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
 
   window._fbLoading = true;
   try {
-    if (banner && !servedFromCache) { banner.style.display = "block"; banner.textContent = tr("Recherche des magasins à proximité…"); }
+    /* La banniere « Recherche des magasins… » ne se montre que si l'app n'a
+       RIEN a afficher (premiere decouverte d'une zone). Des que des magasins
+       sont deja en memoire, le rafraichissement se fait en silence — avant,
+       chaque elargissement (boisson rare, retour au premier plan dans une
+       autre ville) rejouait la banniere et donnait l'impression d'un site
+       qui recharge tout. */
+    if (banner && !servedFromCache && !(window.STORES && window.STORES.length)) { banner.style.display = "block"; banner.textContent = tr("Recherche des magasins à proximité…"); }
     var stores = await queryNearbyStores(lat, lng, radiusKm);
     if (mySeq !== window._fbQuerySeq) return stores; // une requête plus récente a pris la main
     window._fbLastQuery = { lat: lat, lng: lng, radiusKm: radiusKm };
@@ -22993,16 +22999,22 @@ function exploreLoadStores(useCache){
     var _pourCarte=list;
     var _lot=[], _avant=0;
     /* Les plus proches d'abord, pour deux raisons : les six mis en avant sont
-       alors ceux qui servent vraiment (pas les six premiers du tableau), et si
-       le plafond de 3000 devait un jour mordre, ce sont les magasins les plus
-       LOINTAINS qui sauteraient — pas six magasins au hasard sous le nez de
-       celui qui regarde. Le tri vaut donc a tous les paliers, pas seulement
-       aux larges. */
+       alors ceux qui servent vraiment (pas les six premiers du tableau), et
+       quand le plafond mord, ce sont les magasins les plus LOINTAINS qui
+       sautent — pas six magasins au hasard sous le nez de celui qui regarde.
+       Le tri vaut donc a tous les paliers, pas seulement aux larges. */
     if(typeof userLat==="number"&&userLat&&typeof _distM==="function"){
       try{ _pourCarte=_pourCarte.slice().sort(function(a,b){
         return _distM(userLat,userLng,a.lat,a.lng)-_distM(userLat,userLng,b.lat,b.lng);}); }catch(eS){}
     }
-    _pourCarte.slice(0,3000).forEach(function(s){
+    /* Plafond 1200 (etait 3000) : en zone dense, creer 3000 marqueurs d'un
+       coup — chacun avec son icone et ses ecouteurs — faisait un pic memoire
+       qui tuait l'app sur iPhone a l'ouverture de la carte. 1200 regroupes
+       sont visuellement identiques (les bulles absorbent), et quand le
+       plafond mord, le bandeau du bas le DIT au lieu de faire semblant
+       (jamais de coupe silencieuse). */
+    var _tronque=_pourCarte.length>1200;
+    _pourCarte.slice(0,1200).forEach(function(s){
       if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
       var pc=brandColor(s.brand);
       var ini=((s.brand||s.name||"?").trim().charAt(0)||"?").toUpperCase();
@@ -23103,7 +23115,11 @@ function exploreLoadStores(useCache){
           status.textContent="Personne ne vend "+exploreFilter.name+" par ici \u2014 magasins alentours en gris";
         }
       }else{
-        status.textContent=shown?(shown+" magasin"+(shown>1?"s":"")+" ici"):exploreStatutHonnete(true);      }
+        status.textContent=shown
+          ?(_tronque?("Les "+shown+" magasins les plus proches · zoome pour les autres")
+                    :(shown+" magasin"+(shown>1?"s":"")+" ici"))
+          :exploreStatutHonnete(true);
+      }
     }
   }).catch(function(e){
     console.warn("explore:",e);
