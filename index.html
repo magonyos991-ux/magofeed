@@ -6354,6 +6354,46 @@ window.fbLoadCommunityData();
    dans lequel « Hawai Ananas » est tombee. Le controle du catalogue verifie
    desormais que chaque cible existe. */
 window.DRINK_MERGES = { 11287: 3300,
+  /* 02/10 — vingt-trois fiches qui etaient le MEME produit ecrit de deux
+     facons. Soit la version anglaise face a la francaise (« Fanta Strawberry »
+     et « Fanta Fraise », « Gini Lemon » et « Gini Citron »), soit le nom nu
+     face au nom suivi d'« Original » (« Sprite » et « Sprite Original »).
+     Personne ne pouvait tomber d'accord : la moitie des gens cherchait sous un
+     nom, l'autre moitie sous l'autre, et chaque camp croyait la boisson
+     absente.
+     AUCUNE des vingt-trois paires ne partageait de code-barres : ce n'etait
+     donc pas un conflit de scan mais un conflit de VOCABULAIRE. Les codes des
+     deux fiches sont desormais reunis sous une seule, ce qui rend le scan plus
+     large qu'avant, pas moins.
+     Verifie sur data/drinks.js : 4 566 -> 4 543 fiches, 6 650 codes distincts
+     des deux cotes, AUCUN code perdu, aucune collision, aucune chaine.
+     Les paires a volumes differents (35) n'ont PAS ete touchees : un 33 cl et
+     un 1,5 l sont deux choses que l'on cherche separement. « Actimel Fraise »
+     et « Actimel Original et Fraise » non plus : « Original et Fraise » peut
+     designer un pack de deux parfums, et je n'en ai pas la preuve. */
+  14859: 1,      // Coca-Cola -> Coca-Cola Original
+  11029: 104,    // Coca-Cola Lemon -> Coca-Cola Citron
+  11034: 202,    // Fanta Strawberry -> Fanta Fraise
+  11032: 203,    // Fanta Grape -> Fanta Raisin
+  14864: 3,      // Sprite -> Sprite Original
+  14940: 15,     // 7UP -> 7UP Original
+  15349: 8,      // Monster Energy Original -> Monster Energy
+  16551: 10010,  // Nestea peach -> Nestea Peche
+  16534: 10012,  // San Benedetto Peach tea -> San Benedetto The Peche
+  14862: 10060,  // Sprite Sans Sucres -> Sprite Zero
+  14937: 10062,  // Pepsi Max Cerise -> la fiche gardee prend le nom francais
+  11048: 10065,  // Orangina Original -> Orangina
+  14921: 10067,  // Gini Citron -> la fiche gardee prend le nom francais
+  11280: 10072,  // « Guarana Antarctica Antarctica Guarana » -> Guarana Antarctica
+  11066: 10073,  // Inca Kola Original -> Inca Kola
+  11054: 10077,  // Fritz-Kola Original -> Fritz-Kola
+  11017: 10096,  // Crazy Tiger Original -> Crazy Tiger
+  11070: 10103,  // Supermalt Original -> Supermalt
+  11310: 10104,  // Vitamalt Original -> Vitamalt
+  15004: 11015,  // Nalu -> Nalu Original
+  14628: 11336,  // Vitasoy Vita Lemon Tea -> nom francais
+  15002: 11370,  // Fanta Apple Cherry -> Fanta Pomme Cerise
+  14098: 11136,  // Capri-Sun Cherry -> Capri-Sun Cerise
   /* 01/10 — les CINQ dernieres paires qui partageaient encore un code-barres.
      Scanner une de ces canettes etait un tirage au sort entre deux fiches.
      Mesure avant/apres sur data/drinks.js : 6 637 codes distincts des deux
@@ -11970,19 +12010,57 @@ function scoreRecherche(d,q){
   }
   if(mq.indexOf(mots[0])===0)sc+=30;
   if(nom.indexOf(mots[0])===0)sc+=10;
-  sc-=Math.min(14,Math.floor(nom.length/4));               /* a egalite, le nom le plus simple */
+  /* Qui tape « coca » veut le Coca-Cola, pas le Coca-Cola Zero ; qui tape
+     « red bull » veut le Red Bull, pas le Sugarfree. Departager sur la
+     LONGUEUR du nom se trompait : « Coca-Cola Original » est plus long que
+     « Coca-Cola Zero », donc le Zero gagnait. Ce qui compte n'est pas la
+     longueur mais le nombre de mots que la fiche ajoute SANS qu'on les ait
+     demandes. « Original » n'en est pas un, « Zero » en est un. */
+  var motsNom=nom.replace(/[^a-z0-9]+/g," ").split(" ").filter(function(x){return x;});
+  var enTrop=0;
+  for(var j=0;j<motsNom.length;j++){
+    var mn=motsNom[j];
+    if(MOTS_FACULTATIFS[mn]||motsMarque.indexOf(mn)!==-1)continue;
+    var demande=false;
+    for(var k=0;k<mots.length&&!demande;k++){
+      var vk=motsVoisins(mots[k]);
+      for(var z=0;z<vk.length;z++)if(vk[z]===mn||mn.indexOf(vk[z])===0){demande=true;break;}
+    }
+    if(!demande)enTrop++;
+  }
+  sc-=Math.min(30,enTrop*6);
+  sc-=Math.min(4,Math.floor(nom.length/20));               /* ultime depart */
   return sc;
 }
 window.scoreRecherche=scoreRecherche;
+/* ══ LES MOTS QUI NE DOIVENT JAMAIS FAIRE ECHOUER UNE RECHERCHE ════════
+   « orangina original » ne trouvait plus rien, parce que la fiche s'appelle
+   « Orangina » tout court : le mot « original » manquait, donc la requete
+   entiere etait rejetee. Pareil pour « monster energy original ». Ces mots-la
+   ne designent aucune recette, ils remplissent une etiquette. S'ils
+   correspondent, ils font monter le score ; s'ils manquent, ils ne votent pas
+   contre.
+   « zero », « light », « bio », « sans cafeine » ne sont PAS dans cette liste
+   et n'y entreront pas : ils distinguent deux boissons differentes, et les
+   confondre ferait trouver la mauvaise canette. */
+var MOTS_FACULTATIFS={original:1,originale:1,classic:1,classique:1,nouveau:1,nouvelle:1,"new":1,
+  edition:1,saveur:1,saveurs:1,gout:1,flavour:1,flavor:1,taste:1,boisson:1,drink:1,
+  bouteille:1,canette:1,bottle:1,can:1,pack:1,pur:1,pure:1,naturel:1,naturelle:1,natural:1};
 function fuzzyIncludes(query,text){
   var q=canonSaveurs(normTxt(query)),t=canonSaveurs(normTxt(text));
   if(!q)return true;
   var qWords=q.split(/\s+/).filter(function(x){return x;});
   if(!qWords.length)return true;
+  var durs=0,touches=0;
   for(var i=0;i<qWords.length;i++){
-    if(!fuzzyWordMatch(qWords[i],t))return false;
+    var ok=fuzzyWordMatch(qWords[i],t);
+    if(MOTS_FACULTATIFS[qWords[i]]){if(ok)touches++;continue;}
+    if(!ok)return false;
+    durs++;touches++;
   }
-  return true;
+  /* Une requete faite UNIQUEMENT de mots facultatifs (« original ») ne doit pas
+     renvoyer tout le catalogue : il faut alors qu'au moins un ait correspondu. */
+  return durs>0||touches>0;
 }
 
 /* ================================
