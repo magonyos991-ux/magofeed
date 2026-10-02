@@ -18,6 +18,13 @@
 
    La valeur ci-dessous n'est utilisée qu'en local (fichier non déployé). */
 const CACHE_NAME = "magofeed-__BUILD_ID__";
+/* Cache a part pour les vignettes produits (images.openfoodfacts.org) :
+   il survit aux deploiements (une vignette ne change pas avec le code) et
+   il est BORNE — au-dela de MAX_IMG entrees, les plus anciennes partent.
+   Avant, ces images tombaient dans le cache attrape-tout, sans limite ni
+   purge : en balade sur la carte, le stockage grossissait a vie. */
+const IMG_CACHE = "magofeed-img-v1";
+const MAX_IMG = 300;
 /* Chemins RELATIFS au scope du service worker : fonctionne aussi bien a la racine
    d'un domaine (Netlify) que dans un sous-dossier (GitHub Pages /magofeed/).
    Les chemins absolus "/index.html" pointaient hors du sous-dossier sur GitHub
@@ -57,7 +64,7 @@ self.addEventListener("activate", function(event) {
   event.waitUntil(
     caches.keys()
       .then(function(keys) {
-        return Promise.all(keys.filter(function(k) { return k !== CACHE_NAME; }).map(function(k) { return caches.delete(k); }));
+        return Promise.all(keys.filter(function(k) { return k !== CACHE_NAME && k !== IMG_CACHE; }).map(function(k) { return caches.delete(k); }));
       })
       .then(function() { return self.clients.claim(); })
   );
@@ -127,17 +134,58 @@ self.addEventListener("fetch", function(event) {
     return;
   }
 
-  // Ressources CDN (polices, Leaflet, Quagga) : stale-while-revalidate
-  event.respondWith(
-    caches.match(req).then(function(cached) {
-      var network = fetch(req).then(function(res) {
-        var copy = res.clone();
-        caches.open(CACHE_NAME).then(function(cache) { cache.put(req, copy); });
-        return res;
-      }).catch(function() { return cached; });
-      return cached || network;
-    })
-  );
+  /* ── Vignettes produits (OpenFoodFacts) : cache dedie, BORNE ──
+     Utile hors ligne et en rayon (reseau faible), mais jamais sans limite :
+     apres chaque ajout, on compte, et au-dela de MAX_IMG on efface les plus
+     anciennes entrees. Seules les reponses saines (res.ok, non opaques) sont
+     gardees — une reponse opaque est comptee avec plusieurs Mo de marge dans
+     le quota du navigateur. */
+  if (url.hostname === "images.openfoodfacts.org") {
+    event.respondWith(
+      caches.match(req).then(function(cached) {
+        var network = fetch(req).then(function(res) {
+          if (res && res.ok && res.type !== "opaque") {
+            var copy = res.clone();
+            caches.open(IMG_CACHE).then(function(cache) {
+              cache.put(req, copy).then(function() {
+                cache.keys().then(function(keys) {
+                  if (keys.length > MAX_IMG) {
+                    keys.slice(0, keys.length - MAX_IMG).forEach(function(k) { cache.delete(k); });
+                  }
+                });
+              });
+            });
+          }
+          return res;
+        }).catch(function() { return cached; });
+        return cached || network;
+      })
+    );
+    return;
+  }
+
+  /* ── Ressources CDN (Leaflet, Quagga, Firebase SDK, polices) :
+     stale-with-revalidate, mais UNIQUEMENT pour ces hotes connus. Avant,
+     cette branche attrapait TOUT le reste (reponses JSON OpenFoodFacts, et
+     surtout les reponses Overpass — jusqu'a 800 magasins par zone visitee) :
+     cache sans limite ni expiration, qui grossissait a chaque balade sur la
+     carte. Tout hote non liste part desormais en reseau direct. */
+  var CDN_OK = ["cdnjs.cloudflare.com", "www.gstatic.com", "fonts.gstatic.com", "unpkg.com", "cdn.jsdelivr.net"];
+  if (CDN_OK.indexOf(url.hostname) !== -1) {
+    event.respondWith(
+      caches.match(req).then(function(cached) {
+        var network = fetch(req).then(function(res) {
+          if (res && res.ok && res.type !== "opaque") {
+            var copy = res.clone();
+            caches.open(CACHE_NAME).then(function(cache) { cache.put(req, copy); });
+          }
+          return res;
+        }).catch(function() { return cached; });
+        return cached || network;
+      })
+    );
+  }
+  // Tout autre hote (API OpenFoodFacts, Overpass...) : reseau direct, rien en cache.
 });
 
 /* ── Push notifications (FCM) ──
