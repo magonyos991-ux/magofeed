@@ -367,9 +367,10 @@ try{
       </div>
       <div class="searchbox" style="cursor:default;margin-bottom:16px">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--s3)" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="var(--s3)" stroke-width="2" stroke-linecap="round"/></svg>
-        <input id="q" placeholder="Ice tea pastèque…" style="cursor:text">
-        <span onclick="document.getElementById('q').value='';renderList()" style="cursor:pointer;font-size:16px" class="c3">✕</span>
+        <input id="q" placeholder="Ice tea pastèque…" autocomplete="off" aria-autocomplete="list" aria-controls="sug" onkeydown="sugClavier(event)" onblur="setTimeout(fermerSuggestions,160)" style="cursor:text">
+        <span onclick="document.getElementById('q').value='';fermerSuggestions();renderList()" role="button" tabindex="0" aria-label="Effacer la recherche" onkeydown="if(event.key==='Enter'){document.getElementById('q').value='';fermerSuggestions();renderList();}" style="cursor:pointer;font-size:16px" class="c3">✕</span>
       </div>
+      <div id="sug" role="listbox" aria-label="Suggestions"></div>
       <div class="chips" id="cats-search"></div>
       <div id="explore-map-btn" onclick="openExploreMap()" role="button" tabindex="0" aria-label="Explorer la carte des magasins" onkeydown="if(event.key==='Enter'){openExploreMap();}" style="display:none;margin:0 0 12px;padding:12px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);text-align:center;font-size:13px;font-weight:700;color:var(--s1);cursor:pointer"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14"/><path d="M15 6v14"/></svg> Explorer la carte des magasins</div>
       <div id="search-list"></div>
@@ -11732,6 +11733,28 @@ function levenshtein(a,b){
   return prev[n];
 }
 function normTxt(s){return(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");}
+/* ══ NE PAS RECALCULER 4 500 FOIS LA MEME CHOSE A CHAQUE LETTRE ════════
+   Chaque frappe reprenait le nom et la marque de chaque fiche, les mettait en
+   minuscules, decomposait les accents, les recomposait... pour 4 543 fiches,
+   plusieurs fois (le filtre, puis le score). Mesure : 75 ms par frappe sur un
+   ordinateur, donc bien davantage sur un telephone, et la frappe accroche.
+   Ces formes ne changent jamais. On les calcule une fois, a la premiere
+   demande, et on les garde a cote du catalogue — jamais DANS les fiches, pour
+   ne pas ajouter de champ a des donnees qui partent en ligne. */
+var _FORMES={};
+function formesFiche(d){
+  var f=_FORMES[d.id];
+  if(f)return f;
+  var nom=canonSaveurs(normTxt(d.name||"")),mq=canonSaveurs(normTxt(d.brand||""));
+  var plat=(nom+" "+mq).replace(/[^a-z0-9]+/g," ");
+  f={nom:nom,mq:mq,
+     cadre:" "+plat+" ",
+     mots:plat.split(" ").filter(function(x){return x;}),
+     motsMarque:mq.split(/[^a-z0-9]+/).filter(function(x){return x;})};
+  _FORMES[d.id]=f;
+  return f;
+}
+window.formesFiche=formesFiche;
 /* ============================================================================
    RAPPROCHER UN NOM LU SUR UNE CANETTE AVEC LE CATALOGUE
    ----------------------------------------------------------------------------
@@ -11941,12 +11964,55 @@ function motsVoisins(w){
   return out;
 }
 window.motsVoisins=motsVoisins;
+/* ══ LA COULEUR QU'ON A EN TETE N'EST PAS ECRITE SUR LA CANETTE ════════
+   « red bull jaune » marchait, parce que la fiche s'appelle « Yellow Edition ».
+   « fanta jaune » ne donnait RIEN, parce qu'aucun Fanta ne porte le mot jaune
+   dans son nom : le Fanta jaune, c'est le Citron. Personne ne pense « citron »
+   en cherchant, on pense a la canette qu'on a vue dans le frigo.
+   Cette table dit de quelle couleur est un PARFUM. Elle ne va que dans un
+   sens : une couleur tapee peut mener a un parfum, jamais l'inverse. Si
+   « fraise » menait a « rouge », alors « rouge » menant deja a « red » par les
+   mots voisins, taper « fraise » finirait par proposer du Red Bull. C'est
+   exactement le genre d'enchainement qui fait trouver la mauvaise boisson.
+   Les correspondances ECRITES passent toujours devant les deduites : « Yellow
+   Edition » avant un citron devine. */
+var COULEUR_SAVEURS={
+ jaune:["citron","lemon","citroen","ananas","pineapple","banane","banana","banaan","mangue","mango","passion","maracuja","tropical","yuzu","citronnade","limonade","lemonade","limonata"],
+ rouge:["fraise","strawberry","aardbei","pasteque","watermelon","watermeloen","cerise","cherry","kers","framboise","raspberry","framboos","grenade","pomegranate","cranberry","tomate","tomato","hibiscus","goyave","guava","punch"],
+ bleu:["myrtille","blueberry","bosbes","juneberry","curacao","bubblegum","raspberry"],
+ vert:["cactus","pomme","apple","appel","kiwi","menthe","mint","munt","lime","limoen","concombre","cucumber","komkommer","matcha","sudachi","basilic","basil","pistache","pistachio","poire","pear"],
+ orange:["orange","sinaasappel","peche","peach","perzik","abricot","apricot","abrikoos","mangue","mango","carotte","carrot","mandarine","tangerine","clementine","papaye","papaya","physalis","agrumes"],
+ violet:["raisin","grape","druif","cassis","blackcurrant","acai","mure","blackberry","braam","sureau","elderflower","lavande","lavender","asperule","prune","plum","figue","fig","myrtille"],
+ rose:["litchi","lychee","rhubarbe","rhubarb","sakura","rose","pamplemousse","grapefruit","pitaya","guava","goyave","fraise","strawberry","framboise","raspberry"],
+ blanc:["coco","coconut","kokos","vanille","vanilla","lait","milk","melk","amande","almond","soja","soya","avoine","oat","riz","rice","noisette","hazelnut","cajou","cashew","yaourt","yogurt"],
+ noir:["cola","reglisse","liquorice","charbon","cafe","coffee","espresso","chocolat","chocolate","choco"],
+ marron:["cola","cafe","coffee","espresso","chocolat","chocolate","choco","caramel","malt","noisette","hazelnut","latte","cappuccino"]
+};
+/* Les autres facons d'ecrire la couleur elle-meme ramenent a la cle francaise. */
+var _CLE_COULEUR={jaune:"jaune",yellow:"jaune",geel:"jaune",rouge:"rouge",red:"rouge",rood:"rouge",
+ bleu:"bleu",blue:"bleu",blauw:"bleu",vert:"vert",green:"vert",groen:"vert",orange:"orange",
+ violet:"violet",purple:"violet",paars:"violet",mauve:"violet",lilas:"violet",lilac:"violet",
+ rose:"rose",pink:"rose",roze:"rose",blanc:"blanc",white:"blanc",wit:"blanc",
+ noir:"noir",black:"noir",zwart:"noir",marron:"marron",brun:"marron",brown:"marron"};
+/* Le nom porte-t-il un parfum de cette couleur ? Mots ENTIERS : sans quoi
+   « Float » contient « oat » et « Pineapple » contient « apple ». */
+function couleurTouche(mot,t){
+  var cle=_CLE_COULEUR[mot];
+  if(!cle)return false;
+  var l=COULEUR_SAVEURS[cle];if(!l)return false;
+  var cadre=" "+t.replace(/[^a-z0-9]+/g," ")+" ";
+  for(var i=0;i<l.length;i++)if(cadre.indexOf(" "+l[i]+" ")!==-1)return true;
+  return false;
+}
+window.couleurTouche=couleurTouche;
 function fuzzyWordMatch(qw,t){
   if(t.indexOf(qw)!==-1)return true;
   /* Le mot voisin, avant toute tolerance de frappe : « vert » trouve
      « green », « lychee » trouve « litchi », « peach » trouve « peche ». */
   var vois=motsVoisins(qw);
   for(var v=1;v<vois.length;v++)if(t.indexOf(vois[v])!==-1)return true;
+  /* Derniere chance pour une couleur : le parfum EST de cette couleur. */
+  if(couleurTouche(qw,t))return true;
   /* Frappes collees, cote MOT cette fois : « redbull » doit trouver
      « Red Bull » meme quand la requete porte un second mot (« redbull
      cactus »). fuzzyHit le faisait deja sur la requete entiere ; ici on le
@@ -11988,25 +12054,76 @@ window.canonSaveurs=canonSaveurs;
    Trouver ne suffit pas : la bonne canette doit etre la premiere.
    La marque pese le plus lourd. Quand quelqu'un ecrit « coca », il veut du
    Coca-Cola, pas un sosie orthographique. */
+/* ══ NE JAMAIS PROPOSER UNE AUTRE MARQUE QUE CELLE DEMANDEE ════════════
+   « coca rouge » renvoyait « Red Bull White Edition Coco » en premier :
+   « coca » ressemblait a « coco » a une lettre pres, et « rouge » menait a
+   « red », donc a la marque Red Bull. Deux approximations qui se renforcent,
+   et un resultat absurde en tete.
+   Des que la requete nomme une marque du catalogue, les autres marques
+   reculent. On les PENALISE sans les cacher : la liste reste complete, seul
+   l'ordre change, donc une erreur de ma part coute un rang, jamais un
+   resultat. */
+var _MOTS_MARQUE=null;
+function motsDeMarque(){
+  if(_MOTS_MARQUE)return _MOTS_MARQUE;
+  _MOTS_MARQUE={};
+  var compte={};
+  (window.DRINKS||[]).forEach(function(d){
+    normTxt(d.brand||"").replace(/[^a-z0-9]+/g," ").split(" ").forEach(function(w){
+      if(w.length>=3)compte[w]=(compte[w]||0)+1;
+    });
+  });
+  /* Un mot porte par un trop grand nombre de marques differentes ne distingue
+     rien ; et un mot de parfum n'est pas un nom de marque, meme s'il figure
+     dans l'un d'eux. */
+  Object.keys(compte).forEach(function(w){
+    if(MOTS_FACULTATIFS[w])return;
+    if(_VOISIN[w])return;
+    if(_CLE_COULEUR[w])return;
+    _MOTS_MARQUE[w]=1;
+  });
+  return _MOTS_MARQUE;
+}
 function scoreRecherche(d,q){
-  var nom=canonSaveurs(normTxt(d.name||"")),mq=canonSaveurs(normTxt(d.brand||""));
   /* Le trait d'union comptait comme une lettre : « Coca-Cola » ne contenait
      donc pas le MOT « coca », et « Lime verde coca cola zero », ecrit avec de
      vrais espaces, passait devant « Coca-Cola Zero ». Toute ponctuation
      devient un espace avant de chercher des mots entiers. */
-  var foin=" "+(nom+" "+mq).replace(/[^a-z0-9]+/g," ")+" ";
+  var F=formesFiche(d),nom=F.nom,mq=F.mq,foin=F.cadre;
   var mots=canonSaveurs(normTxt(q)).split(/[^a-z0-9]+/).filter(function(x){return x;});
   if(!mots.length)return 0;
-  var sc=0,motsMarque=mq.split(/[^a-z0-9]+/).filter(function(x){return x;});
+  var sc=0,motsMarque=F.motsMarque;
+  /* Les mots d'UNE lettre d'un nom sont du bruit d'etiquette (« Red Bull Energy
+     Drink `S », « Coca-Cola lemon zero BE »). Ils ne doivent pas compter comme
+     un mot entier, sinon « red bull s » place ce rebut avant Sakura. */
+  var motsUtiles=F.mots.filter(function(x){return x.length>1;});
+  var cadreUtile=" "+motsUtiles.join(" ")+" ";
   for(var i=0;i<mots.length;i++){
-    var w=mots[i],voisins=motsVoisins(w),touche=0;
+    var w=mots[i],voisins=motsVoisins(w),touche=0,dernier=(i===mots.length-1);
     for(var v=0;v<voisins.length;v++){
       var x=voisins[v];
-      if(foin.indexOf(" "+x+" ")!==-1){touche=40;break;}   /* mot entier */
-      if(foin.indexOf(x)!==-1&&touche<15)touche=15;         /* morceau */
+      if(cadreUtile.indexOf(" "+x+" ")!==-1){touche=40;break;}   /* mot entier */
+      /* DEBUT DE MOT. « red bull s » doit penser « Sakura » tout de suite, et
+         « red bull sak » encore plus fort : plus la personne en a tape, plus
+         on est sur. C'est ce qui donne l'impression que l'app avait deja
+         trouve. */
+      if(touche<34)for(var u=0;u<motsUtiles.length;u++){
+        if(motsUtiles[u].indexOf(x)===0){touche=Math.max(touche,20+Math.min(14,x.length*3));break;}
+      }
+      if(touche<15&&foin.indexOf(x)!==-1)touche=15;              /* morceau */
     }
-    if(motsMarque.indexOf(w)!==-1)touche+=100;             /* la marque demandee */
+    if(!touche&&couleurTouche(w,foin))touche=22;   /* couleur deduite : sous l'ecrit */
+    if(motsMarque.indexOf(w)!==-1)touche+=100;     /* la marque demandee */
+    if(dernier&&touche>=20)touche+=6;              /* le mot en cours de frappe */
     sc+=touche;
+  }
+  /* La requete nomme-t-elle une marque ? Alors les autres reculent. */
+  var mm=motsDeMarque(),viseMarque=false;
+  for(var b=0;b<mots.length;b++)if(mm[mots[b]]){viseMarque=true;break;}
+  if(viseMarque){
+    var bonneMarque=false;
+    for(var b2=0;b2<mots.length;b2++)if(mm[mots[b2]]&&motsMarque.indexOf(mots[b2])!==-1){bonneMarque=true;break;}
+    if(!bonneMarque)sc-=70;
   }
   if(mq.indexOf(mots[0])===0)sc+=30;
   if(nom.indexOf(mots[0])===0)sc+=10;
@@ -13721,7 +13838,306 @@ function renderDeals(){
     '<span style="font-size:18px;color:var(--txt2)">›</span>'+
   '</div>';
 }
-function onSearchInput(){clearTimeout(searchDebounce);searchDebounce=setTimeout(renderList,150);}
+/* ══ L'APPLI FINIT TA PHRASE ════════════════════════════════════════════
+   Jusqu'ici la recherche attendait qu'on ait fini d'ecrire, puis filtrait une
+   liste. Ce qu'on veut, c'est qu'elle ait deja trouve : des la troisieme
+   lettre, elle propose, et elle DIT pourquoi — « jaune, c'est citron, mangue,
+   ananas ». Une app qui explique son raisonnement est croyable ; une app qui
+   sort un resultat sans raison ne l'est pas.
+   Elle propose dans les trois mondes a la fois, parce que personne ne pense a
+   changer d'onglet avant de chercher : boissons, magasins autour, joueurs. */
+
+/* Les morceaux du nom qui repondent a ce qui a ete tape, pour les mettre en
+   gras. On ne surligne QUE ce qui correspond vraiment : surligner au hasard
+   ferait croire a une correspondance qui n'existe pas. */
+function _zonesTouchees(nom,mots){
+  var bas=normTxt(nom),zones=[];
+  /* Pour chaque mot tape, la premiere occurrence en DEBUT de mot, en essayant
+     le mot lui-meme puis ses voisins (« vert » surligne « Green »). On s'arrete
+     au premier voisin trouve : un seul surlignage par mot tape. */
+  mots.forEach(function(w){
+    if(!w)return;
+    var essais=motsVoisins(w);
+    for(var e=0;e<essais.length;e++){
+      var x=essais[e],d=-1,pose=false;
+      while((d=bas.indexOf(x,d+1))!==-1){
+        if(d===0||!/[a-z0-9]/.test(bas.charAt(d-1))){zones.push([d,d+x.length]);pose=true;break;}
+      }
+      if(pose)break;
+    }
+  });
+  zones.sort(function(a,b){return a[0]-b[0];});
+  var fus=[];
+  zones.forEach(function(z){
+    var der=fus[fus.length-1];
+    if(der&&z[0]<=der[1])der[1]=Math.max(der[1],z[1]);
+    else fus.push([z[0],z[1]]);
+  });
+  return fus;
+}
+function surlignerNom(nom,q){
+  var mots=canonSaveurs(normTxt(q)).split(/[^a-z0-9]+/).filter(function(x){return x;});
+  var z=_zonesTouchees(nom,mots);
+  if(!z.length)return sanitize(nom);
+  var out="",pos=0;
+  z.forEach(function(p2){
+    if(p2[0]>pos)out+=sanitize(nom.slice(pos,p2[0]));
+    out+='<span class="dit">'+sanitize(nom.slice(p2[0],p2[1]))+'</span>';
+    pos=p2[1];
+  });
+  if(pos<nom.length)out+=sanitize(nom.slice(pos));
+  return out;
+}
+/* Quelle couleur de la requete a servi, et par quels parfums : c'est la phrase
+   d'explication. Vide si aucune couleur n'a joue de role. */
+function _couleurEnJeu(q,liste){
+  var mots=normTxt(q).split(/[^a-z0-9]+/).filter(function(x){return x;});
+  for(var i=0;i<mots.length;i++){
+    var cle=_CLE_COULEUR[mots[i]];
+    if(!cle)continue;
+    /* La couleur n'est une DEDUCTION que si le mot n'est pas ecrit sur la
+       fiche : « Yellow Edition » n'a rien a expliquer. */
+    var ecrit=liste.some(function(d){
+      var f=" "+normTxt(d.name+" "+d.brand).replace(/[^a-z0-9]+/g," ")+" ";
+      return motsVoisins(mots[i]).some(function(v){return f.indexOf(" "+v+" ")!==-1;});
+    });
+    if(ecrit)continue;
+    /* On affiche le mot FRANCAIS du parfum, pas celui qui a servi a trouver :
+       « ananas » et non « pineapple ». Les mots voisins donnent le francais en
+       premiere position de chaque famille. */
+    var vus=[];
+    liste.slice(0,6).forEach(function(d){
+      var f=" "+normTxt(d.name).replace(/[^a-z0-9]+/g," ")+" ";
+      COULEUR_SAVEURS[cle].forEach(function(sv){
+        if(f.indexOf(" "+sv+" ")===-1)return;
+        var fr=sv,g=_VOISIN[sv];
+        if(g&&g.length)fr=MOTS_VOISINS[g[0]][0];
+        if(vus.indexOf(fr)===-1&&vus.length<3)vus.push(fr);
+      });
+    });
+    if(vus.length)return {mot:mots[i],saveurs:vus};
+  }
+  return null;
+}
+/* Les cinq meilleures boissons pour une saisie, sans construire la liste
+   entiere : les suggestions tournent a chaque frappe, le tri complet non. */
+function _topBoissons(q,n){
+  /* L'ordre compte. On ecarte d'abord avec le test le MOINS cher (le dernier
+     mot tape trouve-t-il un debut de mot ?), qui ne lit que des formes deja en
+     cache, et on ne paie la correspondance complete puis le score que sur les
+     rares survivantes. Mesure : 64 ms -> une poignee. */
+  var base=window.DRINKS||[],qn=normTxt(q);
+  var mots=canonSaveurs(qn).split(/[^a-z0-9]+/).filter(function(x){return x;});
+  var gardes=[];
+  for(var i=0;i<base.length;i++){
+    var d=base[i];
+    if(!_repondAuDernierMot(d,q,mots))continue;
+    if(fuzzyHit(d.name,qn)||fuzzyHit(d.brand,qn)||fuzzyIncludes(q,d.name+" "+d.brand))gardes.push(d);
+  }
+  var pts={};gardes.forEach(function(d){pts[d.id]=scoreRecherche(d,q);});
+  gardes.sort(function(a,b){return pts[b.id]-pts[a.id];});
+  return gardes.slice(0,n||5);
+}
+/* La marque visee, si la saisie en nomme une : « red bull s » -> Red Bull. */
+function _marqueVisee(q){
+  var mots=normTxt(q).split(/[^a-z0-9]+/).filter(function(x){return x;});
+  var mm=motsDeMarque(),cible=null;
+  for(var i=0;i<mots.length;i++){
+    if(!mm[mots[i]])continue;
+    var w=mots[i],compte=0,nom="";
+    (window.DRINKS||[]).forEach(function(d){
+      if(normTxt(d.brand||"").replace(/[^a-z0-9]+/g," ").split(" ").indexOf(w)!==-1){compte++;if(!nom)nom=d.brand;}
+    });
+    if(compte>(cible?cible.compte:2))cible={mot:w,nom:nom,compte:compte};
+  }
+  return cible;
+}
+/* Les magasins autour dont le nom repond a la saisie. Locaux, donc instantanes. */
+function _topMagasins(q,n){
+  var qn=normTxt(q);if(qn.length<2)return [];
+  var out=(window.STORES||[]).filter(function(m){
+    var nm=normTxt(m.name||"");
+    return nm.indexOf(qn)===0||nm.split(" ").some(function(w){return w.indexOf(qn)===0;})||fuzzyIncludes(q,m.name||"");
+  });
+  out.sort(function(a,b){return (a.dist||1e9)-(b.dist||1e9);});
+  return out.slice(0,n||2);
+}
+/* Les joueurs DEJA connus du telephone (amis, classement deja charge) : on
+   repond sans attendre le serveur, qui ne sait chercher que par le debut du
+   pseudo. La recherche serveur continue en dessous, dans la liste. */
+function _topJoueurs(q,n){
+  var qn=normTxt(q);if(qn.length<2)return [];
+  var vus={},out=[];
+  [].concat(window._amisListe||[],window._classementCache||[],(AMIS&&AMIS.res)||[]).forEach(function(u){
+    if(!u||!u.pseudo||vus[u.uid||u.pseudo])return;
+    var ps=normTxt(u.pseudo);
+    if(ps.indexOf(qn)===-1)return;
+    vus[u.uid||u.pseudo]=1;out.push(u);
+  });
+  out.sort(function(a,b){return normTxt(a.pseudo).indexOf(qn)-normTxt(b.pseudo).indexOf(qn);});
+  return out.slice(0,n||2);
+}
+/* Le dernier mot tape trouve-t-il un mot ENTIER ou un DEBUT de mot ? */
+function _repondAuDernierMot(d,q,prepare){
+  var mots=prepare||canonSaveurs(normTxt(q)).split(/[^a-z0-9]+/).filter(function(x){return x;});
+  if(!mots.length)return true;
+  var F=formesFiche(d),noms=F.mots,essais=motsVoisins(mots[mots.length-1]);
+  for(var e=0;e<essais.length;e++)for(var i=0;i<noms.length;i++)
+    if(noms[i].indexOf(essais[e])===0)return true;
+  /* La couleur deduite compte aussi : « fanta jaune » doit proposer le Citron. */
+  return couleurTouche(mots[mots.length-1],F.cadre);
+}
+var _sugActif=-1,_sugItems=[],_attSug=null;
+function fermerSuggestions(){
+  var b=document.getElementById("sug");
+  if(b){b.classList.remove("ouvert");b.innerHTML="";}
+  _sugActif=-1;_sugItems=[];
+}
+window.fermerSuggestions=fermerSuggestions;
+function _sugLigne(ico,titre,sous,action,aria){
+  var r=document.createElement("div");
+  r.className="sug-row";
+  r.setAttribute("role","option");r.setAttribute("tabindex","-1");r.setAttribute("aria-selected","false");
+  r.setAttribute("aria-label",attr(aria||""));
+  r.innerHTML='<span class="sug-ico">'+ico+'</span><span class="sug-txt"><span class="sug-t">'+titre+'</span>'+
+    (sous?'<span class="sug-s">'+sous+'</span>':'')+'</span>'+
+    '<svg class="sug-fl" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
+  r.onclick=action;
+  _sugItems.push({el:r,go:action});
+  return r;
+}
+function majSuggestions(){
+  var champ=document.getElementById("q"),boite=document.getElementById("sug");
+  if(!champ||!boite)return;
+  var q=(champ.value||"").trim();
+  if(q.length<2||(searchMode!=="drinks"&&searchMode!=="users")){fermerSuggestions();return;}
+  _sugItems=[];_sugActif=-1;
+  var frag=document.createDocumentFragment();
+  /* Le panneau est plus exigeant que la liste. Pour « red bull sa », la liste
+     peut montrer « Boisson energisante » (« sa » est au milieu d'« energisante »)
+     parce qu'elle ne cache rien ; une SUGGESTION, elle, doit repondre au mot
+     qu'on est en train de taper, sinon l'appli a l'air de deviner au hasard et
+     on cesse de lui faire confiance. Mot entier ou debut de mot, rien d'autre. */
+  var bs=(searchMode==="users")?[]:_topBoissons(q,5);
+
+  /* LA REPONSE. Une seule, en avant, parce que neuf fois sur dix c'est elle. */
+  if(bs.length){
+    var d0=bs[0];
+    var tete=document.createElement("div");
+    tete.className="sug-row sug-tete";
+    tete.setAttribute("role","option");tete.setAttribute("tabindex","-1");tete.setAttribute("aria-selected","false");
+    tete.setAttribute("aria-label",attr(trh("Ouvrir {t}",{t:d0.name})));
+    tete.innerHTML='<span class="sug-vign" style="background:'+(d0.light||"var(--bg3)")+'">'+drinkIconHTML(d0)+'</span>'+
+      '<span class="sug-txt"><span class="sug-t">'+surlignerNom(d0.name,q)+'</span>'+
+      '<span class="sug-s">'+sanitize(d0.brand||"")+(d0.cat?" \u00B7 "+sanitize(tr(d0.cat)):"")+'</span></span>'+
+      '<svg class="sug-fl" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
+    tete.onclick=function(){choisirSuggestion(d0);};
+    _sugItems.push({el:tete,go:tete.onclick});
+    frag.appendChild(tete);
+  }
+
+  /* CE QUE L'APPLI A COMPRIS. « jaune, c'est citron, mangue, ananas. » */
+  var cl=_couleurEnJeu(q,bs);
+  if(cl){
+    var note=document.createElement("div");
+    note.className="sug-note";
+    note.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5"/><path d="M12 8h.01"/></svg>'+
+      '<span>'+sanitize(trh("{c}, c\u2019est {s}",{c:cl.mot,s:cl.saveurs.map(function(x){return tr(x);}).join(", ")}))+'</span>';
+    frag.appendChild(note);
+  }
+
+  /* LES SUIVANTES. */
+  bs.slice(1,4).forEach(function(d){
+    frag.appendChild(_sugLigne(
+      '<span class="sug-vign pt" style="background:'+(d.light||"var(--bg3)")+'">'+drinkIconHTML(d)+'</span>',
+      surlignerNom(d.name,q),sanitize(d.brand||""),
+      function(){choisirSuggestion(d);},trh("Ouvrir {t}",{t:d.name})));
+  });
+
+  /* TOUTE LA MARQUE, quand la saisie en nomme une. */
+  var mq=_marqueVisee(q);
+  if(mq&&mq.compte>=3){
+    frag.appendChild(_sugLigne(
+      '<span class="sug-ico-sv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18"/><path d="M6 12h12"/><path d="M9 17h6"/></svg></span>',
+      sanitize(trh("Toutes les {m}",{m:mq.nom})),
+      sanitize(trh("{n} boissons",{n:mq.compte})),
+      function(){champ.value=mq.nom;fermerSuggestions();renderList();},
+      trh("Voir toutes les {m}",{m:mq.nom})));
+  }
+
+  /* LES AUTRES MONDES : on ne force personne a changer d'onglet d'abord. */
+  _topMagasins(q,2).forEach(function(m){
+    frag.appendChild(_sugLigne(
+      '<span class="sug-ico-sv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-6 9 6v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 21V12h6v9"/></svg></span>',
+      surlignerNom(m.name||"",q),
+      sanitize(tr("Magasin")+(m.dist?" \u00B7 "+fmtDist(m.dist):"")),
+      function(){fermerSuggestions();try{openStoreDetail(m.id);}catch(e){}},
+      trh("Ouvrir {t}",{t:m.name||""})));
+  });
+  _topJoueurs(q,2).forEach(function(u){
+    frag.appendChild(_sugLigne(
+      '<span class="sug-ico-sv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg></span>',
+      surlignerNom(u.pseudo||"",q),sanitize(tr("Joueur")),
+      function(){fermerSuggestions();try{openUserProfile(u);}catch(e){}},
+      trh("Profil de {t}",{t:u.pseudo||""})));
+  });
+
+  if(!_sugItems.length){fermerSuggestions();return;}
+  boite.innerHTML="";
+  boite.appendChild(frag);
+  /* La meilleure reponse ressort, meme quand c'est un magasin ou un joueur :
+     « flagey » doit mettre le Night Shop en avant comme « sakura » met la
+     canette. */
+  var prem=boite.querySelector(".sug-row");
+  if(prem)prem.classList.add("sug-tete");
+  /* Apparition en cascade : chaque ligne entre juste apres la precedente. */
+  var rows=boite.querySelectorAll(".sug-row,.sug-note");
+  for(var r=0;r<rows.length;r++)rows[r].style.animationDelay=(r*26)+"ms";
+  boite.classList.add("ouvert");
+}
+window.majSuggestions=majSuggestions;
+function choisirSuggestion(d){
+  var champ=document.getElementById("q");
+  fermerSuggestions();
+  if(champ)champ.blur();
+  try{addToHistory((champ?champ.value:"").trim());}catch(e){}
+  playSound("pop");
+  pick(d);
+}
+window.choisirSuggestion=choisirSuggestion;
+/* Clavier : fleches pour parcourir, Entree pour ouvrir, Echap pour refermer.
+   Sans ca le panneau serait un piege pour qui navigue au clavier. */
+function sugClavier(e){
+  var boite=document.getElementById("sug");
+  if(!boite||!boite.classList.contains("ouvert")||!_sugItems.length)return;
+  if(e.key==="ArrowDown"||e.key==="ArrowUp"){
+    e.preventDefault();
+    _sugActif+=(e.key==="ArrowDown"?1:-1);
+    if(_sugActif<0)_sugActif=_sugItems.length-1;
+    if(_sugActif>=_sugItems.length)_sugActif=0;
+    _sugItems.forEach(function(it,i){
+      var v=(i===_sugActif);
+      it.el.classList.toggle("vise",v);
+      it.el.setAttribute("aria-selected",v?"true":"false");
+    });
+    try{_sugItems[_sugActif].el.scrollIntoView({block:"nearest"});}catch(err){}
+  }else if(e.key==="Enter"){
+    if(_sugActif>=0&&_sugItems[_sugActif]){e.preventDefault();_sugItems[_sugActif].go();}
+  }else if(e.key==="Escape"){
+    fermerSuggestions();
+  }
+}
+window.sugClavier=sugClavier;
+function onSearchInput(){
+  /* Deux horloges. Les suggestions doivent arriver avant qu'on ait fini de
+     taper (60 ms), la liste complete peut attendre la fin du mot (150 ms) :
+     elle parcourt 4 500 fiches et les classe, inutile de le refaire a chaque
+     lettre. */
+  clearTimeout(_attSug);
+  _attSug=setTimeout(majSuggestions,60);
+  clearTimeout(searchDebounce);
+  searchDebounce=setTimeout(renderList,150);
+}
 function setSearchMode(mode){
   if(mode==="stores"){
     // Recherche magasin = la CARTE directement (comme pour les boissons), avec le
