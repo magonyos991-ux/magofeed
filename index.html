@@ -12082,8 +12082,14 @@ function motsDeMarque(){
   _MOTS_MARQUE={};
   var compte={};
   (window.DRINKS||[]).forEach(function(d){
-    normTxt(d.brand||"").replace(/[^a-z0-9]+/g," ").split(" ").forEach(function(w){
-      if(w.length>=3)compte[w]=(compte[w]||0)+1;
+    var mots=normTxt(d.brand||"").replace(/[^a-z0-9]+/g," ").split(" ").filter(function(x){return x;});
+    mots.forEach(function(w){
+      /* « U » est une vraie enseigne (56 fiches), « Nu » et « V8 » aussi. Mais
+         « de », « la », « et » sont des mots courts qui ne vivent QUE dans des
+         marques composees (« Saveur De Nos Regions ») : les compter comme
+         marques ferait reculer tout le catalogue sur une requete contenant
+         « de ». Un mot court ne vaut donc que s'il EST la marque a lui seul. */
+      if(w.length>=3||mots.length===1)compte[w]=(compte[w]||0)+1;
     });
   });
   /* Un mot porte par un trop grand nombre de marques differentes ne distingue
@@ -12159,6 +12165,19 @@ function scoreRecherche(d,q){
     if(!demande)enTrop++;
   }
   sc-=Math.min(30,enTrop*6);
+  /* TAPER LE NOM EXACT DOIT DONNER CETTE FICHE, point final. « Maison Perrier »
+     sortait au 7e rang derriere « Maison Perrier Citron Vert », parce que la
+     seconde porte « Maison Perrier » comme MARQUE (deux mots de marque, +200)
+     la ou la premiere n'a que « Perrier » (+100). Defendable en theorie,
+     absurde a l'usage : on vient d'ecrire le nom, on veut cette fiche. */
+  /* Le bonus doit etre DECISIF, pas consultatif : a +120 il perdait encore
+     contre le cumul marque + mots entiers d'une fiche plus longue. Il grandit
+     avec le nombre de mots du nom, pour qu'une fiche nommee d'un seul mot
+     courant (« Cola ») ne rafle pas une requete d'un seul mot. */
+  var qBrut=normTxt(q).replace(/[^a-z0-9]+/g," ").trim();
+  var nomBrut=normTxt(d.name||"").replace(/[^a-z0-9]+/g," ").trim();
+  if(qBrut&&qBrut===nomBrut)sc+=120+80*nomBrut.split(" ").length;
+  else if(qBrut&&nomBrut===(normTxt(d.brand||"").replace(/[^a-z0-9]+/g," ").trim()+" "+qBrut).trim())sc+=60;
   /* Le mot ecrit tel quel l'emporte sur le mot deduit. Petit poids volontaire :
      il ne doit departager que des ex aequo, jamais renverser un vrai ecart. */
   var motsBruts=normTxt(q).split(/[^a-z0-9]+/).filter(function(x){return x;});
