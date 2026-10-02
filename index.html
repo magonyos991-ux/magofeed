@@ -11760,7 +11760,10 @@ function formesFiche(d){
      Dix categories, 4 543 fiches : c'est la famille de recherches la plus
      naturelle qui ne marchait pas. */
   var cat=canonSaveurs(normTxt(d.cat||""));
-  var plat=(nom+" "+mq+" "+cat).replace(/[^a-z0-9]+/g," ");
+  /* Le volume aussi : « coca 33cl », « red bull 25cl » ne trouvaient rien,
+     alors que la fiche le porte dans son champ size. */
+  var vol=normTxt(d.size||"").replace(/\s+/g,"");
+  var plat=(nom+" "+mq+" "+cat+" "+vol).replace(/[^a-z0-9]+/g," ");
   /* La forme BRUTE, sans synonymes ni canonisation : elle sert a departager.
      « Red Bull Zero » et « Red Bull Sugarfree » se ramenent au meme texte une
      fois « sugar free » devenu « zero », donc au meme score, et l'egalite se
@@ -11982,6 +11985,7 @@ var MOTS_VOISINS=[
   ["gingembre","ginger","gember"],
   ["petillante","sparkling","bruisend","petillant"],
   ["legumes","vegetable","groente"],
+  ["nature","original","originale","naturel","plain","puur"],
   ["litchi","lychee","leechee"],
   ["myrtille","blueberry","bosbes"],
   ["cassis","blackcurrant"],
@@ -12109,7 +12113,7 @@ var PHRASES_VOISINES=[
   [/\brode\s*vruchten\b|\bzwarte\s*bessen\b/g,"fruitsrouges"],
   [/\bzwarte\s*thee\b|\bblack\s*tea\b|\bthe\s*noir\b/g,"noir the"],
   [/\bgroene\s*thee\b|\bgreen\s*tea\b|\bthe\s*vert\b/g,"vert the"],
-  [/\bcitron\s*verts?\b|\blimoen\b/g,"citronvert"],
+  [/\bcitron\s*verts?\b|\blimoen\b|\blime\b|\blimes\b/g,"citronvert"],
   [/\bfruits?\s*(?:rouges?|des\s*bois)\b|\bred\s*berries\b|\bbosvruchten\b/g,"fruitsrouges"],
   [/\bfleur\s*de\s*sureau\b|\belderflower\b/g,"sureau"],
   [/\bthe\s*glace\b|\biced?\s*tea\b|\bijsthee\b/g,"icetea"]
@@ -12216,10 +12220,22 @@ function scoreRecherche(d,q){
   for(var j=0;j<motsNom.length;j++){
     var mn=motsNom[j];
     if(MOTS_FACULTATIFS[mn]||motsMarque.indexOf(mn)!==-1)continue;
-    var demande=false;
+    /* Mot ENTIER, pas un debut de mot. En acceptant le prefixe, « citron »
+       faisait passer « citronvert » pour un mot demande, donc « Badoit citron
+       vert » n'avait aucun mot en trop et coiffait « Badoit Zest Citron » —
+       alors qu'on avait tape « citron » tout court. Un debut de mot garde son
+       bonus de score ; il ne doit simplement pas effacer le fait que la fiche
+       parle d'autre chose. Le DERNIER mot tape fait exception : il est en
+       cours de frappe, « red bull s » designe bien Sakura. */
+    var demande=false,dernierMot=mots[mots.length-1];
     for(var k=0;k<mots.length&&!demande;k++){
-      var vk=motsVoisins(mots[k]);
-      for(var z=0;z<vk.length;z++)if(vk[z]===mn||mn.indexOf(vk[z])===0){demande=true;break;}
+      /* Un mot court en fin de requete est manifestement en cours de frappe
+         (« red bull s », « ice tea past »). Un mot de six lettres, non : qui
+         tape « badoit citron » veut le citron, pas le citron vert. */
+      var vk=motsVoisins(mots[k]),prefixeOk=(mots[k]===dernierMot&&mots[k].length<=4);
+      for(var z=0;z<vk.length;z++){
+        if(vk[z]===mn||(prefixeOk&&mn.indexOf(vk[z])===0)){demande=true;break;}
+      }
     }
     if(!demande)enTrop++;
   }
@@ -12258,6 +12274,7 @@ window.scoreRecherche=scoreRecherche;
    confondre ferait trouver la mauvaise canette. */
 var MOTS_FACULTATIFS={original:1,originale:1,classic:1,classique:1,nouveau:1,nouvelle:1,"new":1,
   et:1,and:1,en:1,avec:1,with:1,"de":1,"du":1,"la":1,"le":1,"les":1,"au":1,"aux":1,"a":1,
+  nature:1,
   edition:1,saveur:1,saveurs:1,gout:1,flavour:1,flavor:1,taste:1,boisson:1,drink:1,
   bouteille:1,canette:1,bottle:1,can:1,pack:1,pur:1,pure:1,naturel:1,naturelle:1,natural:1};
 /* `pret` : le texte DEJA normalise et canonise, pour les appels qui en ont un
@@ -12272,7 +12289,10 @@ function fuzzyIncludes(query,text,pret){
   var durs=0,touches=0;
   for(var i=0;i<qWords.length;i++){
     var ok=fuzzyWordMatch(qWords[i],t);
-    if(MOTS_FACULTATIFS[qWords[i]]){if(ok)touches++;continue;}
+    /* Un volume (« 33cl », « 1l », « 500ml ») precise la demande, il ne la
+       conditionne pas : beaucoup de fiches n'en declarent aucun, et « coca
+       33cl » ne renvoyait donc rien du tout au lieu des Coca-Cola. */
+    if(MOTS_FACULTATIFS[qWords[i]]||/^[0-9]+([.,][0-9]+)?(cl|ml|l|g|kg|pk|x)?$/.test(qWords[i])){if(ok)touches++;continue;}
     if(!ok)return false;
     durs++;touches++;
   }
@@ -14082,11 +14102,17 @@ function _topJoueurs(q,n){
 function _repondAuDernierMot(d,q,prepare){
   var mots=prepare||canonSaveurs(normTxt(q)).split(/[^a-z0-9]+/).filter(function(x){return x;});
   if(!mots.length)return true;
-  var F=formesFiche(d),noms=F.mots,essais=motsVoisins(mots[mots.length-1]);
+  /* On exige le DERNIER mot qui porte du sens. « coca 33cl » finit par un
+     volume, que beaucoup de fiches ne declarent pas : l'exiger faisait
+     repondre au panneau une obscure « Elsass Cola » pendant que la liste,
+     elle, donnait Coca-Cola. Les deux ecrans doivent dire la meme chose. */
+  var j=mots.length-1;
+  while(j>0&&(MOTS_FACULTATIFS[mots[j]]||/^[0-9]+([.,][0-9]+)?(cl|ml|l|g|kg|pk|x)?$/.test(mots[j])))j--;
+  var F=formesFiche(d),noms=F.mots,essais=motsVoisins(mots[j]);
   for(var e=0;e<essais.length;e++)for(var i=0;i<noms.length;i++)
     if(noms[i].indexOf(essais[e])===0)return true;
   /* La couleur deduite compte aussi : « fanta jaune » doit proposer le Citron. */
-  return couleurTouche(mots[mots.length-1],F.cadre);
+  return couleurTouche(mots[j],F.cadre);
 }
 var _sugActif=-1,_sugItems=[],_attSug=null;
 function fermerSuggestions(){
