@@ -11747,7 +11747,13 @@ function formesFiche(d){
   if(f)return f;
   var nom=canonSaveurs(normTxt(d.name||"")),mq=canonSaveurs(normTxt(d.brand||""));
   var plat=(nom+" "+mq).replace(/[^a-z0-9]+/g," ");
+  /* La forme BRUTE, sans synonymes ni canonisation : elle sert a departager.
+     « Red Bull Zero » et « Red Bull Sugarfree » se ramenent au meme texte une
+     fois « sugar free » devenu « zero », donc au meme score, et l'egalite se
+     tranchait dans l'ordre du fichier. Celui qui porte LITTERALEMENT le mot
+     tape doit passer devant. */
   f={nom:nom,mq:mq,
+     brut:" "+normTxt((d.name||"")+" "+(d.brand||"")).replace(/[^a-z0-9]+/g," ")+" ",
      cadre:" "+plat+" ",
      mots:plat.split(" ").filter(function(x){return x;}),
      motsMarque:mq.split(/[^a-z0-9]+/).filter(function(x){return x;})};
@@ -12146,6 +12152,11 @@ function scoreRecherche(d,q){
     if(!demande)enTrop++;
   }
   sc-=Math.min(30,enTrop*6);
+  /* Le mot ecrit tel quel l'emporte sur le mot deduit. Petit poids volontaire :
+     il ne doit departager que des ex aequo, jamais renverser un vrai ecart. */
+  var motsBruts=normTxt(q).split(/[^a-z0-9]+/).filter(function(x){return x;});
+  for(var lb=0;lb<motsBruts.length;lb++)
+    if(F.brut.indexOf(" "+motsBruts[lb]+" ")!==-1)sc+=4;
   sc-=Math.min(4,Math.floor(nom.length/20));               /* ultime depart */
   return sc;
 }
