@@ -8637,7 +8637,7 @@ function renderRewards(){
     h+='<div class="perk-row'+(suivant?' next':'')+(got?'':' locked')+'">'+
       '<div class="perk-num">'+(i+1)+'</div>'+
       '<div style="flex:1;min-width:0">'+
-        '<div class="perk-name" style="color:'+(got&&col?col:'var(--s1)')+'">'+sanitize(L[1])+
+        '<div class="perk-name" style="color:'+(got&&col?col:'var(--s1)')+'">'+sanitize(tr(L[1]))+
           ' <span style="font-weight:600;color:var(--s3)">· '+L[0]+' pts</span></div>'+
         '<div class="perk-desc">'+sanitize(tr(LEVEL_PERKS[i]||""))+'</div>'+
         (suivant&&manque?'<div class="perk-todo">'+sanitize(trh("Encore {n} point(s)",{n:manque}))+'</div>':'')+
@@ -12195,6 +12195,10 @@ function scoreRecherche(d,q){
       if(touche<15&&foin.indexOf(x)!==-1)touche=15;              /* morceau */
     }
     if(!touche&&couleurTouche(w,foin))touche=22;   /* couleur deduite : sous l'ecrit */
+    /* J'ai essaye d'ajouter ici un bonus proportionnel au nombre de fiches de
+       la marque, en pensant que « monstr » devait mener aux 71 Monster plutot
+       qu'a « Mont Roucous ». Mesure A/B sur les 181 cas des sondes : zero gain,
+       et UN cas perdu sur les confusions dangereuses. Retire. */
     if(motsMarque.indexOf(w)!==-1)touche+=100;     /* la marque demandee */
     if(dernier&&touche>=20)touche+=6;              /* le mot en cours de frappe */
     sc+=touche;
@@ -12204,7 +12208,20 @@ function scoreRecherche(d,q){
   for(var b=0;b<mots.length;b++)if(mm[mots[b]]){viseMarque=true;break;}
   if(viseMarque){
     var bonneMarque=false;
-    for(var b2=0;b2<mots.length;b2++)if(mm[mots[b2]]&&motsMarque.indexOf(mots[b2])!==-1){bonneMarque=true;break;}
+    for(var b2=0;b2<mots.length&&!bonneMarque;b2++){
+      if(!mm[mots[b2]])continue;
+      if(motsMarque.indexOf(mots[b2])!==-1){bonneMarque=true;break;}
+      /* ET LA MARQUE MAL TAPEE RESTE LA BONNE MARQUE. « carefour » (un R)
+         tombait pile sur une fiche parasite dont la marque est litteralement
+         « Carefour », donc les 86 vraies Carrefour prenaient les -70 et
+         passaient derriere. Pareil pour « schweps » contre Schwip Schwap,
+         « monstr » contre Mont Roucous, « oasiss » contre Ain Saiss : a chaque
+         fois une marque rare et exacte ecrasait une marque massive et presque
+         exacte. Une faute d'une lettre sur un nom de marque ne doit pas faire
+         reculer la marque qu'on cherchait manifestement. */
+      for(var b3=0;b3<motsMarque.length;b3++)
+        if(lev1(motsMarque[b3],mots[b2])){bonneMarque=true;break;}
+    }
     if(!bonneMarque)sc-=70;
   }
   if(mq.indexOf(mots[0])===0)sc+=30;
@@ -26356,7 +26373,11 @@ function applyPseudoDisplays(){
   var name=document.getElementById("profile-name-display");
   if(name){
     name.textContent=userPseudo;name.style.color=col||"";
-    name.style.textShadow=(lv.idx>=6)?"0 0 12px rgba(209,154,30,.75),0 0 3px rgba(209,154,30,.5)":"";
+    /* Le halo etait ecrit DEUX fois, ici et dans levelHalo(). Deux copies d'un
+       meme seuil finissent toujours par diverger : le jour ou l'echelle
+       s'allonge, l'une des deux est oubliee et le sommet perd son halo sans
+       que rien ne le signale. Une seule source. */
+    name.style.textShadow=levelHalo(lv.idx);
     // Perk niv.6+ (Maître) : coche de confiance doree sur le pseudo
     if(lv.idx>=5){var ck=document.createElement("span");ck.textContent=" ✓";ck.title="Contributeur de confiance";ck.style.cssText="color:#d19a1e;font-weight:800";name.appendChild(ck);}
   }
