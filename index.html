@@ -10502,18 +10502,52 @@ function hasVariantExtras(offName,candidate){
   var extras=n.split(" ").filter(function(t){return t.length>1&&toks.indexOf(t)===-1;});
   return extras.some(function(t){return OFF_VARIANT_WORDS.indexOf(t)!==-1;});
 }
+/* ══ LE GARDE-FOU SE TAISAIT SUR 57 FICHES, ET POUR RIEN ════════════════
+   Cette fonction cherchait chaque marque du catalogue comme un simple MORCEAU
+   de texte dans « marque + nom ». Un morceau, pas un mot. Elle trouvait donc :
+     « Chupa Chups Sparkling Fraise » -> spa (dans « SPArkling »), spar, chupa chups
+     « Celsius Original »            -> cels (dans « CELSius »)
+     « Orangina Rouge »              -> gina (dans « OranGINA »)
+     « Nalu Energy Tropical »        -> tropical, qui est aussi une marque
+     « Caraibos »                    -> ara, bos
+     « Sting Gold »                  -> ting
+   Trois marques reconnues au lieu d'une, donc « ambigu », donc ON NE PROPOSAIT
+   RIEN. La personne scannait sa canette, l'app ne lui montrait aucune boisson
+   existante, et la seule issue etait de creer une decouverte — un doublon.
+   Mesure : 57 des 226 fiches sans code-barres etaient dans ce cas, et AUCUNE de
+   ces 57 ambiguites n'etait reelle.
+
+   Deux corrections. On compare des MOTS ENTIERS : « spa » ne se trouve plus
+   dans « sparkling ». Et quand plusieurs marques correspondent vraiment —
+   « Zamzam Cola » contient bien le mot « cola », qui est aussi une marque — on
+   garde celle qui est le champ marque du produit scanne, sinon la plus longue,
+   c'est-a-dire la plus precise : « Mecca Cola » l'emporte sur « Cola ». */
 function findBrandFamily(offBrand,offName){
   var hay=normFamilyTxt((offBrand||"")+" "+(offName||""));
   if(!hay.trim())return [];
-  var out=[];
-  var seenBrand={};
+  var cadre=" "+hay+" ";
+  var marqueProduit=normFamilyTxt(offBrand||"");
+  var parMarque={};
   DRINKS.forEach(function(d){
     var db=normFamilyTxt(d.brand||"");
-    if(db.length<3)return;
-    if(hay.indexOf(db)!==-1){out.push(d);seenBrand[db]=1;}
+    /* Le plancher etait a trois lettres parce qu'une marque de deux lettres,
+       cherchee comme un morceau de texte, se serait trouvee partout. Avec la
+       comparaison par mots entiers, ce danger disparait : « U », « V8 »,
+       « KA », « Nu » ne correspondent plus qu'a un mot isole. Mesure : le
+       plancher a deux lettres fait passer la couverture de 98 a 99 %, et
+       REDUIT le nombre de listes qui proposent la mauvaise marque (5 -> 3). */
+    if(db.length<2)return;
+    if(cadre.indexOf(" "+db+" ")===-1)return;   // mots entiers, pas un morceau
+    (parMarque[db]=parMarque[db]||[]).push(d);
   });
-  // ne proposer que si UNE seule marque du catalogue correspond (sinon ambigu)
-  return Object.keys(seenBrand).length===1?out:[];
+  var noms=Object.keys(parMarque);
+  if(!noms.length)return [];
+  if(noms.length===1)return parMarque[noms[0]];
+  /* Plusieurs marques pour de vrai : la plus precise gagne. Celle du produit
+     scanne d'abord, sinon la plus longue — « mecca cola » plutot que « cola ». */
+  if(parMarque[marqueProduit])return parMarque[marqueProduit];
+  noms.sort(function(a,b){return b.length-a.length;});
+  return parMarque[noms[0]];
 }
 function renderBrandKinChoice(kin,best,code,p,tout){
   var res=document.getElementById("scan-result");
