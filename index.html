@@ -12890,6 +12890,66 @@ function _grapheCommunautaire(nom,marque){
   }
   return {nom:n,marque:propre};
 }
+/* ══ DEUX FICHES POUR UNE CANETTE : LA TROISIEME PORTE D'ENTREE ════════
+   Le dedoublonnage savait deja refuser une fiche qui partage un CODE-BARRES
+   ou porte le NOM EXACT d'une fiche existante. Il restait grand ouvert sur le
+   cas le plus frequent : le meme produit ecrit autrement.
+
+     serveur « Red Bull pastèque »        local « Red Bull Red Edition Pastèque »
+     serveur « Multivitamin »             local « Capri-Sun Multivitamin »
+     serveur « Vimto »                    local « Vimto Original »
+     serveur « Bar-le-Duc eau minérale »  local « Bar-le-Duc Eau Minérale Naturelle »
+
+   Ni code commun, ni nom identique : les deux entraient, et le fondateur a
+   fini par les voir cote a cote dans sa propre liste.
+
+   LA REGLE, volontairement etroite. Meme marque, et surtout : une fois
+   retires les mots qui ne designent aucune recette (original, edition, les
+   couleurs, les mots de liaison, la marque elle-meme), il doit rester
+   EXACTEMENT les memes mots de part et d'autre. « Red Bull pastèque » et
+   « Red Bull Red Edition Pastèque » gardent tous deux { pasteque } : c'est la
+   meme boisson. « Schweppes zero » garde { zero } et « Schweppes Zero Lemon »
+   garde { zero, citron } : ce sont DEUX boissons, et on n'y touche pas.
+   Dans le doute on laisse passer : une fiche en trop se retire a la main, une
+   boisson absorbee a tort se perd. */
+/* PREMIERE VERSION DE CETTE REGLE : DANGEREUSE, et le test l'a montre avant
+   qu'elle ne sorte. Elle retirait les COULEURS, en pensant a « Red Edition ».
+   Rejouee sur le catalogue local, elle unissait « Monster Ultra Red »,
+   « White », « Violet », « Black » et « Blue » — cinq parfums differents — et
+   « Coca-Cola Original » avec « Coca-Cola Energy ». Chez beaucoup de marques
+   la couleur EST le nom du parfum.
+   Une couleur n'est donc retiree que dans la tournure « <couleur> Edition »,
+   qui designe un habillage, jamais un gout. Et si, apres ce menage, il ne
+   reste RIEN d'un cote, on ne fusionne pas : un ensemble vide veut dire « je
+   ne sais pas de quoi il s'agit », pas « c'est la meme chose ».
+   Une fiche en trop se retire a la main ; une boisson absorbee a tort est
+   perdue. Le doute profite toujours a la separation. */
+var _MOTS_SANS_RECETTE={edition:1,editions:1,canette:1,bouteille:1,
+  taste:1,flavour:1,flavor:1,goout:1,gout:1,saveur:1,saveurs:1};
+function _motsDeRecette(nom,marque){
+  /* PAS DE canonSaveurs ICI, et c'est deliberé. Elle ramene « sans sucre »,
+     « sugar free » et « zero » a un seul mot — ce qui est juste pour CHERCHER
+     et faux pour IDENTIFIER : chez Red Bull, Sugarfree et Zero sont deux
+     recettes distinctes, et la regle les aurait fondues en une. On compare
+     donc les mots tels qu'ils sont ecrits. On rate ainsi quelques vrais
+     doublons (« Ice Tea Peche » et « The glace saveur peche ») ; c'est le bon
+     cote de l'erreur. */
+  var brut=normTxt(nom||"").replace(/[^a-z0-9]+/g," ");
+  /* « red edition », « pink edition »... : l'habillage, pas la recette. */
+  var t=brut.replace(/\b([a-z]+) +editions?\b/g,function(m,c){return _CLE_COULEUR[c]?" ":m;});
+  var mq=normTxt(marque||"").replace(/[^a-z0-9]+/g," ").split(" ").filter(Boolean);
+  var out={};
+  t.split(" ").forEach(function(w){
+    if(!w||w.length<2)return;
+    if(mq.indexOf(w)!==-1)return;                 /* la marque n'est pas une recette */
+    if(MOTS_FACULTATIFS[w])return;                /* original, classique, nature... */
+    if(_MOTS_SANS_RECETTE[w])return;              /* edition, saveur... */
+    if(/^[0-9]+(cl|ml|l|g|kg|pk|x)?$/.test(w))return;
+    out[w]=1;
+  });
+  return Object.keys(out).sort().join(" ");
+}
+window._motsDeRecette=_motsDeRecette;
 function mergeCatalog(rows){
   if(!rows||!rows.length)return 0;
   var added=0;
@@ -12939,6 +12999,32 @@ function mergeCatalog(rows){
     }
     var exists=DRINKS.some(function(d){return d.id===rid||nameKey(d.name)===nn;});
     if(exists)return;
+    /* Meme marque, memes mots de recette : c'est la meme canette ecrite
+       autrement. On absorbe ses codes dans la fiche qui existe, et on
+       n'ajoute pas de seconde ligne. */
+    var gr=_grapheCommunautaire(nomPropre(String(r.name)),nomPropre(String(r.brand||"")));
+    var recette=_motsDeRecette(gr.nom,gr.marque),mqR=normTxt(gr.marque||"");
+    if(mqR&&recette){   /* rien d'identifiable : on ne fusionne pas */
+      var soeur=null;
+      for(var iS=0;iS<DRINKS.length&&!soeur;iS++){
+        var dd=DRINKS[iS];
+        if(normTxt(dd.brand||"")!==mqR)continue;
+        var rd=_motsDeRecette(dd.name,dd.brand);
+        if(!rd)continue;
+        /* Et aussi colles : « Multi-Vitamin » donne deux mots la ou
+           « Multivitamin » n'en donne qu'un, et le trait d'union suffisait a
+           faire naitre une deuxieme fiche Capri-Sun. */
+        if(rd!==recette&&rd.replace(/ /g,"")!==recette.replace(/ /g,""))continue;
+        soeur=dd;
+      }
+      if(soeur){
+        if(!soeur.barcodes)soeur.barcodes=[];
+        (r.barcodes||[]).forEach(function(c){
+          if(c&&indexCode(soeur.barcodes,c)===-1)soeur.barcodes.push(String(c));
+        });
+        return;
+      }
+    }
     // Classement automatique et uniforme. Si le classifieur hesite ("Autre"),
     // on garde la categorie stockee quand elle est valide et parlante.
     var cat=classifyDrink(r.name,r.brand);
