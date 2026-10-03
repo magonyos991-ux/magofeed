@@ -506,6 +506,7 @@ try{
         <button type="button" role="tab" data-chasse-tab="trouver" class="on" onclick="chasseSegTap('trouver')"><span data-i18n="segFind">À trouver</span></button>
         <button type="button" role="tab" data-chasse-tab="valider" onclick="chasseSegTap('valider')"><span data-i18n="segValidate">À valider</span><span id="chasse-seg-valider-n"></span></button>
         <button type="button" role="tab" data-chasse-tab="tendances" onclick="chasseSegTap('tendances')"><span data-i18n="segTrends">Tendances</span></button>
+        <button type="button" role="tab" data-chasse-tab="recommandees" onclick="chasseSegTap('recommandees')"><span data-i18n="segReco">Recommandées</span></button>
       </div>
       <div id="chasse-trouver">
         <!-- LES COUPS DE MAIN RECUS. Quelqu'un a repondu a ta chasse : on le
@@ -530,6 +531,9 @@ try{
       <div id="chasse-valider" style="display:none">
         <div style="padding:0 20px 8px;display:flex;align-items:center;gap:7px"><span class="t-section" data-i18n="suggestionsT" style="padding:0;font-size:15px">En attente de tes votes</span></div>
         <div id="disc-list"></div>
+      </div>
+      <div id="chasse-recommandees" style="display:none">
+        <div id="reco-body" style="padding:0 20px 20px"></div>
       </div>
       <div id="chasse-tendances" style="display:none">
         <div id="chasse-recent" style="padding:0 20px 18px"></div>
@@ -24887,17 +24891,18 @@ function _chasseSegCourant(){
   return _chasseSeg;
 }
 function setChasseSeg(name){
-  if(["trouver","valider","tendances"].indexOf(name)===-1)name="trouver";
+  if(["trouver","valider","tendances","recommandees"].indexOf(name)===-1)name="trouver";
   _chasseSeg=name;
   try{localStorage.setItem("magoChasseSeg",name);}catch(e){}
   document.querySelectorAll("#chasse-seg [data-chasse-tab]").forEach(function(b){
     var on=b.getAttribute("data-chasse-tab")===name;
     b.classList.toggle("on",on);b.setAttribute("aria-selected",on?"true":"false");
   });
-  ["trouver","valider","tendances"].forEach(function(k){
+  ["trouver","valider","tendances","recommandees"].forEach(function(k){
     var p=document.getElementById("chasse-"+k);if(p)p.style.display=(k===name)?"block":"none";
   });
   if(name==="tendances"){try{renderVuesRecentes();}catch(e){}try{renderTopScanned();}catch(e){}}
+  if(name==="recommandees"){try{renderRecommandees();}catch(e){}}
   if(name==="valider"){try{renderDiscoveries();}catch(e){}}
 }
 function chasseSegTap(name){
@@ -25878,17 +25883,217 @@ function setRating(val){
   var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent=starsLabel(curSel);
   if(!prev&&window.fbAddRating)window.fbAddRating(curSel.id,val);
 }
+/* ══ CE QUE LES GENS RECOMMANDENT ══════════════════════════════════════
+   Le fondateur veut « promouvoir » une boisson qu'on trouve bonne. Le mot
+   « promouvoir » ne figure nulle part ici, et c'est deliberé : promouvoir est
+   un service de promotion — placements payants, obligations de transparence,
+   et un avis d'utilisateur transforme en caution commerciale. Le mot est
+   « recommande ».
+
+   VOCABULAIRE FERME, AUCUN CHAMP LIBRE. « ce jus d'orange est tres
+   benefique » est une allegation de sante sur une denree alimentaire,
+   encadree en Europe par le reglement 1924/2006 — et c'est l'app qui la
+   publierait, donc son editeur, nomme en en-tete de chaque fichier. Une liste
+   fermee rend la chose structurellement impossible : il n'y a pas d'endroit
+   ou ecrire une phrase. Le jour ou quelqu'un proposera « une petite zone de
+   texte, juste pour cette fois », la reponse est non, et elle est ici.
+
+   AUCUN MOTIF DE SANTE NI DE NUTRITION. Pas « pas trop sucree », pas « riche
+   en vitamines », meme si c'est vrai : ce sont des allegations reglementees
+   des que l'app les met en avant. Cinq motifs, tous factuels. */
+var RECO_MOTIFS=["Le go\u00FBt","Le prix","La quantit\u00E9","Difficile \u00E0 trouver ailleurs","Pour changer"];
+/* LES DEUX NOMBRES QUI TIENNENT L'HONNETETE DE CETTE FONCTIONNALITE.
+   Un classement de trois voix presente comme « ce que Bruxelles recommande »
+   est un mensonge. Ces seuils sont AFFICHES A L'ECRAN, en chiffres, en
+   permanence — pas pour decorer, mais parce qu'un nombre public ne se baisse
+   pas discretement. Ce sont les premiers qu'on demandera de baisser le jour
+   ou l'onglet aura l'air vide, et la demande viendra de quelqu'un d'aimable. */
+var RECO_MIN_PERSONNES=5;   /* par boisson, pour qu'elle ait un rang */
+var RECO_MIN_BOISSONS=5;    /* pour que le classement s'ouvre */
+window.RECO_MOTIFS=RECO_MOTIFS;
+window.RECO_MIN_PERSONNES=RECO_MIN_PERSONNES;
+window.RECO_MIN_BOISSONS=RECO_MIN_BOISSONS;
+
+/* Ce que CETTE personne a recommande, et pourquoi. Local : l'etape publique
+   demande une Cloud Function, et on ne compte pas cote client « en
+   attendant » — un compteur que le telephone ecrit est un compteur faux. */
+var mesRecos=(function(){try{return JSON.parse(localStorage.getItem("mago_recos")||"{}");}catch(e){return {};}})();
+window.mesRecos=mesRecos;
+function _sauverRecos(){try{localStorage.setItem("mago_recos",JSON.stringify(mesRecos));}catch(e){}}
+
+/* Les boissons dont cette personne peut parler : celles qu'elle a scannees.
+   Pas une preuve — rien dans cette base n'en est une, le journal de scan est
+   ecrit par le telephone — mais un ancrage : on ne recommande pas une boisson
+   qu'on n'a jamais eue en main. Et ca donne a l'onglet quelque chose a
+   montrer des la premiere canette, sans aucune lecture reseau. */
+function boissonsRecommandables(){
+  var vus={},out=[];
+  (window.scanHist||[]).forEach(function(e){
+    var d=null;
+    if(e.drinkId!=null)d=(DRINKS||[]).find(function(x){return Number(x.id)===Number(e.drinkId);});
+    if(!d&&e.code&&window.drinkForBarcode)d=drinkForBarcode(e.code);
+    if(!d||vus[d.id])return;
+    vus[d.id]=1;out.push(d);
+  });
+  return out;
+}
+window.boissonsRecommandables=boissonsRecommandables;
+/* La feuille des motifs. Cinq pastilles, zero champ de saisie. On peut en
+   choisir aucun : recommander sans dire pourquoi reste une recommandation. */
+/* ══ L'ONGLET « RECOMMANDEES » ═════════════════════════════════════════
+   Quatre blocs, dans cet ordre, et l'ordre compte :
+     1. les chiffres vrais, jamais arrondis
+     2. ce que TU peux recommander — c'est lui qui fait que l'onglet n'est
+        jamais vide pour qui a deja scanne une canette
+     3. tes recommandations
+     4. le classement, FERME tant que les seuils ne sont pas atteints, avec
+        le nombre qui manque ecrit en toutes lettres
+   Aucune lecture reseau : tout vient du telephone. Le classement public
+   demande une Cloud Function, et tant qu'elle n'est pas deployee l'onglet le
+   DIT, au lieu d'afficher un compteur fabrique ici. */
+function renderRecommandees(){
+  var el=document.getElementById("reco-body");if(!el)return;
+  el.innerHTML="";
+  var mesIds=Object.keys(mesRecos);
+  var dispo=boissonsRecommandables().filter(function(d){return !mesRecos[d.id];});
+
+  /* 1. LES CHIFFRES, TELS QU'ILS SONT. */
+  var tete=document.createElement("div");
+  tete.className="reco-chiffres";
+  /* Pas de « (s) » : on choisit la phrase selon le nombre. Un pluriel entre
+     parentheses est la signature d'une application bricolee, et il se traduit
+     mal dans les langues qui n'ont pas la meme regle. */
+  tete.textContent=(mesIds.length===0)
+    ? trh("Tu peux recommander {m} boissons que tu as scann\u00E9es",{m:dispo.length})
+    : trh("Tu en recommandes {n} \u00B7 {m} autres sont \u00E0 ta port\u00E9e",{n:mesIds.length,m:dispo.length});
+  el.appendChild(tete);
+
+  /* 2. CE QUE TU PEUX RECOMMANDER. */
+  if(dispo.length){
+    el.appendChild(_recoTitre(tr("Tu peux parler de ces boissons"),
+      tr("Tu les as scann\u00E9es. On ne recommande que ce qu\u2019on a eu en main.")));
+    dispo.slice(0,8).forEach(function(d){
+      el.appendChild(_recoLigne(d,tr("Recommander"),function(){
+        if(!mesRecos[d.id])mesRecos[d.id]={ts:Date.now(),motifs:[]};
+        _sauverRecos();playSound("pop");ouvrirMotifs(d);renderRecommandees();
+      }));
+    });
+  }
+
+  /* 3. LES TIENNES. */
+  if(mesIds.length){
+    el.appendChild(_recoTitre(tr("Tes recommandations"),
+      tr("Elles restent sur ton t\u00E9l\u00E9phone tant que le compte public n\u2019est pas ouvert.")));
+    mesIds.forEach(function(id){
+      var d=(DRINKS||[]).find(function(x){return String(x.id)===String(id);});
+      if(!d)return;
+      var motifs=(mesRecos[id].motifs||[]).map(function(m){return tr(m);}).join(" \u00B7 ");
+      el.appendChild(_recoLigne(d,tr("Modifier"),function(){ouvrirMotifs(d);},motifs));
+    });
+  }
+
+  if(!dispo.length&&!mesIds.length){
+    var vide=document.createElement("div");
+    vide.innerHTML=emptyStateHTML("search",tr("Rien \u00E0 recommander pour l\u2019instant"),
+      tr("Scanne une boisson que tu aimes : elle appara\u00EEtra ici."),
+      tr("Scanner"),"navTo('scan')");
+    el.appendChild(vide);
+  }
+
+  /* 4. LE CLASSEMENT, ET POURQUOI IL EST FERME. */
+  var cl=document.createElement("div");
+  cl.className="reco-classement";
+  cl.innerHTML='<div class="reco-cl-t">'+sanitize(tr("Les plus recommand\u00E9es autour de toi"))+'</div>'+
+    '<div class="reco-cl-d">'+sanitize(trh("Ferm\u00E9 : il faut {p} personnes sur une m\u00EAme boisson, et {b} boissons qui y arrivent. Aujourd\u2019hui : 0.",
+      {p:RECO_MIN_PERSONNES,b:RECO_MIN_BOISSONS}))+'</div>'+
+    '<div class="reco-cl-d">'+sanitize(tr("Un classement de trois voix pr\u00E9sent\u00E9 comme l\u2019avis d\u2019une ville serait faux. Ces deux nombres sont \u00E9crits ici pour qu\u2019ils ne puissent pas baisser en silence."))+'</div>';
+  el.appendChild(cl);
+
+  /* PIED : les deux phrases qui ne se masquent pas. */
+  var pied=document.createElement("div");
+  pied.className="reco-pied";
+  pied.textContent=tr("Magofeed ne dit pas si une boisson est bonne pour la sant\u00E9. Ce sont des go\u00FBts, pas des conseils.")+
+    " "+tr("Aucune place ne s\u2019ach\u00E8te ici.");
+  el.appendChild(pied);
+}
+window.renderRecommandees=renderRecommandees;
+function _recoTitre(t,sous){
+  var h=document.createElement("div");
+  h.className="reco-h";
+  h.innerHTML='<div class="reco-h-t">'+sanitize(t)+'</div>'+(sous?'<div class="reco-h-s">'+sanitize(sous)+'</div>':'');
+  return h;
+}
+function _recoLigne(d,action,go,sous){
+  var r=document.createElement("div");
+  r.className="reco-ligne";
+  r.innerHTML='<span class="reco-vign" style="background:'+(d.light||"var(--bg3)")+'">'+drinkIconHTML(d)+'</span>'+
+    '<span class="reco-txt"><span class="reco-n">'+sanitize(d.name)+'</span>'+
+    '<span class="reco-s">'+sanitize(sous||d.brand||"")+'</span></span>'+
+    '<button type="button" class="reco-act">'+sanitize(action)+'</button>';
+  var b=r.querySelector(".reco-act");
+  if(b)b.onclick=function(ev){ev.stopPropagation();go();};
+  r.onclick=function(){try{pick(d);}catch(e){}};
+  a11yCard(r,d.name+", "+(d.brand||""));
+  return r;
+}
+function ouvrirMotifs(d){
+  if(!d)return;
+  var choisis=(mesRecos[d.id]&&mesRecos[d.id].motifs)||[];
+  var corps='<div class="reco-mots">';
+  RECO_MOTIFS.forEach(function(m,i){
+    var on=choisis.indexOf(m)!==-1;
+    corps+='<button type="button" class="reco-mot'+(on?" on":"")+'" data-m="'+i+'" aria-pressed="'+(on?"true":"false")+'">'+sanitize(tr(m))+'</button>';
+  });
+  corps+='</div>'+
+    '<div class="reco-pied">'+sanitize(tr("Magofeed ne dit pas si une boisson est bonne pour la sant\u00E9. Ce sont des go\u00FBts, pas des conseils."))+'</div>';
+  var ov=msgFeuille("reco-sheet",
+    '<div class="claim-title" style="font-size:16px">'+sanitize(trh("Pourquoi {t} ?",{t:d.name}))+'</div>'+
+    '<div class="claim-lead">'+sanitize(tr("Choisis ce qui te fait la recommander. Tu peux n\u2019en choisir aucun."))+'</div>'+
+    corps);
+  if(!ov)return;
+  ov.querySelectorAll(".reco-mot").forEach(function(b){
+    b.onclick=function(){
+      var m=RECO_MOTIFS[Number(b.getAttribute("data-m"))];
+      var l=(mesRecos[d.id]&&mesRecos[d.id].motifs)||[];
+      var i=l.indexOf(m);
+      if(i===-1)l.push(m);else l.splice(i,1);
+      if(!mesRecos[d.id])mesRecos[d.id]={ts:Date.now(),motifs:[]};
+      mesRecos[d.id].motifs=l;
+      _sauverRecos();
+      b.classList.toggle("on",i===-1);
+      b.setAttribute("aria-pressed",i===-1?"true":"false");
+      playSound("pop");
+      try{renderRecommandees();}catch(e){}
+    };
+  });
+}
+window.ouvrirMotifs=ouvrirMotifs;
 function setRec(val){
   if(!curSel)return;
   var prev=userRecs[curSel.id];
   if(prev===val){toast(val==="yes"?"D\u00e9j\u00e0 recommand\u00e9e par toi":"Avis d\u00e9j\u00e0 enregistr\u00e9");playSound("pop");return;}
   userRecs[curSel.id]=val;localStorage.setItem("mago_recs",JSON.stringify(userRecs));
-  if(!prev&&awardOnce("rec:"+curSel.id,FOREVER)){userStats.pts+=3;toast(val==="yes"?"Recommandé · +3 pts":"Non recommandé · +3 pts");}
-  else{toast("Avis mis \u00e0 jour");}
+  /* PLUS DE POINTS POUR UN AVIS. Payer une opinion, c'est financer la
+     fabrication d'un faux classement : avec le plafond de 60 points par jour
+     et 3 points par signalement, un rayon entier scanne puis recommande
+     suffisait a porter une marque. Le scan qui sert d'ancrage rapporte deja
+     ses points ailleurs, pour ce qu'il est : une contribution verifiable. */
+  toast(val==="yes"?tr("Tu la recommandes"):tr("Avis enregistr\u00E9 \u2014 il reste priv\u00E9"));
   updateProfileStats();playSound("pop");
   renderStarPanel();
   try{var _rs2=document.getElementById("rate-sheet");if(_rs2&&_rs2.style.display!=="none")renderRateSheet();}catch(e){}
-  if(!prev&&window.fbAddRec)window.fbAddRec(curSel.id,val);
+  /* On n'ecrit plus dans stats/drinkRecs : la regle « allow create, update:
+     if isSignedIn() » (firestore.rules:1057) laisse n'importe quel compte,
+     anonyme compris, y ajouter dix mille d'un appel console. Un compteur
+     qu'on ne peut pas defendre ne doit pas etre montre, donc ne pas etre
+     tenu. Le compte public viendra d'une Cloud Function, ou ne viendra pas. */
+  if(val==="yes"){
+    if(!mesRecos[curSel.id])mesRecos[curSel.id]={ts:Date.now(),motifs:[]};
+    _sauverRecos();
+    try{ouvrirMotifs(curSel);}catch(e){}
+  }else{
+    delete mesRecos[curSel.id];_sauverRecos();
+  }
 }
 
 /* ================================
