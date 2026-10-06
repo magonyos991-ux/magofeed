@@ -55,7 +55,15 @@ function aliasDe(d) {
   try {
     if (!d) return null;
     var m = ALIAS_MARQUES[d.brand];
-    return (m && m.length) ? m : null;
+    /* ET LES NOMS QUE CETTE FICHE A DEJA PORTES. Quand deux fiches decrivent
+       la meme canette, l'une absorbe l'autre et son nom disparait. La personne
+       qui avait nomme la boisson elle-meme — « Energy Citron » avant que
+       l'etiquette officielle « Hell Energy Lemon » n'arrive — ne la retrouvait
+       plus sous SON mot. On garde donc l'ancien nom comme porte d'entree :
+       le nom affiche est l'officiel, et les deux mots y menent. */
+    var vus = (d.aka && d.aka.length) ? d.aka.slice() : [];
+    if (m && m.length) vus = vus.concat(m);
+    return vus.length ? vus : null;
   } catch (e) { return null; }
 }
 

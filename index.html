@@ -12954,6 +12954,27 @@ function _motsDeRecette(nom,marque){
   return Object.keys(out).sort().join(" ");
 }
 window._motsDeRecette=_motsDeRecette;
+/* ══ UN NOM ABSORBE NE DOIT PAS DISPARAITRE ════════════════════════════
+   Quelqu'un scanne une canette que personne ne connait, la nomme lui-meme
+   « Energy Citron », et c'est ce nom qui circule. Des semaines plus tard
+   l'etiquette officielle arrive — « Hell Energy Lemon » — avec le meme
+   code-barres. L'app fait alors ce qu'il faut : une seule fiche, le nom
+   officiel, aucun doublon. Mais la personne qui cherchait « energy citron »
+   ne trouvait plus rien, et c'est elle qui avait rendu la fiche possible.
+   On garde donc l'ancien nom comme ALIAS : le nom affiche est l'officiel —
+   pour que tout le monde parle de la meme chose — et les deux mots y menent.
+   Au plus cinq, et jamais le nom deja porte. */
+function _garderAncienNom(fiche,nom){
+  if(!fiche||!nom)return;
+  var n=String(nom).trim();
+  if(!n)return;
+  if(normTxt(n)===normTxt(fiche.name||""))return;
+  if(!fiche.aka)fiche.aka=[];
+  for(var i=0;i<fiche.aka.length;i++)if(normTxt(fiche.aka[i])===normTxt(n))return;
+  if(fiche.aka.length>=5)return;
+  fiche.aka.push(n.slice(0,60));
+}
+window._garderAncienNom=_garderAncienNom;
 function mergeCatalog(rows){
   if(!rows||!rows.length)return 0;
   var added=0;
@@ -12999,6 +13020,7 @@ function mergeCatalog(rows){
       (r.barcodes||[]).forEach(function(c){
         if(c&&indexCode(jumelle.barcodes,c)===-1)jumelle.barcodes.push(String(c));
       });
+      _garderAncienNom(jumelle,r.name);
       return;
     }
     var exists=DRINKS.some(function(d){return d.id===rid||nameKey(d.name)===nn;});
@@ -13026,6 +13048,7 @@ function mergeCatalog(rows){
         (r.barcodes||[]).forEach(function(c){
           if(c&&indexCode(soeur.barcodes,c)===-1)soeur.barcodes.push(String(c));
         });
+        _garderAncienNom(soeur,r.name);
         return;
       }
     }
