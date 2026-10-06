@@ -6567,6 +6567,30 @@ try{
 <script src="data/drinkart.js"></script>
 <script src="data/state.js"></script>
 <script src="data/textes.js"></script>
+<script>
+/* ══ UNE SEULE LANGUE, PAS DIX ═════════════════════════════════════════
+   Mesure sur telephone milieu de gamme en 4G lente : data/textes.js coutait
+   4 995 ms et 334 Ko compresses, parce qu'il porte les DIX langues. Chacun
+   n'en lit qu'une — et un francophone n'en lit AUCUNE, puisque tr() rend la
+   cle telle quelle quand la langue est le francais.
+   Au deploiement, outils/alleger-site.mjs decoupe ce fichier en une coquille
+   (les fonctions, table vide) plus un fichier par langue. Ici on ne charge
+   que celui dont on a besoin.
+   document.write, et c'est le bon outil ici : il faut que la table soit la
+   AVANT le premier tr(), donc le chargement doit bloquer l'analyse. Si le
+   navigateur le refuse (connexion tres lente) ou si le fichier n'existe pas
+   — c'est le cas dans le depot, ou textes.js porte encore tout — l'app reste
+   en francais au lieu de casser. Un ecran en francais vaut mieux qu'un ecran
+   vide. */
+(function(){
+  try{
+    var lg=localStorage.getItem("magolang")||"";
+    if(!lg||lg==="fr")return;
+    if(!/^[a-z]{2}$/.test(lg))return;
+    document.write('<script src="data/textes.'+lg+'.js"><\/script>');
+  }catch(e){}
+})();
+</script>
 <script src="data/alias.js"></script>
 <script src="data/ui.js"></script>
 <script src="data/i18n.js"></script>
@@ -6589,7 +6613,29 @@ var DISCOVERIES=[
 ];
 
 
+/* La table de la langue demandee est-elle la ? Sinon on va la chercher, puis
+   on rejoue setLang. Necessaire parce que changer de langue ne recharge pas la
+   page : sans ca, choisir le neerlandais apres le demarrage laissait l'app en
+   francais, en silence. Au demarrage, le chargeur en tete de page a deja fait
+   le travail — cette fonction ne sert que pour un changement en cours de
+   route, et elle ne demande chaque fichier qu'une fois. */
+var _languesChargees={fr:1};
+function assurerLangue(l,suite){
+  if(!l||l==="fr"||_languesChargees[l]){suite();return;}
+  if(!/^[a-z]{2}$/.test(l)){suite();return;}
+  /* Deja present : le depot sert encore la table complete. */
+  try{
+    for(var k in TEXTES){if(TEXTES[k]&&TEXTES[k][l]){_languesChargees[l]=1;suite();return;}break;}
+  }catch(e){}
+  var sc=document.createElement("script");
+  sc.src="data/textes."+l+".js";
+  sc.onload=function(){_languesChargees[l]=1;suite();};
+  sc.onerror=function(){_languesChargees[l]=1;suite();};  /* absent : on reste en francais */
+  document.head.appendChild(sc);
+}
+window.assurerLangue=assurerLangue;
 function setLang(l){
+  if(l&&l!=="fr"&&!_languesChargees[l]){assurerLangue(l,function(){setLang(l);});return;}
   curLang=l;var T=LANGS[l];
   /* CHANGER DE LANGUE DOIT SE VOIR TOUT DE SUITE. Les textes ecrits en dur dans
      le HTML ne passent pas par LANGS : sans ce rappel, la moitie de l'ecran
