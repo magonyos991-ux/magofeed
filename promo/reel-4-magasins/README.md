@@ -11,6 +11,8 @@ Tout ce qui se fabrique sans caméra est ici. Le reste (filmer, enregistrer l'é
 | `montage.csv` | La timeline du montage : ordre, début, fin, durée, rush à utiliser, carton à poser. S'ouvre dans Numbers, Excel ou Google Sheets (séparateur point-virgule). |
 | `textes-a-copier.txt` | Légende, hashtags, commentaire épinglé, DM, story, relances, six réponses types, réponses d'exploitation, phrases pour le comptoir. |
 | `suivi-commentaires.xlsx` | Le tableau de l'étude de marché : une ligne par personne qui cite une canette (onglet Réponses), et le bilan automatique (canettes et quartiers les plus cités, chasses lancées, retours à faire). |
+| `animatique-NE-PAS-PUBLIER.mp4` | Le Reel à blanc : les vrais cartons aux vraies durées sur des plans fictifs, avec un clic à 120 BPM, le creux de 0:10 à 0:14 et le drop à 0:14. À regarder trois fois avant de filmer pour avoir le rythme dans la tête. Jamais publié, jamais importé dans CapCut. |
+| `storyboard.jpg` | Les 12 plans en une image, avec timecodes et cartons. À garder sur le téléphone pendant le tournage. |
 
 ## Poser un carton dans CapCut
 
@@ -30,4 +32,5 @@ pip install pillow openpyxl
 # police Anton (licence OFL) : https://fonts.google.com/specimen/Anton
 python3 promo/reel-4-magasins/generer-cartons.py /chemin/vers/Anton-Regular.ttf promo/reel-4-magasins
 python3 promo/reel-4-magasins/generer-suivi.py promo/reel-4-magasins/suivi-commentaires.xlsx
+python3 promo/reel-4-magasins/generer-animatique.py /chemin/vers/Anton-Regular.ttf promo/reel-4-magasins   # ffmpeg requis
 ```
