@@ -52,13 +52,38 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
 </script>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <script>
-/* App installee (Capacitor, ou PWA en mode standalone) : plein ecran, la
-   coque de presentation du site disparait — voir html.natif dans app.css. */
+/* PLEIN ECRAN DES QUE L'ECRAN EST CELUI D'UN TELEPHONE, et pas seulement
+   une fois l'app installee.
+   La coque de presentation — une carte de 402 px aux coins arrondis, posee
+   au milieu de la page — a du sens sur un ordinateur : on regarde un
+   telephone. Sur un telephone, elle n'en a aucun. L'app s'affichait dans un
+   cadre, avec le fond de page tout autour et des coins arrondis au milieu de
+   l'ecran : une maquette, pas une application. C'est de la que venait
+   l'essentiel de l'impression « ce n'est pas une vraie app » — avant toute
+   question de fluidite ou de technologie.
+   Desormais : moins de 560 px de large, ou installee, ou en mode autonome ->
+   l'app prend tout le verre, bord a bord, comme n'importe quelle app du
+   store. Au-dela, la coque reste : sur un grand ecran, elle est jolie et
+   elle dit ce que c'est. */
 try{
-  if((window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform())
+  var _tel=(window.matchMedia&&matchMedia("(max-width: 560px)").matches)||window.innerWidth<=560;
+  if(_tel
+   ||(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform())
    ||(window.matchMedia&&matchMedia("(display-mode: standalone)").matches)
    ||navigator.standalone===true)
     document.documentElement.classList.add("natif");
+  /* Rotation, fenetre redimensionnee : la bascule doit suivre. */
+  if(window.matchMedia){
+    var _mq=matchMedia("(max-width: 560px)");
+    var _suivre=function(e){
+      if(e.matches)document.documentElement.classList.add("natif");
+      else if(!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform())
+            &&!matchMedia("(display-mode: standalone)").matches&&navigator.standalone!==true)
+        document.documentElement.classList.remove("natif");
+    };
+    if(_mq.addEventListener)_mq.addEventListener("change",_suivre);
+    else if(_mq.addListener)_mq.addListener(_suivre);
+  }
 }catch(e){}
 </script>
 <title>Ta boisson est en rupture partout ? Magofeed te dit qui l'a.</title>
@@ -13345,7 +13370,13 @@ function updateGreeting(){
   var h=(new Date()).getHours();
   var hello=(h>=18||h<5)?"Bonsoir":"Bonjour";
   var nm=(userPseudo&&userPseudo!=="Explorateur"&&userPseudo.length<=18)?(", "+userPseudo):"";
-  el.textContent=hello+nm+" — que boit-on ?";
+  /* UNE SEULE LIGNE. « Bonsoir, Yassine — que boit-on ? » passait a la ligne
+     sur un telephone et coupait « boit-on » en deux : « que boit- / on ? ».
+     Un titre casse en deux, c'est la premiere chose qui fait amateur.
+     Quand le prenom est la, il porte deja toute la chaleur de la phrase : la
+     question en plus ne sert a rien et ne tient pas. Sans prenom, la ligne est
+     courte et la question tient sans probleme. */
+  el.textContent=hello+nm+(nm?"":" \u2014 que boit-on ?");
 }
 function renderMissions(){
   var host=document.getElementById("missions-card");if(!host)return;
@@ -13428,12 +13459,21 @@ function renderNearby(){
   // \u2500\u2500 ETAT C : pas de position \u2500\u2500 on invite a l'activer (ou explorer une ville).
   if(!hasLoc){
     var c=document.createElement("div");
-    c.innerHTML='<div style="font-size:13.5px;font-weight:700;color:var(--s1);line-height:1.35;margin-bottom:4px">Active ta position</div>'+
-      '<div style="font-size:12px;color:var(--s2);line-height:1.4;margin-bottom:12px">'+tr("Pour voir d'un coup tous les magasins autour de toi.")+'</div>';
-    var row=document.createElement("div");row.style.cssText="display:flex;gap:8px";
+    /* Le sous-titre « Active ta position » disait la meme chose que le bouton
+       juste en dessous. Une phrase, puis le bouton : c'est tout ce qu'il faut. */
+    c.innerHTML='<div style="font-size:12.5px;color:var(--s2);line-height:1.45;margin-bottom:12px">'+tr("Pour voir d'un coup tous les magasins autour de toi.")+'</div>';
+    /* UNE SEULE ACTION, PLEINE LARGEUR.
+       Il y avait deux boutons cote a cote, de poids visuel presque egal :
+       « Activer ma position » et « Explorer une ville ». Le second refaisait
+       exactement ce que fait deja le lien « Carte > » en haut de la meme
+       carte. Deux boutons qui se disputent le regard, dont un en double :
+       l'oeil hesite, et une carte ou l'oeil hesite a l'air d'un brouillon.
+       Une seule action, pleine largeur, et la carte reste accessible par le
+       lien du haut. */
+    var row=document.createElement("div");row.style.cssText="display:flex";
     var b1=document.createElement("div");
     b1.setAttribute("role","button");b1.setAttribute("tabindex","0");b1.setAttribute("aria-label","Activer ma position");
-    b1.style.cssText="flex:1;text-align:center;padding:11px;border-radius:13px;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;cursor:pointer";
+    b1.style.cssText="flex:1;text-align:center;padding:12px;border-radius:13px;background:var(--s1);color:var(--app-bg);font-size:13.5px;font-weight:800;cursor:pointer";
     b1.textContent="Activer ma position";
     /* Une permission REFUSEE ne peut plus etre redemandee par une page web :
        le navigateur ne rouvrira jamais la fenetre. Faire semblant de chercher
@@ -13448,13 +13488,7 @@ function renderNearby(){
       });
     };
     b1.onkeydown=function(ev){if(ev.key==="Enter"){b1.onclick();}};
-    var b2=document.createElement("div");
-    b2.setAttribute("role","button");b2.setAttribute("tabindex","0");b2.setAttribute("aria-label","Explorer une ville sur la carte");
-    b2.style.cssText="flex-shrink:0;padding:11px 14px;border-radius:13px;border:1.5px solid var(--border);color:var(--s1);font-size:13px;font-weight:800;cursor:pointer";
-    b2.textContent=tr("Explorer une ville");
-    b2.onclick=function(){playSound("pop");openExploreMap();};
-    b2.onkeydown=function(ev){if(ev.key==="Enter"){b2.onclick();}};
-    row.appendChild(b1);row.appendChild(b2);c.appendChild(row);
+    row.appendChild(b1);c.appendChild(row);
     card.appendChild(c);
     host.innerHTML="";host.appendChild(card);
     return;
@@ -14086,7 +14120,11 @@ function renderTrends(){
     div.innerHTML='<div class="dcard-photo" style="background:'+d.light+'">'+
       (realAgg(d)?'<div class="dcard-rating"><span class="star">★</span><span class="val">'+d.stars+'</span></div>':'')+
       '<div class="dcard-fav" onclick="event.stopPropagation();toggleFav('+d.id+',this)">'+heartSVG(isFav,18)+'</div>'+
-      '<div class="dcard-tag">'+d.tag+'</div>'+
+      /* LE TAG EST PARTI. Il s'affichait PAR-DESSUS la canette, au meme
+         niveau d'empilement qu'elle, et il repetait mot pour mot le nom ecrit
+         juste en dessous : « FEVER-TREE TONIC FLEUR DE SURE » barrait
+         l'illustration, tronque, pour ne rien apprendre. Une carte propre vaut
+         mieux qu'une carte qui dit deux fois la meme chose. */
       drinkCardPhotoHTML(d)+'</div>'+
       '<div class="dcard-info"><div class="dcard-name">'+d.name+'</div>'+
       '<div class="dcard-bottom"><span class="dcard-cat">'+d.cat+'</span></div></div>';
