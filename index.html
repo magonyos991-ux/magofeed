@@ -7254,6 +7254,7 @@ function show(s){
   _showRaw(s);
 }
 function _showRaw(s){
+  try{donMomentRetirer();}catch(e){}   /* la demande de soutien ne suit pas la personne d'ecran en ecran */
   /* Le fil de messagerie est plein ecran : la barre d'onglets se retire et
      le composeur prend sa place. Quitter le fil coupe son ecouteur Firestore ;
      y revenir (retour depuis un profil ouvert par le menu) le rebranche. */
@@ -7649,7 +7650,7 @@ function awardOnce(key,hours){
   return true;
 }
 var FOREVER=24*3650; // dedup "a vie" (10 ans)
-function trackStoreContribution(storeId){if(storeId!=null)contributedStores[String(storeId)]=true;bumpStreak();}
+function trackStoreContribution(storeId){if(storeId!=null)contributedStores[String(storeId)]=true;bumpStreak();try{donMomentCompter(storeId);}catch(e){}}
 /* Récompense "chasseur" : si la boisson que tu viens de confirmer en stock est
    activement recherchée par d'AUTRES (une chasse), tu gagnes un bonus — tu as
    aidé une vraie demande. Le(s) demandeur(s), eux, sont prévenus par leur veille
@@ -8516,6 +8517,7 @@ function maybeAskFeedback(){
     if(localStorage.getItem("magoFeedbackAsked")==="1")return;
     if(ptsNets()<25)return;
     localStorage.setItem("magoFeedbackAsked","1");
+    window._feedbackLe=Date.now();   // la demande de soutien laisse passer cette feuille
     setTimeout(function(){openFeedback();},1200);
   }catch(e){}
 }
@@ -13770,6 +13772,7 @@ function donChoisir(centimes){
     if(!DON_LIEN)return false;
     /* noopener : la page ouverte ne doit pas pouvoir manipuler la notre. */
     try{window.open(DON_LIEN,"_blank","noopener");}catch(e){location.href=DON_LIEN;}
+    try{localStorage.setItem("magoDonOuvert","1");}catch(e){}   // a ouvert la page de don : plus de demande au fil de l'eau
     closeDon();
     return true;
   };
@@ -13830,6 +13833,251 @@ function donRetour(){
     }).catch(function(){});
   }
   try{renderDonCard();renderDonRow();}catch(e){}
+}
+
+/* ---------------------------------------------------------------------------
+   LA DEMANDE AU MOMENT DE VALEUR
+
+   Le profil enterre la demande de soutien : il faut y aller pour la voir. Ici
+   on la pose UNE fois, au seul instant ou elle a un sens, juste apres que la
+   personne a aide quelqu'un. Elle respecte le pacte du don, et ajoute cinq
+   regles :
+
+   1) UNE SEULE FOIS par appareil. Le drapeau magoDonMomentVu passe AVANT
+      l'affichage (comme magoFeedbackAsked) : une exception ne la rejoue pas.
+   2) A PARTIR DE LA 3e contribution aboutie (magoDonContribs). Pas avant.
+   3) JAMAIS PENDANT LE GESTE. Quelques secondes apres le toast de succes, et
+      seulement si rien d'autre n'occupe l'ecran. Sinon on attend, puis on
+      renonce sans consommer le droit : la prochaine contribution retentera.
+   4) FERMER = « ca ne reviendra pas ». « Non merci » appelle fermerDonCard :
+      meme drapeau (magoDonMasque), meme toast, et la carte du profil disparait
+      aussi. « Voir comment aider » ouvre la feuille EXISTANTE (openDon) : on ne
+      duplique ni son texte ni sa logique. Rien n'est debloque, aucun montant.
+   5) JAMAIS SUR UN ECRAN OU L'ON CONTRIBUE, NI SOUS UNE FEUILLE. Liste blanche
+      d'ecrans (DON_MOMENT_ECRANS) ; z-index 90, sous toutes les feuilles ; et
+      un guet toutes les 0,4 s retire la carte des qu'une feuille, une saisie ou
+      une action s'ouvre apres elle.
+   --------------------------------------------------------------------------- */
+var DON_MOMENT_SEUIL=3;                     // contributions abouties avant la seule demande
+var DON_MOMENT_DELAI=4500;                  // toast de succes (2,5 s) + une respiration
+var DON_MOMENT_REESSAIS=5;                  // puis 5 essais espaces de 3 s, ensuite on renonce
+var DON_MOMENT_VIE=20000;                   // sans geste, la carte se retire d'elle-meme
+var DON_MOMENT_APRES_AVIS=10*60*1000;       // pas dans les 10 min qui suivent la feuille d'avis
+var DON_MOMENT_ECRANS=["s-home","s-profile","s-settings","s-scan"];   // ecrans ou l'on ne contribue pas (voir donMomentEcranOk)
+var DON_MOMENT_GUET=400;                    // carte posee : on verifie toutes les 0,4 s que rien ne l'occupe ni ne la recouvre
+
+function _donLire(k){ try{return localStorage.getItem(k);}catch(e){return null;} }
+function _donEcrire(k,v){ try{localStorage.setItem(k,v);}catch(e){} }
+
+/* Compteur local de contributions abouties. Le miroir en memoire sert quand
+   localStorage leve (Safari prive) : le compte tient au moins la session. */
+function donMomentNb(){
+  var n=parseInt(_donLire("magoDonContribs")||"0",10)||0;
+  return Math.max(n,window._donContribs||0);
+}
+/* Appele par trackStoreContribution, qui n'est atteint qu'APRES les verrous
+   anti-doublon des chemins de contribution. Un meme magasin dans les 30 s est
+   un meme geste (double tap, « deja chez ») : on ne recompte pas. */
+function donMomentCompter(sid){
+  var k=String(sid==null?"":sid),t=Date.now(),d=window._donDernier;
+  if(d&&d.k===k&&t-d.t<30000)return;
+  window._donDernier={k:k,t:t};
+  var n=donMomentNb()+1;
+  window._donContribs=n;
+  _donEcrire("magoDonContribs",String(n));
+  if(n>=DON_MOMENT_SEUIL)donMomentPlanifier(0);
+}
+function donMomentPlanifier(essai){
+  try{ if(window._donTimer)clearTimeout(window._donTimer); }catch(e){}
+  window._donTimer=setTimeout(function(){
+    window._donTimer=null;
+    var r=donMomentPeut();
+    if(r==="oui")donMomentAfficher();
+    else if(r==="attendre"&&essai<DON_MOMENT_REESSAIS)donMomentPlanifier(essai+1);
+  },essai?3000:DON_MOMENT_DELAI);
+}
+/* « non » = definitif (on ne reessaie pas), « attendre » = l'ecran est occupe. */
+function donMomentPeut(){
+  try{
+    if(!donPossible()||donMasque()||donDejaFait())return "non";
+    if(window._donMomentVu||_donLire("magoDonMomentVu")==="1")return "non";
+    if(_donLire("magoDonOuvert")==="1")return "non";          // a deja ouvert la page de don
+    if(donMomentNb()<DON_MOMENT_SEUIL)return "non";
+    if(document.getElementById("don-moment"))return "non";
+    return donMomentCalme()?"oui":"attendre";
+  }catch(e){ return "non"; }
+}
+/* Les ecrans ou la demande a le droit de se poser : ceux ou l'on ne contribue
+   pas. La fiche magasin et la liste de resultats portent les boutons « en
+   stock / rupture », « Ajouter », « Oui / Non » : la carte (150 px, juste
+   au-dessus de la barre) les recouvrait, dont ceux que la personne venait de
+   toucher. Liste blanche plutot que liste noire : un ecran ajoute demain ne
+   recoit pas la demande tant que personne n'a regarde ce qu'il porte en bas.
+   Le scan n'est accepte qu'au repos (carte d'appel) : en resultat il porte
+   « C'est bien ici » et « Scanner un autre ». L'onglet Decouvrir est refuse :
+   la chasse y met « Je l'ai vue en rayon » et « Je sais ou » sur chaque carte,
+   et la carte les recouvrait (mesure a 390x844). Tous les ecrans « on » doivent
+   etre acceptes, car pendant une transition deux le sont un instant. */
+function donMomentEcranOk(){
+  var on=document.querySelectorAll(".screen.on");
+  if(!on.length)return false;
+  for(var i=0;i<on.length;i++){
+    var e=on[i];
+    if(DON_MOMENT_ECRANS.indexOf(e.id)===-1)return false;
+    if(e.id==="s-scan"&&e.getAttribute("data-state")!=="idle")return false;
+  }
+  return true;
+}
+/* Les occupants que l'on connait : une feuille, un voile, une saisie, un geste
+   en cours, un ecran de contribution. Sert deux fois : avant de poser la carte
+   (donMomentCalme) et, une fois posee, pour la retirer des qu'un occupant
+   arrive (donMomentGuetter). Le toast n'en fait pas partie : il dure 2,5 s. */
+function donMomentOccupants(){
+  var b=document.body.classList;
+  if(b.contains("sheet-open")||b.contains("th-on"))return true;
+  if(window._rattachEnCours)return true;
+  if(typeof scanActive!=="undefined"&&scanActive)return true;
+  if(document.querySelector(".claim-ov,.lvup-ov,#feedback-ov,#relecture-sheet,#don-ov,#ios-install-sheet,.msg-full,#map-box.map-fullscreen"))return true;
+  var rm=document.getElementById("report-modal");
+  if(rm&&rm.style.display==="flex")return true;
+  var a=document.activeElement;
+  if(a&&(/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)||a.isContentEditable))return true;
+  var p=document.getElementById("scan-price-input");
+  if(p&&p.offsetParent!==null)return true;                 // la carte « Prix vu ? » du scan est encore la
+  /* La barre « Prix vu ? » de la fiche (doConfirm) n'a pas le focus : elle
+     est inseree sans focus, donc le test du focus ne la voit pas. */
+  var pr=document.querySelectorAll('input[id^="price-input-"]');
+  for(var i=0;i<pr.length;i++){ if(pr[i].offsetParent!==null)return true; }
+  return !donMomentEcranOk();
+}
+/* Rien ne doit occuper l'ecran ni la main : les occupants connus, puis un filet
+   pour les inconnus : l'element au point ou la carte va se poser doit
+   appartenir a l'ecran courant, pas a une feuille ou a un voile. */
+function donMomentCalme(){
+  try{
+    if(document.hidden)return false;
+    var t=document.getElementById("toast");
+    if(t&&t.classList.contains("show"))return false;
+    if(donMomentOccupants())return false;
+    if(window._feedbackLe&&Date.now()-window._feedbackLe<DON_MOMENT_APRES_AVIS)return false;
+    var app=document.getElementById("app");
+    if(!app||!document.querySelector(".screen.on"))return false;
+    var r=app.getBoundingClientRect();
+    var e=document.elementFromPoint(r.left+r.width/2,Math.min(r.bottom,window.innerHeight)-150);
+    if(!e||!e.closest||!e.closest(".screen.on"))return false;
+    return true;
+  }catch(err){ return false; }
+}
+function donMomentAfficher(){
+  /* Le droit est consomme ICI, avant de dessiner : si le rendu leve, la carte
+     ne reviendra pas pour autant. */
+  window._donMomentVu=true;
+  _donEcrire("magoDonMomentVu","1");
+  var app=document.getElementById("app"); if(!app)return;
+  var vieux=document.getElementById("don-moment"); if(vieux&&vieux.parentNode)vieux.parentNode.removeChild(vieux);
+  /* z-index 90 : au-dessus de la barre (50) et des ecrans en geste de retour
+     (55, 60), mais SOUS toute feuille (la plus basse est a 100). Les ecrans ont
+     un transform, donc ce qu'ils contiennent (Leaflet, panneaux) reste sous la
+     carte quel que soit son z-index. A 4500, la carte passait devant la
+     feuille des langues, celle de « Proposer une boisson » et le choix du
+     magasin, et gardait les taps jusqu'a 20 s. */
+  if(!document.getElementById("don-moment-css")){
+    var st=document.createElement("style"); st.id="don-moment-css";
+    st.textContent=
+      "#don-moment{position:absolute;left:14px;right:14px;bottom:calc(104px + env(safe-area-inset-bottom,0px));z-index:90;"+
+        "padding:13px 14px 10px;background:var(--app-bg);color:var(--s1);"+
+        "border:1.5px solid var(--border);border-radius:18px;box-shadow:0 10px 30px rgba(12,10,8,.22);"+
+        "opacity:0;transform:translateY(14px);transition:opacity .28s ease,transform .28s cubic-bezier(.2,.8,.3,1)}"+
+      "#don-moment.in{opacity:1;transform:none}"+
+      "#don-moment button{font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}"+
+      "#don-moment button:focus-visible{outline:2px solid var(--s1);outline-offset:2px}"+
+      "@media (prefers-reduced-motion:reduce){#don-moment{transition:none}}";
+    document.head.appendChild(st);
+  }
+  var el=document.createElement("div");
+  el.id="don-moment";
+  el.setAttribute("role","region");
+  el.setAttribute("aria-label",tr("Soutenir le projet"));
+  el.innerHTML=
+    '<div style="display:flex;align-items:flex-start;gap:11px">'+
+      '<span style="line-height:0;color:var(--don-vert);flex-shrink:0;margin-top:2px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20.5C7 16.5 3.5 13.2 3.5 9.3 3.5 6.6 5.6 4.5 8.2 4.5c1.6 0 3 .8 3.8 2 .8-1.2 2.2-2 3.8-2 2.6 0 4.7 2.1 4.7 4.8 0 3.9-3.5 7.2-8.5 11.2z"/></svg></span>'+
+      '<div id="don-moment-txt" dir="auto" style="flex:1;min-width:0;font-size:12.5px;line-height:1.5;font-weight:600;color:var(--s1)"></div>'+
+    '</div>'+
+    '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;margin-top:6px">'+
+      '<button type="button" id="don-moment-oui" style="min-height:44px;padding:0 15px;border-radius:13px;border:none;background:#0e7a4d;color:#fff;font-size:13px;font-weight:800"></button>'+
+      '<button type="button" id="don-moment-non" style="min-height:44px;padding:0 12px;border-radius:13px;border:none;background:transparent;color:var(--s2);font-size:13px;font-weight:700"></button>'+
+    '</div>';
+  /* Les textes passent par textContent : aucune traduction ne peut casser le HTML. */
+  el.querySelector("#don-moment-txt").textContent=tr("Magofeed est gratuit, et il le restera. Les serveurs ont un coût. Un coup de main aide à les payer.");
+  el.querySelector("#don-moment-oui").textContent=tr("Voir comment aider");
+  var non=el.querySelector("#don-moment-non");
+  non.textContent=tr("Non merci");
+  non.setAttribute("aria-label",tr("Non merci, ne plus me le proposer"));
+  el.querySelector("#don-moment-oui").onclick=donMomentOuvrir;
+  non.onclick=donMomentFermer;
+  el.addEventListener("keydown",function(ev){ if(ev.key==="Escape"||ev.key==="Esc"){ donMomentFermer(); } });
+  /* Toucher la carte, ou y mettre le focus, repousse son retrait : on ne la
+     retire pas sous les doigts de quelqu'un qui la lit. */
+  ["touchstart","mousedown","focusin"].forEach(function(nom){ el.addEventListener(nom,donMomentArmer); });
+  app.appendChild(el);
+  try{playSound("pop");}catch(err){}
+  requestAnimationFrame(function(){ requestAnimationFrame(function(){ el.className="in"; }); });
+  donMomentArmer();
+  donMomentGuetter();
+}
+function donMomentArmer(){
+  if(window._donVie)clearTimeout(window._donVie);
+  window._donVie=setTimeout(function(){
+    window._donVie=null;
+    var el=document.getElementById("don-moment"); if(!el)return;
+    if(el.contains(document.activeElement)){ donMomentArmer(); return; }
+    donMomentRetirer();
+  },DON_MOMENT_VIE);
+}
+/* Quelque chose passe-t-il AU-DESSUS de la carte ? Toute feuille a un z-index
+   superieur au sien : le premier element du point central est alors le sien et
+   non celui de la carte. Le toast est exclu : il passe par-dessus tout, deux
+   secondes, sans rien occuper. */
+function donMomentRecouverte(el){
+  try{
+    if(!document.elementsFromPoint)return false;
+    var r=el.getBoundingClientRect();
+    var pile=document.elementsFromPoint(r.left+r.width/2,r.top+r.height/2);
+    if(!pile||!pile.length)return false;
+    var h=pile[0];
+    if(el.contains(h))return false;
+    return !(h.closest&&h.closest("#toast"));
+  }catch(e){ return false; }
+}
+/* Tant que la carte est la, on regarde toutes les 0,4 s si la personne a ouvert
+   quelque chose depuis (langue, proposition, choix du magasin, photo, saisie,
+   autre ecran). Si oui, la carte part sans conclure : ouvrir une feuille
+   n'appelle pas _showRaw, donc rien d'autre ne la retirerait avant 20 s. */
+function donMomentGuetter(){
+  if(window._donGuet)clearInterval(window._donGuet);
+  window._donGuet=setInterval(function(){
+    var el=document.getElementById("don-moment");
+    if(!el){ clearInterval(window._donGuet); window._donGuet=null; return; }
+    try{ if(donMomentOccupants()||donMomentRecouverte(el))donMomentRetirer(); }catch(e){}
+  },DON_MOMENT_GUET);
+}
+/* Retrait SANS conclusion : navigation, delai ecoule, ouverture de la feuille.
+   Le drapeau « vu » est deja pose, la carte du profil reste. */
+function donMomentRetirer(){
+  if(window._donVie){ clearTimeout(window._donVie); window._donVie=null; }
+  if(window._donGuet){ clearInterval(window._donGuet); window._donGuet=null; }
+  var el=document.getElementById("don-moment"); if(!el)return;
+  el.className="";                        // redescend en fondu, puis part
+  setTimeout(function(){ if(el.parentNode)el.parentNode.removeChild(el); },300);
+}
+/* « Non merci » et Echap : le pacte. Meme geste que la croix du profil. */
+function donMomentFermer(){
+  donMomentRetirer();
+  fermerDonCard();
+}
+function donMomentOuvrir(){
+  donMomentRetirer();
+  openDon("moment");
 }
 
 /* ── LA PASTILLE FLOTTANTE A ETE SUPPRIMEE ───────────────────────────────
@@ -19688,6 +19936,9 @@ function sdSetStock(did,wantStock){
     if(typeof resetWatchTrigger==="function")try{resetWatchTrigger(did,sid);}catch(e){}
     playSound("err");toast("Marqué en rupture");
   }
+  /* Compte pour la demande de soutien (un geste d'aide de plus), mais ni pour
+     les points ni pour la serie. Le meme magasin dans les 30 s = un seul geste. */
+  try{donMomentCompter(sid);}catch(e){}
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
   renderStoreDetail();
 }
