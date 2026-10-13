@@ -421,9 +421,8 @@ try{
           <div class="res-emoji" id="res-emoji" onclick="openDrinkZoom()" role="button" tabindex="0" aria-label="Agrandir la photo" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrinkZoom();}" style="cursor:pointer;position:relative"></div>
           <div style="flex:1">
             <div id="res-sub" style="font-size:12px;color:rgba(255,255,255,.8);font-weight:500"></div>
-            <div id="res-stars" class="res-rate-chip" onclick="openRateSheet()" role="button" tabindex="0" aria-label="Noter cette boisson" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openRateSheet();}"></div>
+            <div id="res-stars" class="res-rate-chip" hidden onclick="openRateSheet()" role="button" tabindex="0" aria-label="Noter cette boisson" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openRateSheet();}"></div>
             <div class="fmt-row" id="res-fmt"></div>
-            <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap" id="res-badges"></div>
           </div>
         </div>
       </div>
@@ -440,8 +439,17 @@ try{
           <button onclick="initGPS()" style="margin-top:4px;padding:8px 18px;border-radius:999px;border:1.5px solid var(--border);background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:600;cursor:pointer;font-family:'Space Grotesk',sans-serif">Activer le GPS</button>
         </div>
       </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px 8px">
+      <!-- « 6 magasins · 6 ouverts » DECRIT LA LISTE, pas la boisson. Ces
+           pastilles vivaient dans l'en-tete, collees sous le nom du produit,
+           melangees a une action (« Donne ton avis ») et a une information
+           (« Canette 50cl ») — trois natures differentes, dessinees pareil.
+           Elles coiffent desormais la liste qu'elles comptent. -->
+      <!-- La reponse se place AVANT le titre de la liste : c'est une reponse,
+           pas un element de liste. -->
+      <div id="drink-reponse"></div>
+      <div style="padding:16px 20px 8px">
         <div class="t-section" id="t-stores">Magasins proches</div>
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap" id="res-badges"></div>
       </div>
       <div id="store-list"></div>
       <div id="rating-panel" style="display:none"></div>
@@ -19001,22 +19009,24 @@ function renderStoreList(){
   var advToggle='<div style="padding:2px 20px 4px;text-align:right"><button onclick="toggleAdvFilters()" class="ghost-btn" style="padding:6px 13px;min-height:32px;font-size:11.5px">Filtres'+(activeCount?' ('+activeCount+')':'')+' '+(advOpen?'\u25B4':'\u25BE')+'</button></div>';
   var advWrap='<div id="store-adv-filters" style="display:'+(advOpen?'block':'none')+'">'+brandBar+budgetBar+'</div>';
   var nearbyMode=window._nearbyFallback&&window._nearbyFallback[curSel.id];
-  var mapCta=stores.length?'<div style="padding:8px 16px 4px"><button onclick="openDrinkMapView()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:13.5px;font-weight:800;cursor:pointer;font-family:inherit">Voir les '+totalStores+' magasin'+(totalStores>1?"s":"")+' sur la carte</button></div>':"";
   var watched=isWatched(curSel.id);
   var alertCta=watched
     ? '<div onclick="toggleWatch(curSel)" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')toggleWatch(curSel)" style="display:inline-block;margin-top:16px;padding:12px 22px;border-radius:999px;background:var(--bg3);border:1.5px solid var(--border);color:var(--s2);font-size:13px;font-weight:800;cursor:pointer">Retirer l\'alerte</div>'
     : '<div onclick="toggleWatch(curSel)" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')toggleWatch(curSel)" aria-label="M\'alerter" style="display:inline-block;margin-top:16px;padding:13px 24px;border-radius:999px;background:#e67e22;color:#fff;border:none;font-size:13.5px;font-weight:800;cursor:pointer;box-shadow:0 6px 18px rgba(230,126,34,.35)">M\'alerter &amp; lancer la chasse </div>';
   // Des magasins listent la boisson, mais aucun n'a de stock CONFIRME ? On
   // propose quand meme l'alerte en haut de liste (sauf si deja activee).
-  var anyStock=allStores.some(function(s){return ((s.confirmations||{})[curSel.id]||0)>0;});
-  var stockBanner=(stores.length&&!watched)?(
-    '<div style="padding:6px 16px 0"><div onclick="toggleWatch(curSel)" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\')toggleWatch(curSel)" aria-label="Activer l\'alerte" style="display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:14px;cursor:pointer;background:'+(anyStock?'var(--bg2);border:1.5px solid var(--border)':'linear-gradient(135deg,#fff3e0,#ffe8cc);border:1.5px solid #f0b840')+'">'+
-      '<span style="font-size:18px"></span>'+
-      '<span style="flex:1;min-width:0;font-size:12px;font-weight:700;line-height:1.35;color:'+(anyStock?'var(--s1)':'#7a4a10')+'">'+(anyStock?'Pr\u00E9viens-moi si le stock change pr\u00E8s de moi':'Aucun stock confirm\u00E9 ici \u2014 active l\'alerte &amp; lance la chasse ')+'</span>'+
-      '<span style="font-size:11px;font-weight:800;color:#e67e22;flex-shrink:0">Activer</span>'+
-    '</div></div>'
-  ):"";
-  el.innerHTML=stores.length?priceBarHTML(_stats)+stockBanner+mapCta+renderSortBar()+advToggle+advWrap:advToggle+advWrap+
+  /* LA BANNIERE ORANGE EST PARTIE. Elle annoncait « Aucun stock confirme ici
+     — active l'alerte », juste sous une carte qui venait d'ecrire « Pas encore
+     confirme ici ». Deux fois la meme phrase, a deux centimetres. L'offre
+     d'alerte vit desormais DANS la carte reponse, la ou la constatation est
+     faite. */
+  /* LA REPONSE EN PREMIER, ET PLUS DE GROS BOUTON « VOIR SUR LA CARTE ».
+     mapCta repetait ce que la carte juste au-dessus montrait deja, et son
+     libelle se cassait au singulier (« Voir les 1 magasin sur la carte »).
+     A sa place : le magasin le plus proche qui l'a, avec « Y aller ». */
+  var rep=document.getElementById("drink-reponse");
+  if(rep)rep.innerHTML=stores.length?drinkReponseHTML(stores):"";
+  el.innerHTML=stores.length?priceBarHTML(_stats)+renderSortBar()+advToggle+advWrap:advToggle+advWrap+
     '<div style="padding:22px 20px 8px;text-align:center">'+
       '<div style="font-size:36px;line-height:1;margin-bottom:8px"></div>'+
       '<div style="font-size:15.5px;font-weight:800;color:var(--s1);margin-bottom:5px">'+(watched?"Alerte activ\u00E9e pour cette boisson":"Personne ne l\'a signal\u00E9e par ici\u2026 pour l\'instant")+'</div>'+
@@ -19133,6 +19143,10 @@ function renderStoreList(){
     if(storeRow)a11yCard(storeRow,s.name+", "+dist+(s.open?", ouvert":", fermé"));
     el.appendChild(div);
   });
+  /* LES OUTILS FERMENT L'ECRAN, apres les magasins. Places plus haut, ils
+     s'inseraient AVANT les cartes : on proposait d'agir sur une liste qu'on
+     n'avait pas encore lue. */
+  el.insertAdjacentHTML("beforeend",drinkOutilsHTML());
 }
 
 /* ============================================================================
@@ -26506,14 +26520,94 @@ function setRec(val){
 /* ================================
    SORT
 ================================ */
+/* ══ LA REPONSE D'ABORD ═══════════════════════════════════════════════════
+   La question que se pose quelqu'un qui ouvre la fiche d'une boisson n'est pas
+   « a quoi ressemble-t-elle » : il la connait, il la cherche. C'est « ou je
+   l'achete, maintenant ». Cette question n'etait repondue nulle part en haut
+   de l'ecran : il fallait depasser une carte de 250 px, une banniere, un gros
+   bouton et sept petits avant d'apercevoir le premier magasin.
+   Cette carte y repond en premier, avec le nom du magasin, la distance et
+   l'heure de fermeture.
+   ELLE NE MENT PAS. Tant que personne n'a confirme le stock sur place, elle le
+   dit en toutes lettres et reste grise ; un magasin qui « devrait » l'avoir
+   n'est jamais presente comme un magasin qui l'a. */
+function drinkReponseHTML(stores){
+  if(!stores||!stores.length||!window.curSel)return "";
+  var sid=curSel.id;
+  var sur=null;
+  for(var i=0;i<stores.length&&!sur;i++){
+    var st=stores[i];
+    var fr=freshnessInfo(st,sid);
+    var perime=!!(fr&&fr.f<=0.4)&&!storeVerifiedFor(st,sid);
+    if((storeVerifiedFor(st,sid)||confBornee(st,sid)>0)&&!perime)sur=st;
+  }
+  var s0=sur||stores[0];
+  var dist=(typeof s0.dist==="number"&&s0.dist>0)
+    ? (s0.dist<1000?Math.round(s0.dist)+" m":(s0.dist/1000).toFixed(1).replace(".",",")+" km")
+    : "";
+  /* openLabel rend « Ouvert », « Sans doute ouvert », « Ferme » ou rien du
+     tout quand les horaires sont inconnus — et rien du tout est la bonne
+     reponse dans ce cas : on n'invente pas une ouverture. */
+  var horaire=openLabel(s0);
+  var etat=sur?tr("En rayon"):tr("Pas encore confirm\u00e9 ici");
+  var vert=!!sur;
+  return '<div style="padding:12px 16px 0">'+
+    '<div style="border:1.5px solid '+(vert?"#16a34a":"var(--border)")+';border-radius:16px;padding:13px 14px;'+
+      'background:'+(vert?"color-mix(in srgb,#16a34a 8%,transparent)":"var(--bg2)")+'">'+
+      '<div style="font-size:10.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:'+(vert?"#16a34a":"var(--s3)")+'">'+
+        (vert?tr("Le plus proche qui l\u2019a"):tr("Le plus proche qui la r\u00e9f\u00e9rence"))+'</div>'+
+      '<div style="font-size:17px;font-weight:800;letter-spacing:-.01em;color:var(--s1);margin:3px 0 1px">'+
+        sanitize(s0.name)+(dist?' \u2014 '+dist:'')+'</div>'+
+      '<div style="font-size:12px;color:var(--s2)">'+etat+(horaire?' \u00b7 '+horaire.toLowerCase():'')+'</div>'+
+      '<button onclick="goToStore('+s0.lat+','+s0.lng+')" style="width:100%;margin-top:11px;padding:13px;border-radius:13px;border:0;'+
+        'background:var(--s1);color:var(--app-bg);font-size:14.5px;font-weight:800;cursor:pointer">'+tr("Y aller")+'</button>'+
+      /* Quand rien n'est confirme, l'offre d'alerte se place ICI, sous le
+         constat qui la motive — et non dans une banniere separee qui repetait
+         la meme phrase deux centimetres plus bas. */
+      ((!vert&&!isWatched(sid))
+        ? '<button onclick="toggleWatch(curSel)" style="width:100%;margin-top:8px;padding:11px;border-radius:13px;'+
+          'border:1.5px solid var(--border);background:transparent;color:var(--s1);font-size:13px;font-weight:700;cursor:pointer">'+
+          tr("Pr\u00e9viens-moi quand quelqu\u2019un l\u2019y voit")+'</button>'
+        : "")+
+    '</div></div>';
+}
+/* ══ LES OUTILS, REGROUPES ET EN BAS ══════════════════════════════════════
+   Quatre actions qui se disputaient la barre de tri, plus celles de l'en-tete.
+   Elles vivent desormais ensemble, en bas, a poids egal entre elles et
+   inferieur a l'action principale. « Partager » n'apparait plus qu'une fois. */
+function drinkOutilsHTML(){
+  if(!window.curSel)return "";
+  var veille=isWatched(curSel.id);
+  function outil(act,label,svg,actif){
+    return '<div onclick="'+act+'" role="button" tabindex="0" aria-label="'+label+'" '+
+      'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+act+'}" '+
+      'style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;padding:10px 4px;cursor:pointer;'+
+      '-webkit-tap-highlight-color:transparent;color:'+(actif?"var(--s1)":"var(--s2)")+';font-size:10.5px;font-weight:700">'+
+      svg+'<span>'+label+'</span></div>';
+  }
+  var I='width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"';
+  return '<div style="display:flex;gap:4px;margin:14px 16px 4px;padding:2px;border-top:1px solid var(--border)">'+
+    outil("drinkLocate()",tr("Je l\u2019ai vue"),'<svg '+I+'><path d="M12 21s-7-4.9-7-10a7 7 0 1 1 14 0c0 5.1-7 10-7 10z"/><circle cx="12" cy="11" r="2.4"/></svg>',false)+
+    outil("toggleWatch(curSel)",tr("Alerte"),'<svg '+I+'><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>',veille)+
+    outil("openRateSheet()",tr("Noter"),'<svg '+I+'><path d="m12 3 2.6 5.6 6 .8-4.4 4.2 1.1 6-5.3-3-5.3 3 1.1-6L3.4 9.4l6-.8z"/></svg>',false)+
+    outil("shareDrink(curSel)",tr("Partager"),'<svg '+I+'><path d="M12 17V5"/><path d="M7 10l5-5 5 5"/><path d="M4 19h16"/></svg>',false)+
+  '</div>';
+}
+window.drinkReponseHTML=drinkReponseHTML;window.drinkOutilsHTML=drinkOutilsHTML;
+
+/* ══ UNE RANGEE NE MELANGE PLUS LES ACTIONS ET LES TRIS ═══════════════════
+   Cette barre portait sept boutons cote a cote : « J'ai vu ca ici », une
+   cloche, un partage, « Carte », puis « Plus proche », « Ouvert d'abord »,
+   « Plus fiable ». Quatre actions et trois tris, dessines pareil, dans une
+   rangee qui debordait de l'ecran a droite — on ne voyait meme pas les
+   derniers. Faire quelque chose et changer l'ordre d'une liste sont deux
+   gestes differents : ils ne peuvent pas se ressembler.
+   La barre ne garde que les tris. Les actions sont regroupees en bas de
+   l'ecran, dans drinkOutilsHTML(). */
 function renderSortBar(){
   var labels={distance:"Plus proche",open:"Ouvert d'abord",trust:"Plus fiable"};
   var isDark=document.body.classList.contains("dark");
   var html='<div style="display:flex;gap:8px;padding:8px 20px 4px;overflow-x:auto;flex-shrink:0">';
-  html+='<div onclick="drinkLocate()" role="button" tabindex="0" aria-label="Dire dans quel magasin tu as vu cette boisson" onkeydown="if(event.key===\'Enter\')drinkLocate()" style="flex-shrink:0;display:flex;align-items:center;gap:5px;padding:0 15px;height:38px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:12.5px;font-weight:800;cursor:pointer;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6-5.7-6-10a6 6 0 0 1 12 0c0 4.3-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg> J\'ai vu ça ici</div>';
-  html+='<div onclick="toggleWatch(curSel)" role="button" tabindex="0" aria-label="Veille sur cette boisson" onkeydown="if(event.key===\'Enter\')toggleWatch(curSel)" style="flex-shrink:0;padding:8px 12px;border-radius:999px;background:'+(isWatched(curSel.id)?"var(--s1)":"var(--bg2)")+';color:'+(isWatched(curSel.id)?"var(--app-bg)":"var(--s1)")+';border:1.5px solid '+(isWatched(curSel.id)?"var(--s1)":"var(--border)")+';font-size:13px;cursor:pointer">'+(isWatched(curSel.id)?'<svg width="16px" height="16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>':'<svg width="16px" height="16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/><line x1="3" y1="3" x2="21" y2="21"/></svg>')+'</div>';
-  html+='<div onclick="shareDrink(curSel)" role="button" tabindex="0" aria-label="Partager cette boisson" onkeydown="if(event.key===\'Enter\')shareDrink(curSel)" style="flex-shrink:0;padding:8px 12px;border-radius:999px;background:var(--bg2);color:var(--s1);border:1.5px solid var(--border);font-size:13px;cursor:pointer"><svg width="16px" height="16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg></div>';
-  html+='<div onclick="openExploreMap({drinkId:curSel.id,name:curSel.name})" role="button" tabindex="0" aria-label="Voir sur la carte" onkeydown="if(event.key===\'Enter\'){openExploreMap({drinkId:curSel.id,name:curSel.name});}" style="flex-shrink:0;padding:8px 14px;border-radius:999px;background:var(--s1);color:var(--app-bg);font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14"/><path d="M15 6v14"/></svg> Carte</div>';
   ["distance","open","trust"].forEach(function(s){
     var a=curSort===s;
     var bg=a?(isDark?"#f0f0f0":"#1a1714"):"var(--bg2)";
