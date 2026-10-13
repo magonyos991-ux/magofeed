@@ -447,6 +447,10 @@ try{
       <!-- La reponse se place AVANT le titre de la liste : c'est une reponse,
            pas un element de liste. -->
       <div id="drink-reponse"></div>
+      <!-- Ce qu'il y a dedans. Vide tant qu'OpenFoodFacts n'a rien a dire :
+           sur deux boissons sur trois, cette zone reste absente, et c'est
+           voulu. -->
+      <div id="drink-nutri"></div>
       <div style="padding:16px 20px 8px">
         <div class="t-section" id="t-stores">Magasins proches</div>
         <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap" id="res-badges"></div>
@@ -12971,6 +12975,35 @@ function pick(d){
   window._storeListExpanded=false;
   // Recherche (une seule fois, mise en cache) de la vraie photo du produit sur OpenFoodFacts
   fetchVerifiedOFFImage(d);
+  /* Sucre et calories, au meme endroit et avec le meme cache. La reponse
+     arrive apres le premier affichage : on redessine alors la zone concernee
+     seulement, pas l'ecran entier. */
+  try{
+    nutriPourBoisson(d,function(){
+      try{
+        if(window.curSel&&String(curSel.id)===String(d.id)){
+          var n=document.getElementById("drink-nutri");
+          if(n)n.innerHTML=nutriHTML(d);
+        }
+      }catch(e){}
+    });
+  }catch(e){}
+  /* LA COULEUR DE LA BOISSON ENTRE DANS L'EN-TETE.
+     Le meme degrade brun coiffait les 4455 fiches : rien ne distinguait un
+     Coca d'un jus de carotte avant d'avoir lu le nom. Chaque fiche porte deja
+     sa couleur (champ color) ; on la pose en variable sur l'ecran, la vignette
+     s'en teinte, et on reconnait la boisson avant de lire.
+     Dose faible (26 %) et volontairement : l'en-tete reste sombre, le texte
+     blanc dessus garde son contraste. On ne colore pas le fond entier, qui
+     rendrait certains titres illisibles sur les boissons claires. */
+  try{
+    var ecr=document.getElementById("s-results");
+    if(ecr){
+      var col=(d&&d.color)||"";
+      ecr.style.setProperty("--teinte",
+        col?("color-mix(in srgb,"+col+" 26%,transparent)"):"rgba(255,255,255,.18)");
+    }
+  }catch(e){}
   // Rafraichir le visuel de fiche (badge loupe si une photo est deja en cache)
   setTimeout(function(){refreshDrinkVisual(d);},80);
   // Un seul bouton admin : les actions sont regroupees dans une feuille (openAdminSheet)
@@ -17170,6 +17203,9 @@ function selectFormat(idx){
       ? '<img src="'+curFormat.img+'" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" onerror="if(this.parentNode)this.outerHTML=\''+curSel.emoji+'\'">'
       : drinkIconHTML(curSel);
   }
+  /* Le sucre d'une bouteille de 1,5 L n'est pas celui d'une canette de 33 cl :
+     changer de format doit redessiner le bloc. */
+  try{ var n=document.getElementById("drink-nutri"); if(n)n.innerHTML=nutriHTML(curSel); }catch(e){}
   playSound("pop");
 }
 function renderResults(){
@@ -19052,6 +19088,8 @@ function renderStoreList(){
   }
   var rep=document.getElementById("drink-reponse");
   if(rep)rep.innerHTML=stores.length?drinkReponseHTML(stores):"";
+  var nut=document.getElementById("drink-nutri");
+  if(nut)nut.innerHTML=nutriHTML(curSel);
   el.innerHTML=stores.length?priceBarHTML(_stats)+renderSortBar()+advToggle+advWrap:advToggle+advWrap+
     '<div style="padding:22px 20px 8px;text-align:center">'+
       '<div style="font-size:36px;line-height:1;margin-bottom:8px"></div>'+
@@ -26772,8 +26810,8 @@ function drinkReponseHTML(stores){
   var horaire=openLabel(s0);
   var etat=sur?tr("En rayon"):tr("Pas encore confirm\u00e9 ici");
   var vert=!!sur;
-  return '<div style="padding:12px 16px 0">'+
-    '<div style="border:1.5px solid '+(vert?"#16a34a":"var(--border)")+';border-radius:16px;padding:13px 14px;'+
+  return '<div style="padding:12px 20px 0">'+
+    '<div style="border:1.5px solid '+(vert?"#16a34a":"var(--border)")+';border-radius:18px;padding:14px 15px;'+
       'background:'+(vert?"color-mix(in srgb,#16a34a 8%,transparent)":"var(--bg2)")+'">'+
       '<div style="font-size:10.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:'+(vert?"#16a34a":"var(--s3)")+'">'+
         (vert?tr("Le plus proche qui l\u2019a"):tr("Le plus proche qui la r\u00e9f\u00e9rence"))+'</div>'+
@@ -26792,6 +26830,131 @@ function drinkReponseHTML(stores){
         : "")+
     '</div></div>';
 }
+/* ══ CE QU'IL Y A DEDANS : SUCRE ET CALORIES ══════════════════════════════
+   Les valeurs viennent d'OpenFoodFacts, via les codes-barres de la fiche.
+   TROIS CHOSES MESUREES AVANT D'ECRIRE CE CODE, sur 70 boissons tirees du
+   catalogue :
+     - sucre et calories : disponibles pour environ UNE BOISSON SUR TROIS ;
+     - cafeine : JAMAIS. Zero sur soixante-dix. Il n'y a donc pas de case
+       cafeine — une case toujours vide est pire qu'une case absente ;
+     - une fiche a souvent plusieurs codes-barres et le premier est parfois
+       muet alors qu'un autre repond : on les essaie jusqu'a cinq.
+   Quand on ne sait pas, on n'affiche RIEN. Pas de tiret, pas de « donnee
+   indisponible » : une section absente ne ment pas et n'encombre pas.
+   LES VALEURS ABERRANTES SONT ECARTEES. OpenFoodFacts est alimente a la main
+   et contient des erreurs : « Schweppes Agrum, 130 kcal/100 ml » est
+   impossible pour un soda (le Coca en fait 42). Au-dela des bornes, on
+   prefere ne rien dire. */
+var _NUTRI_CACHE=null;
+function _nutriCache(){
+  if(_NUTRI_CACHE)return _NUTRI_CACHE;
+  try{_NUTRI_CACHE=JSON.parse(localStorage.getItem("magoNutri")||"{}");}catch(e){_NUTRI_CACHE={};}
+  return _NUTRI_CACHE;
+}
+function _nutriSauver(){
+  try{localStorage.setItem("magoNutri",JSON.stringify(_NUTRI_CACHE||{}));}catch(e){}
+}
+/* Bornes de plausibilite pour une BOISSON, aux 100 ml. */
+function _nutriPlausible(n){
+  var o={};
+  if(typeof n.sucre==="number"&&n.sucre>=0&&n.sucre<=40)o.sucre=n.sucre;
+  if(typeof n.kcal==="number"&&n.kcal>=0&&n.kcal<=100)o.kcal=n.kcal;
+  return (o.sucre!==undefined||o.kcal!==undefined)?o:null;
+}
+/* Cherche les valeurs d'une boisson. Resultat mis en cache 60 jours, y compris
+   l'absence de resultat : sans ca, les deux tiers des fiches relanceraient
+   cinq requetes a chaque ouverture. */
+function nutriPourBoisson(d,suite){
+  if(!d||!d.id)return;
+  var c=_nutriCache(),k=String(d.id),e=c[k];
+  var frais=e&&(Date.now()-(e.t||0)<60*24*3600*1000);
+  if(frais){ if(suite)suite(e.v||null); return; }
+  var codes=(d.barcodes||[]).slice(0,5);
+  if(!codes.length){ c[k]={t:Date.now(),v:null}; _nutriSauver(); if(suite)suite(null); return; }
+  var trouve={},reste=codes.length;
+  function fini(){
+    var v=_nutriPlausible(trouve);
+    c[k]={t:Date.now(),v:v};_nutriSauver();
+    if(suite)suite(v);
+  }
+  codes.forEach(function(code){
+    var url="https://world.openfoodfacts.org/api/v0/product/"+encodeURIComponent(code)+".json";
+    fetch(url).then(function(r){return r.json();}).then(function(j){
+      if(j&&j.status===1&&j.product){
+        var n=j.product.nutriments||{};
+        if(trouve.sucre===undefined&&typeof n["sugars_100g"]==="number")trouve.sucre=n["sugars_100g"];
+        if(trouve.kcal===undefined&&typeof n["energy-kcal_100g"]==="number")trouve.kcal=n["energy-kcal_100g"];
+      }
+    }).catch(function(){}).then(function(){ if(--reste<=0)fini(); });
+  });
+}
+window.nutriPourBoisson=nutriPourBoisson;
+/* Le volume du contenant, en millilitres, quand on le connait.
+   DEUX SOURCES, dans cet ordre. Le format choisi en haut de la fiche d'abord
+   (« Canette 33cl », « Bouteille 1.5L ») : c'est celui que la personne regarde,
+   et « 35 g dans ta canette » est autrement plus parlant que « 10,6 g pour
+   100 ml ». Le champ size ensuite, pour les fiches sans formats.
+   Si on ne sait pas, on reste aux 100 ml : une valeur juste et modeste vaut
+   mieux qu'un calcul sur un volume suppose. */
+function _volumeMl(d){
+  try{
+    if(window.curSel&&String(curSel.id)===String(d&&d.id)&&window.curFormat&&curFormat.cl>0){
+      var mlf=Math.round(curFormat.cl*10);
+      if(mlf>=50&&mlf<=3000)return mlf;
+    }
+  }catch(e){}
+  var t=normTxt((d&&d.size)||"");
+  var m=t.match(/(\d+(?:[.,]\d+)?)\s*(ml|cl|l)\b/);
+  if(!m)return 0;
+  var v=parseFloat(m[1].replace(",","."));
+  if(m[2]==="cl")v*=10; else if(m[2]==="l")v*=1000;
+  return (v>=50&&v<=3000)?Math.round(v):0;
+}
+/* Le bloc affiche. Rien si on ne sait rien. */
+function nutriHTML(d){
+  var c=_nutriCache(),e=c[String(d&&d.id)];
+  var v=e&&e.v;
+  if(!v)return "";
+  var ml=_volumeMl(d);
+  var tuiles=[];
+  if(v.sucre!==undefined){
+    var parPot=ml?(v.sucre*ml/100):null;
+    var g=parPot!==null?parPot:v.sucre;
+    /* Un morceau de sucre pese 4 g : c'est la seule facon de rendre un gramme
+       parlant. Huit morceaux dans une canette se voient ; « 27 g » ne dit
+       rien a personne. */
+    var morceaux=Math.round(g/4);
+    var niveau=(v.sucre<=2.5)?0:(v.sucre<=8?1:2);
+    var coul=["#16a34a","#d97706","#c8321a"][niveau];
+    var fond=["rgba(22,163,74,.10)","rgba(217,119,6,.10)","rgba(200,50,26,.10)"][niveau];
+    var cubes="";
+    for(var i=0;i<Math.min(morceaux,10);i++)
+      cubes+='<span style="width:9px;height:9px;border-radius:2px;background:'+coul+';display:inline-block"></span>';
+    if(morceaux>10)cubes+='<span style="font-size:10px;font-weight:800;color:'+coul+'">+'+(morceaux-10)+'</span>';
+    tuiles.push('<div style="flex:1;min-width:0;border:1px solid var(--border);border-radius:14px;padding:11px 12px;background:'+fond+'">'+
+      '<div style="font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--s3)">'+tr("Sucre")+'</div>'+
+      '<div style="font-size:19px;font-weight:800;color:var(--s1);letter-spacing:-.02em;margin-top:1px">'+
+        (Math.round(g*10)/10).toString().replace(".",",")+' g</div>'+
+      '<div style="font-size:11px;color:var(--s2)">'+(ml?trh("par {v} ml",{v:ml}):tr("pour 100 ml"))+'</div>'+
+      (morceaux>0?'<div style="display:flex;gap:3px;align-items:center;margin-top:7px;flex-wrap:wrap">'+cubes+
+        '<span style="font-size:10.5px;font-weight:700;color:'+coul+';margin-left:3px">'+trh("{n} morceaux",{n:morceaux})+'</span></div>':'')+
+    '</div>');
+  }
+  if(v.kcal!==undefined){
+    var ml2=ml||100;
+    var kc=Math.round(v.kcal*ml2/100);
+    tuiles.push('<div style="flex:1;min-width:0;border:1px solid var(--border);border-radius:18px;padding:12px 13px;background:var(--bg2)">'+
+      '<div style="font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--s3)">'+tr("Calories")+'</div>'+
+      '<div style="font-size:19px;font-weight:800;color:var(--s1);letter-spacing:-.02em;margin-top:1px">'+kc+' kcal</div>'+
+      '<div style="font-size:11px;color:var(--s2)">'+(ml?trh("par {v} ml",{v:ml}):tr("pour 100 ml"))+'</div>'+
+    '</div>');
+  }
+  if(!tuiles.length)return "";
+  return '<div style="padding:6px 20px 0"><div style="display:flex;gap:10px">'+tuiles.join("")+'</div>'+
+    '<div style="font-size:10.5px;color:var(--s3);margin-top:7px">'+tr("Source : OpenFoodFacts")+'</div></div>';
+}
+window.nutriHTML=nutriHTML;
+
 /* ══ L'AFFICHAGE DES ALTERNATIVES ═════════════════════════════════════════
    Une rangee qui defile, une carte par marque. On n'affiche la section que
    s'il y a quelque chose a dire : pas de titre vide, pas de « aucune
@@ -26839,7 +27002,7 @@ function alternativesHTML(d){
     '<div style="padding:0 20px 2px"><div class="t-section">'+tr("Le m\u00eame go\u00fbt, ailleurs")+'</div>'+
       '<div style="font-size:12px;color:var(--s2);margin-top:3px">'+
         trh("Si tu ne la trouves pas : m\u00eame go\u00fbt {g}, une autre marque.",{g:sanitize(lisible.join(", "))})+'</div></div>'+
-    '<div style="display:flex;gap:10px;overflow-x:auto;padding:12px 20px 4px;-webkit-overflow-scrolling:touch">'+cartes+'</div>'+
+    '<div style="display:flex;gap:10px;overflow-x:auto;padding:12px 20px 6px;-webkit-overflow-scrolling:touch">'+cartes+'</div>'+
   '</div>';
 }
 window.alternativesHTML=alternativesHTML;
@@ -26859,7 +27022,7 @@ function drinkOutilsHTML(){
       svg+'<span>'+label+'</span></div>';
   }
   var I='width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"';
-  return '<div style="display:flex;gap:4px;margin:14px 16px 4px;padding:2px;border-top:1px solid var(--border)">'+
+  return '<div style="display:flex;gap:4px;margin:18px 20px 6px;padding:4px 0 0;border-top:1px solid var(--border)">'+
     outil("drinkLocate()",tr("Je l\u2019ai vue"),'<svg '+I+'><path d="M12 21s-7-4.9-7-10a7 7 0 1 1 14 0c0 5.1-7 10-7 10z"/><circle cx="12" cy="11" r="2.4"/></svg>',false)+
     outil("toggleWatch(curSel)",tr("Alerte"),'<svg '+I+'><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>',veille)+
     outil("openRateSheet()",tr("Noter"),'<svg '+I+'><path d="m12 3 2.6 5.6 6 .8-4.4 4.2 1.1 6-5.3-3-5.3 3 1.1-6L3.4 9.4l6-.8z"/></svg>',false)+
