@@ -6383,7 +6383,87 @@ window.fbLoadCommunityData();
    mais elle se lisait comme une fusion valide, et c'est exactement le piege
    dans lequel « Hawai Ananas » est tombee. Le controle du catalogue verifie
    desormais que chaque cible existe. */
-window.DRINK_MERGES = { 11287: 3300,
+window.DRINK_MERGES = {
+  /* Et les trois « sans sucre » : Sugarfree, Sans Sucre et Sugar Free Energy
+     Drink sont le meme mot en deux langues, pas trois recettes. On garde
+     10083, la fiche soignee (note et format renseignes). */
+  16272: 10083,
+  16407: 10083,
+  /* 13/10 — CINQUANTE ET UNE FICHES QUI ETAIENT LE MEME PRODUIT.
+     D'ou elles venaient : la barriere anti-doublons ne savait pas reconnaitre
+     « l'original » d'une marque (voir _motsDeRecette). Six fiches Red Bull
+     designaient la meme canette, quatre Golden Power, trois Crazy Tiger. Un
+     Intermarche proposait 38 Red Bull differents.
+     Comment la liste a ete etablie : la barriere corrigee a regroupe les 4543
+     fiches, ce qui a donne 72 groupes candidats. Chaque groupe a ensuite ete
+     juge par trois verificateurs independants — un sur la recette, un charge
+     de PROUVER que les produits sont differents, un qui se demande si un
+     client serait trompe — avec pour consigne de conclure « differents » au
+     moindre doute. Seuls les 43 groupes unanimes ont ete fusionnes ; les 29
+     autres sont restes separes.
+     Ce que les juges ont sauve : « Delhaize Orange a jus » designe des oranges
+     a presser, pas une boisson. « Actimel Original et Fraise » est un pack
+     panache, pas l'Actimel Fraise. « La Vie Claire Soja nature » est sans
+     sucres ajoutes la ou « Boisson au soja » contient du sirop de ble. Et
+     surtout : « pur jus » et « jus » sont deux denominations legales
+     distinctes, le second pouvant venir d'un concentre — vingt groupes en
+     dependaient, aucun n'a ete fusionne.
+     Verifie par outils/appliquer-fusions : 4543 -> 4492 fiches, 6650 codes-
+     barres avant comme apres, AUCUN perdu, aucune chaine de fusion. Les 50
+     anciens noms sont conserves dans « aka » : qui cherche « Red Bull Energy
+     Drink » trouve toujours. */
+  11072: 10104,
+  16039: 10022,
+  16270: 10,
+  16271: 10096,
+  16274: 10,
+  16279: 11011,
+  16282: 11181,
+  16291: 700,
+  16304: 16284,
+  16312: 10091,
+  16318: 10096,
+  16322: 10091,
+  16339: 11360,
+  16341: 10,
+  16350: 10091,
+  16356: 11362,
+  16364: 10083,
+  16365: 10,
+  16366: 10,
+  16367: 10084,
+  16379: 14918,
+  16380: 14909,
+  16429: 14906,
+  16430: 11444,
+  16431: 14911,
+  16440: 600,
+  16518: 16479,
+  16530: 16598,
+  16537: 16536,
+  16548: 16507,
+  16575: 16564,
+  16581: 16574,
+  16596: 16592,
+  16696: 16719,
+  17142: 17479,
+  17173: 16807,
+  17197: 17027,
+  17359: 17075,
+  17647: 17623,
+  17754: 17752,
+  17764: 17797,
+  17765: 1,
+  17791: 17785,
+  17813: 1,
+  17814: 17914,
+  17819: 17793,
+  17824: 6,
+  17844: 101,
+  17855: 17808,
+  17888: 11367,
+  17918: 17919,
+  11287: 3300,
   /* 02/10 — vingt-trois fiches qui etaient le MEME produit ecrit de deux
      facons. Soit la version anglaise face a la francaise (« Fanta Strawberry »
      et « Fanta Fraise », « Gini Lemon » et « Gini Citron »), soit le nom nu
@@ -11848,7 +11928,24 @@ function formesFiche(d){
   /* Le volume aussi : « coca 33cl », « red bull 25cl » ne trouvaient rien,
      alors que la fiche le porte dans son champ size. */
   var vol=normTxt(d.size||"").replace(/\s+/g,"");
-  var plat=(nom+" "+mq+" "+cat+" "+vol).replace(/[^a-z0-9]+/g," ");
+  /* LES ANCIENS NOMS ETAIENT CONSERVES MAIS INTROUVABLES.
+     Quand deux fiches fusionnent, le nom de celle qui disparait est range dans
+     « aka » precisement pour que la recherche continue de le trouver. Sauf que
+     le texte fouille se limitait au nom, a la marque, a la categorie et au
+     volume : « aka » n'y entrait pas. Mesure apres la fusion des 53 doublons :
+     chercher « red bull boisson energisante » ne rendait PLUS RIEN, alors que
+     ce nom etait bien enregistre sur la fiche Red Bull Original. La promesse
+     faite a l'utilisateur — « on ne perd jamais le nom que tu connaissais » —
+     etait donc fausse en pratique.
+     Les anciens noms entrent dans le CADRE (le texte large, qui sert a
+     retrouver) et pas dans « nom » : ils ne doivent pas peser sur le score du
+     nom exact, sinon un ancien nom pourrait passer devant le vrai. */
+  var akas="";
+  try{
+    var liste=(typeof aliasDe==="function")?aliasDe(d):(d.aka||[]);
+    if(liste&&liste.length)akas=" "+canonSaveurs(normTxt(liste.join(" ")));
+  }catch(e){}
+  var plat=(nom+" "+mq+" "+cat+" "+vol+akas).replace(/[^a-z0-9]+/g," ");
   /* La forme BRUTE, sans synonymes ni canonisation : elle sert a departager.
      « Red Bull Zero » et « Red Bull Sugarfree » se ramenent au meme texte une
      fois « sugar free » devenu « zero », donc au meme score, et l'egalite se
@@ -13011,6 +13108,32 @@ var _MOTS_SANS_RECETTE={edition:1,editions:1,canette:1,bouteille:1,
    bien, mais « ml » restait et devenait le mot de recette de la fiche. Elle ne
    pouvait donc ressembler a aucune autre. */
 var _UNITES_SEULES=/^(ml|cl|dl|l|lt|litre|litres|g|kg|oz|fl|pcs|pc|pk)$/;
+/* CE QUI EST FACULTATIF POUR CHERCHER NE L'EST PAS POUR IDENTIFIER.
+   MOTS_FACULTATIFS sert au classement de la recherche : y figurer veut dire
+   « ce mot ne doit pas faire rater un resultat ». Pour decider si deux fiches
+   sont le MEME produit, c'est une autre question, et deux de ces mots s'y
+   revelent faux :
+
+   « pur » — « pur jus » et « jus » sont deux denominations legales
+   distinctes : le second peut etre reconstitue a partir de concentre. Vingt
+   groupes du catalogue en dependent (Marque Repere, Solevita, Belle France,
+   Eco+, Carrefour, Pressade, Rea, La Vie Claire...), et trois verificateurs
+   independants ont conclu « produits differents » sur chacun. Les fusionner
+   aurait fait croire a du pur jus a qui achete du jus de concentre.
+
+   « nature » — tolerable sur une eau (Volvic Nature est l'eau plate), faux
+   ailleurs : « La Vie Claire Soja nature » est sans sucres ajoutes tandis que
+   « Boisson au soja » contient du sirop de ble. Le cas de l'eau se traite au
+   cas par cas dans la table de fusions, pas par une regle generale.
+
+   On garde donc MOTS_FACULTATIFS intact pour la recherche, et on retire ces
+   mots de la seule identification. */
+var _MOTS_PAS_IDENTIFIANTS=(function(){
+  var o={},k;
+  for(k in MOTS_FACULTATIFS)if(Object.prototype.hasOwnProperty.call(MOTS_FACULTATIFS,k))o[k]=1;
+  ["pur","pure","nature","naturel","naturelle","natural"].forEach(function(m){delete o[m];});
+  return o;
+})();
 /* MOTS QUI DISENT LA CATEGORIE, PAS LA RECETTE — et seulement dans leur
    categorie. Pour une boisson deja classee Energy, « energy » et
    « energisante » ne distinguent rien : toutes le sont. Pour un soda, au
@@ -13041,7 +13164,18 @@ function _motsDeRecette(nom,marque,cat){
        « Joker Le Pur Jus Multifruits »    et « Joker Le Pur Jus -30% Multifruits »
      donnaient tous la meme recette. On le transforme donc en un seul jeton
      (« pct3.5 ») avant tout nettoyage. */
+  /* « SANS SUCRE » ET « SUGARFREE » SONT LE MEME MOT, PAS LA MEME RECETTE
+     QUE « ZERO ».
+     Le commentaire ci-dessus explique pourquoi canonSaveurs n'est pas
+     appliquee ici : elle ramene « sans sucre », « sugar free » ET « zero » a
+     un seul mot, alors que chez Red Bull Sugarfree et Zero sont deux recettes.
+     Mais entre « Red Bull Sugarfree », « Red Bull Sans Sucre » et « Red Bull
+     Sugar Free Energy Drink », il n'y a aucune difference de recette : c'est
+     la meme canette ecrite en anglais et en francais, et elle occupait trois
+     lignes du catalogue. On traduit donc la seule famille « sans sucre », en
+     laissant « zero » et « light » strictement intacts. */
   var brut=normTxt(nom||"")
+    .replace(/\b(?:sugar\s*free|sugarfree|sans\s*sucres?|suikervrij|zonder\s*suiker|senza\s*zucchero|sin\s*azucar|ohne\s*zucker)\b/g," sanssucre ")
     .replace(/(\d+(?:[.,]\d+)?)\s*%/g,function(m,x){return " pct"+x.replace(",",".")+" ";})
     .replace(/\b\d+(?:[.,]\d+)?\s*(?:cl|ml|dl|l|lt|litres?|g|kg|oz|pcs?|pk)\b/g," ")
     /* UNE ABREVIATION EN DEUX LETTRES SEPAREES PAR UNE BARRE EST UN MOT.
@@ -13070,7 +13204,7 @@ function _motsDeRecette(nom,marque,cat){
   t.split(" ").forEach(function(w){
     if(!w||w.length<2)return;
     if(mq.indexOf(w)!==-1)return;                 /* la marque n'est pas une recette */
-    if(MOTS_FACULTATIFS[w])return;                /* original, classique, nature... */
+    if(_MOTS_PAS_IDENTIFIANTS[w])return;          /* original, classique... */
     if(_MOTS_SANS_RECETTE[w])return;              /* edition, saveur... */
     if(catMots&&catMots[w])return;                /* energy pour une Energy... */
     if(/^pct/.test(w))return void(out[w]=1);           /* pourcentage : garde */
