@@ -13052,8 +13052,18 @@ function _motsDeRecette(nom,marque,cat){
        On les recolle avant tout decoupage. */
     .replace(/\b([a-z])\s*\/\s*([a-z])\b/g,"$1$2")
     .replace(/[^a-z0-9.]+/g," ");
-  /* « red edition », « pink edition »... : l'habillage, pas la recette. */
-  var t=brut.replace(/\b([a-z]+) +editions?\b/g,function(m,c){return _CLE_COULEUR[c]?" ":m;});
+  /* « red edition », « pink edition »... : l'habillage, pas la recette —
+     SAUF quand il ne reste que lui. « Red Bull Pink Edition » n'a pas d'autre
+     mot : si on retire « pink edition », la fiche se reduit a rien, et la
+     regle du produit phare la ferait avaler par « Red Bull Original ». Or la
+     Pink Edition est une vraie canette, differente. Quand la couleur est tout
+     ce qu'on avait, elle redevient donc la recette. */
+  var _couleurOtee="";
+  var t=brut.replace(/\b([a-z]+) +editions?\b/g,function(m,c){
+    if(!_CLE_COULEUR[c])return m;
+    _couleurOtee=_couleurOtee||c;
+    return " ";
+  });
   var mq=normTxt(marque||"").replace(/[^a-z0-9]+/g," ").split(" ").filter(Boolean);
   var catMots=_MOTS_DE_CATEGORIE[cat||""]||null;
   var out={};
@@ -13070,7 +13080,9 @@ function _motsDeRecette(nom,marque,cat){
     if(_UNITES_SEULES.test(w))return;             /* « ml » orphelin */
     out[w]=1;
   });
-  return Object.keys(out).sort().join(" ");
+  var cles=Object.keys(out).sort();
+  if(!cles.length&&_couleurOtee)return _couleurOtee;   /* « Pink Edition » = pink */
+  return cles.join(" ");
 }
 window._motsDeRecette=_motsDeRecette;
 /* ══ UN NOM ABSORBE NE DOIT PAS DISPARAITRE ════════════════════════════

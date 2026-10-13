@@ -39,6 +39,17 @@ const PAIRES=[
  ["Vimto","Exotique","Vimto Original","Energy","Vimto Energy",false],
  ["U","Jus","Pur jus d'orange a/p flash pasteurisé","Jus","Pur jus d'orange s/p flash pasteurisé",false],
  ["Lipton","Ice Tea","Lipton Ice tea peach","Ice Tea","Lipton Ice tea peach zero sugar",false],
+ ["Red Bull","Energy","Red Bull Original","Energy","Red Bull Pink Edition",false],
+ ["Red Bull","Energy","Red Bull Pink Edition","Energy","Red Bull Blue Edition Myrtille",false],
+ /* AUCUNE REGLE ne peut savoir que la Pink Edition EST celle aux fruits des
+    bois : c'est une connaissance produit. La separation est donc le bon
+    comportement du code ; le rapprochement, s'il a lieu, passera par la liste
+    de fusions jugee a la main. */
+ ["Red Bull","Energy","Red Bull Pink Edition","Energy","Red Bull Pink Edition Fruits des Bois",false],
+ ["Red Bull","Energy","Red Bull Yellow Edition Tropical","Energy","Red Bull Tropical",true],
+ ["Red Bull","Energy","Red Bull Winter Edition","Energy","Red Bull Winter",true],
+ ["Volvic","Eau","Volvic","Eau","Volvic Nature",true],
+ ["Coca-Cola","Soda","Coca-Cola Zéro","Soda","Coca-Cola Original",false],
 ];
 let ko=0;
 console.log("  FUSIONNENT-ELLES ? (meme marque + meme recette + meme categorie)\n");
