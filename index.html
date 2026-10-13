@@ -6738,6 +6738,10 @@ window.appliquerFusionsAuPerso=appliquerFusionsAuPerso;
 
 </script>
 <script src="data/drinks.js"></script>
+<!-- Sucre et calories des 3801 boissons renseignees, recoltes une fois sur
+     OpenFoodFacts et figes. 55 Ko charges avec le catalogue, contre jusqu'a
+     cinq requetes reseau par fiche ouverte — et ca marche hors connexion. -->
+<script src="data/nutrition.js"></script>
 <script src="data/enseignes.js"></script>
 <script>
 /* Les fusions ci-dessus sont connues des maintenant : on les applique tout de
@@ -26896,6 +26900,8 @@ function _nutriPlausible(n){
    cinq requetes a chaque ouverture. */
 function nutriPourBoisson(d,suite){
   if(!d||!d.id)return;
+  /* Deja dans la table livree avec l'app : aucune requete a faire. */
+  try{ if((window.NUTRI||{})[d.id]){ if(suite)suite(nutriDe(d)); return; } }catch(e){}
   var c=_nutriCache(),k=String(d.id),e=c[k];
   var frais=e&&(Date.now()-(e.t||0)<60*24*3600*1000);
   if(frais){ if(suite)suite(e.v||null); return; }
@@ -26941,9 +26947,28 @@ function _volumeMl(d){
   return (v>=50&&v<=3000)?Math.round(v):0;
 }
 /* Le bloc affiche. Rien si on ne sait rien. */
+/* Les valeurs d'une boisson : la table locale d'abord, le reseau ensuite.
+   data/nutrition.js couvre 3801 des 4455 fiches, recoltees une fois pour
+   toutes. Le cache reseau ne sert plus qu'aux boissons arrivees depuis — une
+   fiche creee par un scan, par exemple — et aux 207 fiches sans code-barres,
+   pour lesquelles il n'y a de toute facon rien a chercher. */
+function nutriDe(d){
+  if(!d||!d.id)return null;
+  try{
+    var t=(window.NUTRI||{})[d.id];
+    if(t){
+      var o={};
+      if(typeof t[0]==="number")o.sucre=t[0];
+      if(typeof t[1]==="number")o.kcal=t[1];
+      if(o.sucre!==undefined||o.kcal!==undefined)return o;
+    }
+  }catch(e){}
+  var c=_nutriCache(),e2=c[String(d.id)];
+  return (e2&&e2.v)||null;
+}
+window.nutriDe=nutriDe;
 function nutriHTML(d){
-  var c=_nutriCache(),e=c[String(d&&d.id)];
-  var v=e&&e.v;
+  var v=nutriDe(d);
   if(!v)return "";
   var ml=_volumeMl(d);
   var tuiles=[];
