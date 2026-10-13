@@ -13288,8 +13288,30 @@ function mergeCatalog(rows){
       _garderAncienNom(jumelle,r.name);
       return;
     }
-    var exists=DRINKS.some(function(d){return d.id===rid||nameKey(d.name)===nn;});
-    if(exists)return;
+    /* MEME NOM DEJA CONNU : ON PREND QUAND MEME SON CODE-BARRES.
+       Avant, on s'arretait ici sans rien faire. Consequence : une boisson deja
+       au catalogue qui revenait du serveur avec un code-barres INEDIT — un EAN
+       d'un autre pays, un nouveau conditionnement, une refonte d'etiquette —
+       perdait purement ce code. La canette restait inscannable sous ce code,
+       pour toujours, alors que la fiche existait a deux lignes de la.
+       C'est l'exact contraire de ce qu'on veut : plusieurs codes-barres qui
+       designent la meme boisson doivent se retrouver REUNIS sur une seule
+       fiche, pas se perdre. */
+    var memeNom=null;
+    for(var iE=0;iE<DRINKS.length&&!memeNom;iE++){
+      var de=DRINKS[iE];
+      if(de.id===rid||nameKey(de.name)===nn)memeNom=de;
+    }
+    if(memeNom){
+      if(!memeNom.barcodes)memeNom.barcodes=[];
+      (r.barcodes||[]).forEach(function(c){
+        if(c&&indexCode(memeNom.barcodes,c)===-1){
+          memeNom.barcodes.push(String(c));
+          var k2=codeNu(c); if(k2)_codesConnus[k2]=memeNom;
+        }
+      });
+      return;
+    }
     /* Meme marque, memes mots de recette : c'est la meme canette ecrite
        autrement. On absorbe ses codes dans la fiche qui existe, et on
        n'ajoute pas de seconde ligne. */
