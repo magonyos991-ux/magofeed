@@ -12982,7 +12982,7 @@ function pick(d){
     var titleEl=document.getElementById("res-title");if(titleEl)titleEl.textContent=d.name;
     var emojiEl=document.getElementById("res-emoji");if(emojiEl)emojiEl.innerHTML=drinkIconHTML(d);
     var subEl=document.getElementById("res-sub");if(subEl)subEl.textContent=d.brand+" · "+d.cat;
-    var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent=starsLabel(d);
+    var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent=noteEnTete(d);
     var favElSkel=document.getElementById("res-fav");if(favElSkel)favElSkel.innerHTML=heartSVG(favorites.indexOf(d.id)!==-1,22);
     var listEl=document.getElementById("store-list");if(listEl)listEl.innerHTML=storeSkeletonHTML();
     show("results");
@@ -17177,7 +17177,7 @@ function renderResults(){
   document.getElementById("res-title").textContent=curSel.name;
   document.getElementById("res-emoji").innerHTML=drinkIconHTML(curSel);
   document.getElementById("res-sub").textContent=curSel.brand+" · "+curSel.cat;
-  document.getElementById("res-stars").textContent=starsLabel(curSel);
+  document.getElementById("res-stars").textContent=noteEnTete(curSel);
   var favEl=document.getElementById("res-fav");if(favEl)favEl.innerHTML=heartSVG(favorites.indexOf(curSel.id)!==-1,22);
   renderFormats(curSel);
   renderMap();renderStoreList();renderStarPanel();
@@ -26260,6 +26260,18 @@ function realAgg(d){
   return(a&&a.count>0)?a:null;
 }
 function starSuffix(d){var a=realAgg(d);return a?" · ★ "+d.stars:"";}
+/* LA LIGNE DE NOTE DE L'EN-TETE : la vraie note, ou rien.
+   starsLabel rend « Donne ton avis » quand personne n'a encore vote — utile sur
+   un bouton, absurde sur une ligne d'information : une invitation a agir
+   s'etait retrouvee en texte nu entre la marque et le format, sans ressembler
+   a un bouton ni a un renseignement. L'invitation existe deja en bas, dans
+   l'outil « Noter ». Ici, tant qu'aucun avis reel n'existe, on n'ecrit rien,
+   et la regle .res-note-ligne:empty fait disparaitre la ligne. */
+function noteEnTete(d){
+  var a=realAgg(d);
+  return a?("\u2605 "+d.stars+" \u00b7 "+a.count+" avis"):"";
+}
+window.noteEnTete=noteEnTete;
 function starsLabel(d){
   if(!d)return "";
   var a=realAgg(d);
@@ -26371,7 +26383,7 @@ function setRating(val){
   updateProfileStats();playSound("pop");
   renderStarPanel();
   try{var _rs=document.getElementById("rate-sheet");if(_rs&&_rs.style.display!=="none")renderRateSheet();}catch(e){}
-  var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent=starsLabel(curSel);
+  var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent=noteEnTete(curSel);
   if(!prev&&window.fbAddRating)window.fbAddRating(curSel.id,val);
 }
 /* ══ CE QUE LES GENS RECOMMANDENT ══════════════════════════════════════
@@ -31869,7 +31881,7 @@ try{
       if(a && a.count>0) d.stars=Math.round((a.sum/a.count)*10)/10;
     });
     renderTrends();
-    if(curSel){var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent=starsLabel(curSel);}
+    if(curSel){var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent=noteEnTete(curSel);}
   });
   window.addEventListener("fbDrinkRecsLoaded", function(e) {
     drinkRecsAgg=e.detail||{};
