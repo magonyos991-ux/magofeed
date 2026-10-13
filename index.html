@@ -450,6 +450,10 @@ try{
       <div style="padding:16px 20px 8px">
         <div class="t-section" id="t-stores">Magasins proches</div>
         <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap" id="res-badges"></div>
+        <!-- Combien de gens la cherchent. Vide tant que le seuil n'est pas
+             atteint : « 0 personne l'a cherchee » ne renseigne personne et
+             donne l'impression d'une application deserte. -->
+        <div id="res-demande" style="font-size:12px;color:var(--s2);margin-top:6px"></div>
       </div>
       <div id="store-list"></div>
       <div id="rating-panel" style="display:none"></div>
@@ -6326,6 +6330,15 @@ window.fbLoadCommunityData = async function() {
     var ratingsSnap = await getDoc(doc(db, "stats", "drinkRatings"));
     window.dispatchEvent(new CustomEvent("fbDrinkRatingsLoaded", { detail: ratingsSnap.exists() ? ratingsSnap.data() : {} }));
   } catch (e) { console.warn("Firestore drink ratings load error:", e); }
+
+  /* Combien de personnes ont cherche chaque boisson sur 30 jours. Un seul
+     document, deja public (stats/{id} est en lecture libre) : une lecture par
+     session, pas une par fiche. Il est fabrique chaque nuit par la fonction
+     agregerDemande, qui n'y ecrit QUE les boissons atteignant le seuil. */
+  try {
+    var demSnap = await getDoc(doc(db, "stats", "drinkDemand"));
+    window.dispatchEvent(new CustomEvent("fbDrinkDemandLoaded", { detail: demSnap.exists() ? demSnap.data() : {} }));
+  } catch (e) { console.warn("Firestore drink demand load error:", e); }
 
   try {
     var recsSnap = await getDoc(doc(db, "stats", "drinkRecs"));
@@ -19024,6 +19037,19 @@ function renderStoreList(){
      mapCta repetait ce que la carte juste au-dessus montrait deja, et son
      libelle se cassait au singulier (« Voir les 1 magasin sur la carte »).
      A sa place : le magasin le plus proche qui l'a, avec « Y aller ». */
+  /* COMBIEN DE GENS LA CHERCHENT — et rien du tout en dessous du seuil.
+     Le serveur n'ecrit dans l'agregat que les boissons atteignant 5 personnes
+     sur 30 jours, donc l'absence de chiffre ici veut dire « pas encore assez
+     de monde », jamais « zero ». C'est le choix du fondateur : un compteur qui
+     affiche « 0 personne l'a cherchee » sur presque chaque fiche ne renseigne
+     personne et fait croire a une application deserte. Le chiffre apparaitra
+     tout seul, boisson par boisson, a mesure que les gens viennent. */
+  var dem=document.getElementById("res-demande");
+  if(dem){
+    var n=(window.drinkDemandAgg||{})[curSel.id];
+    n=(typeof n==="number")?n:(n&&n.n);
+    dem.textContent=(n>=5)?trh("{n} personnes l\u2019ont cherch\u00e9e ce mois-ci",{n:n}):"";
+  }
   var rep=document.getElementById("drink-reponse");
   if(rep)rep.innerHTML=stores.length?drinkReponseHTML(stores):"";
   el.innerHTML=stores.length?priceBarHTML(_stats)+renderSortBar()+advToggle+advWrap:advToggle+advWrap+
@@ -31830,6 +31856,10 @@ try{
     scanCountsGlobal=e.detail||{};
     renderTopScanned();
     try{ renderTrends(); }catch(err){}
+  });
+  window.addEventListener("fbDrinkDemandLoaded", function(e) {
+    window.drinkDemandAgg=e.detail||{};
+    try{ if(curSel)renderStoreList(); }catch(err){}
   });
   window.addEventListener("fbDrinkRatingsLoaded", function(e) {
     var agg=e.detail||{};
