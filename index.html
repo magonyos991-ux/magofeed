@@ -12378,7 +12378,11 @@ var MOTS_FACULTATIFS={original:1,originale:1,classic:1,classique:1,nouveau:1,nou
   et:1,and:1,en:1,avec:1,with:1,"de":1,"du":1,"la":1,"le":1,"les":1,"au":1,"aux":1,"a":1,
   nature:1,
   edition:1,saveur:1,saveurs:1,gout:1,flavour:1,flavor:1,taste:1,boisson:1,drink:1,
-  bouteille:1,canette:1,bottle:1,can:1,pack:1,pur:1,pure:1,naturel:1,naturelle:1,natural:1};
+  bouteille:1,canette:1,bottle:1,can:1,pack:1,pur:1,pure:1,naturel:1,naturelle:1,natural:1,
+  /* FORMAT, PAS RECETTE. « Red Bull grande Energy Drink » decrivait un
+     contenant ; « grande » devenait un mot de recette et faisait naitre une
+     fiche de plus a cote de « Red Bull Original ». */
+  grande:1,grand:1,petite:1,petit:1,format:1,regular:1,standard:1,originel:1,classico:1};
 /* `pret` : le texte DEJA normalise et canonise, pour les appels qui en ont un
    sous la main. Sans lui, chaque fiche refaisait minuscules + accents + les
    dix-huit reecritures de canonSaveurs a CHAQUE lettre tapee, alors que le
@@ -13001,7 +13005,21 @@ function _grapheCommunautaire(nom,marque){
    perdue. Le doute profite toujours a la separation. */
 var _MOTS_SANS_RECETTE={edition:1,editions:1,canette:1,bouteille:1,
   taste:1,flavour:1,flavor:1,goout:1,gout:1,saveur:1,saveurs:1};
-function _motsDeRecette(nom,marque){
+/* UNE UNITE TOUTE SEULE N'EST PAS UNE RECETTE.
+   Le filtre des tailles exigeait le chiffre colle a l'unite (« 355ml »).
+   Dans « Red Bull Original (355 ml) » les deux sont separes : « 355 » tombait
+   bien, mais « ml » restait et devenait le mot de recette de la fiche. Elle ne
+   pouvait donc ressembler a aucune autre. */
+var _UNITES_SEULES=/^(ml|cl|dl|l|lt|litre|litres|g|kg|oz|fl|pcs|pc|pk)$/;
+/* MOTS QUI DISENT LA CATEGORIE, PAS LA RECETTE — et seulement dans leur
+   categorie. Pour une boisson deja classee Energy, « energy » et
+   « energisante » ne distinguent rien : toutes le sont. Pour un soda, au
+   contraire, « Coca-Cola Energy » est un produit bien reel, different du
+   Coca-Cola Original ; le mot doit alors etre conserve. D'ou le fait que ce
+   menage depende de la categorie de la fiche, et d'elle seule. */
+var _MOTS_DE_CATEGORIE={Energy:{energy:1,energie:1,energisante:1,energisant:1,
+  energizing:1,energydrink:1}};
+function _motsDeRecette(nom,marque,cat){
   /* PAS DE canonSaveurs ICI, et c'est deliberé. Elle ramene « sans sucre »,
      « sugar free » et « zero » a un seul mot — ce qui est juste pour CHERCHER
      et faux pour IDENTIFIER : chez Red Bull, Sugarfree et Zero sont deux
@@ -13009,17 +13027,47 @@ function _motsDeRecette(nom,marque){
      donc les mots tels qu'ils sont ecrits. On rate ainsi quelques vrais
      doublons (« Ice Tea Peche » et « The glace saveur peche ») ; c'est le bon
      cote de l'erreur. */
-  var brut=normTxt(nom||"").replace(/[^a-z0-9]+/g," ");
+  /* LES TAILLES PARTENT D'ABORD, AVEC LEUR CHIFFRE.
+     L'ancien filtre jetait tout nombre nu, unite ou pas. « Irn-Bru 1901 » se
+     reduisait donc a rien, exactement comme « Irn-Bru Original » — et 1901,
+     qui est une recette bien reelle, allait etre avalee par l'original.
+     On retire donc le motif complet « nombre + unite » AVANT de decouper, et
+     seuls les restes courts (1 a 3 chiffres, debris de taille) tombent
+     ensuite. Un nombre de 4 chiffres ou plus est un nom de produit. */
+  /* UN POURCENTAGE N'EST JAMAIS DU BRUIT, et il doit survivre au passage qui
+     supprime la ponctuation — sinon le « % » tombe, le nombre ressemble a une
+     taille et deux produits differents deviennent identiques :
+       « Alpro Not Milk 3,5 % »            et « Alpro Not Milk 1,8 % »
+       « Joker Le Pur Jus Multifruits »    et « Joker Le Pur Jus -30% Multifruits »
+     donnaient tous la meme recette. On le transforme donc en un seul jeton
+     (« pct3.5 ») avant tout nettoyage. */
+  var brut=normTxt(nom||"")
+    .replace(/(\d+(?:[.,]\d+)?)\s*%/g,function(m,x){return " pct"+x.replace(",",".")+" ";})
+    .replace(/\b\d+(?:[.,]\d+)?\s*(?:cl|ml|dl|l|lt|litres?|g|kg|oz|pcs?|pk)\b/g," ")
+    /* UNE ABREVIATION EN DEUX LETTRES SEPAREES PAR UNE BARRE EST UN MOT.
+       Chez U, « Pur jus d'orange a/p » et « s/p » sont AVEC PULPE et SANS
+       PULPE : deux produits distincts, cote a cote en rayon. Decoupees, ces
+       lettres faisaient chacune un jeton d'un seul caractere, elimine par la
+       regle « moins de 2 lettres », et les deux fiches devenaient identiques.
+       On les recolle avant tout decoupage. */
+    .replace(/\b([a-z])\s*\/\s*([a-z])\b/g,"$1$2")
+    .replace(/[^a-z0-9.]+/g," ");
   /* « red edition », « pink edition »... : l'habillage, pas la recette. */
   var t=brut.replace(/\b([a-z]+) +editions?\b/g,function(m,c){return _CLE_COULEUR[c]?" ":m;});
   var mq=normTxt(marque||"").replace(/[^a-z0-9]+/g," ").split(" ").filter(Boolean);
+  var catMots=_MOTS_DE_CATEGORIE[cat||""]||null;
   var out={};
   t.split(" ").forEach(function(w){
     if(!w||w.length<2)return;
     if(mq.indexOf(w)!==-1)return;                 /* la marque n'est pas une recette */
     if(MOTS_FACULTATIFS[w])return;                /* original, classique, nature... */
     if(_MOTS_SANS_RECETTE[w])return;              /* edition, saveur... */
-    if(/^[0-9]+(cl|ml|l|g|kg|pk|x)?$/.test(w))return;
+    if(catMots&&catMots[w])return;                /* energy pour une Energy... */
+    if(/^pct/.test(w))return void(out[w]=1);           /* pourcentage : garde */
+    if(/^[0-9]+(cl|ml|l|g|kg|pk|x)$/.test(w))return;   /* 355ml colle */
+    if(/^[0-9]{1,3}(\.[0-9]+)?$/.test(w))return;      /* debris de taille */
+    if(w.indexOf(".")!==-1&&/^[0-9.]+$/.test(w))return;
+    if(_UNITES_SEULES.test(w))return;             /* « ml » orphelin */
     out[w]=1;
   });
   return Object.keys(out).sort().join(" ");
@@ -13100,14 +13148,42 @@ function mergeCatalog(rows){
        autrement. On absorbe ses codes dans la fiche qui existe, et on
        n'ajoute pas de seconde ligne. */
     var gr=_grapheCommunautaire(nomPropre(String(r.name)),nomPropre(String(r.brand||"")));
-    var recette=_motsDeRecette(gr.nom,gr.marque),mqR=normTxt(gr.marque||"");
-    if(mqR&&recette){   /* rien d'identifiable : on ne fusionne pas */
+    var catR=String(r.cat||"");
+    var recette=_motsDeRecette(gr.nom,gr.marque,catR),mqR=normTxt(gr.marque||"");
+    /* ══ « L'ORIGINAL » EST LE SEUL PRODUIT QUE CETTE BARRIERE NE SAVAIT PAS
+       DEDOUBLONNER ═══════════════════════════════════════════════════════
+       Avant, la condition etait `if(mqR && recette)` : une recette VIDE
+       interdisait toute fusion. L'intention etait juste — vide voulait dire
+       « je ne sais pas de quoi il s'agit », et dans le doute on separe.
+       Mais vide ne veut pas dire ca. Vide veut dire : une fois la marque, la
+       taille et les mots passe-partout retires, il ne restait que la marque.
+       Autrement dit, c'est le produit phare de la marque. Et le produit phare
+       d'une marque, dans une categorie donnee, il n'y en a qu'un.
+       Consequence mesuree sur le catalogue reel : six fiches Red Bull
+       designaient la meme canette (« Original », « Energy Drink »,
+       « Boisson energisante », « Original (355 ml) », « Energy Drink `S »,
+       « grande Energy Drink ») et AUCUNE ne pouvait rejoindre les autres,
+       parce que la premiere se reduisait a rien. Quatre Golden Power, trois
+       Crazy Tiger, deux Rockstar, deux Burn dans le meme cas.
+       La fusion a vide reste la plus delicate du lot : on exige donc, en plus
+       de la marque, que la CATEGORIE soit identique. C'est ce qui empeche
+       « Vimto Original » (Exotique) d'avaler « Vimto Energy » (Energy), et
+       « Coca-Cola Original » (Soda) d'avaler quoi que ce soit d'autre. Si la
+       categorie manque d'un cote, on ne fusionne pas. */
+    if(mqR){
       var soeur=null;
       for(var iS=0;iS<DRINKS.length&&!soeur;iS++){
         var dd=DRINKS[iS];
         if(normTxt(dd.brand||"")!==mqR)continue;
-        var rd=_motsDeRecette(dd.name,dd.brand);
-        if(!rd)continue;
+        var rd=_motsDeRecette(dd.name,dd.brand,dd.cat);
+        if(!recette||!rd){
+          /* L'un des deux se reduit a la marque seule. Ce n'est la meme
+             boisson que si les DEUX s'y reduisent, et dans la meme categorie. */
+          if(recette||rd)continue;
+          if(!catR||String(dd.cat||"")!==catR)continue;
+          soeur=dd;
+          continue;
+        }
         /* Et aussi colles : « Multi-Vitamin » donne deux mots la ou
            « Multivitamin » n'en donne qu'un, et le trait d'union suffisait a
            faire naitre une deuxieme fiche Capri-Sun. */
