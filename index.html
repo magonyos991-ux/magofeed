@@ -421,7 +421,7 @@ try{
           <div class="res-emoji" id="res-emoji" onclick="openDrinkZoom()" role="button" tabindex="0" aria-label="Agrandir la photo" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrinkZoom();}" style="cursor:pointer;position:relative"></div>
           <div style="flex:1">
             <div id="res-sub" style="font-size:12px;color:rgba(255,255,255,.8);font-weight:500"></div>
-            <div id="res-stars" class="res-rate-chip" hidden onclick="openRateSheet()" role="button" tabindex="0" aria-label="Noter cette boisson" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openRateSheet();}"></div>
+            <div id="res-stars" class="res-note-ligne" onclick="openRateSheet()" role="button" tabindex="0" aria-label="Noter cette boisson" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openRateSheet();}"></div>
             <div class="fmt-row" id="res-fmt"></div>
           </div>
         </div>
@@ -19037,6 +19037,12 @@ function renderStoreList(){
 
   if(!stores.length){
     if(nearbyMode)renderNearbyFallback(el);
+    /* AUCUN MAGASIN : c'est precisement la que les alternatives servent le
+       plus. Elles etaient pourtant hors d'atteinte, la fonction s'arretant
+       ici. Quelqu'un qui ne trouve sa boisson nulle part merite au moins de
+       savoir qu'une autre marque fait le meme gout. */
+    el.insertAdjacentHTML("beforeend",alternativesHTML(curSel));
+    el.insertAdjacentHTML("beforeend",drinkOutilsHTML());
     return;
   }
   if(!window._storeListExpanded&&totalStores>6){
@@ -19143,6 +19149,9 @@ function renderStoreList(){
     if(storeRow)a11yCard(storeRow,s.name+", "+dist+(s.open?", ouvert":", fermé"));
     el.appendChild(div);
   });
+  /* Les alternatives arrivent apres les magasins : on ne propose autre chose
+     qu'a celui qui a vu que sa boisson n'etait pas la. */
+  el.insertAdjacentHTML("beforeend",alternativesHTML(curSel));
   /* LES OUTILS FERMENT L'ECRAN, apres les magasins. Places plus haut, ils
      s'inseraient AVANT les cartes : on proposait d'agir sur une liste qu'on
      n'avait pas encore lue. */
@@ -22826,7 +22835,15 @@ function exploreFermerAjout(){
   try{_majBandeauChoix();}catch(e){}
 }
 function exploreToggleChip(name){
-  window._exploreChips[name]=!window._exploreChips[name];
+  /* « Tous les magasins » n'est pas un filtre de plus : c'est le retrait du
+     filtre par boisson. Il vit donc a part, pas dans _exploreChips. */
+  if(name==="tous"){
+    window._exploreTousMagasins=!window._exploreTousMagasins;
+    if(window._exploreTousMagasins)window._exploreChips.instock=false;
+  }else{
+    window._exploreChips[name]=!window._exploreChips[name];
+    if(name==="instock"&&window._exploreChips.instock)window._exploreTousMagasins=false;
+  }
   renderExploreChips();
   if(exploreMap)exploreLoadStores(true);
   playSound("pop");
@@ -22841,6 +22858,7 @@ function renderExploreChips(){
   }
   var html="";
   if(exploreFilter)html+=chip("instock","En stock",c.instock,true);
+  if(exploreFilter)html+=chip("tous",tr("Tous les magasins"),!!window._exploreTousMagasins,false);
   html+=chip("open","Ouvert",c.open,false);
   // Chip distance réglable : Off → 1 → 2 → 5 → 10 km (tap pour changer).
   var nearKm=Number(c.near)||0;
@@ -23079,6 +23097,21 @@ function exploreApplyChips(list){
      boisson etait seulement rattachee : on cochait « en stock » et on obtenait
      une liste de peut-etre, avec des pins gris. */
   if(c.instock&&exploreFilter)arr=arr.filter(function(s){return magasinConfirmePour(s,exploreFilter.drinkId);});
+  /* OUVERTE DEPUIS UNE BOISSON, LA CARTE NE PARLE QUE DE CETTE BOISSON.
+     Elle affichait tous les magasins du quartier, y compris ceux qui n'ont
+     aucun lien avec ce qu'on cherche : des dizaines de pins a lire un par un
+     pour trouver les trois qui comptent. Le filtre « En stock » existait, mais
+     il fallait le cocher, et il est plus strict — il ne garde que le stock
+     CONFIRME, donc souvent rien.
+     Par defaut, on garde desormais les magasins qui referencent la boisson,
+     confirmes ou non : c'est la question posee. La puce « Tous les magasins »
+     rend la vue complete a qui la veut, par exemple pour ajouter un magasin
+     qui manque. */
+  else if(exploreFilter&&exploreFilter.drinkId!=null&&!window._exploreTousMagasins){
+    arr=arr.filter(function(s){
+      try{ return magasinALaBoisson(s,exploreFilter.drinkId); }catch(e){ return true; }
+    });
+  }
   if(window._exploreBrand){
     arr=arr.filter(function(s){return s.brand===window._exploreBrand;});
   }else if(window._exploreBrandQuery){
@@ -23375,6 +23408,7 @@ function openExploreMap(opts){
   window._exploreMapFailed=false;
   exploreFilter=(opts&&opts.drinkId!=null)?{drinkId:opts.drinkId,name:opts.name||""}:null;
   window._exploreChips={instock:false,open:false,near:0};
+  window._exploreTousMagasins=false;   /* on repart toujours centre sur la boisson */
   window._exploreBrand=null;
   window._exploreBrandQuery="";
   /* Le zoom demande etait ignore : _exploreFocus ne retenait que les
@@ -23658,9 +23692,19 @@ function closeExploreMap(){
     try{if(exploreMap&&exploreMap._eventailFils)exploreMap._eventailFils.clearLayers();}catch(e){}
     window._explorePeint=null;
   },280);
-  // Ouverte depuis une boisson : on revient a l'accueil, JAMAIS sur l'ancienne
-  // page produit encombree (que l'utilisateur ne doit plus voir).
-  if(window._exploreFromDrink){window._exploreFromDrink=false;try{show("home");}catch(e){}}
+  /* RETOUR = LA OU L'ON ETAIT.
+     Ce code renvoyait a l'ACCUEIL, et son commentaire disait pourquoi : « on
+     ne revient jamais sur l'ancienne page produit encombree ». C'etait un
+     contournement — la fiche etait illisible, alors on evitait d'y retourner.
+     La fiche a ete refaite (reponse en tete, trente actions ramenees a une
+     principale et quatre outils) : la raison du contournement a disparu, et il
+     ne reste que son defaut. Quelqu'un qui ouvre la carte DEPUIS une boisson
+     pour voir ou elle se trouve, puis fait « retour », veut revenir a cette
+     boisson — pas etre renvoye a l'accueil et devoir la rechercher. */
+  if(window._exploreFromDrink){
+    window._exploreFromDrink=false;
+    try{ if(window.curSel)show("results"); else show("home"); }catch(e){}
+  }
 }
 /* ============================================================================
    MENU EN ARC PAR APPUI LONG SUR UN PIN
@@ -26520,6 +26564,145 @@ function setRec(val){
 /* ================================
    SORT
 ================================ */
+/* ══ LES ALTERNATIVES : LE MEME GOUT, UNE AUTRE MARQUE ════════════════════
+   Quand on cherche un Monster Pasteque et qu'il n'est nulle part, savoir qu'un
+   Hell Watermelon ou un Celsius Watermelon existe — et ou il est — vaut mieux
+   que rentrer les mains vides. C'est la seule chose qu'on propose : le MEME
+   GOUT. Jamais « ca pourrait te plaire ».
+
+   D'OU VIENT LA LISTE DES GOUTS. Pas d'une liste ecrite a la main : du
+   catalogue lui-meme. Un mot employe par au moins trois marques differentes
+   est un gout (orange, peche, mangue, pasteque) ; un mot employe par une seule
+   est un nom de produit (« Peachy Keen », « Rio Punch », « Juneberry »).
+   Mesure sur les 4455 fiches : 1439 mots de recette distincts, dont 329
+   partages par trois marques ou plus.
+
+   TROIS GARDE-FOUS :
+   1. Une COULEUR n'est pas un gout. « Monster Ultra Red » ne doit pas appeler
+      toutes les canettes rouges du catalogue : personne ne sait si c'est de la
+      cerise ou du fruit rouge. Sans gout identifiable, on n'affiche rien.
+   2. Un TYPE de boisson n'est pas un gout (jus, eau, soda, limonade, the,
+      lait, nectar), ni un QUALIFICATIF (bio, zero, sans sucre, pur, petillant,
+      light, pct...). Ils disent ce que c'est, pas quel gout ca a.
+   3. MEME CATEGORIE obligatoire : un jus d'orange n'est pas l'alternative d'un
+      soda a l'orange, et un the glace peche n'est pas une energisante peche.
+
+   ET LES SYNONYMES COMPTENT : « pasteque » et « watermelon » sont le meme
+   gout. On passe donc chaque mot par MOTS_VOISINS, la table que la recherche
+   emploie deja, et on garde la tete de famille. Sans ca, Red Bull Red Edition
+   Pasteque ne trouvait aucune alternative alors que le catalogue contient
+   Hell Watermelon, Celsius Sparkling Watermelon et Monster Ultra Watermelon. */
+var _PAS_UN_GOUT=(function(){
+  var o={},add=function(l){for(var i=0;i<l.length;i++)o[l[i]]=1;};
+  /* le type de boisson — ce que c'est, pas quel gout ca a */
+  add(["jus","juice","eau","water","soda","limonade","lemonade","the","thee","tea",
+       "lait","milk","smoothie","nectar","cola","kombucha","sirop","boisson","drink","tonic"]);
+  /* « ice », « glace » disent que le the est froid, pas quel fruit il porte */
+  add(["ice","iced","glace","glacee","gazeuse"]);
+  /* les qualificatifs */
+  add(["bio","zero","sanssucre","sans","sucre","sucres","pur","pure","minerale","mineral",
+       "naturelle","naturel","nature","petillante","petillant","sparkling","plate","plat",
+       "light","diet","max","intense","extra","premium","reserve","import"]);
+  /* les couleurs : un habillage, jamais un gout identifiable */
+  add(["vert","green","groen","rouge","red","rood","bleu","blue","blauw","blanc","white","wit",
+       "noir","black","zwart","jaune","yellow","geel","rose","pink","roze","violet","purple","paars"]);
+  /* les noms de gamme */
+  add(["ultra","edition","juiced","rehab","nitro","cosmic","punched","original","classic","classique"]);
+  return o;
+})();
+/* Tete de famille d'un mot : « watermelon » et « pasteque » rendent le meme. */
+function _familleGout(m){
+  var v=motsVoisins(m);
+  if(!v||v.length<2)return m;
+  var tri=v.slice().sort();
+  return tri[0];
+}
+var _GOUTS_VOCAB=null;
+function _vocabGouts(){
+  if(_GOUTS_VOCAB)return _GOUTS_VOCAB;
+  var parMot={};
+  for(var i=0;i<DRINKS.length;i++){
+    var d=DRINKS[i];
+    var rec=_motsDeRecette(d.name,d.brand,d.cat);
+    if(!rec)continue;
+    var mq=normTxt(d.brand||"");
+    rec.split(" ").forEach(function(m){
+      if(!m||m.length<3||_PAS_UN_GOUT[m]||/^pct/.test(m)||/^[0-9]/.test(m))return;
+      (parMot[m]=parMot[m]||{})[mq]=1;
+    });
+  }
+  var ok={};
+  Object.keys(parMot).forEach(function(m){
+    var n=0;for(var k in parMot[m])if(Object.prototype.hasOwnProperty.call(parMot[m],k))n++;
+    if(n>=3)ok[m]=1;            /* partage par au moins trois marques */
+  });
+  _GOUTS_VOCAB=ok;
+  return ok;
+}
+/* Le gout d'une fiche, en tetes de famille, trie — ou [] si rien de sur. */
+function goutsDe(d){
+  if(!d)return [];
+  var vocab=_vocabGouts();
+  var rec=_motsDeRecette(d.name,d.brand,d.cat);
+  if(!rec)return [];
+  var vus={},out=[];
+  rec.split(" ").forEach(function(m){
+    if(!vocab[m])return;
+    var f=_familleGout(m);
+    if(!vus[f]){vus[f]=1;out.push(f);}
+  });
+  return out.sort();
+}
+window.goutsDe=goutsDe;
+/* Les alternatives d'une boisson : meme gout exactement, meme categorie,
+   autre marque. Classees : d'abord celles qu'on peut trouver autour de soi,
+   puis les mieux notees. Six au maximum — au-dela ce n'est plus une
+   suggestion, c'est un catalogue. */
+function alternativesDe(d,max){
+  var g=goutsDe(d);
+  if(!g.length)return [];
+  var cle=g.join(" ");
+  var mq=normTxt(d.brand||""),cat=String(d.cat||"");
+  var out=[];
+  for(var i=0;i<DRINKS.length;i++){
+    var x=DRINKS[i];
+    if(String(x.id)===String(d.id))continue;
+    if(normTxt(x.brand||"")===mq)continue;      /* une autre marque, c'est le principe */
+    if(String(x.cat||"")!==cat)continue;
+    if(goutsDe(x).join(" ")!==cle)continue;     /* MEME gout, pas « proche » */
+    out.push(x);
+  }
+  function proche(x){
+    try{
+      for(var k=0;k<STORES.length;k++){
+        var st=STORES[k];
+        if(typeof st.dist!=="number"||st.dist>5000)continue;
+        if(typeof magasinALaBoisson==="function"&&magasinALaBoisson(st,x.id))return 1;
+      }
+    }catch(e){}
+    return 0;
+  }
+  out.sort(function(a,b){
+    var pa=proche(a),pb=proche(b);
+    if(pa!==pb)return pb-pa;
+    var ra=realAgg(a),rb=realAgg(b);
+    var na=ra?ra.count:0,nb=rb?rb.count:0;
+    if(na!==nb)return nb-na;
+    return String(a.name||"").localeCompare(String(b.name||""));
+  });
+  /* UNE SEULE PAR MARQUE. Sinon « Look Ice Tea Peche », « Look Ice Tea Peche
+     Light » et « Look Ice Tea Peche Zero » prenaient la moitie de la liste :
+     on propose d'AUTRES marques, pas le rayon d'une seule. */
+  var vues={},uniques=[];
+  for(var k=0;k<out.length;k++){
+    var m2=normTxt(out[k].brand||"");
+    if(vues[m2])continue;
+    vues[m2]=1;uniques.push(out[k]);
+  }
+  return uniques.slice(0,max||6);
+}
+window.alternativesDe=alternativesDe;
+
 /* ══ LA REPONSE D'ABORD ═══════════════════════════════════════════════════
    La question que se pose quelqu'un qui ouvre la fiche d'une boisson n'est pas
    « a quoi ressemble-t-elle » : il la connait, il la cherche. C'est « ou je
@@ -26571,6 +26754,58 @@ function drinkReponseHTML(stores){
         : "")+
     '</div></div>';
 }
+/* ══ L'AFFICHAGE DES ALTERNATIVES ═════════════════════════════════════════
+   Une rangee qui defile, une carte par marque. On n'affiche la section que
+   s'il y a quelque chose a dire : pas de titre vide, pas de « aucune
+   alternative trouvee » — une section absente ne deçoit personne.
+   Chaque carte porte une pastille verte quand la boisson est trouvable dans un
+   magasin a moins de 5 km : c'est l'information qui decide d'un detour. */
+function alternativesHTML(d){
+  var alt=alternativesDe(d,6);
+  if(!alt.length)return "";
+  var cartes=alt.map(function(x){
+    var dispo=false;
+    try{
+      for(var k=0;k<STORES.length&&!dispo;k++){
+        var st=STORES[k];
+        if(typeof st.dist==="number"&&st.dist<=5000&&typeof magasinALaBoisson==="function"&&magasinALaBoisson(st,x.id))dispo=true;
+      }
+    }catch(e){}
+    return '<div onclick="pick(DRINKS.filter(function(z){return String(z.id)===\''+String(x.id)+'\';})[0])" '+
+      'role="button" tabindex="0" aria-label="'+sanitize(x.name)+'" '+
+      'onkeydown="if(event.key===\'Enter\'){this.click();}" '+
+      'style="flex:0 0 132px;border:1px solid var(--border);border-radius:16px;overflow:hidden;background:var(--bg2);cursor:pointer;-webkit-tap-highlight-color:transparent">'+
+      '<div style="height:92px;display:flex;align-items:center;justify-content:center;padding:8px;background:'+(x.light||"var(--bg3)")+'">'+
+        drinkIconHTML(x)+'</div>'+
+      '<div style="padding:9px 10px 11px">'+
+        '<div style="font-size:10.5px;font-weight:700;color:var(--s3);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sanitize(x.brand||"")+'</div>'+
+        '<div style="font-size:12px;font-weight:800;color:var(--s1);line-height:1.25;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.5em">'+sanitize(x.name||"")+'</div>'+
+        (dispo?'<div style="display:flex;align-items:center;gap:4px;margin-top:5px;font-size:10.5px;font-weight:700;color:#16a34a"><span style="width:6px;height:6px;border-radius:50%;background:#16a34a"></span>'+tr("Pr\u00e8s de toi")+'</div>':'')+
+      '</div></div>';
+  }).join("");
+  /* LE MOT AFFICHE EST CELUI DE LA FICHE, pas la cle interne. goutsDe rend une
+     tete de famille normalisee (« pasteque », « appelsien ») qui sert a
+     comparer et qui n'a ni accent ni sens pour un lecteur. On retrouve donc,
+     dans le nom de la boisson elle-meme, le mot qui porte ce gout, et on
+     l'affiche tel qu'il est ecrit. */
+  var g=goutsDe(d);
+  var mots=String(d.name||"").split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  var lisible=[];
+  g.forEach(function(f){
+    for(var i=0;i<mots.length;i++){
+      if(_familleGout(normTxt(mots[i]))===f){lisible.push(mots[i].toLowerCase());return;}
+    }
+    lisible.push(f);
+  });
+  return '<div style="padding:20px 0 4px">'+
+    '<div style="padding:0 20px 2px"><div class="t-section">'+tr("Le m\u00eame go\u00fbt, ailleurs")+'</div>'+
+      '<div style="font-size:12px;color:var(--s2);margin-top:3px">'+
+        trh("Si tu ne la trouves pas : m\u00eame go\u00fbt {g}, une autre marque.",{g:sanitize(lisible.join(", "))})+'</div></div>'+
+    '<div style="display:flex;gap:10px;overflow-x:auto;padding:12px 20px 4px;-webkit-overflow-scrolling:touch">'+cartes+'</div>'+
+  '</div>';
+}
+window.alternativesHTML=alternativesHTML;
+
 /* ══ LES OUTILS, REGROUPES ET EN BAS ══════════════════════════════════════
    Quatre actions qui se disputaient la barre de tri, plus celles de l'en-tete.
    Elles vivent desormais ensemble, en bas, a poids egal entre elles et
