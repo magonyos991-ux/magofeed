@@ -17178,7 +17178,20 @@ function loadStoresForMapViewport(map){
 // Formats disponibles pour une boisson : canette/bouteille avec taille en CL.
 // d.formats sert de source vérifiée (photo réelle confirmée) quand on l'a ; sinon tailles usuelles par catégorie.
 function getDrinkFormats(d){
-  if(d.formats)return d.formats;
+  /* JAMAIS DEUX FOIS LE MEME FORMAT. Coca-Cola Original portait deux fois
+     « canette 33 cl » : la fiche affichait donc deux pastilles identiques,
+     dont une sans image, et l'utilisateur ne pouvait pas savoir laquelle
+     choisir. On dedoublonne a l'affichage — en gardant celle qui porte une
+     image — plutot que de compter sur la proprete des donnees entrantes. */
+  if(d.formats){
+    var vus={},propre=[];
+    for(var i=0;i<d.formats.length;i++){
+      var f=d.formats[i],k=(f.type||"")+":"+(f.cl||"");
+      if(vus[k]!==undefined){ if(f.img&&!propre[vus[k]].img)propre[vus[k]]=f; continue; }
+      vus[k]=propre.length;propre.push(f);
+    }
+    return propre;
+  }
   if(d.cat==="Eau")return[{type:"bouteille",cl:50}];
   if(d.cat==="Energy")return[{type:"canette",cl:33},{type:"bouteille",cl:50}];
   return[{type:"canette",cl:33},{type:"bouteille",cl:150}];
@@ -19055,7 +19068,10 @@ function renderStoreList(){
   var locateBtn='<div style="padding:4px 20px 10px"><button onclick="drinkLocate()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border-radius:14px;border:1.5px dashed var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Je sais o\u00F9 la trouver !</button></div>';
   var advOpen=window._advFiltersOpen||curBrandFilter||curBudget;
   var activeCount=(curBrandFilter?1:0)+(curBudget?1:0);
-  var advToggle='<div style="padding:2px 20px 4px;text-align:right"><button onclick="toggleAdvFilters()" class="ghost-btn" style="padding:6px 13px;min-height:32px;font-size:11.5px">Filtres'+(activeCount?' ('+activeCount+')':'')+' '+(advOpen?'\u25B4':'\u25BE')+'</button></div>';
+  /* « Filtres » flottait seul, aligne a droite, sous une rangee de tris alignee
+     a gauche : deux objets de meme nature sur deux lignes et deux alignements.
+     Il rejoint la rangee des tris, a sa fin. */
+  var advToggle='<button onclick="toggleAdvFilters()" class="ghost-btn" style="flex:none;margin-left:auto;padding:6px 13px;min-height:32px;font-size:11.5px;white-space:nowrap">Filtres'+(activeCount?' ('+activeCount+')':'')+' '+(advOpen?'\u25B4':'\u25BE')+'</button>';
   var advWrap='<div id="store-adv-filters" style="display:'+(advOpen?'block':'none')+'">'+brandBar+budgetBar+'</div>';
   var nearbyMode=window._nearbyFallback&&window._nearbyFallback[curSel.id];
   var watched=isWatched(curSel.id);
@@ -19090,7 +19106,7 @@ function renderStoreList(){
   if(rep)rep.innerHTML=stores.length?drinkReponseHTML(stores):"";
   var nut=document.getElementById("drink-nutri");
   if(nut)nut.innerHTML=nutriHTML(curSel);
-  el.innerHTML=stores.length?priceBarHTML(_stats)+renderSortBar()+advToggle+advWrap:advToggle+advWrap+
+  el.innerHTML=stores.length?priceBarHTML(_stats)+renderSortBar(advToggle)+advWrap:renderSortBar(advToggle)+advWrap+
     '<div style="padding:22px 20px 8px;text-align:center">'+
       '<div style="font-size:36px;line-height:1;margin-bottom:8px"></div>'+
       '<div style="font-size:15.5px;font-weight:800;color:var(--s1);margin-bottom:5px">'+(watched?"Alerte activ\u00E9e pour cette boisson":"Personne ne l\'a signal\u00E9e par ici\u2026 pour l\'instant")+'</div>'+
@@ -19118,7 +19134,10 @@ function renderStoreList(){
     },0);
   }
   var sid=curSel.id;
-  el.insertAdjacentHTML("beforeend",'<div style="padding:8px 20px 4px"><button onclick="drinkLocate()" class="ghost-btn" style="width:100%">Ajouter un autre magasin qui la vend</button></div>');
+  /* « Ajouter un autre magasin qui la vend » s'inserait AVANT les magasins : on
+     proposait d'en ajouter un avant d'avoir montre ceux qui existent. Il passe
+     sous la liste, la ou la question se pose vraiment — quand on a lu les
+     magasins connus et qu'il en manque un. */
   stores.forEach(function(s){
     var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):"~?km";
     var confs=Math.max(0,confBornee(s,sid));
@@ -19180,6 +19199,16 @@ function renderStoreList(){
          l'utilisateur de decider. */
       '<button class="gobtn'+(storeOpenState(s)===false?" closed":"")+'" onclick="goToStore('+s.lat+','+s.lng+')">Y aller</button>'+
     '</div>'+
+    /* LE BLOC DE FIABILITE DISPARAIT QUAND IL N'A RIEN A DIRE.
+       Sur un magasin que personne n'a encore confirme, il affichait le mot
+       « Fiabilite », une barre vide et « 0 confirmation » : trois elements
+       visuels pour annoncer qu'on ne sait rien. Multiplie par six magasins,
+       c'est la moitie de l'ecran qui ne renseigne personne — et c'est ce qui
+       donnait l'impression d'un mur de texte.
+       On ne cache aucune information : on cesse d'afficher une absence. Des
+       qu'il y a une confirmation, une verification, une date ou un historique
+       de prix, le bloc revient entier. */
+    ((storeVerifiedFor(s,sid)||confN!==0||vuParHTML(s,sid)||fr||priceHistoryRowHTML(s,sid))?
     '<div class="trust-wrap">'+
       (storeVerifiedFor(s,sid)?
         '<div style="display:inline-flex;align-items:center;gap:5px;margin-bottom:7px;padding:3px 10px;border-radius:999px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:10.5px;font-weight:700;color:#15803d">\u2713 Confirm\u00e9 au catalogue de l\'enseigne</div>':
@@ -19200,7 +19229,7 @@ function renderStoreList(){
       '</div>'+
       '<div class="trust-bar-bg"><div class="trust-fill" style="width:'+trust+'%;background:'+(trust>=60?"#22c55e":trust>=30?"#f59e0b":"var(--s3)")+'"></div></div>'+
       priceHistoryRowHTML(s,sid)+
-    '</div>'+
+    '</div>':"")+
     '<div class="comm-bar" id="comm-'+storeIdStr+'">'+
       '<span style="font-size:12px;font-weight:500;flex:1;color:var(--s2)">C\'est exact ?</span>'+
       '<div style="display:flex;gap:8px">'+
@@ -19213,6 +19242,7 @@ function renderStoreList(){
     if(storeRow)a11yCard(storeRow,s.name+", "+dist+(s.open?", ouvert":", fermé"));
     el.appendChild(div);
   });
+  el.insertAdjacentHTML("beforeend",'<div style="padding:10px 20px 2px"><button onclick="drinkLocate()" class="ghost-btn" style="width:100%">'+tr("Ajouter un autre magasin qui la vend")+'</button></div>');
   /* Les alternatives arrivent apres les magasins : on ne propose autre chose
      qu'a celui qui a vu que sa boisson n'etait pas la. */
   el.insertAdjacentHTML("beforeend",alternativesHTML(curSel));
@@ -27040,8 +27070,13 @@ window.drinkReponseHTML=drinkReponseHTML;window.drinkOutilsHTML=drinkOutilsHTML;
    gestes differents : ils ne peuvent pas se ressembler.
    La barre ne garde que les tris. Les actions sont regroupees en bas de
    l'ecran, dans drinkOutilsHTML(). */
-function renderSortBar(){
-  var labels={distance:"Plus proche",open:"Ouvert d'abord",trust:"Plus fiable"};
+function renderSortBar(fin){
+  /* LIBELLES COURTS. « Plus proche · Ouvert d'abord · Plus fiable · Filtres »
+     faisait quatre pastilles trop larges pour 390 px : la derniere etait
+     coupee en plein mot. Dans une rangee de tris dont une seule est allumee,
+     le mot « Plus » n'ajoute rien — « Proche » se comprend seul. Les quatre
+     tiennent desormais sur la ligne. */
+  var labels={distance:"Proche",open:"Ouvert",trust:"Fiable"};
   var isDark=document.body.classList.contains("dark");
   var html='<div style="display:flex;gap:8px;padding:8px 20px 4px;overflow-x:auto;flex-shrink:0">';
   ["distance","open","trust"].forEach(function(s){
@@ -27049,9 +27084,9 @@ function renderSortBar(){
     var bg=a?(isDark?"#f0f0f0":"#1a1714"):"var(--bg2)";
     var col=a?(isDark?"#1a1714":"#fff"):"var(--s2)";
     var border=a?(isDark?"#f0f0f0":"#1a1714"):"var(--border)";
-    html+='<button onclick="setSort(\''+s+'\')" style="flex:none;padding:6px 14px;border-radius:999px;border:1.5px solid '+border+';background:'+bg+';color:'+col+';font-size:12px;font-weight:600;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">'+labels[s]+'</button>';
+    html+='<button onclick="setSort(\''+s+'\')" style="flex:none;padding:6px 14px;border-radius:999px;border:1.5px solid '+border+';background:'+bg+';color:'+col+';font-size:12px;font-weight:600;cursor:pointer;font-family:\'Space Grotesk\',sans-serif">'+tr(labels[s])+'</button>';
   });
-  return html+'</div>';
+  return html+(fin||"")+'</div>';
 }
 function setSort(s){curSort=s;renderStoreList();playSound("pop");}
 /* ================================
