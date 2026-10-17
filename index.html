@@ -15500,9 +15500,22 @@ function renderMap(){
   mapRenderedFor=productId;
   var placeholder=box.querySelector("#map-placeholder");if(placeholder)placeholder.style.display="none";
   box.innerHTML='<div id="leaflet-map" style="width:100%;height:100%"></div>'+
-    '<div style="position:absolute;top:8px;left:8px;z-index:900;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);border-radius:999px">'+mapLegendHTML()+'</div>'+
-    '<div id="map-instock-btn" onclick="toggleInStockOnly()" role="button" tabindex="0" aria-pressed="'+(window._mapInStockOnly?"true":"false")+'" aria-label="N\'afficher que les magasins qui l\'ont en stock" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleInStockOnly();}" class="'+(window._mapInStockOnly?"on":"")+'" style="position:absolute;top:50px;left:8px;z-index:901;padding:7px 12px;border-radius:999px;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);font-size:11px;font-weight:800;color:var(--s1);cursor:pointer;display:flex;align-items:center;gap:6px"><span style="width:9px;height:9px;border-radius:50%;background:#16a34a;display:inline-block;flex-shrink:0"></span>En stock seulement</div>'+
-    '<div id="map-full-btn" onclick="if(document.getElementById(\'map-box\')&&document.getElementById(\'map-box\').classList.contains(\'map-fullscreen\'))toggleDrinkMapFull();else if(window.curSel)openExploreMap({drinkId:curSel.id,name:curSel.name});else toggleDrinkMapFull();" role="button" tabindex="0" aria-label="Ouvrir la carte des magasins" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();if(window.curSel)openExploreMap({drinkId:curSel.id,name:curSel.name});}" style="position:absolute;top:8px;right:8px;z-index:900;width:36px;height:36px;border-radius:12px;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--s1);cursor:pointer">\u26f6</div>'+
+    /* UNE SEULE BANDE AU-DESSUS DE LA CARTE.
+       La legende et le bouton « En stock seulement » etaient deux bandeaux
+       empiles, chacun avec son fond et son contour : sur un apercu de 150 px
+       de haut, ils en couvraient un tiers a eux deux. Ils partagent desormais
+       la meme ligne, et celle-ci defile si elle est trop large. */
+    '<div class="map-barre">'+
+      mapLegendHTML()+
+      '<div id="map-instock-btn" onclick="toggleInStockOnly()" role="button" tabindex="0" '+
+        'aria-pressed="'+(window._mapInStockOnly?"true":"false")+'" '+
+        'aria-label="'+tr("N\u2019afficher que les magasins qui l\u2019ont en stock")+'" '+
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleInStockOnly();}" '+
+        'class="'+(window._mapInStockOnly?"on":"")+'">'+
+        '<span class="pt"></span>'+tr("En stock seulement")+
+      '</div>'+
+    '</div>'+
+'<div id="map-full-btn" onclick="if(document.getElementById(\'map-box\')&&document.getElementById(\'map-box\').classList.contains(\'map-fullscreen\'))toggleDrinkMapFull();else if(window.curSel)openExploreMap({drinkId:curSel.id,name:curSel.name});else toggleDrinkMapFull();" role="button" tabindex="0" aria-label="Ouvrir la carte des magasins" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();if(window.curSel)openExploreMap({drinkId:curSel.id,name:curSel.name});}" style="position:absolute;top:8px;right:8px;z-index:900;width:36px;height:36px;border-radius:12px;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--s1);cursor:pointer">\u26f6</div>'+
     '<div class="map-locate-btn" onclick="centerMapOnUser()" title="Centrer sur moi" role="button" tabindex="0" aria-label="Centrer la carte sur ma position" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();centerMapOnUser();}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="var(--s1)" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="var(--s1)" stroke-width="2" stroke-linecap="round"/></svg></div>';
   if(window._leafletMap){window._leafletMap.remove();window._leafletMap=null;}
   /* Meme chargeur robuste que la carte Explorer. Le regroupement de marqueurs
@@ -17194,6 +17207,29 @@ function populateClusterMarkers(cluster){
     stores=(STORES||[]).filter(function(s){return typeof s.lat==="number";})
       .slice().sort(function(a,b){return(a.dist||9e9)-(b.dist||9e9);}).slice(0,30);
   }
+  /* ══ L'APERCU N'EPINGLE QUE CE QUE LA LISTE MONTRE ════════════════════════
+     Mesure en ville, sur « Coca-Cola Light Sans Cafeine » : 120 commerces
+     autour, 60 « referencent » la boisson (leur enseigne la vend quelque
+     part), AUCUN ne l'a confirmee. La liste en dessous en affichait six — la
+     carte en epinglait soixante. Soixante pastilles oranges « peut-etre »
+     empilees sur 150 px de haut : on ne distinguait plus rien, et pas une ne
+     menait quelque part.
+     Un apercu sert a situer les magasins qu'on vient de lire, pas a recenser
+     le quartier. On garde donc les memes : d'abord ceux qui l'ont vraiment,
+     puis les plus proches, et on s'arrete a douze. La carte en grand, elle,
+     les garde tous — c'est la qu'on explore. */
+  var enGrand=false;
+  try{
+    var bx=document.getElementById("map-box");
+    enGrand=!!(bx&&bx.classList.contains("map-fullscreen"));
+  }catch(e){}
+  if(!enGrand&&stores.length>12){
+    stores=stores.slice().sort(function(a,b){
+      var ca=magasinConfirmePour(a,curSel.id)?1:0, cb=magasinConfirmePour(b,curSel.id)?1:0;
+      if(ca!==cb)return cb-ca;
+      return (a.dist||9e9)-(b.dist||9e9);
+    }).slice(0,12);
+  }
   /* Un seul appel a addLayers a la fin : le greffon calcule ses groupes UNE
      fois pour tout le lot. Marqueur par marqueur, il recalculait la grille a
      chaque ajout — c'est le piege classique, et il coute cher des la centaine
@@ -17262,6 +17298,10 @@ function toggleDrinkMapFull(){
   var full=box.classList.toggle("map-fullscreen");
   var btn=document.getElementById("map-full-btn");
   if(btn)btn.textContent=full?"\u2715":"\u26f6";
+  /* L'apercu ne porte que douze pins ; en grand on les veut tous, et en
+     repliant on revient a douze. Les marqueurs sont donc redessines a chaque
+     bascule — sans quoi le plein ecran aurait herite du lot reduit. */
+  try{ if(window._leafletCluster)populateClusterMarkers(window._leafletCluster); }catch(e){}
   // En plein ecran, on rend la carte pleinement interactive ; repliee, on recoupe
   // le pan/zoom pour que la page puisse defiler vers la liste des magasins.
   var m=window._leafletMap;
