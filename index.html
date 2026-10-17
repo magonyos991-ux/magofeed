@@ -12994,6 +12994,21 @@ function pick(d){
       }catch(e){}
     });
   }catch(e){}
+  /* « EN STOCK SEULEMENT » DEVIENT LE REGLAGE PAR DEFAUT — QUAND IL RESTE
+     QUELQUE CHOSE A MONTRER.
+     Le filtre existait mais partait eteint : la petite carte s'ouvrait donc
+     couverte de pins « peut-etre », un par commerce du quartier, et l'on ne
+     distinguait plus les trois magasins qui comptent. On l'allume d'office
+     des qu'AU MOINS UN magasin a vraiment la boisson.
+     Et seulement dans ce cas : si personne ne l'a confirmee, l'allumer
+     donnerait une carte vide, ce qui est pire que trop de pins. On montre
+     alors les possibles, en disant que ce sont des possibles. */
+  try{
+    var surs=0;
+    for(var iS=0;iS<STORES.length&&!surs;iS++)
+      if(magasinConfirmePour(STORES[iS],d.id))surs++;
+    window._mapInStockOnly=!!surs;
+  }catch(e){ window._mapInStockOnly=false; }
   /* LA COULEUR DE LA BOISSON ENTRE DANS L'EN-TETE.
      Le meme degrade brun coiffait les 4455 fiches : rien ne distinguait un
      Coca d'un jus de carotte avant d'avoir lu le nom. Chaque fiche porte deja
@@ -17201,6 +17216,15 @@ function populateClusterMarkers(cluster){
     // Filtre "en stock seulement" : on ne garde QUE les magasins qui l'ont vraiment
     // (vert coche), pour savoir ou ALLER a coup sur plutot qu'ou essayer.
     if(window._mapInStockOnly&&status!=="sure")return;
+    /* LA CARTE D'UNE BOISSON NE MONTRE PAS OU ELLE N'EST PAS.
+       En ville, les pins rouges « ne l'a pas » se melangeaient aux oranges
+       « peut-etre » et aux verts « l'a » : trois familles superposees sur un
+       apercu de 150 px, illisibles, et deux d'entre elles ne menent nulle
+       part. On ouvre cette carte pour savoir ou ALLER.
+       Ou la boisson manque reste consultable sur la grande carte
+       d'exploration, qui a ses propres marqueurs et sa propre legende — ce
+       filtre ne la concerne pas. */
+    if(status==="no")return;
     var certif=storeCertifie(s);
     var pinCls="mago-pin"+(isOpen===false?" closed":"")+(status==="sure"?" sure":status==="no"?" no":" maybe")+(certif?" certif":"");
     var big=status==="sure";
@@ -17401,11 +17425,20 @@ function navUpdatePosition(lat,lng){
     }
   }
 }
-function mapLegendHTML(){
-  return '<div style="display:flex;gap:10px;align-items:center;padding:7px 12px;font-size:10px;font-weight:700;color:var(--s2)">'+
-    '<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:11px;height:11px;border-radius:50%;background:#16a34a;display:inline-block"></span>L\'a en rayon</span>'+
-    '<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-block"></span>Possible</span>'+
-    '<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:50%;background:#dc2626;display:inline-block"></span>Ne l\'a pas</span>'+
+/* LA LEGENDE DIT CE QUE LA CARTE MONTRE, ET RIEN DE PLUS.
+   Elle annoncait trois etats en permanence, dont « Ne l'a pas » — alors que
+   l'apercu d'une fiche n'affiche plus les pins rouges, et que la grande carte
+   les affiche. Une legende qui nomme une couleur absente de l'image apprend a
+   s'en mefier. Elle se construit donc d'apres ce qui est reellement dessine. */
+function mapLegendHTML(pleinEcran){
+  function etat(coul,txt,cls){
+    return '<span class="'+(cls||"")+'" style="display:inline-flex;align-items:center;gap:4px">'+
+      '<span style="width:10px;height:10px;border-radius:50%;background:'+coul+';display:inline-block"></span>'+txt+'</span>';
+  }
+  return '<div class="map-legend" style="display:flex;gap:10px;align-items:center;padding:7px 12px;font-size:10px;font-weight:700;color:var(--s2)">'+
+    etat("#16a34a",tr("L\u2019a en rayon"))+
+    etat("#f59e0b",tr("Possible"))+
+    (pleinEcran?etat("#dc2626",tr("Ne l\u2019a pas"),"lg-no"):"")+
   '</div>';
 }
 function loadStoresForMapViewport(map){
@@ -19427,7 +19460,17 @@ function renderStoreList(){
     var stCol=isSure?"#16a34a":(isNo?"#dc2626":"#f59e0b");
     var stBg=isSure?"#f0fdf4":(isNo?"#fef2f2":"#fffbeb");
     var stTxt=isSure?"#15803d":(isNo?"#b91c1c":"#b45309");
-    var stLbl=isSure?"En stock":(isNo?"Absente":(perime?"\u00c0 reconfirmer":"\u00c0 v\u00e9rifier"));
+    /* LA PASTILLE DIT AUSSI D'OU VIENT L'INFORMATION.
+       Avant, un magasin referencé au catalogue de son enseigne affichait
+       « En stock » — puis, trente pixels plus bas, un second badge
+       « Confirme au catalogue de l'enseigne » pour nuancer. Deux elements,
+       cinquante-six pixels, pour une seule idee ; et la pastille promettait
+       entre-temps plus que ce qu'on sait.
+       Un seul mot desormais : « En stock » quand des gens l'ont vu sur place,
+       « Au catalogue » quand c'est l'enseigne qui le reference. La nuance est
+       portee la ou elle est lue, et le badge separe n'existe plus. */
+    var vuParDesGens=confN>0&&!perime;
+    var stLbl=isSure?(vuParDesGens?"En stock":"Au catalogue"):(isNo?"Absente":(perime?"\u00c0 reconfirmer":"\u00c0 v\u00e9rifier"));
     var stIco=isSure?"✓":(isNo?"✕":"?");
     var div=document.createElement("div");div.className="store-card";
     div.style.borderLeft="4px solid "+stCol;
@@ -19438,7 +19481,7 @@ function renderStoreList(){
           '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">'+
             '<div class="store-name">'+sanitize(s.name)+'</div>'+
             '<span style="flex-shrink:0;display:inline-flex;align-items:center;gap:3px;padding:2px 9px;border-radius:999px;background:'+stBg+';color:'+stTxt+';font-size:10px;font-weight:800;letter-spacing:.2px;white-space:nowrap">'+stIco+' '+stLbl+'</span>'+
-            (storePrice?'<span class="pchip'+(estMoinsCher?' best':'')+'">'+storePrice+(estMoinsCher?' \u00b7 le moins cher':'')+'</span>':'<span style="font-size:11px;color:var(--txt2);font-weight:500">Prix inconnu</span>')+
+            (storePrice?'<span class="pchip'+(estMoinsCher?' best':'')+'">'+storePrice+(estMoinsCher?' \u00b7 le moins cher':'')+'</span>':"")+
           '</div>'+
           '<div class="store-meta"><span>'+dist+'</span><span>·</span>'+
           (storeOpenState(s)!==null?'<span class="status" style="background:'+(openSur(s)?(storeOpenState(s)?"#f0fdf4":"#fef2f2"):"#fffbeb")+';color:'+(openSur(s)?(storeOpenState(s)?"#15803d":"#b91c1c"):"#92400e")+'">'+openLabel(s)+(s.hours?" · "+s.hours:"")+'</span>':'<span class="status" style="background:var(--bg3);color:var(--s2)">Horaires inconnus</span>')+'</div>'+
@@ -19460,7 +19503,11 @@ function renderStoreList(){
        On ne cache aucune information : on cesse d'afficher une absence. Des
        qu'il y a une confirmation, une verification, une date ou un historique
        de prix, le bloc revient entier. */
-    ((storeVerifiedFor(s,sid)||confN!==0||vuParHTML(s,sid)||fr||priceHistoryRowHTML(s,sid))?
+    /* Le referencement au catalogue ne justifie plus a lui seul d'ouvrir ce
+       bloc : il est deja dit par la pastille. Restent les vraies raisons —
+       quelqu'un a confirme, quelqu'un a dit non, ou il y a un historique de
+       prix. */
+    ((confN!==0||priceHistoryRowHTML(s,sid))?
     '<div class="trust-wrap">'+
       (storeVerifiedFor(s,sid)?
         '<div style="display:inline-flex;align-items:center;gap:5px;margin-bottom:7px;padding:3px 10px;border-radius:999px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:10.5px;font-weight:700;color:#15803d">\u2713 Confirm\u00e9 au catalogue de l\'enseigne</div>':
@@ -19482,8 +19529,24 @@ function renderStoreList(){
       '<div class="trust-bar-bg"><div class="trust-fill" style="width:'+trust+'%;background:'+(trust>=60?"#22c55e":trust>=30?"#f59e0b":"var(--s3)")+'"></div></div>'+
       priceHistoryRowHTML(s,sid)+
     '</div>':"")+
-    '<div class="comm-bar" id="comm-'+storeIdStr+'">'+
-      '<span style="font-size:12px;font-weight:500;flex:1;color:var(--s2)">C\'est exact ?</span>'+
+    /* LA RANGEE DE CONFIRMATION SE REPLIE.
+       « C'est exact ? Oui / Non / Signaler » prenait 49 px sur chacune des
+       cartes — un quart de la liste consacre a une question qu'on ne pose
+       qu'une fois de temps en temps. Sur six magasins c'est presque un ecran
+       entier ; a New York, ou une recherche en rend cinquante, c'est une
+       demi-heure de defilement.
+       Elle est desormais fermee, et s'ouvre d'une touche sur la carte. On ne
+       la supprime pas : confirmer un stock est ce qui tient l'application en
+       vie, et la rendre impossible pour gagner des pixels serait un mauvais
+       echange. Un chevron discret dit qu'il y a quelque chose dessous. */
+    '<div class="comm-pli" role="button" tabindex="0" aria-expanded="false" '+
+      'aria-label="'+tr("Confirmer ou signaler ce magasin")+'" '+
+      'onclick="basculerConfirmation(this)" '+
+      'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();basculerConfirmation(this);}">'+
+      '<span>'+tr("C\u2019est exact ?")+'</span>'+
+      '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>'+
+    '</div>'+
+    '<div class="comm-bar" id="comm-'+storeIdStr+'" hidden>'+
       '<div style="display:flex;gap:8px">'+
         '<button class="cfbtn yes" onclick="doConfirm(this,\''+storeIdStr+'\','+sid+',1)">Oui</button>'+
         '<button class="cfbtn no" onclick="doConfirm(this,\''+storeIdStr+'\','+sid+',-1)">Non</button>'+
@@ -27364,6 +27427,20 @@ function renderSortBar(fin){
   });
   return html+(fin||"")+'</div>';
 }
+/* Ouvre ou ferme la rangee de confirmation d'une carte magasin. Volontairement
+   par carte et sans memoire : la question « c'est exact ? » porte sur UN
+   magasin, et rouvrir la liste doit la rendre a son etat compact. */
+function basculerConfirmation(el){
+  if(!el)return;
+  var bar=el.nextElementSibling;
+  if(!bar||bar.className.indexOf("comm-bar")===-1)return;
+  var ouvert=!bar.hasAttribute("hidden");
+  if(ouvert)bar.setAttribute("hidden","");else bar.removeAttribute("hidden");
+  el.setAttribute("aria-expanded",ouvert?"false":"true");
+  el.classList.toggle("ouvert",!ouvert);
+  playSound("pop");
+}
+window.basculerConfirmation=basculerConfirmation;
 function setSort(s){curSort=s;renderStoreList();playSound("pop");}
 /* ================================
    HORAIRES EN DIRECT
