@@ -61,6 +61,7 @@ var TEXTES = {
   "Niveau {n}": {ar:"المستوى {n}",de:"Level {n}",en:"Level {n}",es:"Nivel {n}",it:"Livello {n}",nl:"Niveau {n}",pl:"Poziom {n}",pt:"Nível {n}",tr:"Seviye {n}",zh:"等级 {n}"},
   "Ouvrir {t}": {ar:"فتح {t}",de:"{t} öffnen",en:"Open {t}",es:"Abrir {t}",it:"Apri {t}",nl:"{t} openen",pl:"Otwórz {t}",pt:"Abrir {t}",tr:"{t} aç",zh:"打开{t}"},
   "possible": {ar:"ممكن",de:"möglich",en:"possible",es:"posible",it:"possibile",nl:"mogelijk",pl:"możliwe",pt:"possível",tr:"olası",zh:"可能"},
+  "possibles": {ar:"ممكنة",de:"möglich",en:"possible",es:"posibles",it:"possibili",nl:"mogelijk",pl:"możliwe",pt:"possíveis",tr:"olası",zh:"可能"},
   "Pour changer": {ar:"من أجل التغيير",de:"Mal was anderes",en:"For a change",es:"Para variar",it:"Per cambiare",nl:"Voor de verandering",pl:"Dla odmiany",pt:"Para variar",tr:"Değişiklik olsun diye",zh:"换换口味"},
   "Pourquoi {t} ?": {ar:"لماذا {t} ؟",de:"Warum {t} ?",en:"Why {t} ?",es:"¿Por qué {t} ?",it:"Perché {t} ?",nl:"Waarom {t} ?",pl:"Dlaczego {t} ?",pt:"Porquê {t} ?",tr:"Neden {t} ?",zh:"为什么是 {t} ？"},
   "Profil de {t}": {ar:"ملف {t}",de:"Profil von {t}",en:"{t}’s profile",es:"Perfil de {t}",it:"Profilo di {t}",nl:"Profiel van {t}",pl:"Profil {t}",pt:"Perfil de {t}",tr:"{t} profili",zh:"{t} 的个人资料"},
