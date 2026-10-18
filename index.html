@@ -19565,13 +19565,26 @@ function renderStoreList(){
   if(maxPrice){stores=stores.filter(function(s){var p=getStorePrice(s,curSel.id);return !p||p<=maxPrice;});}
   var totalStores=stores.length;
   var open=stores.filter(function(s){return storeOpenState(s)===true;}).length;
+  /* « 1193 MAGASINS » NE VEUT PAS DIRE « 1193 L'ONT ».
+     magasinALaBoisson repond vrai dans trois cas : quelqu'un l'y a vue, la
+     fiche la rattache, OU le rayon probable de l'enseigne la contient. Sur
+     une edition limitee comme Red Bull Pink Edition, le troisieme cas donne
+     plus de mille commerces pour UN SEUL confirme — et un badge « 1193
+     magasins » se lit « mille cent quatre-vingt-treize l'ont en rayon ».
+     Afficher le total etait deja mieux que le compte tronque a six, mais pas
+     encore honnete. On separe donc les deux notions avec les mots que la
+     legende de la carte emploie deja : ce qui est confirme, et ce qui est
+     seulement possible. */
+  var surs=stores.filter(function(s){return magasinConfirmePour(s,curSel.id);}).length;
+  var possibles=totalStores-surs;
   if(!window._storeListExpanded&&stores.length>6)stores=stores.slice(0,6);
 
   /* Le meilleur prix connu rejoint les badges d'en-tete : c'est l'information
      qu'on cherche en premier quand on sait deja ou la boisson se trouve. */
   var _stats=priceStats(curSel.id,allStores);
   document.getElementById("res-badges").innerHTML=
-    '<span class="rbadge">'+totalStores+' magasin'+(totalStores>1?"s":"")+'</span>'+
+    (surs?'<span class="rbadge">'+surs+' '+tr("en rayon")+'</span>':'')+
+    (possibles?'<span class="rbadge">'+possibles+' '+(possibles>1?tr("possibles"):tr("possible"))+'</span>':'')+
     '<span class="rbadge">'+open+' ouvert'+(open>1?"s":"")+'</span>'+
     (_stats?'<span class="rbadge price">d\u00e8s '+fmtPrix(_stats.min)+'</span>':"");
 

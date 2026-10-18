@@ -60,17 +60,26 @@ await etape("l'en-tete compte tous les magasins",async()=>{
     const d=DRINKS.find(x=>x.name==="Coca-Cola Original");
     window.STORES.length=0;
     window._storeListExpanded=false; window.curBudget=null; window.curBrandFilter=null;
-    for(let i=0;i<30;i++)window.STORES.push({id:"C"+i,name:"Commerce "+i,brand:"",
-      lat:50.879+i*0.001,lng:4.351+i*0.001,dist:200+i*50,
-      drinks:[d.id],confirmations:{},hours:"24/7"});
+    for(let i=0;i<30;i++){
+      const st={id:"C"+i,name:"Commerce "+i,brand:"",
+        lat:50.879+i*0.001,lng:4.351+i*0.001,dist:200+i*50,
+        drinks:[d.id],confirmations:{},hours:"24/7"};
+      if(i<4)st.confirmations[d.id]=2;      /* quatre l'ont vraiment */
+      window.STORES.push(st);
+    }
     window.pick(d); await new Promise(r=>setTimeout(r,1800));
     const b=document.getElementById("res-badges");
     const cartes=document.querySelectorAll("#store-list .store-card").length;
     return {badges:(b?b.textContent:"").replace(/\s+/g," ").trim(),cartes};
   });
-  const m=/(\d+)\s*magasin/.exec(r.badges), o=/(\d+)\s*ouvert/.exec(r.badges);
-  if(!m||Number(m[1])!==30)throw new Error("en-tete = "+r.badges);
-  if(!o||Number(o[1])!==30)throw new Error("ouverts = "+r.badges+" (les 30 sont en 24/7)");
+  const ray=/(\d+)\s*en rayon/.exec(r.badges);
+  const pos=/(\d+)\s*possible/.exec(r.badges);
+  const o=/(\d+)\s*ouvert/.exec(r.badges);
+  /* Quatre confirmes, vingt-six seulement possibles, et les trente ouverts :
+     l'en-tete doit dire les trois, sur le total et pas sur les six affichees. */
+  if(!ray||Number(ray[1])!==4)throw new Error("en rayon : "+r.badges);
+  if(!pos||Number(pos[1])!==26)throw new Error("possibles : "+r.badges);
+  if(!o||Number(o[1])!==30)throw new Error("ouverts : "+r.badges+" (les 30 sont en 24/7)");
   return r.badges+" pour "+r.cartes+" cartes affichees";
 });
 await etape("profil et reglages",async()=>{
