@@ -4026,8 +4026,14 @@ window.fbZoneLegere = async function (lat, lng, radiusKm, did) {
      ca — et on le retrouve sans un octet de reseau. */
   try { fusionnerRayonEnseigne(out); } catch (e) { console.warn("rayon d'enseigne:", e); }
   if (did != null) {
+    /* L'ECHEC DOIT LAISSER UNE TRACE. Quand le marquage echoue (index
+       composite absent, reseau coupe), aucun magasin ne porte plus son
+       assortiment : la carte en deduit que personne ne vend la boisson et
+       l'ecrit en toutes lettres. Une absence de REPONSE devenait une absence
+       CONSTATEE. On retient donc l'echec, et la banniere le dit. */
+    window._marquageRate = false;
     try { await _marquerBoisson(out, box, did); }
-    catch (e) { console.warn("marquage boisson indisponible:", e); }
+    catch (e) { window._marquageRate = true; console.warn("marquage boisson indisponible:", e); }
   }
   return out;
 };
@@ -24370,6 +24376,21 @@ function closeExploreMap(){
      boisson — pas etre renvoye a l'accueil et devoir la rechercher. */
   if(window._exploreFromDrink){
     window._exploreFromDrink=false;
+    /* ══ LA FICHE N'EST PAS UNE DESTINATION QU'ON A CHOISIE ════════════════
+       Ouvrir une boisson appelle show("results") PUIS ouvre la carte par
+       dessus, soixante millisecondes plus tard. L'utilisateur n'a jamais
+       demande la fiche : elle s'est glissee sous la carte. Et comme
+       show("results") ne fait rien quand « results » est deja l'ecran
+       courant, fermer la carte le deposait sur cette fiche — il lui fallait
+       un DEUXIEME retour pour revenir a sa recherche.
+       « C'est juste un retour de la ou j'etais precedemment, et ca doit etre
+       comme ca partout. » On depile donc la pile de navigation, qui porte
+       deja le bon ecran. navBack passe par l'historique quand nous y avons
+       ecrit : les deux piles restent alignees, et le geste de retour du
+       telephone continue de fonctionner.
+       La porte explicite vers la fiche reste le titre de la carte
+       (openDrinkInfoFromMap), qui eteint ce drapeau avant de s'y rendre. */
+    try{ if(typeof navBack==="function"&&navBack())return; }catch(e){}
     try{ if(window.curSel)show("results"); else show("home"); }catch(e){}
   }
 }
@@ -25007,10 +25028,31 @@ function exploreLoadStores(useCache){
     try{renderInStockArrows();}catch(eArr){}
     if(status){
       if(exploreFilter){
-        if(withDrink){
-          status.textContent=withDrink+" magasin"+(withDrink>1?"s":"")+" vend"+(withDrink>1?"ent":"")+" "+exploreFilter.name+" \u00B7 autres alentours en gris";
+        /* ══ « AUTRES ALENTOURS EN GRIS » ETAIT UNE PROMESSE INTENABLE ══════
+           Ouverte depuis une boisson, la carte ne garde que les magasins qui
+           la referencent — c'est voulu, et la puce « Tous les magasins »
+           rend la vue complete. Mais la banniere annoncait « autres alentours
+           en gris » dans les deux cas. Le code qui grise un pin teste
+           !magasinALaBoisson, c'est-a-dire exactement ce que le filtre vient
+           de supprimer : aucun pin gris ne pouvait exister. L'utilisateur
+           cherchait donc des magasins que le texte lui promettait et que le
+           code avait retires — « je ne vois pas tout les magasins autour sans
+           aucune raison, meme les gris ».
+           La banniere dit maintenant ce qui est reellement affiche, et nomme
+           l'interrupteur quand il reste quelque chose a voir. */
+        var _suite=window._exploreTousMagasins
+          ? tr("les autres sont en gris")
+          : tr("\u00AB Tous les magasins \u00BB pour voir le reste");
+        if(window._marquageRate){
+          /* On n'a pas pu lire les rayons : on ne conclut rien. */
+          status.textContent=tr("Rayons non v\u00e9rifiables pour l\u2019instant");
+        }else if(withDrink){
+          status.textContent=(withDrink>1
+              ? trh("{n} magasins vendent {b}",{n:withDrink,b:exploreFilter.name})
+              : trh("{n} magasin vend {b}",{n:withDrink,b:exploreFilter.name}))
+            +" \u00B7 "+_suite;
         }else{
-          status.textContent="Personne ne vend "+exploreFilter.name+" par ici \u2014 magasins alentours en gris";
+          status.textContent=trh("Personne ne vend {b} par ici",{b:exploreFilter.name})+" \u00B7 "+_suite;
         }
       }else{
         status.textContent=shown
