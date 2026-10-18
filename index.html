@@ -12273,7 +12273,32 @@ var MOTS_VOISINS=[
   ["concombre","cucumber","komkommer"],
   ["sureau","elderflower","vlierbloesem"],
   ["fruits rouges","fruits des bois","red berries","bosvruchten"],
-  ["sans sucre","zero","sugarfree","sugar free","suikervrij"]
+  ["sans sucre","zero","sugarfree","sugar free","suikervrij"],
+  /* ══ LES LANGUES DES EPICERIES ═══════════════════════════════════════════
+     Le tableau ci-dessus parle francais, anglais et neerlandais — Bruxelles
+     officielle. Mais « Uludag Portakal » se trouve chez l'epicier turc,
+     « San Pellegrino Aranciata » chez l'italien, « Lipton Melocoton » chez
+     l'espagnol. Portakal, aranciata, melocoton : c'est orange, orange et
+     peche. Sans ces mots, ces boissons n'avaient aucun gout reconnu et donc
+     aucune alternative proposee.
+     Chaque mot ci-dessous a ete verifie present dans le catalogue, sur les
+     boissons qui le portent. Deux candidats ont ete ECARTES : « maca », parce
+     que dans « Actimel Grenade Myrtille Maca » c'est la racine peruvienne et
+     pas la pomme portugaise ; « jagoda », parce qu'il veut dire fraise en
+     croate et myrtille en polonais — on ne devine pas la langue d'un mot. */
+  ["orange","sinaasappel","appelsien","aranciata","arancia","laranja","naranja","portakal","apfelsine"],
+  ["pomme","apple","appel","manzana","mela","jablko"],
+  ["peche","peach","perzik","melocoton","pesca","pfirsich"],
+  ["citron","lemon","citroen","limon","limone","limao"],
+  ["raisin","grape","druif","uva"],
+  ["poire","pear","peer","pera"],
+  ["ananas","pineapple","pina"],
+  ["abricot","apricot","abrikoos","albicocca"],
+  ["grenade","pomegranate","granaatappel","granatapfel"],
+  ["framboise","raspberry","framboos","malina"],
+  ["pamplemousse","grapefruit","pompelmoes","pomelo"],
+  ["agrumes","agrum","citrus"],
+  ["tropical","tropicale","tropisch"]
 ];
 var _VOISIN={};
 (function(){
@@ -13528,6 +13553,11 @@ function mergeCatalog(rows){
     added++;
   });
   if(added){
+    /* Le catalogue vient de grandir : le vocabulaire des gouts (« un mot
+       porte par trois marques ») et les gouts deja calcules par fiche sont
+       devenus faux. On les jette plutot que de servir des alternatives
+       calculees sur un catalogue qui n'existe plus. */
+    try{ _GOUTS_VOCAB=null; _GOUTS_FICHE={}; }catch(eG){}
     renderBrandsRail();
     renderTrends();
     var sEl=document.getElementById("s-search");
@@ -17184,11 +17214,7 @@ function initLeafletMap(lat,lng){
     // (transition d'écran en cours) : on force Leaflet à recalculer sa taille avant de centrer/cadrer la vue.
     setTimeout(function(){
       map.invalidateSize();
-      if(userLat&&stores.length>0){
-        map.setView([userLat,userLng],13);
-      } else if(stores.length>0){
-        try{map.fitBounds(cluster.getBounds(),{padding:[20,20],maxZoom:14});}catch(e){}
-      }
+      cadrerSurLesPins(map);
     },320);
 
     // Charge davantage de magasins Firestore quand l'utilisateur déplace/zoome la carte au-delà de la zone déjà chargée
@@ -17234,7 +17260,7 @@ function populateClusterMarkers(cluster){
      fois pour tout le lot. Marqueur par marqueur, il recalculait la grille a
      chaque ajout — c'est le piege classique, et il coute cher des la centaine
      de magasins. */
-  var _lot=[];
+  var _lot=[],_compte={sure:0,maybe:0,no:0};
   stores.forEach(function(s){
     if(!s.lat||!s.lng)return;
     var color=brandColor(s.brand);
@@ -17273,6 +17299,7 @@ function populateClusterMarkers(cluster){
       className:"",iconSize:big?[38,49]:[28,36],iconAnchor:big?[19,49]:[14,36]
     });
     var marker=L.marker([s.lat,s.lng],{icon:storeIcon,zIndexOffset:status==="sure"?600:(status==="no"?0:(certif?450:200))});
+    _compte[status]=(_compte[status]||0)+1;   /* la legende lira CE comptage */
     marker._brand=s.brand||"";
     var storeIdForSheet=String(s.id);
     marker.on("click",function(){routeFromMarker(storeIdForSheet);});
@@ -17280,6 +17307,9 @@ function populateClusterMarkers(cluster){
   });
   if(cluster.addLayers)cluster.addLayers(_lot);
   else _lot.forEach(function(m){cluster.addLayer(m);});
+  window._mapCompte=_compte;
+  window._mapPins=_lot.map(function(m){var ll=m.getLatLng();return[ll.lat,ll.lng];});
+  try{if(window.rafraichirLegende)window.rafraichirLegende();}catch(eL){}
   try{if(window._leafletMap)etalerMarqueurs(window._leafletMap,cluster);}catch(eE){}
   return stores;
 }
@@ -17302,6 +17332,10 @@ function toggleDrinkMapFull(){
      repliant on revient a douze. Les marqueurs sont donc redessines a chaque
      bascule — sans quoi le plein ecran aurait herite du lot reduit. */
   try{ if(window._leafletCluster)populateClusterMarkers(window._leafletCluster); }catch(e){}
+  /* Le lot de marqueurs vient de changer (douze <-> tous) : le cadrage doit
+     suivre, sinon le plein ecran garde la vue serree de l'apercu. */
+  try{ if(window.rafraichirLegende)window.rafraichirLegende(); }catch(e){}
+  setTimeout(function(){try{if(window._leafletMap)cadrerSurLesPins(window._leafletMap);}catch(e){}},420);
   // En plein ecran, on rend la carte pleinement interactive ; repliee, on recoupe
   // le pan/zoom pour que la page puisse defiler vers la liste des magasins.
   var m=window._leafletMap;
@@ -17323,6 +17357,9 @@ function toggleInStockOnly(){
     btn.setAttribute("aria-pressed",window._mapInStockOnly?"true":"false");
   }
   if(window._leafletCluster)populateClusterMarkers(window._leafletCluster);
+  /* Le filtre vient de retirer (ou rendre) des pins : on recadre, sinon la
+     vue reste reglee sur des magasins qui ne sont plus affiches. */
+  try{ if(window._leafletMap)cadrerSurLesPins(window._leafletMap); }catch(e){}
   playSound("pop");
   if(window._mapInStockOnly&&window._leafletCluster&&window._leafletCluster.getLayers&&!window._leafletCluster.getLayers().length){
     toast("Aucun magasin confirme pour l'instant — sois le premier a confirmer !");
@@ -17470,17 +17507,83 @@ function navUpdatePosition(lat,lng){
    l'apercu d'une fiche n'affiche plus les pins rouges, et que la grande carte
    les affiche. Une legende qui nomme une couleur absente de l'image apprend a
    s'en mefier. Elle se construit donc d'apres ce qui est reellement dessine. */
+/* ══ UNE LEGENDE NE PROMET QUE CE QUI EST DESSINE ═══════════════════════════
+   Elle etait ecrite en dur : « L'a en rayon » et « Possible » s'affichaient
+   toujours, meme quand pas un seul pin vert n'existait sur la carte. Sur
+   « Uludag Portakal » — six magasins, aucun confirme — la legende annoncait
+   donc une pastille verte introuvable. Une legende qui decrit une carte
+   qu'on ne voit pas, c'est l'application qui ment, et elle n'a pas le droit.
+   Desormais chaque pastille est tiree du comptage reel des marqueurs, et
+   elle porte son nombre : on lit « 6 possible » et on sait quoi chercher.
+   Aucun marqueur du tout, on le dit en toutes lettres plutot que d'afficher
+   une legende vide. */
 function mapLegendHTML(pleinEcran){
-  function etat(coul,txt,cls){
-    return '<span class="'+(cls||"")+'" style="display:inline-flex;align-items:center;gap:4px">'+
-      '<span style="width:10px;height:10px;border-radius:50%;background:'+coul+';display:inline-block"></span>'+txt+'</span>';
+  var c=window._mapCompte||null;
+  function etat(coul,n,txt,cls){
+    return '<span class="'+(cls||"")+'" style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap">'+
+      '<span style="width:10px;height:10px;border-radius:50%;background:'+coul+';display:inline-block"></span>'+
+      '<b style="font-weight:800;color:var(--s1)">'+n+'</b> '+txt+'</span>';
+  }
+  var bouts=[];
+  /* Tant que le comptage n'existe pas (carte pas encore peuplee), on n'annonce
+     rien : mieux vaut une barre nue une demi-seconde qu'une fausse promesse. */
+  if(c){
+    if(c.sure)bouts.push(etat("#16a34a",c.sure,tr("en rayon")));
+    if(c.maybe)bouts.push(etat("#f59e0b",c.maybe,tr("possible")));
+    if(pleinEcran&&c.no)bouts.push(etat("#dc2626",c.no,tr("ne l\u2019a pas"),"lg-no"));
+    if(!bouts.length)bouts.push('<span style="white-space:nowrap">'+tr("Aucun magasin sur cette carte")+'</span>');
   }
   return '<div class="map-legend" style="display:flex;gap:10px;align-items:center;padding:7px 12px;font-size:10px;font-weight:700;color:var(--s2)">'+
-    etat("#16a34a",tr("L\u2019a en rayon"))+
-    etat("#f59e0b",tr("Possible"))+
-    (pleinEcran?etat("#dc2626",tr("Ne l\u2019a pas"),"lg-no"):"")+
+    bouts.join("")+
   '</div>';
 }
+window.mapLegendHTML=mapLegendHTML;
+/* Reecrit la legende en place apres chaque (re)dessin des marqueurs. */
+function rafraichirLegende(){
+  try{
+    var bar=document.querySelector("#map-box .map-barre");if(!bar)return;
+    var vieille=bar.querySelector(".map-legend");if(!vieille)return;
+    var bx=document.getElementById("map-box");
+    var enGrand=!!(bx&&bx.classList.contains("map-fullscreen"));
+    var tmp=document.createElement("div");
+    tmp.innerHTML=mapLegendHTML(enGrand);
+    bar.replaceChild(tmp.firstChild,vieille);
+  }catch(e){}
+}
+window.rafraichirLegende=rafraichirLegende;
+/* ══ LA CARTE CADRE CE QU'ELLE EPINGLE ═════════════════════════════════════
+   Elle faisait « setView(ma position, zoom 13) » : un zoom fixe, centre sur
+   l'utilisateur, qui ne regardait jamais ou sont les magasins. Sur « Uludag
+   Portakal », les six magasins tombaient hors du cadre de 150 px — la carte
+   montrait un point bleu seul au milieu de rien, sous une legende qui
+   promettait des pastilles vertes et oranges.
+   On cadre desormais sur l'ensemble « mes pins + moi ». La marge du haut
+   degage la barre de legende, celle du bas l'attribution Leaflet ; en plein
+   ecran on respire davantage. maxZoom evite de coller au trottoir quand un
+   seul magasin est epingle. */
+function cadrerSurLesPins(map){
+  if(!map)return;
+  try{
+    var pts=(window._mapPins||[]).slice();
+    var aMoi=(typeof userLat==="number"&&userLat&&typeof userLng==="number"&&userLng);
+    if(aMoi)pts.push([userLat,userLng]);
+    if(!pts.length){                       /* rien a montrer : on reste chez soi */
+      if(aMoi)map.setView([userLat,userLng],14);
+      return;
+    }
+    var bx=document.getElementById("map-box");
+    var enGrand=!!(bx&&bx.classList.contains("map-fullscreen"));
+    map.fitBounds(L.latLngBounds(pts),{
+      paddingTopLeft:     enGrand?[30,92]:[16,46],
+      paddingBottomRight: enGrand?[30,40]:[16,22],
+      maxZoom:            enGrand?16:15,
+      animate:false
+    });
+  }catch(e){
+    try{ if(typeof userLat==="number"&&userLat)map.setView([userLat,userLng],14); }catch(e2){}
+  }
+}
+window.cadrerSurLesPins=cadrerSurLesPins;
 function loadStoresForMapViewport(map){
   if(!curSel||!window.fbLoadNearbyStores||window._fbViewportLoading)return;
   var center=map.getCenter();
@@ -27059,8 +27162,13 @@ function setRec(val){
 var _PAS_UN_GOUT=(function(){
   var o={},add=function(l){for(var i=0;i<l.length;i++)o[l[i]]=1;};
   /* le type de boisson — ce que c'est, pas quel gout ca a */
+  /* « tonic » a quitte cette liste : toutes les tonics ont le meme gout, et
+     c'est bien pour cela qu'on cherche une autre marque de tonic. « cola »
+     reste ici — le gout cola se traite plus bas, par le produit phare. */
   add(["jus","juice","eau","water","soda","limonade","lemonade","the","thee","tea",
-       "lait","milk","smoothie","nectar","cola","kombucha","sirop","boisson","drink","tonic"]);
+       "lait","milk","smoothie","nectar","cola","kombucha","sirop","boisson","drink"]);
+  /* un usage, pas un gout : une boisson « sport » peut etre orange ou citron */
+  add(["sport","energy","energie","energydrink","hydration","isotonique","isotonic"]);
   /* « ice », « glace » disent que le the est froid, pas quel fruit il porte */
   add(["ice","iced","glace","glacee","gazeuse"]);
   /* les qualificatifs */
@@ -27082,9 +27190,20 @@ function _familleGout(m){
   return tri[0];
 }
 var _GOUTS_VOCAB=null;
+/* ══ ON COMPTE LES FAMILLES, PAS LES MOTS ═════════════════════════════════
+   La regle « un mot est un gout s'il est porte par au moins trois marques »
+   reste la bonne : elle ecarte les inventions marketing d'une seule marque.
+   Mais elle etait appliquee au MOT, et pas a la FAMILLE. « portakal » n'est
+   ecrit que par Uludag, « aranciata » que par deux italiens : comptes seuls,
+   ils n'atteignaient jamais trois et restaient hors du vocabulaire — alors
+   qu'ils disent « orange », un gout porte par des dizaines de marques.
+   On compte desormais les marques de la famille entiere. Un mot etranger
+   herite ainsi de la credibilite de sa famille, sans qu'aucun mot invente
+   n'y gagne quoi que ce soit : seul, il forme une famille d'un seul membre
+   et reste dehors. */
 function _vocabGouts(){
   if(_GOUTS_VOCAB)return _GOUTS_VOCAB;
-  var parMot={};
+  var parFamille={},motsDe={};
   for(var i=0;i<DRINKS.length;i++){
     var d=DRINKS[i];
     var rec=_motsDeRecette(d.name,d.brand,d.cat);
@@ -27092,48 +27211,126 @@ function _vocabGouts(){
     var mq=normTxt(d.brand||"");
     rec.split(" ").forEach(function(m){
       if(!m||m.length<3||_PAS_UN_GOUT[m]||/^pct/.test(m)||/^[0-9]/.test(m))return;
-      (parMot[m]=parMot[m]||{})[mq]=1;
+      var f=_familleGout(m);
+      (parFamille[f]=parFamille[f]||{})[mq]=1;
+      (motsDe[f]=motsDe[f]||{})[m]=1;
     });
   }
   var ok={};
-  Object.keys(parMot).forEach(function(m){
-    var n=0;for(var k in parMot[m])if(Object.prototype.hasOwnProperty.call(parMot[m],k))n++;
-    if(n>=3)ok[m]=1;            /* partage par au moins trois marques */
+  Object.keys(parFamille).forEach(function(f){
+    var n=0;for(var k in parFamille[f])if(Object.prototype.hasOwnProperty.call(parFamille[f],k))n++;
+    if(n<3)return;                 /* famille portee par moins de trois marques */
+    for(var m in motsDe[f])if(Object.prototype.hasOwnProperty.call(motsDe[f],m))ok[m]=1;
   });
   _GOUTS_VOCAB=ok;
   return ok;
 }
+
+/* ══ LE GOUT D'UN PRODUIT PHARE ═══════════════════════════════════════════
+   « Coca-Cola Original », « Red Bull Original », « Evian » : une fois la
+   marque retiree, il ne reste aucun mot. Leur gout n'est pas ecrit, il EST
+   la marque. Resultat, 130 fiches — dont les plus cherchees de toute
+   l'application — n'avaient aucune alternative a proposer.
+   On leur donne une famille, mais seulement la ou elle veut dire quelque
+   chose. Une energisante classique en vaut une autre, une eau plate en vaut
+   une autre, un cola en vaut un autre : ces trois-la se remplacent vraiment.
+   Un soda phare quelconque, non — Sprite n'est pas une alternative a
+   Coca-Cola, et Irn-Bru ne ressemble a rien d'autre. Ces fiches-la gardent
+   donc zero alternative, ce qui est la reponse honnete.
+   Le tilde marque une famille deduite et non lue dans le nom : l'affichage
+   s'en sert pour changer de phrase. */
+var _MARQUES_COLA={pepsi:1};      /* les colas que leur nom ne trahit pas */
+var _PHARES_MAIN={sprite:"~limonade",'7up':"~limonade"};  /* verifie a la main */
+function _goutPhare(d){
+  if(!d)return null;
+  var mq=normTxt(d.brand||""),cat=String(d.cat||"");
+  if(cat==="Energy")return "~energy";
+  /* PAS DE FAMILLE « EAU ». Perrier, San Pellegrino et Badoit ne portent
+     aucun mot qui dise qu'elles petillent : rien dans la fiche ne distingue
+     une eau plate d'une gazeuse quand le nom se tait. Les regrouper
+     proposerait du Perrier a qui cherche de l'Evian. On prefere ne rien
+     proposer plutot que proposer le contraire de ce qui est cherche. */
+  if(cat==="Soda"){
+    /* La marque FINIT par cola/kola : coca-cola, mecca-cola, fritz-kola,
+       breizh cola, molecola, cola. Pas une sous-chaine — « cacolac » est un
+       lait chocolate et « chocolaterie » contient « cola » par accident. */
+    if(/[ck]ola$/.test(mq.trim())||_MARQUES_COLA[mq.trim()])return "~cola";
+    if(_PHARES_MAIN[mq])return _PHARES_MAIN[mq];
+  }
+  return null;
+}
 /* Le gout d'une fiche, en tetes de famille, trie — ou [] si rien de sur. */
+var _GOUTS_FICHE={};
 function goutsDe(d){
   if(!d)return [];
+  /* Cette fonction est appelee une fois par fiche du catalogue a chaque
+     ouverture d'un ecran de boisson — 4 455 fois, et deux fois par
+     comparaison. On garde le resultat : il ne depend que de la fiche. */
+  var cle=String(d.id);
+  if(_GOUTS_FICHE[cle])return _GOUTS_FICHE[cle];
   var vocab=_vocabGouts();
   var rec=_motsDeRecette(d.name,d.brand,d.cat);
-  if(!rec)return [];
   var vus={},out=[];
-  rec.split(" ").forEach(function(m){
+  if(rec)rec.split(" ").forEach(function(m){
     if(!vocab[m])return;
     var f=_familleGout(m);
     if(!vus[f]){vus[f]=1;out.push(f);}
   });
-  return out.sort();
+  /* AUCUN MOT DU TOUT : la marque est le gout. On exige une recette vide,
+     pas seulement l'absence de gout RECONNU — « Coca-Cola chery » porte un
+     mot (mal orthographie, donc non reconnu) et se retrouvait presente comme
+     un cola nature. Un mot qu'on ne comprend pas reste un mot : la fiche
+     garde alors zero alternative, ce qui est la reponse honnete.
+     Ce garde-fou ecarte aussi « Abatilles Eau minerale naturelle petillante »
+     du lot des eaux : sa recette n'est pas vide. */
+  if(!out.length&&!(rec&&rec.trim())){
+    var ph=_goutPhare(d);
+    if(ph)out.push(ph);
+  }
+  out=out.sort();
+  _GOUTS_FICHE[cle]=out;
+  return out;
 }
 window.goutsDe=goutsDe;
 /* Les alternatives d'une boisson : meme gout exactement, meme categorie,
    autre marque. Classees : d'abord celles qu'on peut trouver autour de soi,
    puis les mieux notees. Six au maximum — au-dela ce n'est plus une
    suggestion, c'est un catalogue. */
+/* ══ POURQUOI « EXACTEMENT LE MEME GOUT » NE SUFFISAIT PAS ════════════════
+   La regle exigeait des ensembles de gouts IDENTIQUES. Mesure sur le
+   catalogue : 940 fiches avaient bien un gout reconnu et zero alternative,
+   simplement parce qu'aucune autre marque ne portait la combinaison exacte.
+   « Prime Strawberry Watermelon » ne trouvait rien — alors qu'une pasteque
+   d'une autre marque est precisement ce qu'on cherche quand on ne la trouve
+   pas.
+   On accepte donc aussi l'INCLUSION : l'un des deux gouts contient l'autre.
+   Fraise+pasteque accueille pasteque ; pasteque accueille fraise+pasteque.
+   Ce qu'on refuse toujours, c'est le simple recoupement partiel — citron+
+   menthe et citron+gingembre ne sont pas la meme boisson, et les proposer
+   serait du remplissage. Les correspondances exactes passent devant. */
 function alternativesDe(d,max){
   var g=goutsDe(d);
   if(!g.length)return [];
-  var cle=g.join(" ");
+  var cle=g.join(" "),dansG={};
+  for(var z=0;z<g.length;z++)dansG[g[z]]=1;
   var mq=normTxt(d.brand||""),cat=String(d.cat||"");
-  var out=[];
+  var out=[],rang={};
   for(var i=0;i<DRINKS.length;i++){
     var x=DRINKS[i];
     if(String(x.id)===String(d.id))continue;
     if(normTxt(x.brand||"")===mq)continue;      /* une autre marque, c'est le principe */
     if(String(x.cat||"")!==cat)continue;
-    if(goutsDe(x).join(" ")!==cle)continue;     /* MEME gout, pas « proche » */
+    var h=goutsDe(x);
+    if(!h.length)continue;
+    var hc=h.join(" ");
+    var exact=(hc===cle);
+    if(!exact){
+      var commun=0;
+      for(var y=0;y<h.length;y++)if(dansG[h[y]])commun++;
+      /* inclusion dans un sens ou dans l'autre, rien d'autre */
+      if(commun!==h.length&&commun!==g.length)continue;
+    }
+    rang[String(x.id)]=exact?0:1;
     out.push(x);
   }
   function proche(x){
@@ -27147,11 +27344,24 @@ function alternativesDe(d,max){
     return 0;
   }
   out.sort(function(a,b){
+    /* le meme gout exactement passe devant le gout inclus */
+    var xa=rang[String(a.id)],xb=rang[String(b.id)];
+    if(xa!==xb)return xa-xb;
     var pa=proche(a),pb=proche(b);
     if(pa!==pb)return pb-pa;
     var ra=realAgg(a),rb=realAgg(b);
     var na=ra?ra.count:0,nb=rb?rb.count:0;
     if(na!==nb)return nb-na;
+    /* ALPHABETIQUE EN DERNIER RECOURS SEULEMENT. Sans ces deux lignes, les
+       alternatives a Coca-Cola commencaient par « Afri Cola » et Pepsi
+       n'entrait meme pas dans les six — le A passait devant le monde entier.
+       On departage d'abord par la note du catalogue, puis par le nombre de
+       codes-barres connus : une boisson reellement vendue partout en porte
+       plusieurs, une fiche marginale un seul ou aucun. */
+    var sa=typeof a.stars==="number"?a.stars:0, sb=typeof b.stars==="number"?b.stars:0;
+    if(sa!==sb)return sb-sa;
+    var ca=(a.barcodes||[]).length, cb2=(b.barcodes||[]).length;
+    if(ca!==cb2)return cb2-ca;
     return String(a.name||"").localeCompare(String(b.name||""));
   });
   /* UNE SEULE PAR MARQUE. Sinon « Look Ice Tea Peche », « Look Ice Tea Peche
@@ -27399,18 +27609,29 @@ function alternativesHTML(d){
      dans le nom de la boisson elle-meme, le mot qui porte ce gout, et on
      l'affiche tel qu'il est ecrit. */
   var g=goutsDe(d);
-  var mots=String(d.name||"").split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  var lisible=[];
-  g.forEach(function(f){
-    for(var i=0;i<mots.length;i++){
-      if(_familleGout(normTxt(mots[i]))===f){lisible.push(mots[i].toLowerCase());return;}
-    }
-    lisible.push(f);
-  });
+  /* Un gout deduit de la marque (le tilde) n'est ecrit nulle part dans le nom :
+     « meme gout ~cola » n'aurait aucun sens a lire. Il a sa propre phrase. */
+  var PHARE={"~cola":tr("un autre cola"),
+             "~energy":tr("une autre \u00e9nergisante classique"),
+             "~limonade":tr("une autre limonade claire")};
+  var phrase;
+  if(g.length===1&&PHARE[g[0]]){
+    phrase=trh("Si tu ne la trouves pas : {g}.",{g:PHARE[g[0]]});
+  }else{
+    var mots=String(d.name||"").split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    var lisible=[];
+    g.forEach(function(f){
+      for(var i=0;i<mots.length;i++){
+        if(_familleGout(normTxt(mots[i]))===f){lisible.push(mots[i].toLowerCase());return;}
+      }
+      lisible.push(f);
+    });
+    phrase=trh("Si tu ne la trouves pas : m\u00eame go\u00fbt {g}, une autre marque.",{g:sanitize(lisible.join(", "))});
+  }
   return '<div style="padding:20px 0 4px">'+
     '<div style="padding:0 20px 2px"><div class="t-section">'+tr("Le m\u00eame go\u00fbt, ailleurs")+'</div>'+
       '<div style="font-size:12px;color:var(--s2);margin-top:3px">'+
-        trh("Si tu ne la trouves pas : m\u00eame go\u00fbt {g}, une autre marque.",{g:sanitize(lisible.join(", "))})+'</div></div>'+
+        phrase+'</div></div>'+
     '<div style="display:flex;gap:10px;overflow-x:auto;padding:12px 20px 6px;-webkit-overflow-scrolling:touch">'+cartes+'</div>'+
   '</div>';
 }
