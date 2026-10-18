@@ -53,6 +53,26 @@ await etape("alternatives meme gout",async()=>{
     await new Promise(r=>setTimeout(r,1800));
     return (window.alternativesDe(d)||[]).length; });
   if(!n)throw new Error("aucune alternative"); return n+" propositions";});
+await etape("l'en-tete compte tous les magasins",async()=>{
+  /* La liste n'affiche que six cartes, mais l'en-tete doit annoncer le vrai
+     nombre : « 6 magasins - 0 ouvert » quand il y en a trente, c'est faux. */
+  const r=await pg.evaluate(async()=>{
+    const d=DRINKS.find(x=>x.name==="Coca-Cola Original");
+    window.STORES.length=0;
+    window._storeListExpanded=false; window.curBudget=null; window.curBrandFilter=null;
+    for(let i=0;i<30;i++)window.STORES.push({id:"C"+i,name:"Commerce "+i,brand:"",
+      lat:50.879+i*0.001,lng:4.351+i*0.001,dist:200+i*50,
+      drinks:[d.id],confirmations:{},hours:"24/7"});
+    window.pick(d); await new Promise(r=>setTimeout(r,1800));
+    const b=document.getElementById("res-badges");
+    const cartes=document.querySelectorAll("#store-list .store-card").length;
+    return {badges:(b?b.textContent:"").replace(/\s+/g," ").trim(),cartes};
+  });
+  const m=/(\d+)\s*magasin/.exec(r.badges), o=/(\d+)\s*ouvert/.exec(r.badges);
+  if(!m||Number(m[1])!==30)throw new Error("en-tete = "+r.badges);
+  if(!o||Number(o[1])!==30)throw new Error("ouverts = "+r.badges+" (les 30 sont en 24/7)");
+  return r.badges+" pour "+r.cartes+" cartes affichees";
+});
 await etape("profil et reglages",async()=>{
   await pg.evaluate(()=>navTo("profile")); await pg.waitForTimeout(400);
   const v=await pg.evaluate(()=>getComputedStyle(document.getElementById("s-profile")).display);
