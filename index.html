@@ -27470,7 +27470,15 @@ function nutriPourBoisson(d,suite){
   var frais=e&&(Date.now()-(e.t||0)<60*24*3600*1000);
   if(frais){ if(suite)suite(e.v||null); return; }
   var codes=(d.barcodes||[]).slice(0,5);
-  if(!codes.length){ c[k]={t:Date.now(),v:null}; _nutriSauver(); if(suite)suite(null); return; }
+  /* AUCUN CODE-BARRES : ON NE MEMORISE PAS L'ECHEC.
+     Un « rien trouve » apres avoir interroge OpenFoodFacts merite d'etre
+     garde soixante jours — la reponse ne changera pas demain. Mais ici on
+     n'a rien demande du tout, faute de code a demander. Le memoriser
+     condamnait la fiche : 207 boissons du catalogue n'ont aucun code-barres
+     (Uludag Portakal en fait partie), et le jour ou quelqu'un en scanne une
+     en magasin, le code rejoint la fiche — l'echec mis en cache aurait
+     empeche la recherche pendant deux mois sur son telephone. */
+  if(!codes.length){ if(suite)suite(null); return; }
   var trouve={},reste=codes.length;
   function fini(){
     var v=_nutriPlausible(trouve);
