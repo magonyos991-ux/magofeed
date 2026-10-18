@@ -151,6 +151,77 @@ verifier("plein ecran cadre ses pins",g.hors===0,g.hors+" hors cadre sur "+g.pin
 verifier("legende suit le plein ecran",g.compte&&(g.compte.sure+g.compte.maybe)===g.pins,
   JSON.stringify(g.compte)+" pour "+g.pins+" pins");
 
+/* ─── Scene 5 : LES MAGASINS ARRIVENT APRES LE CADRAGE ───────────────────
+   C'est le defaut de la capture d'ecran, et l'ancien controle ne savait pas
+   le jouer : sa scene remplissait STORES AVANT de construire la carte, donc
+   les pins existaient toujours au moment du cadrage. Ici on construit la
+   carte VIDE, on cadre, puis on fait arriver les magasins loin de la
+   position — exactement ce que fait l'elargissement Firestore a 25 km. */
+await pg.evaluate(async()=>{
+  const d=DRINKS.find(x=>x.name==="Coca-Cola Original");
+  window.STORES.length=0;                 /* aucun magasin au depart */
+  window._mapInStockOnly=false;
+  window.mapRenderedFor=null;
+  const bx=document.getElementById("map-box");
+  if(bx&&bx.classList.contains("map-fullscreen"))window.toggleDrinkMapFull();
+  window.pick(d);
+  await new Promise(r=>setTimeout(r,900));
+  window.renderMap();
+  await new Promise(r=>setTimeout(r,2200));   /* le cadrage a eu lieu, a vide */
+});
+const vide=await lire();
+verifier("carte vide : aucun pin annonce",vide.pins===0&&!/en rayon|possible/.test(vide.legende),
+  vide.pins+" pins, « "+vide.legende+" »");
+await pg.evaluate(async()=>{
+  const d=DRINKS.find(x=>x.name==="Coca-Cola Original");
+  /* Les magasins arrivent, a 4 km au nord : hors du cadre initial. */
+  for(let i=0;i<7;i++)window.STORES.push({id:"L"+i,name:"Loin "+i,brand:"",
+    lat:50.9150+i*0.002, lng:4.3511+i*0.002, dist:4000+i*200,
+    drinks:[d.id], confirmations:{}});
+  window.populateClusterMarkers(window._leafletCluster);
+  await new Promise(r=>setTimeout(r,700));
+});
+const tard=await lire();
+verifier("magasins tardifs : pins dessines",tard.pins===7,tard.pins+" pins");
+verifier("magasins tardifs : legende juste",tard.compte&&tard.compte.maybe===7,JSON.stringify(tard.compte));
+verifier("MAGASINS TARDIFS : TOUS DANS LE CADRE",tard.hors===0,tard.hors+" hors cadre sur "+tard.pins);
+
+/* ─── Scene 6 : le bouton agrandir ouvre bien le plein ecran ─────────────── */
+const btn=await pg.evaluate(()=>{
+  const b=document.getElementById("map-full-btn");
+  return b?{onclick:b.getAttribute("onclick")||"",aria:b.getAttribute("aria-label")||""}:null;
+});
+verifier("le bouton appelle le plein ecran",
+  btn&&/toggleDrinkMapFull/.test(btn.onclick)&&!/openExploreMap/.test(btn.onclick),
+  btn?btn.onclick.slice(0,40):"bouton absent");
+await pg.evaluate(async()=>{document.getElementById("map-full-btn").click();await new Promise(r=>setTimeout(r,1500));});
+const apresClic=await pg.evaluate(()=>{
+  const bx=document.getElementById("map-box"),m=window._leafletMap;
+  return {plein:!!(bx&&bx.classList.contains("map-fullscreen")),
+          glisse:!!(m&&m.dragging&&m.dragging.enabled())};
+});
+verifier("un appui ouvre le plein ecran",apresClic.plein,"map-fullscreen="+apresClic.plein);
+verifier("et la carte devient deplacable",apresClic.glisse,"dragging="+apresClic.glisse);
+await pg.evaluate(async()=>{document.getElementById("map-full-btn").click();await new Promise(r=>setTimeout(r,1200));});
+
+/* ─── Scene 7 : « voir les magasins autour de moi » dessine ses pins ─────── */
+const repli=await pg.evaluate(async()=>{
+  const d=DRINKS.find(x=>x.name==="Coca-Cola Original");
+  window.STORES.length=0;
+  for(let i=0;i<9;i++)window.STORES.push({id:"A"+i,name:"Autour "+i,brand:"",
+    lat:50.8793+i*0.003, lng:4.3511+i*0.002, dist:300+i*200, drinks:[], confirmations:{}});
+  window._nearbyFallback={}; window._nearbyFallback[d.id]=true;
+  window._mapInStockOnly=false;
+  window.populateClusterMarkers(window._leafletCluster);
+  await new Promise(r=>setTimeout(r,700));
+  const lg=document.querySelector("#map-box .map-legend");
+  return {pins:(window._mapPins||[]).length,compte:window._mapCompte,
+          legende:(lg?lg.textContent:"").replace(/\s+/g," ").trim()};
+});
+verifier("repli « autour de moi » : des pins",repli.pins>0,repli.pins+" pins");
+verifier("repli : la legende dit « autour »",/autour/.test(repli.legende),"« "+repli.legende+" »");
+verifier("repli : jamais « en rayon »",!/en rayon/.test(repli.legende),"« "+repli.legende+" »");
+
 console.log("\n  LA CARTE D'UNE FICHE DIT-ELLE LA VERITE ?\n");
 let ko=0;
 for(const [nom,ok,det] of etapes){

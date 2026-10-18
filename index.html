@@ -7476,6 +7476,11 @@ function _showRaw(s){
   if(TAB_SCREENS.indexOf(s)!==-1&&window._leafletMap){
     try{window._leafletMap.remove();}catch(e){}
     window._leafletMap=null;window._leafletCluster=null;
+    /* Ces trois-la DECRIVENT la carte qu'on vient de detruire. Oubliees, la
+       barre de la fiche suivante affichait le comptage de la precedente —
+       une legende qui promet des pins d'une autre boisson. */
+    window._mapPins=null;window._mapCompte=null;
+    window._mapMainUtilisateur=false;window._mapCadragePilote=false;
     try{mapRenderedFor=null;}catch(e){}
     try{var _mbx=document.getElementById("map-box");if(_mbx)_mbx.innerHTML="";}catch(e){}
   }
@@ -15528,6 +15533,10 @@ function renderMap(){
     return;
   }
   mapRenderedFor=productId;
+  /* On reconstruit la boite : le comptage et les pins de la boisson
+     precedente ne valent plus rien, et la barre ci-dessous les lirait. */
+  window._mapPins=null;window._mapCompte=null;
+  window._mapMainUtilisateur=false;window._mapCadragePilote=false;
   var placeholder=box.querySelector("#map-placeholder");if(placeholder)placeholder.style.display="none";
   box.innerHTML='<div id="leaflet-map" style="width:100%;height:100%"></div>'+
     /* UNE SEULE BANDE AU-DESSUS DE LA CARTE.
@@ -15545,7 +15554,19 @@ function renderMap(){
         '<span class="pt"></span>'+tr("En stock seulement")+
       '</div>'+
     '</div>'+
-'<div id="map-full-btn" onclick="if(document.getElementById(\'map-box\')&&document.getElementById(\'map-box\').classList.contains(\'map-fullscreen\'))toggleDrinkMapFull();else if(window.curSel)openExploreMap({drinkId:curSel.id,name:curSel.name});else toggleDrinkMapFull();" role="button" tabindex="0" aria-label="Ouvrir la carte des magasins" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();if(window.curSel)openExploreMap({drinkId:curSel.id,name:curSel.name});}" style="position:absolute;top:8px;right:8px;z-index:900;width:36px;height:36px;border-radius:12px;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--s1);cursor:pointer">\u26f6</div>'+
+/* ══ CE BOUTON AGRANDIT LA CARTE, IL NE CHANGE PLUS D'ECRAN ═══════════════
+       Il appelait openExploreMap des que curSel existait — c'est-a-dire
+       toujours, sur une fiche. toggleDrinkMapFull etait donc injoignable, et
+       le commentaire d'initLeafletMap qui presente le plein ecran comme
+       l'echappatoire ou « l'interaction complete reste dispo » etait devenu
+       faux : l'apercu refusait le doigt et aucun bouton ne menait a une
+       carte deplacable.
+       Pire, le detour n'avait pas de sens : ouvrir une boisson passe DEJA
+       par la carte Explorer (pick appelle openDrinkMapView a +60 ms). Depuis
+       la fiche, on vient d'en revenir — y renvoyer, c'est un aller-retour.
+       Le plein ecran, lui, reactive le glisser et le zoom sans quitter la
+       boisson, et la croix ramene a la fiche. */
+    '<div id="map-full-btn" onclick="toggleDrinkMapFull()" role="button" tabindex="0" aria-label="'+tr("Agrandir la carte")+'" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleDrinkMapFull();}" style="position:absolute;top:8px;right:8px;z-index:900;width:36px;height:36px;border-radius:12px;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--s1);cursor:pointer">\u26f6</div>'+
     '<div class="map-locate-btn" onclick="centerMapOnUser()" title="Centrer sur moi" role="button" tabindex="0" aria-label="Centrer la carte sur ma position" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();centerMapOnUser();}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="var(--s1)" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="var(--s1)" stroke-width="2" stroke-linecap="round"/></svg></div>';
   if(window._leafletMap){window._leafletMap.remove();window._leafletMap=null;}
   /* Meme chargeur robuste que la carte Explorer. Le regroupement de marqueurs
@@ -17158,6 +17179,14 @@ function initLeafletMap(lat,lng){
   // le bouton plein ecran (voir toggleDrinkMapFull, qui les reactive).
   map.dragging.disable();
   map.scrollWheelZoom.disable();
+  /* LE SEUL SIGNAL HONNETE QUE L'UTILISATEUR A DEPLACE LA CARTE, C'EST dragstart.
+     Pas touchstart : hors plein ecran le glisser est coupe expres (juste
+     au-dessus), donc un doigt pose sur la carte est le DEBUT D'UN DEFILEMENT
+     de page, pas une manipulation de carte. Pas wheel non plus, pour la meme
+     raison. Se tromper de signal condamnerait le recadrage automatique des la
+     premiere lecture de la fiche. */
+  window._mapMainUtilisateur=false;
+  map.on("dragstart",function(){window._mapMainUtilisateur=true;});
   /* Carto a ferme son acces gratuit (« API KEY REQUIRED » imprime sur chaque
      tuile) : OpenStreetMap, gratuit et sans cle, le remplace. Le sombre est
      rendu par un filtre CSS — OSM n'a pas de variante nocturne. */
@@ -17229,7 +17258,22 @@ function populateClusterMarkers(cluster){
   cluster.clearLayers();
   if(!curSel)return[];
   var stores=STORES.filter(function(s){return magasinALaBoisson(s,curSel.id);});
+  /* ══ « VOIR LES MAGASINS AUTOUR DE MOI » REMPLISSAIT LA LISTE ET VIDAIT LA
+        CARTE ════════════════════════════════════════════════════════════════
+     Ce repli choisit, par construction, des magasins pour lesquels
+     magasinALaBoisson est FAUX — le filtre ci-dessus a deja pris tous les
+     autres et n'en a trouve aucun. Plus bas, la meme fonction etait rappelee
+     pour chaque magasin, rendait « no », et la regle « la carte d'une boisson
+     ne montre pas ou elle n'est pas » les jetait tous. Trente magasins dans
+     la liste, zero pin sur la carte : c'est MOI qui ai casse ce repli hier en
+     supprimant les pins rouges.
+     Ils ont desormais leur propre etat. Rien a voir avec « possible » : on ne
+     pretend pas que la boisson y est, et la legende ecrit « autour de toi ».
+     Cet ecran n'apparait que lorsque personne ne l'a, donc aucun melange
+     n'est possible avec les pins verts et oranges. */
+  var _repli=false;
   if(!stores.length&&window._nearbyFallback&&window._nearbyFallback[curSel.id]){
+    _repli=true;
     stores=(STORES||[]).filter(function(s){return typeof s.lat==="number";})
       .slice().sort(function(a,b){return(a.dist||9e9)-(b.dist||9e9);}).slice(0,30);
   }
@@ -17260,7 +17304,7 @@ function populateClusterMarkers(cluster){
      fois pour tout le lot. Marqueur par marqueur, il recalculait la grille a
      chaque ajout — c'est le piege classique, et il coute cher des la centaine
      de magasins. */
-  var _lot=[],_compte={sure:0,maybe:0,no:0};
+  var _lot=[],_compte={sure:0,maybe:0,no:0,autour:0};
   stores.forEach(function(s){
     if(!s.lat||!s.lng)return;
     var color=brandColor(s.brand);
@@ -17274,7 +17318,7 @@ function populateClusterMarkers(cluster){
     var hasDrink=curSel?magasinALaBoisson(s,curSel.id):true;
     var conf=curSel?((s.confirmations||{})[curSel.id]||0):0;
     var sure=curSel?magasinConfirmePour(s,curSel.id):false;
-    var status=(!hasDrink||conf<0)?"no":(sure?"sure":"maybe");
+    var status=_repli?"autour":((!hasDrink||conf<0)?"no":(sure?"sure":"maybe"));
     // Filtre "en stock seulement" : on ne garde QUE les magasins qui l'ont vraiment
     // (vert coche), pour savoir ou ALLER a coup sur plutot qu'ou essayer.
     if(window._mapInStockOnly&&status!=="sure")return;
@@ -17311,6 +17355,10 @@ function populateClusterMarkers(cluster){
   window._mapPins=_lot.map(function(m){var ll=m.getLatLng();return[ll.lat,ll.lng];});
   try{if(window.rafraichirLegende)window.rafraichirLegende();}catch(eL){}
   try{if(window._leafletMap)etalerMarqueurs(window._leafletMap,cluster);}catch(eE){}
+  /* Pose ICI, le recadrage couvre les cinq appelants d'un coup — y compris
+     les deux qui l'oubliaient (loadStoresForMapViewport apres Firestore,
+     toggleNearbyFallback) — et tout appelant futur. */
+  try{if(window._leafletMap)cadrerSiPinsHorsCadre(window._leafletMap);}catch(eF){}
   return stores;
 }
 /* Plein ecran carte : la boite passe en fixe pleine fenetre, Leaflet recalcule
@@ -17328,6 +17376,14 @@ function toggleDrinkMapFull(){
   var full=box.classList.toggle("map-fullscreen");
   var btn=document.getElementById("map-full-btn");
   if(btn)btn.textContent=full?"\u2715":"\u26f6";
+  /* La bascule cadre elle-meme, mais seulement APRES invalidateSize (+420 ms) :
+     la taille du conteneur vient de changer du tout au tout. On neutralise
+     donc le recadrage automatique de populateClusterMarkers le temps du
+     basculement, sinon il cadrerait sur une taille perimee, dans les deux
+     sens. Le plein ecran rend aussi la carte deplacable : on repart d'une
+     main libre. */
+  window._mapCadragePilote=true;
+  window._mapMainUtilisateur=false;
   /* L'apercu ne porte que douze pins ; en grand on les veut tous, et en
      repliant on revient a douze. Les marqueurs sont donc redessines a chaque
      bascule — sans quoi le plein ecran aurait herite du lot reduit. */
@@ -17335,7 +17391,10 @@ function toggleDrinkMapFull(){
   /* Le lot de marqueurs vient de changer (douze <-> tous) : le cadrage doit
      suivre, sinon le plein ecran garde la vue serree de l'apercu. */
   try{ if(window.rafraichirLegende)window.rafraichirLegende(); }catch(e){}
-  setTimeout(function(){try{if(window._leafletMap)cadrerSurLesPins(window._leafletMap);}catch(e){}},420);
+  setTimeout(function(){
+    try{if(window._leafletMap)cadrerSurLesPins(window._leafletMap);}catch(e){}
+    window._mapCadragePilote=false;
+  },420);
   // En plein ecran, on rend la carte pleinement interactive ; repliee, on recoupe
   // le pan/zoom pour que la page puisse defiler vers la liste des magasins.
   var m=window._leafletMap;
@@ -17530,6 +17589,8 @@ function mapLegendHTML(pleinEcran){
   if(c){
     /* « 9 possible » se lit comme une faute : l'adjectif s'accorde. « en
        rayon » est invariable, lui. */
+    /* « autour de toi » n'apparait que dans le repli, ou il est seul. */
+    if(c.autour)bouts.push(etat("#f59e0b",c.autour,tr("autour de toi")));
     if(c.sure)bouts.push(etat("#16a34a",c.sure,tr("en rayon")));
     if(c.maybe)bouts.push(etat("#f59e0b",c.maybe,c.maybe>1?tr("possibles"):tr("possible")));
     if(pleinEcran&&c.no)bouts.push(etat("#dc2626",c.no,tr("ne l\u2019a pas"),"lg-no"));
@@ -17586,6 +17647,32 @@ function cadrerSurLesPins(map){
   }
 }
 window.cadrerSurLesPins=cadrerSurLesPins;
+/* ══ DESSINER ET CADRER SONT LE MEME GESTE ════════════════════════════════
+   Le cadrage etait un coup unique, 320 ms apres la construction de la carte.
+   Or les magasins arrivent de Firestore APRES : sur « Uludag Portakal », la
+   liste n'en trouve aucun en memoire, elargit la recherche a 25 puis 50 km,
+   et les sept magasins arrivent une seconde plus tard. Les marqueurs sont
+   redessines, la legende passe a « 7 possibles » — et la vue reste la ou le
+   cadrage l'avait laissee : sur le point bleu, au zoom 14, soit un kilometre
+   sur une boite de 150 px. Sept pins annonces, aucun visible. C'est
+   exactement la capture d'ecran recue.
+   On recadre donc a chaque dessin, mais SOUS CONDITION : seulement si plus
+   aucun pin n'est dans le cadre. Un seul pin visible suffit a ne pas bouger,
+   et la carte ne saute jamais sous les doigts de quelqu'un qui l'explore. */
+function cadrerSiPinsHorsCadre(map){
+  if(!map||!map._loaded)return;
+  if(window._mapMainUtilisateur)return;        /* le doigt a la priorite */
+  if(window._mapCadragePilote)return;          /* la bascule plein ecran cadre elle-meme */
+  var t=map.getSize&&map.getSize();
+  if(!t||t.x<40||t.y<40)return;                /* conteneur pas encore dimensionne */
+  var pts=window._mapPins||[];
+  if(!pts.length)return;                       /* rien a cadrer : on ne touche pas a la vue */
+  var vue=map.getBounds();
+  for(var i=0;i<pts.length;i++)
+    if(vue.contains(L.latLng(pts[i][0],pts[i][1])))return;   /* au moins un pin visible */
+  cadrerSurLesPins(map);
+}
+window.cadrerSiPinsHorsCadre=cadrerSiPinsHorsCadre;
 function loadStoresForMapViewport(map){
   if(!curSel||!window.fbLoadNearbyStores||window._fbViewportLoading)return;
   var center=map.getCenter();
@@ -19629,7 +19716,7 @@ function renderStoreList(){
             (storePrice?'<span class="pchip'+(estMoinsCher?' best':'')+'">'+storePrice+(estMoinsCher?' \u00b7 le moins cher':'')+'</span>':"")+
           '</div>'+
           '<div class="store-meta"><span>'+dist+'</span><span>·</span>'+
-          (storeOpenState(s)!==null?'<span class="status" style="background:'+(openSur(s)?(storeOpenState(s)?"#f0fdf4":"#fef2f2"):"#fffbeb")+';color:'+(openSur(s)?(storeOpenState(s)?"#15803d":"#b91c1c"):"#92400e")+'">'+openLabel(s)+(s.hours?" · "+s.hours:"")+'</span>':'<span class="status" style="background:var(--bg3);color:var(--s2)">Horaires inconnus</span>')+'</div>'+
+          (storeOpenState(s)!==null?'<span class="status" style="background:'+(openSur(s)?(storeOpenState(s)?"#f0fdf4":"#fef2f2"):"#fffbeb")+';color:'+(openSur(s)?(storeOpenState(s)?"#15803d":"#b91c1c"):"#92400e")+'">'+openLabel(s)+(horaireTexte(s)?" · "+horaireTexte(s):"")+'</span>':'<span class="status" style="background:var(--bg3);color:var(--s2)">'+(horaireTexte(s)||tr("Horaires inconnus"))+'</span>')+'</div>'+
         '</div>'+
       '</div>'+
       /* « Y aller » reste TOUJOURS cliquable. Avant, un magasin juge ferme
@@ -19846,7 +19933,7 @@ function openStoreSheet(storeId){
       '<div class="store-ico" style="background:'+(s.open?"var(--bg2)":"#fee2e2")+';width:46px;height:46px;font-size:22px;flex-shrink:0">'+storeIconHTML(s)+'</div>'+
       '<div style="flex:1;min-width:0">'+
         '<div style="font-size:16px;font-weight:800;color:var(--s1)">'+sanitize(s.name)+'</div>'+
-        '<div style="font-size:12px;color:var(--s2);margin-top:2px">'+(s.brand?s.brand+" · ":"")+(dist?dist+" · ":"")+(openLabel(s)?openLabel(s)+(s.hours?" · "+s.hours:""):"Horaires inconnus")+'</div>'+
+        '<div style="font-size:12px;color:var(--s2);margin-top:2px">'+(s.brand?s.brand+" · ":"")+(dist?dist+" · ":"")+(openLabel(s)?openLabel(s)+(horaireTexte(s)?" · "+horaireTexte(s):""):(horaireTexte(s)||tr("Horaires inconnus")))+'</div>'+
       '</div>'+
       '<span onclick="closeStoreSheet()" style="font-size:22px;cursor:pointer;flex-shrink:0" class="c3" role="button" tabindex="0" aria-label="Fermer" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();closeStoreSheet();}">✕</span>'+
     '</div>'+
@@ -20429,7 +20516,7 @@ function renderStoreDetail(){
   if(!addr)resolveStoreAddress(s);
   var dist=s.dist?(s.dist<1000?Math.round(s.dist)+"m":(s.dist/1000).toFixed(1)+"km"):null;
   document.getElementById("sd-badges").innerHTML=
-    (openLabel(s)?'<span class="rbadge" style="background:'+(openSur(s)?(storeOpenState(s)?"rgba(34,197,94,.3)":"rgba(239,68,68,.3)"):"rgba(245,158,11,.3)")+'">'+openLabel(s)+(s.hours?" · "+s.hours:"")+'</span>':"")+
+    (openLabel(s)?'<span class="rbadge" style="background:'+(openSur(s)?(storeOpenState(s)?"rgba(34,197,94,.3)":"rgba(239,68,68,.3)"):"rgba(245,158,11,.3)")+'">'+openLabel(s)+(horaireTexte(s)?" · "+horaireTexte(s):"")+'</span>':"")+
     (dist?'<span class="rbadge">'+dist+'</span>':"");
   var mmap=document.getElementById("sd-mago-map");if(mmap)mmap.onclick=function(){
     var la=Number(s.lat),ln=Number(s.lng);
@@ -27541,9 +27628,56 @@ function nutriDe(d){
   return (e2&&e2.v)||null;
 }
 window.nutriDe=nutriDe;
+/* ══ NE RIEN AFFICHER NE VEUT RIEN DIRE ═══════════════════════════════════
+   654 fiches sur 4 455 n'ont ni sucre ni calories. L'ecran n'affichait alors
+   RIEN — et rien ne se distingue pas d'un bloc oublie. On le dit, et on dit
+   pourquoi, parce que les deux causes n'appellent pas la meme suite.
+     - La fiche n'a aucun code-barres (207 boissons, dont Uludag Portakal) :
+       on n'a rien a demander a OpenFoodFacts. Un scan en rayon ajoute le
+       code manquant. On ne promet PAS que les valeurs apparaitront aussitot
+       — un code propose attend une deuxieme personne pour etre confirme.
+     - La fiche a des codes-barres mais OpenFoodFacts ne connait pas ces
+       valeurs. Rien a faire de plus, et on le dit franchement.
+   TANT QUE LA RECHERCHE EST EN COURS, ON SE TAIT. nutriPourBoisson interroge
+   le reseau a l'ouverture de la fiche ; annoncer « inconnu » avant sa reponse
+   serait affirmer une chose qu'on n'a pas encore verifiee. */
+function nutriInconnuHTML(d){
+  if(!d||!d.id)return "";
+  var cb=(d.barcodes||[]).length;
+  if(cb){
+    var repondu=false;
+    try{
+      var c=_nutriCache(),e=c[String(d.id)];
+      repondu=!!(e&&Object.prototype.hasOwnProperty.call(e,"v"));
+    }catch(x){}
+    if(!repondu)return "";                 /* on attend la reponse reseau */
+  }
+  var phrase=cb?tr("OpenFoodFacts n\u2019a pas ces valeurs pour cette boisson.")
+               :tr("Cette boisson n\u2019a pas encore de code-barres au catalogue.");
+  return '<div style="padding:6px 20px 0"><div style="display:flex;align-items:center;gap:10px;'+
+      'border:1px dashed var(--border);border-radius:14px;padding:11px 12px;background:var(--bg2)">'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:12.5px;font-weight:800;color:var(--s1)">'+tr("Sucre et calories inconnus")+'</div>'+
+        '<div style="font-size:11.5px;color:var(--s2);margin-top:2px">'+phrase+'</div>'+
+      '</div>'+
+      (cb?'':'<span role="button" tabindex="0" onclick="scannerPourNutrition()" '+
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();scannerPourNutrition();}" '+
+        'style="flex:0 0 auto;padding:8px 14px;border-radius:999px;background:var(--s1);color:var(--app-bg);'+
+        'font-size:11.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent">'+
+        tr("Scanner")+'</span>')+
+    '</div></div>';
+}
+window.nutriInconnuHTML=nutriInconnuHTML;
+/* Depuis la fiche : ouvrir le scanner pour rattacher le code-barres manquant. */
+function scannerPourNutrition(){
+  try{show("scan");}catch(e){}
+  try{startScan();}catch(e){}
+  try{playSound("pop");}catch(e){}
+}
+window.scannerPourNutrition=scannerPourNutrition;
 function nutriHTML(d){
   var v=nutriDe(d);
-  if(!v)return "";
+  if(!v)return nutriInconnuHTML(d);
   var ml=_volumeMl(d);
   var tuiles=[];
   if(v.sucre!==undefined){
@@ -27800,18 +27934,42 @@ function chargerHorairesOSM(){
     })
     .catch(function(){ _horairesEtat=3; });
 }
-/* L'identifiant OpenStreetMap d'un magasin : champ osm, ou id « o12345 ». */
+/* L'identifiant OpenStreetMap d'un magasin : champ osm, champ osmId, ou
+   identifiant « o12345 ».
+   LE CHAMP osmId MANQUAIT, ET C'EST CELUI QUE PORTENT LES MAGASINS DE LA
+   BASE. MAGO_CHAMPS_PIN le liste explicitement, et le commentaire de
+   memeMagasinOsm chiffre deja la population concernee a 981 documents. Sans
+   lui, ces magasins ne pouvaient trouver leur ligne dans les 34 786 horaires
+   publies avec le site : ils affichaient « Horaires inconnus » alors que la
+   reponse etait livree avec l'application. */
 function osmIdDe(s){
   if(!s)return null;
-  if(s.osm!=null)return String(s.osm);
+  if(s.osm!=null&&/^\d+$/.test(String(s.osm)))return String(s.osm);
+  if(s.osmId!=null&&/^\d+$/.test(String(s.osmId)))return String(s.osmId);
   var i=String(s.fbId||s.id||"");
   return /^o\d+$/.test(i)?i.slice(1):null;
+}
+/* OpenStreetMap separe ses blocs par « ; », mais 904 des 34 786 lignes
+   emploient une virgule la ou un point-virgule est attendu :
+   « Mo-Fr 09:00-18:00, Sa 09:00-17:00 ». parseOSMHours decoupe alors la
+   virgule comme un separateur de PLAGES a l'interieur d'un bloc, lit
+   « 09:00-18:00 Sa 09:00-17:00 » comme un seul jeu de jours et renonce.
+   On ne remplace la virgule que lorsqu'elle SUIT une heure et PRECEDE un
+   jour : mesure sur le fichier entier, 904 lignes gagnees, zero perdue.
+   Les 542 echecs restants sont des phrases (« sur rendez-vous », « Enkel op
+   afspraak ») : elles n'ont pas d'horaire a lire, et c'est tres bien ainsi. */
+var _OSM_REPARE={};
+function _reparerSeparateur(t){
+  if(!t)return t;
+  if(_OSM_REPARE[t]===undefined)
+    _OSM_REPARE[t]=String(t).replace(/(\d{2}:\d{2})\s*,\s*(?=(Mo|Tu|We|Th|Fr|Sa|Su|PH)\b)/g,"$1; ");
+  return _OSM_REPARE[t];
 }
 function horairesReels(s){
   if(_horairesEtat===0)chargerHorairesOSM();
   if(!HORAIRES_OSM)return null;
   var k=osmIdDe(s);
-  return k?(HORAIRES_OSM[k]||null):null;
+  return k?(_reparerSeparateur(HORAIRES_OSM[k])||null):null;
 }
 /* On ne renvoie plus seulement OUVERT ou FERME : on renvoie aussi D'OU on le
    tient. Trois sources, et elles ne se valent pas du tout.
@@ -27825,12 +27983,54 @@ function horairesReels(s){
    supposition qui s'affiche « Fermé » en rouge est un mensonge : le magasin
    est peut-etre grand ouvert. D'ou openSur() plus bas, que l'affichage utilise
    pour ne jamais donner a une devinette l'apparence d'une certitude. */
+/* La chaine ecrite par le commercant, mise en syntaxe lisible. Elle est
+   gardee par TEXTE et non par magasin : openInfo est appelee une dizaine de
+   fois par magasin et par rendu, et normaliserHoraires fait un normalize()
+   plus quinze remplacements. Les chaines distinctes se comptent par
+   centaines, les magasins par milliers. */
+var _NORM_SAISI={};
+function _horaireSaisi(s){
+  var h=(s&&s.hours)?String(s.hours):"";
+  if(!h)return "";
+  if(_NORM_SAISI[h]===undefined)_NORM_SAISI[h]=normaliserHoraires(h);
+  return _NORM_SAISI[h];
+}
+window._horaireSaisi=_horaireSaisi;
+/* ══ LA PHRASE DU COMMERCANT, ASSAINIE, ET JAMAIS PERDUE ══════════════════
+   s.hours partait dans le HTML tel quel a trois endroits, alors que s.name y
+   passe par sanitize(). Or s.hours vient d'OpenStreetMap, ecrit par
+   n'importe qui, et importer-horaires le recopie brut. C'est une porte
+   ouverte, et elle se ferme ici.
+   Second role : quand on ne sait pas lire l'horaire, l'ecran disait
+   « Horaires inconnus » et JETAIT la phrase ecrite. « Sur rendez-vous » est
+   pourtant l'information la plus utile que ce magasin possede. On l'affiche
+   telle quelle : pas de verdict ouvert/ferme, mais pas d'oubli non plus. */
+function horaireTexte(s){
+  var h=(s&&s.hours)?String(s.hours).trim():"";
+  return h?sanitize(h):"";
+}
+window.horaireTexte=horaireTexte;
 function openInfo(s,at){
   var now=at||(window.__forceNow?new Date(window.__forceNow):new Date());
   var src=null,rules=null;
-  rules=parseOSMHours(s.hours);            if(rules)src="saisi";
+  /* ON LIT D'ABORD CE QUE LE COMMERCANT A ECRIT, EN LE NORMALISANT.
+     « 0h (24/7) » n'est pas de la syntaxe OpenStreetMap : parseOSMHours la
+     rejetait, la devinette d'enseigne prenait la main, et un nom contenant
+     « night » donnait 18h-4h — donc « Sans doute ferme ». L'ecran affichait
+     « Sans doute ferme - 0h (24/7) » : l'application contredisait, a deux
+     centimetres d'elle, la seule donnee factuelle qu'elle possedait.
+     normaliserHoraires rend « 24/7 » pour cette chaine, qui se lit tres bien. */
+  rules=parseOSMHours(_horaireSaisi(s))||parseOSMHours(s.hours);
+  if(rules)src="saisi";
   if(!rules){rules=parseOSMHours(horairesReels(s)); if(rules)src="osm";}
-  if(!rules){rules=heuristicHours(s.name,s.type);   if(rules)src="devine";}
+  /* UNE DEVINETTE NE CONTREDIT JAMAIS UNE PHRASE ECRITE. Si le magasin porte
+     des horaires qu'on n'arrive pas a lire (« sur rendez-vous », « Enkel op
+     afspraak »), on ne deduit rien de son enseigne : on rend « inconnu » et
+     l'ecran affichera la phrase telle quelle. Deviner par-dessus, c'est
+     recommencer la contradiction ci-dessus sous une autre forme. */
+  if(!rules&&!(s&&s.hours&&String(s.hours).trim())){
+    rules=heuristicHours(s.name,s.type); if(rules)src="devine";
+  }
   if(!rules)return{open:null,src:null};    // horaires inconnus : pas de mensonge
   var day=now.getDay(),t=now.getHours()*60+now.getMinutes();
   var open=false;
