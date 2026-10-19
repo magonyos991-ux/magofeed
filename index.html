@@ -23907,19 +23907,48 @@ function exploreApplyChips(list){
      confirmes ou non : c'est la question posee. La puce « Tous les magasins »
      rend la vue complete a qui la veut, par exemple pour ajouter un magasin
      qui manque. */
-  else if(exploreFilter&&exploreFilter.drinkId!=null&&!window._exploreTousMagasins){
-    arr=arr.filter(function(s){
-      try{ return magasinALaBoisson(s,exploreFilter.drinkId); }catch(e){ return true; }
+  /* DEUX CORRECTIONS, APRES UN MAGASIN INTROUVABLE SIGNALE PAR LE FONDATEUR.
+
+     (a) CHERCHER UN MAGASIN PAR SON NOM PASSE AVANT LE FILTRE PAR BOISSON.
+     On tapait le nom d'un magasin dont on SAVAIT qu'il avait la boisson, et la
+     liste revenait vide : le filtre par boisson s'appliquait d'abord, et il
+     ecartait justement le magasin que l'app ne savait pas encore vendeur. Une
+     recherche explicite est une instruction, pas une suggestion — elle desactive
+     le filtre implicite.
+
+     (b) LES AUTRES MAGASINS NE SONT PLUS EFFACES, ILS SONT MIS EN RETRAIT.
+     Ils sont ecartes de la LISTE et des compteurs — la question posee reste la
+     boisson — mais ils restent sur la CARTE, en gris et en retrait. Le code qui
+     peint les pins sait d'ailleurs deja le faire depuis toujours
+     (opacity:.4;filter:grayscale(1), plus bas) : depuis le 13 octobre cette
+     branche ne servait plus jamais, puisque ces magasins ne lui parvenaient
+     plus. Sans eux, impossible de declarer un stock dans un magasin que l'app
+     ignore — c'est-a-dire exactement le geste qui fait vivre Magofeed. */
+  var _chercheUnMagasin=!!(window._exploreBrand||window._exploreBrandQuery);
+  var _horsBoisson=[];
+  if(!c.instock&&exploreFilter&&exploreFilter.drinkId!=null
+     &&!window._exploreTousMagasins&&!_chercheUnMagasin){
+    var _gardes=[];
+    arr.forEach(function(s){
+      var ok; try{ ok=magasinALaBoisson(s,exploreFilter.drinkId); }catch(e){ ok=true; }
+      (ok?_gardes:_horsBoisson).push(s);
     });
+    arr=_gardes;
   }
-  if(window._exploreBrand){
-    arr=arr.filter(function(s){return s.brand===window._exploreBrand;});
-  }else if(window._exploreBrandQuery){
-    // Filtre LIVE pendant qu'on tape une enseigne : on garde les magasins dont
-    // le nom/l'enseigne contient le texte (ex: "lid" -> tous les Lidl).
-    var qq=normTxt(window._exploreBrandQuery);
-    arr=arr.filter(function(s){return normTxt((s.brand||"")+" "+(s.name||"")).indexOf(qq)!==-1;});
+  /* Les filtres d'enseigne valent pour les deux lots : un magasin mis en retrait
+     ne doit pas reapparaitre sur la carte quand on filtre sur « Lidl ». */
+  function _parEnseigne(a){
+    if(window._exploreBrand)return a.filter(function(s){return s.brand===window._exploreBrand;});
+    if(window._exploreBrandQuery){
+      // Filtre LIVE pendant qu'on tape une enseigne : on garde les magasins dont
+      // le nom/l'enseigne contient le texte (ex: "lid" -> tous les Lidl).
+      var qq=normTxt(window._exploreBrandQuery);
+      return a.filter(function(s){return normTxt((s.brand||"")+" "+(s.name||"")).indexOf(qq)!==-1;});
+    }
+    return a;
   }
+  arr=_parEnseigne(arr);
+  window._exploreHorsBoisson=_parEnseigne(_horsBoisson);
   return arr;
 }
 function exploreSetHeader(shown,sure){
@@ -25042,6 +25071,13 @@ function exploreLoadStores(useCache){
        fait pour des milliers de marqueurs (chunkedLoading + grille interne
        par zoom), il n'en perd aucun, et sa bulle porte le VRAI nombre.
        On envoie donc TOUTE la liste visible au regroupement. */
+    /* Les magasins mis en retrait par le filtre par boisson sont peints eux
+       aussi, en gris (voir exploreApplyChips). Ils arrivent APRES les autres :
+       si le plafond de 1200 mord, ce sont eux qui sautent, jamais un magasin
+       qui vend ce qu'on cherche. */
+    var _retrait=(window._exploreHorsBoisson||[]).filter(function(s){
+      return typeof s.lat==="number"&&typeof s.lng==="number";
+    });
     var _pourCarte=list;
     var _lot=[], _avant=0;
     /* Les plus proches d'abord, pour deux raisons : les six mis en avant sont
@@ -25050,9 +25086,12 @@ function exploreLoadStores(useCache){
        sautent — pas six magasins au hasard sous le nez de celui qui regarde.
        Le tri vaut donc a tous les paliers, pas seulement aux larges. */
     if(typeof userLat==="number"&&userLat&&typeof _distM==="function"){
-      try{ _pourCarte=_pourCarte.slice().sort(function(a,b){
-        return _distM(userLat,userLng,a.lat,a.lng)-_distM(userLat,userLng,b.lat,b.lng);}); }catch(eS){}
+      var _parDistance=function(a,b){
+        return _distM(userLat,userLng,a.lat,a.lng)-_distM(userLat,userLng,b.lat,b.lng);};
+      try{ _pourCarte=_pourCarte.slice().sort(_parDistance); }catch(eS){}
+      try{ _retrait=_retrait.slice().sort(_parDistance); }catch(eS2){}
     }
+    _pourCarte=_pourCarte.concat(_retrait);
     /* Plafond 1200 (etait 3000) : en zone dense, creer 3000 marqueurs d'un
        coup — chacun avec son icone et ses ecouteurs — faisait un pic memoire
        qui tuait l'app sur iPhone a l'ouverture de la carte. 1200 regroupes
