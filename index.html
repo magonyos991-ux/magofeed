@@ -7485,7 +7485,7 @@ function _showRaw(s){
     /* Ces trois-la DECRIVENT la carte qu'on vient de detruire. Oubliees, la
        barre de la fiche suivante affichait le comptage de la precedente —
        une legende qui promet des pins d'une autre boisson. */
-    window._mapPins=null;window._mapCompte=null;
+    window._mapPins=null;window._mapPinsEtat=null;window._mapDessine=null;
     window._mapMainUtilisateur=false;window._mapCadragePilote=false;
     try{mapRenderedFor=null;}catch(e){}
     try{var _mbx=document.getElementById("map-box");if(_mbx)_mbx.innerHTML="";}catch(e){}
@@ -15541,7 +15541,7 @@ function renderMap(){
   mapRenderedFor=productId;
   /* On reconstruit la boite : le comptage et les pins de la boisson
      precedente ne valent plus rien, et la barre ci-dessous les lirait. */
-  window._mapPins=null;window._mapCompte=null;
+  window._mapPins=null;window._mapPinsEtat=null;window._mapDessine=null;
   window._mapMainUtilisateur=false;window._mapCadragePilote=false;
   var placeholder=box.querySelector("#map-placeholder");if(placeholder)placeholder.style.display="none";
   box.innerHTML='<div id="leaflet-map" style="width:100%;height:100%"></div>'+
@@ -15557,7 +15557,7 @@ function renderMap(){
         'aria-label="'+tr("N\u2019afficher que les magasins qui l\u2019ont en stock")+'" '+
         'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleInStockOnly();}" '+
         'class="'+(window._mapInStockOnly?"on":"")+'">'+
-        '<span class="pt"></span>'+tr("En stock seulement")+
+        '<span class="pt"></span>'+tr("En rayon")+
       '</div>'+
     '</div>'+
 /* ══ CE BOUTON AGRANDIT LA CARTE, IL NE CHANGE PLUS D'ECRAN ═══════════════
@@ -15572,7 +15572,7 @@ function renderMap(){
        la fiche, on vient d'en revenir — y renvoyer, c'est un aller-retour.
        Le plein ecran, lui, reactive le glisser et le zoom sans quitter la
        boisson, et la croix ramene a la fiche. */
-    '<div id="map-full-btn" onclick="toggleDrinkMapFull()" role="button" tabindex="0" aria-label="'+tr("Agrandir la carte")+'" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleDrinkMapFull();}" style="position:absolute;top:8px;right:8px;z-index:900;width:36px;height:36px;border-radius:12px;background:color-mix(in srgb,var(--app-bg) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--s1);cursor:pointer">\u26f6</div>'+
+    '<div id="map-full-btn" onclick="toggleDrinkMapFull()" role="button" tabindex="0" aria-label="'+tr("Agrandir la carte")+'" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleDrinkMapFull();}" style="position:absolute;top:8px;right:8px;z-index:1000;width:44px;height:44px;border-radius:13px;background:var(--app-bg);border:1.5px solid var(--border);box-shadow:0 2px 8px rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;font-size:17px;color:var(--s1);cursor:pointer;-webkit-tap-highlight-color:transparent">\u26f6</div>'+
     '<div class="map-locate-btn" onclick="centerMapOnUser()" title="Centrer sur moi" role="button" tabindex="0" aria-label="Centrer la carte sur ma position" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();centerMapOnUser();}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="var(--s1)" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="var(--s1)" stroke-width="2" stroke-linecap="round"/></svg></div>';
   if(window._leafletMap){window._leafletMap.remove();window._leafletMap=null;}
   /* Meme chargeur robuste que la carte Explorer. Le regroupement de marqueurs
@@ -17166,6 +17166,17 @@ function drinkCardPhotoHTML(d){
 function centerMapOnUser(){
   if(!window._leafletMap)return;
   if(userLat){
+    /* En apercu, voler jusqu'au zoom 15 mettait tous les magasins hors champ
+       sur une bande de 150 px — et comme on ne peut pas la deplacer, il n'y
+       avait plus aucun moyen de les retrouver. On recadre donc plutot que de
+       zoomer : moi et le magasin le plus proche, comme a l'ouverture. */
+    var bx=document.getElementById("map-box");
+    if(!(bx&&bx.classList.contains("map-fullscreen"))&&typeof cadrerSurLesPins==="function"){
+      window._mapMainUtilisateur=false;
+      try{ cadrerSurLesPins(window._leafletMap); }catch(e0){}
+      haptic("pop");
+      return;
+    }
     try{ window._leafletMap.flyTo([userLat,userLng],15,{duration:1,easeLinearity:0.22}); }
     catch(e){ window._leafletMap.setView([userLat,userLng],15); }
     haptic("pop");
@@ -17177,7 +17188,14 @@ function centerMapOnUser(){
 function initLeafletMap(lat,lng){
   if(!window.L||!document.getElementById("leaflet-map"))return;
   var map=L.map("leaflet-map",{zoomControl:false,attributionControl:true,zoomAnimation:true,markerZoomAnimation:true,fadeAnimation:false}).setView([lat,lng],13);
-  L.control.zoom({position:"bottomleft"}).addTo(map);
+  /* ══ PAS DE ZOOM SANS DEPLACEMENT ══════════════════════════════════════
+     Les boutons + et - etaient poses sur l'apercu alors que le glisser y est
+     coupe. On pouvait donc zoomer une carte qu'on ne pouvait pas deplacer :
+     on agrandissait un bout de rue, et plus rien ne permettait d'en sortir.
+     « Je ne peux pas bouger sur la carte » etait litteralement vrai, bouton
+     de zoom compris. Le controle est garde de cote et ajoute seulement en
+     plein ecran, la ou le glisser est reactive. */
+  window._zoomCtrl=L.control.zoom({position:"bottomleft"});
   window._leafletMap=map;
   // Carte embarquee = apercu : on coupe le pan tactile et le zoom molette pour que
   // le doigt (ou la molette) fasse defiler la PAGE vers la liste des magasins en
@@ -17214,11 +17232,17 @@ function initLeafletMap(lat,lng){
          recouvraient — impossible d'atteindre celui du dessous. Rayon
          degressif + eventail : plus aucun magasin hors de portee du doigt. */
       maxClusterRadius:rayonRegroupement,
-      /* Plus AUCUNE bulle de comptage des le zoom de detail : a partir de la,
-         chaque magasin a son point. Ce reglage cachait autrefois les magasins
-         superposes ; il ne le peut plus, etalerMarqueurs les ecarte en rosace
-         a chaque zoom. */
-      disableClusteringAtZoom:ZOOM_DETAIL,
+      /* ══ DOUZE PINS N'ONT PAS BESOIN D'ETRE REGROUPES ═══════════════════
+         Le regroupement existe pour la carte d'exploration et ses milliers de
+         commerces. L'apercu d'une fiche en porte DOUZE au maximum. En dessous
+         du zoom 13, le greffon les fondait pourtant en une seule pastille
+         blanche portant « 12 » — un rond sans nom, sans adresse, sans
+         distance, au milieu d'une carte dezoomee sur toute la province.
+         On ne regroupe donc plus qu'en dessous du plancher de l'apercu, la ou
+         l'utilisateur ne va jamais sans l'avoir demande : les pins restent
+         individuels partout ou il les voit. etalerMarqueurs continue d'ecarter
+         en rosace ceux qui se superposent. */
+      disableClusteringAtZoom:0,
       spiderfyOnMaxZoom:true,
       spiderfyDistanceMultiplier:1.6,
       spiderLegPolylineOptions:{weight:2,color:"#8c8378",opacity:.8},
@@ -17242,7 +17266,11 @@ function initLeafletMap(lat,lng){
     var stores=populateClusterMarkers(cluster);
     map.addLayer(cluster);
     // Rosace : recalculee a chaque zoom et a chaque deplacement.
-    map.on("zoomend moveend",function(){etalerMarqueurs(map,cluster);});
+    map.on("zoomend moveend",function(){
+      etalerMarqueurs(map,cluster);
+      /* Le cadre a change : ce qui est visible aussi, donc le comptage. */
+      try{if(window.rafraichirLegende)window.rafraichirLegende();}catch(eL){}
+    });
     setTimeout(function(){etalerMarqueurs(map,cluster);},360);
 
     // Le conteneur peut avoir une taille nulle si la carte est construite pendant que l'écran est encore masqué
@@ -17349,7 +17377,8 @@ function populateClusterMarkers(cluster){
       className:"",iconSize:big?[38,49]:[28,36],iconAnchor:big?[19,49]:[14,36]
     });
     var marker=L.marker([s.lat,s.lng],{icon:storeIcon,zIndexOffset:status==="sure"?600:(status==="no"?0:(certif?450:200))});
-    _compte[status]=(_compte[status]||0)+1;   /* la legende lira CE comptage */
+    _compte[status]=(_compte[status]||0)+1;
+    marker._magoEtat=status;                  /* pour recompter ce qui est visible */
     marker._brand=s.brand||"";
     var storeIdForSheet=String(s.id);
     marker.on("click",function(){routeFromMarker(storeIdForSheet);});
@@ -17357,14 +17386,17 @@ function populateClusterMarkers(cluster){
   });
   if(cluster.addLayers)cluster.addLayers(_lot);
   else _lot.forEach(function(m){cluster.addLayer(m);});
-  window._mapCompte=_compte;
+  window._mapDessine=_compte;            /* ce qui est DESSINE */
   window._mapPins=_lot.map(function(m){var ll=m.getLatLng();return[ll.lat,ll.lng];});
-  try{if(window.rafraichirLegende)window.rafraichirLegende();}catch(eL){}
+  window._mapPinsEtat=_lot.map(function(m){return m._magoEtat||"maybe";});
   try{if(window._leafletMap)etalerMarqueurs(window._leafletMap,cluster);}catch(eE){}
   /* Pose ICI, le recadrage couvre les cinq appelants d'un coup — y compris
      les deux qui l'oubliaient (loadStoresForMapViewport apres Firestore,
      toggleNearbyFallback) — et tout appelant futur. */
   try{if(window._leafletMap)cadrerSiPinsHorsCadre(window._leafletMap);}catch(eF){}
+  /* La legende vient APRES le cadrage : elle compte ce qui est a l'ecran, et
+     le cadrage vient de decider ce qui y est. */
+  try{if(window.rafraichirLegende)window.rafraichirLegende();}catch(eL){}
   return stores;
 }
 /* Plein ecran carte : la boite passe en fixe pleine fenetre, Leaflet recalcule
@@ -17405,8 +17437,14 @@ function toggleDrinkMapFull(){
   // le pan/zoom pour que la page puisse defiler vers la liste des magasins.
   var m=window._leafletMap;
   if(m){
-    if(full){m.dragging.enable();m.scrollWheelZoom.enable();if(m.touchZoom)m.touchZoom.enable();if(m.doubleClickZoom)m.doubleClickZoom.enable();}
-    else{m.dragging.disable();m.scrollWheelZoom.disable();}
+    if(full){
+      m.dragging.enable();m.scrollWheelZoom.enable();
+      if(m.touchZoom)m.touchZoom.enable();if(m.doubleClickZoom)m.doubleClickZoom.enable();
+      try{ if(window._zoomCtrl)window._zoomCtrl.addTo(m); }catch(eZ){}
+    }else{
+      m.dragging.disable();m.scrollWheelZoom.disable();
+      try{ if(window._zoomCtrl)m.removeControl(window._zoomCtrl); }catch(eZ2){}
+    }
   }
   playSound("pop");
   setTimeout(function(){try{if(window._leafletMap)window._leafletMap.invalidateSize();}catch(e){}},80);
@@ -17582,8 +17620,33 @@ function navUpdatePosition(lat,lng){
    elle porte son nombre : on lit « 6 possible » et on sait quoi chercher.
    Aucun marqueur du tout, on le dit en toutes lettres plutot que d'afficher
    une legende vide. */
+/* ══ LA LEGENDE COMPTE CE QUI EST A L'ECRAN, PAS CE QUI EST DESSINE ═══════
+   Elle lisait le comptage pose au dessin. Depuis que l'apercu cadre sur le
+   magasin le plus proche au lieu de contenir les douze, une partie des pins
+   est volontairement hors champ : annoncer « 12 possibles » au-dessus d'une
+   carte qui en montre trois serait exactement la faute corrigee avant-hier,
+   sous une autre forme. On recompte donc a chaque cadrage et a chaque
+   deplacement, et ce qui depasse est annonce separement : « +9 plus loin ». */
+function compterPinsVisibles(){
+  var m=window._leafletMap, pts=window._mapPins||[], etats=window._mapPinsEtat||[];
+  var c={sure:0,maybe:0,no:0,autour:0,loin:0};
+  if(!pts.length)return c;
+  var vue=null;
+  try{ if(m&&m._loaded)vue=m.getBounds(); }catch(e){}
+  for(var i=0;i<pts.length;i++){
+    var dedans=true;
+    if(vue){ try{ dedans=vue.contains(L.latLng(pts[i][0],pts[i][1])); }catch(e2){} }
+    if(dedans)c[etats[i]||"maybe"]=(c[etats[i]||"maybe"]||0)+1;
+    else c.loin++;
+  }
+  return c;
+}
+window.compterPinsVisibles=compterPinsVisibles;
 function mapLegendHTML(pleinEcran){
-  var c=window._mapCompte||null;
+  /* Un tableau VIDE n'est pas l'absence de tableau : « zero magasin dessine »
+     est une information, « la carte n'est pas encore peuplee » n'en est pas
+     une. Le premier se dit, le second se tait. */
+  var c=(window._mapPins)?compterPinsVisibles():null;
   function etat(coul,n,txt,cls){
     return '<span class="'+(cls||"")+'" style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap">'+
       '<span style="width:10px;height:10px;border-radius:50%;background:'+coul+';display:inline-block"></span>'+
@@ -17600,6 +17663,9 @@ function mapLegendHTML(pleinEcran){
     if(c.sure)bouts.push(etat("#16a34a",c.sure,tr("en rayon")));
     if(c.maybe)bouts.push(etat("#f59e0b",c.maybe,c.maybe>1?tr("possibles"):tr("possible")));
     if(pleinEcran&&c.no)bouts.push(etat("#dc2626",c.no,tr("ne l\u2019a pas"),"lg-no"));
+    /* Hors du cadre : annonce a part, sans pastille de couleur — il n'y a
+       aucun point a montrer, c'est justement ce que cette mention dit. */
+    if(c.loin)bouts.push('<span style="white-space:nowrap;color:var(--s3)">+'+c.loin+' '+tr("plus loin")+'</span>');
     if(!bouts.length)bouts.push('<span style="white-space:nowrap">'+tr("Aucun magasin sur cette carte")+'</span>');
   }
   return '<div class="map-legend" style="display:flex;gap:10px;align-items:center;padding:7px 12px;font-size:10px;font-weight:700;color:var(--s2)">'+
@@ -17608,7 +17674,24 @@ function mapLegendHTML(pleinEcran){
 }
 window.mapLegendHTML=mapLegendHTML;
 /* Reecrit la legende en place apres chaque (re)dessin des marqueurs. */
+/* ══ UNE COMMANDE QUI NE PEUT QUE VIDER L'ECRAN NE SE PROPOSE PAS ═════════
+   Sur une boisson qu'aucun magasin n'a confirmee, appuyer sur ce filtre ne
+   pouvait produire qu'une carte vide, annoncee par un message d'excuse. Il
+   occupait pourtant plus de la moitie de la bande, en face d'une legende qui
+   est la seule chose expliquant ce qu'on voit. On ne l'affiche donc que
+   lorsqu'il a quelque chose a filtrer — et toujours quand il est deja
+   allume, pour ne jamais enfermer quelqu'un dans une carte vide. */
+function majPuceStock(){
+  try{
+    var b=document.getElementById("map-instock-btn");if(!b)return;
+    var d=window._mapDessine||null;
+    var utile=!!(d&&d.sure)||!!window._mapInStockOnly;
+    b.style.display=utile?"":"none";
+  }catch(e){}
+}
+window.majPuceStock=majPuceStock;
 function rafraichirLegende(){
+  try{ majPuceStock(); }catch(eP){}
   try{
     var bar=document.querySelector("#map-box .map-barre");if(!bar)return;
     var vieille=bar.querySelector(".map-legend");if(!vieille)return;
@@ -17633,21 +17716,52 @@ window.rafraichirLegende=rafraichirLegende;
 function cadrerSurLesPins(map){
   if(!map)return;
   try{
-    var pts=(window._mapPins||[]).slice();
+    var tous=(window._mapPins||[]).slice();
     var aMoi=(typeof userLat==="number"&&userLat&&typeof userLng==="number"&&userLng);
-    if(aMoi)pts.push([userLat,userLng]);
-    if(!pts.length){                       /* rien a montrer : on reste chez soi */
+    if(!tous.length){                      /* rien a montrer : on reste chez soi */
       if(aMoi)map.setView([userLat,userLng],14);
       return;
     }
     var bx=document.getElementById("map-box");
     var enGrand=!!(bx&&bx.classList.contains("map-fullscreen"));
-    map.fitBounds(L.latLngBounds(pts),{
-      paddingTopLeft:     enGrand?[30,92]:[16,46],
-      paddingBottomRight: enGrand?[30,40]:[16,22],
-      maxZoom:            enGrand?16:15,
-      animate:false
-    });
+    var pts=[];
+    if(aMoi)pts.push([userLat,userLng]);
+    if(enGrand){
+      pts=pts.concat(tous);                /* en grand, on a la place : tout */
+    }else if(aMoi){
+      /* ══ L'APERCU CADRE SUR MOI ET LE MAGASIN LE PLUS PROCHE ═════════════
+         Il cadrait sur LES DOUZE. Quand ils sont etales sur vingt kilometres,
+         les contenir tous obligeait a dezoomer jusqu'a la province : 274 km
+         de large sur une bande de 150 px, mesure sur la capture. La question
+         posee par cet apercu n'est pas « ou sont les douze », c'est « ou est
+         le plus proche, par rapport a moi » — exactement ce que repete la
+         carte-reponse juste en dessous. Les autres restent dessines : ceux
+         qui tombent dans le cadre se voient, les autres sont comptes a part
+         par la legende. */
+      var proche=null,dmin=Infinity;
+      for(var i=0;i<tous.length;i++){
+        var d=haversine(userLat,userLng,tous[i][0],tous[i][1]);
+        if(d<dmin){dmin=d;proche=tous[i];}
+      }
+      if(proche)pts.push(proche);
+    }else{
+      pts=tous.slice();                    /* sans GPS, aucun « plus proche » */
+    }
+    var ptl=enGrand?[30,92]:[16,46], pbr=enGrand?[30,40]:[16,22];
+    var b=L.latLngBounds(pts);
+    /* PLANCHER DE ZOOM. On demande a Leaflet le zoom qu'il choisirait avec
+       ces marges ; s'il descend sous le plancher de l'apercu, on refuse et on
+       se centre. Sans ce garde-fou, un magasin isole a trente kilometres
+       ramenait la carte a l'echelle d'un pays. */
+    if(!enGrand){
+      var z=map.getBoundsZoom(b,false,L.point(ptl[0]+pbr[0],ptl[1]+pbr[1]));
+      if(z<APERCU_ZOOM_MIN){
+        map.setView(aMoi?L.latLng(userLat,userLng):b.getCenter(),APERCU_ZOOM_MIN,{animate:false});
+        return;
+      }
+    }
+    map.fitBounds(b,{paddingTopLeft:ptl,paddingBottomRight:pbr,
+      maxZoom:enGrand?16:15,animate:false});
   }catch(e){
     try{ if(typeof userLat==="number"&&userLat)map.setView([userLat,userLng],14); }catch(e2){}
   }
@@ -19319,6 +19433,19 @@ function ensureCluster(onDone){
    carte s'ouvre au zoom 13/14 : au premier coup d'oeil on voit donc des
    magasins, pas des « 2 ». */
 var ZOOM_DETAIL=13;
+/* ══ JUSQU'OU L'APERCU A LE DROIT DE DEZOOMER ══════════════════════════════
+   Calcul, a la latitude de Bruxelles : un pixel vaut 98 770 m au zoom 0, donc
+   48,2 m au zoom 11. La boite fait 362 x 150 px, dont environ 330 x 82 px
+   utiles une fois retirees les marges de cadrage : au zoom 11 elle montre
+   donc 15,9 km de large sur 4,0 km de haut. C'est le plancher — assez large
+   pour contenir le magasin le plus proche dans presque tous les cas urbains,
+   assez serre pour qu'on lise encore des rues.
+   En dessous, on ne voit plus une ville mais une province : la capture
+   « Caresse Antillaise » etait descendue au zoom 7, soit 274 km de large et
+   760 m par pixel — mesure, pas estimation. Les magasins qui ne tiennent pas
+   dans ce cadre restent dessines, simplement hors champ, et la legende les
+   compte a part plutot que de les annoncer comme visibles. */
+var APERCU_ZOOM_MIN=11;
 
 /* L'EVENTAIL PERMANENT. Le greffon sait deja ouvrir un eventail, mais
    seulement sur un clic et seulement au zoom maximal : entre les deux, deux

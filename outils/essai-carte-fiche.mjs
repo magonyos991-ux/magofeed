@@ -101,8 +101,15 @@ async function lire(){
     let hors=0;
     if(m)for(const [la,ln] of pins)if(!m.getBounds().contains(window.L.latLng(la,ln)))hors++;
     const lg=document.querySelector("#map-box .map-legend");
+    /* « dessine » = ce que populateClusterMarkers a pose. « visible » = ce qui
+       tombe dans le cadre, c'est-a-dire ce que la legende a le droit
+       d'annoncer. Les deux ne sont plus censes etre egaux : l'apercu cadre
+       sur le magasin le plus proche, et compte les autres a part. */
     return {pins:pins.length, hors, carte:!!m, grappe:!!cl,
-            compte:window._mapCompte||null,
+            compte:window._mapDessine||null,
+            visible:(window.compterPinsVisibles?window.compterPinsVisibles():null),
+            zoom:(m&&m._loaded)?m.getZoom():null,
+            pastilles:document.querySelectorAll("#map-box .mago-cluster").length,
             legende:(lg?lg.textContent:"").replace(/\s+/g," ").trim()};
   });
 }
@@ -118,10 +125,15 @@ await scene(30,0);
 let v=await lire();
 verifier("la carte existe",v.carte&&v.grappe,v.carte?"leaflet + grappe":"ABSENTE");
 verifier("apercu plafonne a 12 pins",v.pins<=12,v.pins+" pins");
-verifier("aucun pin hors du cadre",v.hors===0,v.hors+" hors cadre sur "+v.pins);
+verifier("AUCUNE pastille de regroupement",v.pastilles===0,v.pastilles+" pastille(s)");
+verifier("l'apercu ne descend pas sous le plancher",v.zoom>=11,"zoom "+v.zoom);
 verifier("legende sans vert quand aucun confirme",!/en rayon/.test(v.legende),"« "+v.legende+" »");
-verifier("legende = comptage reel",v.compte&&(v.compte.sure+v.compte.maybe)===v.pins,
-  JSON.stringify(v.compte)+" pour "+v.pins+" pins");
+verifier("legende = ce qui est DANS le cadre",
+  v.visible&&(v.visible.sure+v.visible.maybe+v.visible.autour+v.visible.loin)===v.pins,
+  JSON.stringify(v.visible)+" pour "+v.pins+" dessines");
+verifier("ce qui depasse est annonce a part",
+  v.visible.loin===0||/plus loin/.test(v.legende),
+  v.visible.loin+" hors cadre, « "+v.legende+" »");
 verifier("legende chiffree",/\d/.test(v.legende),"« "+v.legende+" »");
 
 /* ─── Scene 2 : trois confirmes parmi vingt ─────────────────────────────
@@ -133,7 +145,7 @@ v=await lire();
 verifier("filtre automatique : 3 surs seuls",v.pins===3&&v.compte.sure===3,
   JSON.stringify(v.compte)+" pour "+v.pins+" pins");
 verifier("pas d'orange annonce s'il n'y en a pas",!/possible/.test(v.legende),"« "+v.legende+" »");
-verifier("toujours aucun pin hors cadre",v.hors===0,v.hors+" hors cadre sur "+v.pins);
+verifier("toujours aucune pastille",v.pastilles===0,v.pastilles+" pastille(s)");
 
 /* ─── Scene 3 : filtre eteint — les deux couleurs, et le plafond de 12 ─── */
 await pg.evaluate(async()=>{window.toggleInStockOnly();await new Promise(r=>setTimeout(r,900));});
@@ -141,15 +153,17 @@ const f=await lire();
 verifier("filtre eteint : plafond de 12",f.pins===12,f.pins+" pins");
 verifier("vert ET orange annonces",/en rayon/.test(f.legende)&&/possible/.test(f.legende),"« "+f.legende+" »");
 verifier("les 3 surs sont gardes en priorite",f.compte&&f.compte.sure===3,JSON.stringify(f.compte));
-verifier("aucun pin hors cadre apres filtre",f.hors===0,f.hors+" hors cadre sur "+f.pins);
+verifier("aucune pastille apres filtre",f.pastilles===0,f.pastilles+" pastille(s)");
 
 /* ─── Scene 4 : plein ecran — les vingt, toujours cadres ────────────────── */
 await pg.evaluate(async()=>{window.toggleDrinkMapFull();await new Promise(r=>setTimeout(r,1600));});
 const g=await lire();
 verifier("plein ecran leve le plafond",g.pins>f.pins,f.pins+" -> "+g.pins);
-verifier("plein ecran cadre ses pins",g.hors===0,g.hors+" hors cadre sur "+g.pins);
-verifier("legende suit le plein ecran",g.compte&&(g.compte.sure+g.compte.maybe)===g.pins,
-  JSON.stringify(g.compte)+" pour "+g.pins+" pins");
+verifier("plein ecran cadre tous ses pins",g.hors===0,g.hors+" hors cadre sur "+g.pins);
+verifier("plein ecran : aucune pastille",g.pastilles===0,g.pastilles+" pastille(s)");
+verifier("legende suit le plein ecran",
+  g.visible&&(g.visible.sure+g.visible.maybe+g.visible.autour+g.visible.loin)===g.pins,
+  JSON.stringify(g.visible)+" pour "+g.pins+" pins");
 
 /* ─── Scene 5 : LES MAGASINS ARRIVENT APRES LE CADRAGE ───────────────────
    C'est le defaut de la capture d'ecran, et l'ancien controle ne savait pas
@@ -184,7 +198,9 @@ await pg.evaluate(async()=>{
 const tard=await lire();
 verifier("magasins tardifs : pins dessines",tard.pins===7,tard.pins+" pins");
 verifier("magasins tardifs : legende juste",tard.compte&&tard.compte.maybe===7,JSON.stringify(tard.compte));
-verifier("MAGASINS TARDIFS : TOUS DANS LE CADRE",tard.hors===0,tard.hors+" hors cadre sur "+tard.pins);
+verifier("MAGASINS TARDIFS : LE PLUS PROCHE EST CADRE",
+  tard.visible&&(tard.visible.sure+tard.visible.maybe+tard.visible.autour)>0,
+  JSON.stringify(tard.visible));
 
 /* ─── Scene 6 : le bouton agrandir ouvre bien le plein ecran ─────────────── */
 const btn=await pg.evaluate(()=>{
@@ -221,6 +237,91 @@ const repli=await pg.evaluate(async()=>{
 verifier("repli « autour de moi » : des pins",repli.pins>0,repli.pins+" pins");
 verifier("repli : la legende dit « autour »",/autour/.test(repli.legende),"« "+repli.legende+" »");
 verifier("repli : jamais « en rayon »",!/en rayon/.test(repli.legende),"« "+repli.legende+" »");
+
+/* ─── Scene 8 : LA CAPTURE « CARESSE ANTILLAISE » ────────────────────────
+   Douze magasins etales de 2,5 a 20 km, aucun confirme, apercu de 150 px.
+   Avant correction : zoom 7, 274 km de large, zero pin individuel et une
+   pastille blanche portant « 12 ». Mesure, pas estimation. */
+const etale=await pg.evaluate(async()=>{
+  const d=DRINKS.find(x=>x.name==="Coca-Cola Original");
+  /* La position est posee a la main : sans elle le cadrage ne peut pas
+     choisir « le plus proche », et la scene ne jouerait pas le bon chemin. */
+  window.userLat=50.8793; window.userLng=4.3511;
+  window.STORES.length=0;
+  for(let i=0;i<12;i++){
+    const km=2.5+i*1.6, ang=i*1.1;
+    window.STORES.push({id:"E"+i,name:"Carrefour "+i,brand:"Carrefour",
+      lat:50.8793+Math.cos(ang)*km/111, lng:4.3511+Math.sin(ang)*km/71,
+      dist:km*1000, drinks:[d.id], confirmations:{}});
+  }
+  window._mapInStockOnly=false; window.mapRenderedFor=null;
+  const bx=document.getElementById("map-box");
+  if(bx&&bx.classList.contains("map-fullscreen"))window.toggleDrinkMapFull();
+  window.pick(d); await new Promise(r=>setTimeout(r,900));
+  window.renderMap(); await new Promise(r=>setTimeout(r,2800));
+  const m=window._leafletMap, b=m.getBounds();
+  const lg=document.querySelector("#map-box .map-legend");
+  /* Le magasin le plus proche est-il dans le cadre ? C'est la question que
+     pose cet apercu, et la carte-reponse juste en dessous le nomme. */
+  let dmin=Infinity,proche=null;
+  for(const p of (window._mapPins||[])){
+    const dd=window.haversine(window.userLat,window.userLng,p[0],p[1]);
+    if(dd<dmin){dmin=dd;proche=p;}
+  }
+  return {zoom:m.getZoom(),
+    largeurKm:+(m.distance(b.getNorthWest(),b.getNorthEast())/1000).toFixed(1),
+    pastilles:document.querySelectorAll("#map-box .mago-cluster").length,
+    dessines:(window._mapPins||[]).length,
+    visible:window.compterPinsVisibles(),
+    procheCadre:!!(proche&&b.contains(window.L.latLng(proche[0],proche[1]))),
+    procheKm:+(dmin/1000).toFixed(1),
+    legende:(lg?lg.textContent:"").replace(/\s+/g," ").trim()};
+});
+verifier("capture : aucune pastille « 12 »",etale.pastilles===0,etale.pastilles+" pastille(s)");
+verifier("capture : zoom remonte au plancher",etale.zoom>=11,"zoom "+etale.zoom);
+verifier("capture : la carte reste a l'echelle d'une ville",etale.largeurKm<=40,etale.largeurKm+" km de large");
+verifier("capture : le plus proche est dans le cadre",etale.procheCadre,"a "+etale.procheKm+" km");
+verifier("capture : les absents sont comptes a part",
+  etale.visible.loin===0||/plus loin/.test(etale.legende),
+  JSON.stringify(etale.visible)+" « "+etale.legende+" »");
+
+/* ─── Scene 9 : la puce « En rayon » ─────────────────────────────────────
+   Elle ne doit pas etre proposee quand elle ne peut que vider la carte, et
+   son point doit dire son etat et non le contraire. */
+const puceSansSur=await pg.evaluate(()=>{
+  const b=document.getElementById("map-instock-btn");
+  if(!b)return null;
+  const pt=b.querySelector(".pt"), st=getComputedStyle(pt);
+  return {affichee:getComputedStyle(b).display!=="none",
+          allumee:b.classList.contains("on"),
+          fondDuPoint:st.backgroundColor,
+          dessine:window._mapDessine};
+});
+verifier("puce masquee quand aucun magasin confirme",
+  puceSansSur&&!puceSansSur.affichee,JSON.stringify(puceSansSur));
+
+await scene(20,4);              /* quatre confirmes : la puce redevient utile */
+const puceAvecSur=await pg.evaluate(()=>{
+  const b=document.getElementById("map-instock-btn");
+  const pt=b.querySelector(".pt");
+  return {affichee:getComputedStyle(b).display!=="none",
+          allumee:b.classList.contains("on"),
+          fondDuPoint:getComputedStyle(pt).backgroundColor};
+});
+verifier("puce affichee quand il y a du confirme",puceAvecSur.affichee,
+  JSON.stringify(puceAvecSur));
+verifier("allumee : le point est plein",
+  !puceAvecSur.allumee||puceAvecSur.fondDuPoint==="rgb(255, 255, 255)",
+  "allumee="+puceAvecSur.allumee+", point="+puceAvecSur.fondDuPoint);
+await pg.evaluate(async()=>{window.toggleInStockOnly();await new Promise(r=>setTimeout(r,900));});
+const puceEteinte=await pg.evaluate(()=>{
+  const b=document.getElementById("map-instock-btn");
+  return {allumee:b.classList.contains("on"),
+          fondDuPoint:getComputedStyle(b.querySelector(".pt")).backgroundColor};
+});
+verifier("eteinte : le point n'est plus vert plein",
+  puceEteinte.allumee||puceEteinte.fondDuPoint!=="rgb(22, 163, 74)",
+  "allumee="+puceEteinte.allumee+", point="+puceEteinte.fondDuPoint);
 
 console.log("\n  LA CARTE D'UNE FICHE DIT-ELLE LA VERITE ?\n");
 let ko=0;
