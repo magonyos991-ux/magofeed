@@ -198,6 +198,30 @@ try{
     var cls=taille===3?" xs":(taille===7?" lg":"");
     return '<div class="sonar'+cls+'" aria-hidden="true"><i></i><i></i><i></i><b></b></div>';
   }
+  /* ── LA COULEUR DU VERRE — une seule table pour toute l'app ──────────────
+     Chaque niveau debloque la teinte de SA boisson : c'est la meme que celle
+     du verre de la fete de passage de niveau (LEVEL_LIQUIDE en derive).
+     « or » (la marque) et « citron » (niveau 1) sont ouverts a tout le monde.
+     Les seuils sont ceux de LEVELS (0/50/150/300/600/1200/2500) ; la regle
+     Firestore verreValide() les repete : si l'un change, changer l'autre.
+     Le choix vit dans users/{uid}.verre (le compte fait foi) et en copie
+     locale magoVerre, parce que le splash s'affiche avant Firebase. */
+  window.MAGO_VERRES={
+    or:       {nom:"Or",                 hi:"#e8c47a",lo:"#9a7228",seuil:0,    niveau:null},
+    citron:   {nom:"Citron",             hi:"#f6dd6a",lo:"#e3ad1c",seuil:0,    niveau:0},
+    orange:   {nom:"Orange",             hi:"#ffb14a",lo:"#e2661a",seuil:50,   niveau:1},
+    peche:    {nom:"P\u00EAche",          hi:"#f5915c",lo:"#c8541a",seuil:150,  niveau:2},
+    grenadine:{nom:"Grenadine",          hi:"#f2606f",lo:"#b3213c",seuil:300,  niveau:3},
+    menthe:   {nom:"Menthe",             hi:"#5fd6a0",lo:"#12915f",seuil:600,  niveau:4},
+    myrtille: {nom:"Myrtille",           hi:"#56aef2",lo:"#1657b2",seuil:1200, niveau:5},
+    legende:  {nom:"Or de L\u00E9gende",  hi:"#f7d97c",lo:"#bf8a0e",seuil:2500, niveau:6}
+  };
+  window.MAGO_VERRE_ORDRE=["or","citron","orange","peche","grenadine","menthe","myrtille","legende"];
+  (function(){try{
+    var id=localStorage.getItem("magoVerre"), v=window.MAGO_VERRES[id];
+    var el=document.getElementById("splash-verre");
+    if(v&&el){el.style.setProperty("--verre-hi",v.hi);el.style.setProperty("--verre-lo",v.lo);}
+  }catch(e){}})();
   /* ── LE VERRE DU SPLASH — plein a l'instant ou l'app s'ouvre ─────────────
      1. Des maintenant, le liquide monte vite puis ralentit vers le bord, sans
         jamais atteindre le haut tout seul : c'est le chargement reel (donnees,
@@ -845,6 +869,14 @@ try{
           <div class="set-txt"><div class="set-title">Aider en discret</div><div class="set-sub">Ton nom n'apparaît pas quand tu dépannes</div></div>
           <div id="discret-toggle" class="sw" aria-hidden="true"><div class="sw-knob"></div></div>
         </div>
+        <!-- La couleur du verre qui se remplit a l'ouverture : une recompense de
+             niveau. Les teintes pas encore gagnees restent visibles, avec le
+             niveau qu'il faut. Peint par peindreVerres(). -->
+        <div id="verre-row" class="set-row static">
+          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12l-1.5 16.5a2 2 0 0 1-2 1.5h-5a2 2 0 0 1-2-1.5Z"/><path d="M7 11h10"/></svg></div>
+          <div class="set-txt"><div class="set-title">Couleur du verre</div><div class="set-sub">Le verre qui se remplit à l'ouverture</div></div>
+        </div>
+        <div id="verre-choix" class="verre-choix" role="radiogroup" aria-label="Couleur du verre"></div>
       </div>
       <div class="set-sec">Position</div>
       <div class="set-group">
@@ -5666,6 +5698,15 @@ window.fbDireMerci = async function(id) {
    est respecte cote SERVEUR au moment d'ecrire le coup de main, pas a
    l'affichage — un reglage de confidentialite qui ne tiendrait qu'a
    l'interface n'en serait pas un. */
+/* La couleur du verre : un choix de la personne, ecrit par elle — mais la
+   regle Firestore verreValide() n'accepte qu'une teinte que ses points
+   debloquent. Si elle refuse, l'appelant remet la copie locale d'avant. */
+window.fbVerreTeinte = async function(id) {
+  await ensureAuthed();
+  var user = auth.currentUser; if (!user) return false;
+  await setDoc(userDocRef(user.uid), { verre: String(id) }, { merge: true });
+  return true;
+};
 window.fbAideDiscrete = async function(actif) {
   await ensureAuthed();
   var user = auth.currentUser; if (!user) return false;
@@ -7520,7 +7561,7 @@ function _showRaw(s){
   if(s==="discover"){try{window._huntsCache=null;}catch(e){}}
   if(s==="profile"){try{majLigneAmis();}catch(e){}try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}try{renderDonCard();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
-  if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}}
+  if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}try{peindreVerres();}catch(e){}}
   if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderChasseCodes();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{_verifierAides();}catch(e){}try{renderChasse();}catch(e){}    // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
     // le filtre boisson de la carte (sinon la carte rouvrait toujours sur la derniere
     // boisson cherchee, ex. "Red Bull", au lieu de montrer tous les magasins).
@@ -8430,15 +8471,11 @@ function confettiBurst(){
 
    CE QUI N'EST PAS AFFIRME. On ne montre ni classement, ni comparaison, ni
    nombre de joueurs : seulement le palier atteint et les points reels. */
-var LEVEL_LIQUIDE=[
-  ["#f6dd6a","#e3ad1c"], // Curieux — citron
-  ["#ffb14a","#e2661a"], // Explorateur — orange
-  ["#f5915c","#c8541a"], // Chasseur — peche
-  ["#f2606f","#b3213c"], // Connaisseur — grenadine
-  ["#5fd6a0","#12915f"], // Expert — menthe
-  ["#56aef2","#1657b2"], // Maitre des rayons — bleu
-  ["#f7d97c","#bf8a0e"]  // Legende — or
-];
+/* Les teintes de la fete de niveau sont celles du verre du splash (MAGO_VERRES,
+   definie sous le splash) : une seule table, deux usages. */
+var LEVEL_LIQUIDE=["citron","orange","peche","grenadine","menthe","myrtille","legende"].map(function(id){
+  var v=window.MAGO_VERRES[id]; return [v.hi,v.lo];
+});
 function celebrateLevelUp(lv){
   var reduit=false;try{reduit=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;}catch(e){}
   var prevName=tr((LEVELS[lv.idx-1]&&LEVELS[lv.idx-1][1])||"Débutant");
@@ -8453,6 +8490,7 @@ function celebrateLevelUp(lv){
   ov.innerHTML='<div class="lvup-box">'+
     '<div class="lvup-kick">'+sanitize(tr("Niveau supérieur"))+'</div>'+
     '<div class="lvup-old">'+sanitize(prevName)+'</div>'+
+    '<div class="lvup-couleur">'+sanitize(trh("Nouvelle couleur de verre : {teinte}",{teinte:tr((window.MAGO_VERRES[["citron","orange","peche","grenadine","menthe","myrtille","legende"][lv.idx]]||{nom:""}).nom)}))+'</div>'+
     '<svg class="lvup-verre" width="150" height="200" viewBox="0 0 132 176" aria-hidden="true">'+
       '<defs>'+
         '<clipPath id="'+uid+'c"><path d="'+cup+'"/></clipPath>'+
@@ -26338,6 +26376,63 @@ function _chasseDistLabel(distKm){
    tout de suite, puis on envoie au serveur — et on remet l'interrupteur dans
    son etat d'origine si l'envoi echoue, plutot que de laisser croire a un
    reglage qui n'a pas pris. */
+/* ══ LA COULEUR DU VERRE ═══════════════════════════════════════════════════
+   Le verre du splash se remplit de la boisson qu'on a choisie. Les teintes
+   sont celles des niveaux (MAGO_VERRES, sous le splash) : chaque niveau
+   debloque la sienne, l'or et le citron sont ouverts a tous. Meme mecanique
+   que « aider en discret » : copie locale d'abord (le splash la lit avant
+   Firebase), serveur ensuite, retour en arriere + toast si la regle refuse. */
+function verreActuel(){
+  var id=null;try{id=localStorage.getItem("magoVerre");}catch(e){}
+  return (id&&window.MAGO_VERRES&&window.MAGO_VERRES[id])?id:"or";
+}
+function verreDebloque(id,pts){var v=window.MAGO_VERRES&&window.MAGO_VERRES[id];return !!v&&pts>=v.seuil;}
+function verreMiniSVG(v,uid){
+  var cup='M14 8 H50 L45 90 Q44.5 95 39.5 95 H24.5 Q19.5 95 19 90 Z';
+  return '<svg viewBox="0 0 64 100" width="22" height="34" aria-hidden="true"><defs><linearGradient id="'+uid+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="'+v.hi+'"/><stop offset="1" stop-color="'+v.lo+'"/></linearGradient></defs>'
+    +'<path d="'+cup+'" fill="url(#'+uid+')"/><path d="'+cup+'" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>';
+}
+function verreLibelleVerrou(v){
+  var niv=(v.niveau!=null&&LEVELS[v.niveau])?tr(LEVELS[v.niveau][1]):"";
+  return trh("D\u00E8s le niveau {n} \u00B7 {nom}",{n:v.niveau+1,nom:niv});
+}
+function peindreVerres(){
+  var host=document.getElementById("verre-choix"); if(!host||!window.MAGO_VERRES)return;
+  var pts=0;try{pts=ptsNets();}catch(e){}
+  var actuel=verreActuel(), h="";
+  (window.MAGO_VERRE_ORDRE||[]).forEach(function(id){
+    var v=window.MAGO_VERRES[id], ok=verreDebloque(id,pts), sel=id===actuel;
+    var nom=sanitize(tr(v.nom));
+    h+='<button type="button" class="verre-opt'+(sel?" sel":"")+(ok?"":" verrou")+'" role="radio" aria-checked="'+(sel?"true":"false")
+      +'" aria-label="'+nom+(ok?"":" \u2014 "+sanitize(verreLibelleVerrou(v)))+'" data-verre="'+id+'" onclick="choisirVerre(\''+id+'\')">'
+      +verreMiniSVG(v,"vo-"+id)
+      +'<span class="verre-nom">'+nom+'</span>'
+      +(ok?'':'<span class="verre-niv" aria-hidden="true">'+(v.niveau+1)+'</span>')
+      +'</button>';
+  });
+  host.innerHTML=h;
+}
+function choisirVerre(id){
+  var v=window.MAGO_VERRES&&window.MAGO_VERRES[id]; if(!v)return;
+  var pts=0;try{pts=ptsNets();}catch(e){}
+  if(!verreDebloque(id,pts)){
+    toast(verreLibelleVerrou(v));
+    try{playSound("pop");}catch(e){}
+    return;
+  }
+  var avant=verreActuel(); if(avant===id)return;
+  try{localStorage.setItem("magoVerre",id);}catch(e){}
+  peindreVerres();
+  try{playSound("pop");}catch(e){}
+  toast(trh("Verre : {teinte}",{teinte:tr(v.nom)}));
+  if(!window.fbVerreTeinte)return;
+  window.fbVerreTeinte(id).catch(function(){
+    try{localStorage.setItem("magoVerre",avant);}catch(e){}
+    peindreVerres();
+    toast("R\u00E9glage non enregistr\u00E9, r\u00E9essaie");
+  });
+}
+
 function peindreAideDiscrete(){
   var t=document.getElementById("discret-toggle"),r=document.getElementById("discret-row");
   var on=false;
@@ -32994,6 +33089,7 @@ try{
   setMode(savedMode||"light");
   setLang(savedLang||"fr");
   initSoundToggle();
+  try{peindreVerres();}catch(e){}
   initSettingsPseudo();
   renderCats("cats-home");renderCats("cats-search");renderBrandsRail();
   var dl=document.getElementById("disc-list");
@@ -33110,6 +33206,17 @@ try{
     }
     // Consentement e-mails (opt-in RGPD) charge avec le profil.
     window._emailOptIn=!!d.emailOptIn;
+    /* La couleur du verre vient du compte ; la copie locale ne sert qu'au
+       splash, qui s'affiche avant Firebase. Le compte fait foi ; s'il n'en a
+       pas encore et que cet appareil en a une, on la lui envoie. */
+    try{
+      var vLocal=localStorage.getItem("magoVerre");
+      if(typeof d.verre==="string"&&window.MAGO_VERRES&&window.MAGO_VERRES[d.verre]){
+        if(d.verre!==vLocal){localStorage.setItem("magoVerre",d.verre);try{peindreVerres();}catch(err){}}
+      }else if(vLocal&&vLocal!=="or"&&window.MAGO_VERRES&&window.MAGO_VERRES[vLocal]&&window.fbVerreTeinte){
+        window.fbVerreTeinte(vLocal).catch(function(){});
+      }
+    }catch(err){}
     try{renderEmailOptInRow();}catch(err){}
     // Les vrais points sont maintenant chargés : la détection de niveau peut se
     // fier à eux (fête un niveau gagné pendant que l'app était fermée).

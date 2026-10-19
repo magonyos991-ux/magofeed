@@ -162,6 +162,40 @@ const ecart=(pg)=>pg.evaluate(()=>(window.__splashCacheAt&&window.__splashPretAt
   await ctx.close();
 }
 
+/* ─── 6 bis. La couleur du verre : une recompense de niveau ──────────────── */
+{
+  /* Le splash lit la copie locale avant Firebase : menthe doit etre peinte. */
+  const {ctx,pg}=await ouvrir(null,"commit",()=>{try{localStorage.setItem("magoVerre","menthe");}catch(e){}});
+  await pg.waitForSelector("#splash-verre",{state:"attached"});
+  const couleurs=await pg.evaluate(()=>{const el=document.getElementById("splash-verre");
+    return {hi:el.style.getPropertyValue("--verre-hi").trim(),lo:el.style.getPropertyValue("--verre-lo").trim()};});
+  verifier("splash : le verre prend la teinte choisie des la premiere image", couleurs.hi==="#5fd6a0"&&couleurs.lo==="#12915f", couleurs.hi+" / "+couleurs.lo);
+  await pg.waitForFunction(()=>window.DRINKS&&DRINKS.length>100,{timeout:40000});
+  const r=await pg.evaluate(()=>{
+    window.fbVerreTeinte=function(){return Promise.resolve(true);};   /* pas de Firebase ici */
+    const lis=()=>[...document.querySelectorAll("#verre-choix .verre-opt")];
+    const etat=()=>({n:lis().length,verrous:lis().filter(b=>b.classList.contains("verrou")).length,
+      sel:(lis().find(b=>b.classList.contains("sel"))||{}).dataset?.verre||null,local:localStorage.getItem("magoVerre")});
+    userStats.pts=0;userStats.penalty=0;userStats.penaliteDejaDeduite=true;
+    peindreVerres(); const a0=etat();
+    choisirVerre("orange"); const a1=etat();             /* verrouillee a 0 point : rien ne change */
+    choisirVerre("citron"); const a2=etat();             /* ouverte a tous : adoptee */
+    userStats.pts=600; peindreVerres(); const a3=etat();  /* Expert : jusqu'a la menthe */
+    const table=Object.keys(window.MAGO_VERRES).every(id=>{const v=window.MAGO_VERRES[id];return v.niveau==null||LEVELS[v.niveau][0]===v.seuil;});
+    const fete=LEVEL_LIQUIDE.length===7&&LEVEL_LIQUIDE[4][0]===window.MAGO_VERRES.menthe.hi;
+    return {a0,a1,a2,a3,table,fete,libelle:(lis().find(b=>b.dataset.verre==="legende")||{}).getAttribute?.("aria-label")||""};
+  });
+  verifier("Parametres : huit teintes, six verrouillees a 0 point", r.a0.n===8&&r.a0.verrous===6, r.a0.n+" teintes, "+r.a0.verrous+" verrouillees");
+  verifier("la teinte locale (menthe) est montree comme choisie", r.a0.sel==="menthe", "sel = "+r.a0.sel);
+  verifier("toucher une teinte verrouillee ne change rien", r.a1.local==="menthe"&&r.a1.sel==="menthe", "local = "+r.a1.local);
+  verifier("toucher le citron l adopte (copie locale + pastille)", r.a2.local==="citron"&&r.a2.sel==="citron", "local = "+r.a2.local);
+  verifier("a 600 points, il ne reste que deux teintes verrouillees", r.a3.verrous===2, r.a3.verrous+" verrouillees");
+  verifier("une teinte verrouillee dit le niveau qu il faut", /niveau 7/.test(r.libelle), r.libelle.slice(0,60));
+  verifier("les seuils de MAGO_VERRES sont ceux de LEVELS", r.table, "");
+  verifier("la fete de niveau et le splash partagent les memes teintes", r.fete, "");
+  await ctx.close();
+}
+
 /* ─── 7. Dans les sources ────────────────────────────────────────────────── */
 {
   const html=await readFile(join(R,"index.html"),"utf8"), css=await readFile(join(R,"app.css"),"utf8");
@@ -173,6 +207,9 @@ const ecart=(pg)=>pg.evaluate(()=>(window.__splashCacheAt&&window.__splashPretAt
   verifier("app.css : l'ancien rond qui tourne a disparu", !/\.spinner[\s{,:.>]/.test(css), "");
   verifier("app.css : le squelette en double a disparu", !/\.mago-skel[\s{,:.>]/.test(css), "");
   verifier("app.css : plus de grille .onde", !/\.onde\b/.test(css), "");
+  const regles=await readFile(join(R,"functions-a-deployer/firestore.rules"),"utf8");
+  verifier("regles : la teinte est verifiee cote serveur (verreValide)", /function verreValide\(\)/.test(regles)&&/&& verreValide\(\)/.test(regles), "");
+  verifier("regles : les sept seuils y sont", ["50","150","300","600","1200","2500"].every(n=>new RegExp("pts >= "+n+"\\)").test(regles)), "");
   const tm=/verre-liq\s*\{[^}]*transition\s*:\s*([^;}]*)/.exec(css);
   verifier("le liquide n'anime que transform", !!tm&&/^transform\b/.test(tm[1].trim())&&!/opacity|all/.test(tm[1]), tm?tm[1].trim():"regle introuvable");
 }
