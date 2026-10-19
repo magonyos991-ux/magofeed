@@ -158,29 +158,84 @@ try{
     </svg>
     <div class="splash-logo">Mago<span style="color:#c69a57">feed</span></div>
     <div class="splash-sub">Trouve ta boisson</div>
-    <div id="splash-onde"></div>
+    <!-- LE VERRE QUI SE REMPLIT. Peint des que le navigateur arrive ici, avant
+         le catalogue et le gros script : le remplissage commence a la premiere
+         image. Toujours sur fond sombre #1a1714, d'ou les couleurs en dur.
+         La couleur du liquide passe par deux variables (--verre-hi / --verre-lo)
+         pour qu'un reglage de teinte puisse la changer sans toucher au dessin. -->
+    <svg id="splash-verre" viewBox="0 0 64 100" width="64" height="100" aria-hidden="true">
+      <defs>
+        <linearGradient id="verreOr" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" style="stop-color:var(--verre-hi,#e8c47a)"/>
+          <stop offset="1" style="stop-color:var(--verre-lo,#9a7228)"/>
+        </linearGradient>
+        <clipPath id="verreClip"><path d="M14 8 H50 L45 90 Q44.5 95 39.5 95 H24.5 Q19.5 95 19 90 Z"/></clipPath>
+      </defs>
+      <g clip-path="url(#verreClip)"><g class="verre-liq">
+        <path class="verre-vague" d="M-64 0 Q-56 -3 -48 0 T-32 0 T-16 0 T0 0 T16 0 T32 0 T48 0 T64 0 T80 0 T96 0 T112 0 T128 0 V6 H-64 Z" fill="url(#verreOr)"/>
+        <rect x="0" y="4" width="64" height="120" fill="url(#verreOr)"/>
+        <circle class="verre-bulle" cx="27" cy="72" r="1.7" fill="#fff8e8"/>
+        <circle class="verre-bulle" cx="35" cy="80" r="1.2" fill="#fff8e8"/>
+        <circle class="verre-bulle" cx="40" cy="66" r="1.4" fill="#fff8e8"/>
+      </g></g>
+      <path d="M14 8 H50 L45 90 Q44.5 95 39.5 95 H24.5 Q19.5 95 19 90 Z" fill="none" stroke="#f4f2ee" stroke-width="2.5" stroke-linejoin="round"/>
+    </svg>
   </div>
   <script>
-  /* ── L'ONDE QUI SE PROPAGE — le SEUL generateur du motif de chargement ──
-     Une grille carree de points ; chaque point recoit, en style, un retard
-     d'animation proportionnel a sa distance (euclidienne) au centre : l'onde
-     part du point central, dore, vers les bords. Le mouvement est en CSS pur
-     (.onde dans app.css) — ici aucun chronometre, seulement du balisage.
-     Definie ICI, avant tout le reste, parce que le splash s'en sert au tout
-     premier rendu, bien avant que le gros script du bas n'ait ete lu.
-       taille : 7 (splash, plein ecran) · 5 (cartes, etats vides) · 3 (en
-       ligne, a cote d'un texte). Jamais plus de 49 points.
-     Le pas entre deux anneaux grandit quand la grille retrecit : avec trois
-     anneaux, un pas de 0,16 s ferait clignoter le tout d'un bloc. */
+  /* ── LE SONAR — le SEUL generateur du motif d'attente dans l'app ──────────
+     L'anneau dore du logo, immobile (c'est toi, l'epingle) ; trois ondes
+     fines naissent de lui, s'elargissent et se dissipent : l'app cherche
+     autour de toi. CSS pur (.sonar dans app.css), aucun chronometre.
+     Definie ICI, avant tout le reste, parce que les premiers ecrans s'en
+     servent avant que le gros script du bas n'ait ete lu.
+       taille : 7 (grand, attentes plein ecran) · 5 (cartes, etats vides)
+       · 3 (en ligne, a cote d'un texte : une seule onde, cycle plus court).
+     Le nom ondeHTML est garde : une quinzaine d'appels en dependent
+     (directs, et via magoLoader).
+     Le carre de points qu'il remplace voulait etre une onde ; dessine sur
+     une grille carree, il se lisait comme un carre de points sans sens. */
   function ondeHTML(taille){
-    var n=(taille===3||taille===5)?taille:7, c=(n-1)/2, pas=(n===7?.16:(n===5?.2:.3)), html="";
-    for(var i=0;i<n*n;i++){
-      var d=Math.sqrt(Math.pow(i%n-c,2)+Math.pow(Math.floor(i/n)-c,2));
-      html+=d?'<i style="animation-delay:'+(Math.round(d*pas*100)/100)+'s"></i>':'<i class="c"></i>';
-    }
-    return '<div class="onde onde-'+n+'" aria-hidden="true">'+html+'</div>';
+    var cls=taille===3?" xs":(taille===7?" lg":"");
+    return '<div class="sonar'+cls+'" aria-hidden="true"><i></i><i></i><i></i><b></b></div>';
   }
-  document.getElementById("splash-onde").innerHTML=ondeHTML(7);
+  /* ── LE VERRE DU SPLASH — plein a l'instant ou l'app s'ouvre ─────────────
+     1. Des maintenant, le liquide monte vite puis ralentit vers le bord, sans
+        jamais atteindre le haut tout seul : c'est le chargement reel (donnees,
+        gros script), dont la duree n'est pas connue d'avance.
+     2. Quand l'app est prete, initSplash() appelle magoSplashPret() : le verre
+        finit de se remplir d'ou qu'il en soit (0,38 s), tient plein 0,3 s, puis
+        le splash s'efface. Avant, le splash attendait 1 400 ms FIXES apres que
+        l'app etait prete : une seconde et demie perdue a chaque lancement.
+     Seul transform est anime : c'est ce qui continue de bouger pendant que le
+     fil principal compile. La position courante est lue par la transition
+     elle-meme, donc aucun saut quand « pret » arrive en plein remplissage. */
+  (function(){try{
+    var liq=document.querySelector("#splash-verre .verre-liq");
+    if(!liq)return;
+    var calme=false;try{calme=window.matchMedia("(prefers-reduced-motion: reduce)").matches;}catch(e){}
+    /* Second splash juste apres le premier (le service worker vient de se
+       mettre a jour et a recharge la page) : le verre ne repart pas de vide,
+       sinon on le voit se vider d'un coup et recommencer. */
+    var relance=false;try{relance=sessionStorage.getItem("mago_sw_reloaded")==="1";}catch(e){}
+    function regler(dur,ease,y){liq.style.setProperty("--dur",dur);liq.style.setProperty("--ease",ease);liq.style.setProperty("--y",y);}
+    regler("0s","linear",relance?"40px":"100px");
+    void liq.getBoundingClientRect();
+    if(calme)regler("0s","linear","9px");
+    else regler(relance?"1.2s":"3.4s","cubic-bezier(.2,.6,.2,1)","24px");
+    window.magoSplashPret=function(fin){
+      window.__splashPretAt=Date.now();
+      if(!calme)regler(".38s","cubic-bezier(.3,.7,.2,1)","9px");
+      setTimeout(function(){
+        /* Une image de plus : l'accueil a eu sa passe de style sous le splash.
+           Mais l'app peut etre passee en arriere-plan pendant le remplissage :
+           la, requestAnimationFrame ne tourne pas, le minuteur si — fin() part
+           quand meme, et une seule fois quel que soit le premier arrive. */
+        var fait=false;function go(){if(fait)return;fait=true;try{fin();}catch(e){}}
+        if(document.hidden){go();return;}
+        requestAnimationFrame(go);setTimeout(go,120);
+      },calme?300:680);
+    };
+  }catch(e){}})();
   </script>
 
   <!-- TUTORIAL -->
@@ -11777,7 +11832,7 @@ function onBarcodeDetected(r){
   }
 }
 /* ── CHARGEMENT : deux formes, un seul vocabulaire ────────────────────────
-   magoLoader() : l'onde qui se propage (ondeHTML, definie sous le splash),
+   magoLoader() : le sonar (ondeHTML, definie sous le splash),
    quand l'ecran est VIDE et qu'on attend — moyenne seule, ou petite EN LIGNE
    a cote de son texte (petit=true).
    magoCharge() : la barre fine du haut, quand l'ecran est DEJA rempli et
@@ -13852,6 +13907,7 @@ function renderNearby(){
     : all.slice();
 
   var card=document.createElement("div");
+  card.className="zone-card";
   card.style.cssText="background:var(--bg2);border:1.5px solid var(--border);border-radius:18px;padding:14px 16px 12px";
 
   // En-tete commun : point vert vivant + titre + raccourci carte.
@@ -28535,14 +28591,20 @@ function initSplash(){
     var ob=document.getElementById("onboarding");
     if(ob)ob.style.display="none";
   }
-  setTimeout(function(){
+  /* L'app est prete ICI : l'accueil est construit, le catalogue en memoire.
+     Le verre du splash finit de se remplir, puis le splash s'efface (voir le
+     script sous le splash). Avant : 1 400 ms fixes, apres que tout etait pret. */
+  var fermer=function(){
+    window.__splashCacheAt=Date.now();
     splash.classList.add("hidden");
     setTimeout(function(){splash.style.display="none";},400);
     // La pastille chasse etait calculee PENDANT le splash (donc masquee par la
     // garde anti-intro) et rien ne la recalculait apres : elle n'apparaissait
     // qu'au premier changement d'onglet. On la reevalue des que le splash part.
     try{renderChasse();}catch(e){}
-  },1400);
+  };
+  if(typeof window.magoSplashPret==="function")window.magoSplashPret(fermer);
+  else setTimeout(fermer,0);
 }
 
 /* ================================
@@ -31545,7 +31607,7 @@ function renderAmis(){
   if(AMIS.q.length>=2){
     body.appendChild(amisTitre(tr("Résultats")));
     if(AMIS.cherche){
-      body.innerHTML+='<div style="padding:22px 0">'+magoLoader(true,tr("Recherche…"))+'</div>';
+      body.innerHTML+='<div style="padding:22px 0;text-align:center">'+magoLoader(true,tr("Recherche…"))+'</div>';
       try{traduirePage();}catch(e){}return;
     }
     if(!(AMIS.res||[]).length){
