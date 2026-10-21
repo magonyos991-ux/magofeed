@@ -142,7 +142,6 @@ const codeExtrait = [
 ].join("\n");
 
 const noms = Object.keys(portee);
-// eslint-disable-next-line no-new-func
 const charger = new Function(...noms, codeExtrait + "\nreturn window;");
 const F = charger(...noms.map((n) => portee[n]));
 portee.window.fbArreterMessagerie = function () {};
