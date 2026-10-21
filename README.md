@@ -51,7 +51,9 @@ data/
 
 functions-a-deployer/ Les Cloud Functions (Node, europe-west1) + firestore.rules.
                       ⚠ Ce dossier n'est PAS déployé par la CI : voir « Déployer ».
-  tests-regles/       260 épreuves qui attaquent la base sur un émulateur.
+  tests-regles/       Les épreuves sur émulateur : 280 sur les règles Firestore
+                      (regles.test.mjs) et 15 sur le compte et ses liaisons
+                      (comptes.test.mjs, émulateur Auth).
 
 outils/               Scripts de contrôle en ligne de commande (traductions,
                       catalogue, essais navigateur). Aucun n'est nécessaire pour
