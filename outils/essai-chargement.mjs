@@ -53,7 +53,7 @@ async function ouvrir(options,attente,init){
   await pg.goto(`http://127.0.0.1:${port}/index.html`,{waitUntil:attente||"load"});
   return {ctx,pg};
 }
-const cache=(pg,ms)=>pg.waitForFunction(()=>document.getElementById("splash").classList.contains("hidden"),{timeout:ms||20000}).then(()=>true).catch(()=>false);
+const cache=(pg,ms)=>pg.waitForFunction(()=>document.getElementById("splash").classList.contains("hidden"),undefined,{timeout:ms||20000,polling:100}).then(()=>true).catch(()=>false);
 const ecart=(pg)=>pg.evaluate(()=>(window.__splashCacheAt&&window.__splashPretAt)?(window.__splashCacheAt-window.__splashPretAt):null);
 
 /* ─── 1. Chargement LENT : la phase 1 est observee, puis l'app est prete ──── */
@@ -62,7 +62,7 @@ const ecart=(pg)=>pg.evaluate(()=>(window.__splashCacheAt&&window.__splashPretAt
   const {ctx,pg}=await ouvrir(null,"commit");
   /* --y n'est pose que par le script inline, qui attend lui-meme app.css :
      l'attendre evite de lire transform « none » si la feuille arrive apres. */
-  await pg.waitForFunction(()=>{const l=document.querySelector("#splash-verre .verre-liq");return l&&l.style.getPropertyValue("--y")!=="";},{timeout:20000});
+  await pg.waitForFunction(()=>{const l=document.querySelector("#splash-verre .verre-liq");return l&&l.style.getPropertyValue("--y")!=="";},undefined,{timeout:20000,polling:100});
   await pg.waitForTimeout(600);
   const t=await pg.evaluate(()=>{
     const liq=document.querySelector("#splash-verre .verre-liq");
@@ -79,6 +79,26 @@ const ecart=(pg)=>pg.evaluate(()=>(window.__splashCacheAt&&window.__splashPretAt
   verifier("le verre est plein (9 px) quand le splash part", y==="9px", "--y = "+y);
   verifier("pret -> cache : ~0,7 s (0,38 + 0,3 + une image), plus jamais 1,4 s", e!==null&&e>=650&&e<=800, e+" ms");
   await ctx.close(); LENT=0;
+}
+
+/* ─── 1 bis. Lancement RAPIDE : le remplissage reste visible ─────────────── */
+{
+  /* Constate sur un enregistrement d'ecran : cache chaud, app prete en 0,5 s,
+     le verre finissait de se remplir derriere l'ecran de lancement natif et
+     n'apparaissait que plein. On garantit 1,1 s de remplissage depuis T0. */
+  const {ctx,pg}=await ouvrir(null,"commit");
+  await pg.waitForFunction(()=>typeof window.__splashT0==="number",undefined,{timeout:20000,polling:100});
+  await pg.waitForFunction(()=>Date.now()-window.__splashT0>=500,undefined,{timeout:5000,polling:100});
+  const mi=await pg.evaluate(()=>{const liq=document.querySelector("#splash-verre .verre-liq");
+    const m=/matrix\(([^)]+)\)/.exec(getComputedStyle(liq).transform);
+    return {y:liq.style.getPropertyValue("--y").trim(),ty:m?Number(m[1].split(",")[5]):null,
+      fade:getComputedStyle(document.getElementById("splash-verre")).animationDelay};});
+  verifier("lancement rapide : a 0,5 s le verre n'est pas encore fini (encore en phase 1)", mi.y==="24px"&&mi.ty!==null&&mi.ty>24, "--y = "+mi.y+", translateY = "+mi.ty);
+  verifier("le verre apparait avec le logo (pas de retard de 0,3 s)", /^0?\.0[0-9]*s$|^0s$/.test(mi.fade), "animation-delay = "+mi.fade);
+  await cache(pg);
+  const t=await pg.evaluate(()=>({depuisT0:window.__splashCacheAt-window.__splashT0,min:window.__splashMinimum}));
+  verifier("lancement rapide : au moins 1,1 s de remplissage visible avant de fermer", t.depuisT0>=t.min+600&&t.depuisT0<=t.min+1400, t.depuisT0+" ms depuis T0 (minimum "+t.min+" + 0,38 + 0,3 + une image)");
+  await ctx.close();
 }
 
 /* ─── 2. fin() n'est appelee qu'UNE fois ─────────────────────────────────── */
@@ -100,7 +120,7 @@ const ecart=(pg)=>pg.evaluate(()=>(window.__splashCacheAt&&window.__splashPretAt
 {
   const {ctx,pg}=await ouvrir(null,"load",()=>{
     Object.defineProperty(window,"magoSplashPret",{configurable:true,get(){return undefined;},set(){}});});
-  await pg.waitForFunction(()=>window.DRINKS&&DRINKS.length>100,{timeout:40000});
+  await pg.waitForFunction(()=>window.DRINKS&&DRINKS.length>100,undefined,{timeout:40000,polling:100});
   const ok=await cache(pg,3000);
   verifier("sans magoSplashPret, le splash se ferme quand meme (repli setTimeout 0)", ok, ok?"hidden":"TOUJOURS VISIBLE");
   await ctx.close();
@@ -109,8 +129,8 @@ const ecart=(pg)=>pg.evaluate(()=>(window.__splashCacheAt&&window.__splashPretAt
 /* ─── 4. App en arriere-plan : requestAnimationFrame ne tourne pas ───────── */
 {
   const {ctx,pg}=await ouvrir(null,"load",()=>{window.requestAnimationFrame=function(){return 0;};});
-  await pg.waitForFunction(()=>window.DRINKS&&DRINKS.length>100,{timeout:40000});
-  const ok=await cache(pg,3000);
+  await pg.waitForFunction(()=>window.DRINKS&&DRINKS.length>100,undefined,{timeout:40000,polling:100});
+  const ok=await cache(pg,4000);   /* 1,1 s de remplissage garanti + 0,68 s + le minuteur de secours */
   verifier("arriere-plan (rAF muet) : le splash se ferme quand meme en moins de 3 s", ok, ok?"hidden":"TOUJOURS VISIBLE");
   await ctx.close();
 }
@@ -118,7 +138,7 @@ const ecart=(pg)=>pg.evaluate(()=>(window.__splashCacheAt&&window.__splashPretAt
 /* ─── 5. Le sonar : un generateur, trois tailles ─────────────────────────── */
 {
   const {ctx,pg}=await ouvrir();
-  await pg.waitForFunction(()=>window.DRINKS&&DRINKS.length>100,{timeout:40000});
+  await pg.waitForFunction(()=>window.DRINKS&&DRINKS.length>100,undefined,{timeout:40000,polling:100});
   const s=await pg.evaluate(()=>{
     const h3=ondeHTML(3),h5=ondeHTML(5),h7=ondeHTML(7),ml=magoLoader(true,"Actualisation…");
     const box=document.createElement("div");box.innerHTML=h7+h5+h3+ml;document.body.appendChild(box);
@@ -170,7 +190,7 @@ const ecart=(pg)=>pg.evaluate(()=>(window.__splashCacheAt&&window.__splashPretAt
   const couleurs=await pg.evaluate(()=>{const el=document.getElementById("splash-verre");
     return {hi:el.style.getPropertyValue("--verre-hi").trim(),lo:el.style.getPropertyValue("--verre-lo").trim()};});
   verifier("splash : le verre prend la teinte choisie des la premiere image", couleurs.hi==="#5fd6a0"&&couleurs.lo==="#12915f", couleurs.hi+" / "+couleurs.lo);
-  await pg.waitForFunction(()=>window.DRINKS&&DRINKS.length>100,{timeout:40000});
+  await pg.waitForFunction(()=>window.DRINKS&&DRINKS.length>100,undefined,{timeout:40000,polling:100});
   const r=await pg.evaluate(()=>{
     window.fbVerreTeinte=function(){return Promise.resolve(true);};   /* pas de Firebase ici */
     const lis=()=>[...document.querySelectorAll("#verre-choix .verre-opt")];
