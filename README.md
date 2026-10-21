@@ -160,7 +160,7 @@ publication** ; les autres se lancent à la main.
 npm install eslint@9.15.0 eslint-plugin-html@8.1.2 --no-save
 npx eslint .
 
-# 2. Les 260 épreuves des règles Firestore (il faut Java pour l'émulateur).
+# 2. Les 280 épreuves des règles Firestore (il faut Java pour l'émulateur).
 #    Tournent aussi dans la CI, et y bloquent le déploiement.
 cd functions-a-deployer/tests-regles && npm install && npm test
 
@@ -191,7 +191,7 @@ en français dans les dix langues, en silence.
 
 **Le site** — automatique. `git push origin main` déclenche
 `.github/workflows/pages.yml`, qui :
-1. lance les 260 épreuves des règles (échec ⇒ rien n'est publié) ;
+1. lance les épreuves des règles (échec ⇒ rien n'est publié) ;
 2. lance ESLint (échec ⇒ rien n'est publié) ;
 3. régénère les pages de partage, tamponne le service worker, publie.
 
