@@ -71,6 +71,12 @@ function estTechnique(s) {
   /* "{quoi}", "{n}", "{p}" : le NOM d'un trou, donne a .replace(). Ce n'est
      pas une phrase, et le signaler ferait revenir chaque modele a trous. */
   if (/^\{\w+\}$/.test(s)) return true;
+  /* « magofeed/mot-de-passe-requis » : un CODE D'ERREUR, de la meme forme que
+     ceux de Firebase ("auth/wrong-password"). Il voyage dans err.code, il est
+     compare par le code, il n'est jamais lu par personne. Un espace de nom
+     suivi d'un identifiant a tirets, sans espace ni majuscule : ce n'est pas
+     une phrase, meme quand les mots sont francais. */
+  if (/^[a-z][\w-]*\/[a-z][\w-]*$/.test(s)) return true;
   if (/^[A-Za-z_$][\w$]*$/.test(s)) return true;                  /* identifiant */
   /* Un seul mot, sans espace, sans accent, fait de lettres et de tirets :
      c'est une classe CSS ou un identifiant ("th-on", "map-wrap"), pas une
@@ -193,6 +199,12 @@ for (const b of blocs) {
       const c = n.arguments[0].value;
       if (c && !TEXTES[c] && !TEXTES[c.trim()]) promesses.add(c);
     }
+    /* new Error("...") : le message d'une erreur technique. Il part dans la
+       console et dans les journaux, jamais a l'ecran — l'interface affiche
+       ses propres phrases, traduites, a partir du CODE de l'erreur. Le
+       signaler reclamait une traduction pour un texte que personne ne lit. */
+    if (n.type === "NewExpression" && n.callee && n.callee.type === "Identifier" &&
+        /^(Error|TypeError|RangeError)$/.test(n.callee.name)) dansConsole = true;
     if (n.type === "Literal" && typeof n.value === "string" && !dansConsole) {
       const s = n.value.trim();
       if (s && !estTechnique(s) && !TEXTES[s] && !TEXTES[n.value] && estFrancais(s)) {
