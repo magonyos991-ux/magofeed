@@ -19975,7 +19975,12 @@ function renderStoreList(){
     div.style.borderLeft="4px solid "+stCol;
     div.innerHTML='<div class="store-top">'+
       '<div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;cursor:pointer" onclick="openStoreDetail(\''+storeIdStr.replace(/'/g,"\\'")+'\')">'+
-        '<div class="store-ico" style="background:'+(storeOpenState(s)===false?"#fee2e2":curSel.light)+'">'+storeIconHTML(s)+'</div>'+
+        /* ROUGE = FERME, ET SEULEMENT SUR UN FAIT. Sans le test openSur, un
+           magasin seulement DEVINE ferme d'apres son enseigne — « ce nom
+           ressemble a une librairie, donc ferme le dimanche » — se peignait
+           en rouge comme une certitude. La couleur doit tenir la meme
+           promesse que le mot a cote d'elle. */
+        '<div class="store-ico" style="background:'+((storeOpenState(s)===false&&openSur(s))?"#fee2e2":curSel.light)+'">'+storeIconHTML(s)+'</div>'+
         '<div style="flex:1;min-width:0">'+
           '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">'+
             '<div class="store-name">'+sanitize(s.name)+'</div>'+
@@ -20053,7 +20058,17 @@ function renderStoreList(){
       '</div>'+
     '</div>';
     var storeRow=div.querySelector('[onclick^="openStoreDetail"]');
-    if(storeRow)a11yCard(storeRow,s.name+", "+dist+(s.open?", ouvert":", fermé"));
+    /* L'ETIQUETTE VOCALE DISAIT « FERME » POUR TOUS LES MAGASINS.
+       Elle lisait `s.open`, le meme champ mort que le bouton Waze : la
+       branche « ouvert » etait inatteignable. Et comme aria-label REMPLACE
+       tout ce que la carte contient, une personne au lecteur d'ecran
+       n'entendait jamais la pastille juste a cote, qui disait « Ouvert ».
+       On lui donne desormais exactement le mot affiche — « Ouvert »,
+       « Sans doute ferme », ou rien quand on ne sait pas. */
+    if(storeRow){
+      var _dit=openLabel(s);
+      a11yCard(storeRow,s.name+", "+dist+(_dit?", "+_dit.toLowerCase():", "+tr("Horaires inconnus").toLowerCase()));
+    }
     el.appendChild(div);
   });
   el.insertAdjacentHTML("beforeend",'<div style="padding:10px 20px 2px"><button onclick="drinkLocate()" class="ghost-btn" style="width:100%">'+tr("Ajouter un autre magasin qui la vend")+'</button></div>');
@@ -20197,7 +20212,10 @@ function openStoreSheet(storeId){
   var content=document.getElementById("map-sheet-content");
   content.innerHTML=
     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">'+
-      '<div class="store-ico" style="background:'+(s.open?"var(--bg2)":"#fee2e2")+';width:46px;height:46px;font-size:22px;flex-shrink:0">'+storeIconHTML(s)+'</div>'+
+      /* Meme champ mort : la vignette etait rouge « ferme » pour TOUS les
+         magasins, y compris a cote d'un texte disant « Ouvert ». On reprend
+         le test de la liste des magasins, qui ne rougit que sur un fait. */
+      '<div class="store-ico" style="background:'+((storeOpenState(s)===false&&openSur(s))?"#fee2e2":"var(--bg2)")+';width:46px;height:46px;font-size:22px;flex-shrink:0">'+storeIconHTML(s)+'</div>'+
       '<div style="flex:1;min-width:0">'+
         '<div style="font-size:16px;font-weight:800;color:var(--s1)">'+sanitize(s.name)+'</div>'+
         '<div style="font-size:12px;color:var(--s2);margin-top:2px">'+(s.brand?s.brand+" · ":"")+(dist?dist+" · ":"")+(openLabel(s)?openLabel(s)+(horaireTexte(s)?" · "+horaireTexte(s):""):(horaireTexte(s)||tr("Horaires inconnus")))+'</div>'+
@@ -26913,9 +26931,18 @@ function voteDisc(id){
 /* ================================
    MAPS EXTERNAL
 ================================ */
-function openGmaps(){
-  if(!curSel)return;
-  var did=curSel.id;
+/* ══ LES DEUX BOUTONS D'ITINERAIRE CHOISISSENT LE MEME MAGASIN ════════════
+   openGmaps avait ete soigneusement reparee — openWaze, restee sur une seule
+   ligne, ne l'a jamais ete : elle filtrait sur `x.open`, un champ qu'AUCUNE
+   ligne de l'application n'ecrit plus. Son filtre etait donc toujours vide,
+   et le bouton Waze repondait « Position de ce magasin inconnue » a chaque
+   fois, pour toutes les boissons, depuis des mois — alors que la carte
+   epinglait le magasin et que Google Maps, juste a cote, y conduisait.
+   Son `x.drinks.includes(...)` pouvait en plus lever une erreur sur un
+   magasin charge en mode allege, qui n'a pas de tableau `drinks`.
+   La selection vit desormais a un seul endroit : les deux boutons ne peuvent
+   plus diverger. */
+function magasinOuAller(did){
   var cands=STORES.filter(function(x){
     return (x.drinks||[]).some(function(d){return Number(d)===Number(did);})
       /* On n'ecarte que les magasins CERTAINEMENT fermes. Ecarter aussi ceux
@@ -26924,7 +26951,6 @@ function openGmaps(){
       &&!(storeOpenState(x)===false&&openSur(x))
       &&((x.confirmations||{})[did]||0)>=0; // jamais vers un magasin signale absent
   });
-  if(!cands.length){toast("Aucun magasin ouvert avec cette boisson par ici");playSound("err");return;}
   // Le but de l'app : t'envoyer la ou elle EST. Priorite aux magasins SURS
   // (catalogue verifie / confirmations / scans), puis au plus proche.
   cands.sort(function(a,b){
@@ -26933,12 +26959,26 @@ function openGmaps(){
     if(sa!==sb)return sb-sa;
     return (a.dist||9e9)-(b.dist||9e9);
   });
+  return cands;
+}
+window.magasinOuAller=magasinOuAller;
+function openGmaps(){
+  if(!curSel)return;
+  var did=curSel.id;
+  var cands=magasinOuAller(did);
+  if(!cands.length){toast("Aucun magasin ouvert avec cette boisson par ici");playSound("err");return;}
   var s=cands[0];
   var sure=storeVerifiedFor(s,did)||((s.confirmations||{})[did]||0)>0;
   toast((sure?"\u2713 ":"")+sanitize(s.name)+(s.dist?" \u00b7 "+fmtDist(s.dist):""));
   showRouteToStore(s.lat,s.lng,s);
 }
-function openWaze(){if(!curSel)return;var s=STORES.filter(function(x){return x.drinks.includes(curSel.id)&&x.open;})[0];if(s&&storeHasCoords(s))openNavApp("https://waze.com/ul?ll="+s.lat+","+s.lng+"&navigate=yes");else toast("Position de ce magasin inconnue");}
+function openWaze(){
+  if(!curSel)return;
+  var cands=magasinOuAller(curSel.id).filter(storeHasCoords);
+  if(!cands.length){toast("Aucun magasin ouvert avec cette boisson par ici");playSound("err");return;}
+  var s=cands[0];
+  openNavApp("https://waze.com/ul?ll="+s.lat+","+s.lng+"&navigate=yes");
+}
 /* "Y aller" trace maintenant le CHEMIN dans notre carte (ligne type suivi de
    livreur, distance + duree a pied) via le routage OpenStreetMap public —
    gratuit, sans cle. Google Maps reste en secours dans le bandeau pour la
