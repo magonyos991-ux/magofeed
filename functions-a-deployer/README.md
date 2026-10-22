@@ -117,6 +117,31 @@ pastille, mais la ligne est dans la cloche. Supprime ensuite
 la pastille s'allume à la prochaine ouverture de l'app. Pense à supprimer le
 document d'essai après.
 
+## agreger-demande.js — combien de gens cherchent chaque boisson
+
+Nouveau, à déployer (fichier `agreger-demande.js`, fonction `agregerDemande`).
+
+L'application **enregistre déjà** chaque recherche dans la collection `demand`,
+une fois par appareil, par boisson et par jour. Ce comptage tourne depuis
+longtemps ; rien à faire de ce côté.
+
+Mais `demand` n'est lisible que par l'admin, et c'est très bien ainsi : ce sont
+des données de fréquentation. Cette fonction en fabrique chaque nuit, à 3 h 17,
+un **résumé public** dans `stats/drinkDemand`, que l'app lit en une seule
+lecture par session. Aucune règle de sécurité à changer : `stats/` est déjà en
+lecture libre.
+
+**Le seuil, et pourquoi il existe.** Seules les boissons atteignant **5
+personnes sur 30 jours** entrent dans le résumé. En dessous, la boisson en est
+absente et l'app n'affiche rien du tout. Un compteur qui annonce « 0 personne
+l'a cherchée » sur presque chaque fiche ne renseigne personne et donne
+l'impression d'une application déserte — l'inverse du but. Le chiffre
+apparaîtra tout seul, boisson par boisson, à mesure que les gens viennent.
+
+Si la fonction n'est pas déployée, il ne se passe rien de grave : le document
+`stats/drinkDemand` n'existe pas, l'app ne trouve aucun chiffre, et n'affiche
+simplement aucune ligne. Le comptage, lui, continue d'accumuler.
+
 ## Ce qui attend, et ce qui l'attend
 
 | Fichier | Ce qui manque |

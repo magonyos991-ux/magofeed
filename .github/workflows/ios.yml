@@ -1,0 +1,188 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CONSTRUIRE L'APP iPHONE ET L'ENVOYER SUR TESTFLIGHT, SANS POSSEDER DE MAC
+#
+# GitHub loue des machines Apple a la minute. Ce workflow en reserve une, y
+# construit Magofeed, et depose le resultat sur TestFlight — d'ou tu l'installes
+# sur ton iPhone comme n'importe quelle app. Tu n'as jamais besoin d'un Mac.
+#
+# Declenchement MANUEL depuis l'onglet Actions, bouton « Run workflow ».
+#
+# ─── CE QU'IL FAUT, UNE SEULE FOIS ───────────────────────────────────────────
+#
+# 1. Un compte Apple Developer Program : 99 $/an, sur developer.apple.com.
+#    C'est le seul cout, et il est incontournable — Apple n'autorise aucune
+#    autre voie pour mettre une app sur un iPhone de maniere durable.
+#
+# 2. Dans App Store Connect, creer l'app une fois : identifiant com.magofeed.app
+#
+# 3. Une cle d'API App Store Connect (Users and Access → Integrations → Keys),
+#    role « App Manager ». Apple donne un fichier .p8 TELECHARGEABLE UNE SEULE
+#    FOIS — garde-le.
+#
+# 4. Quatre secrets GitHub (Settings → Secrets and variables → Actions).
+#    Tu les saisis toi-meme, directement sur GitHub. Ils ne passent par aucune
+#    conversation et n'apparaissent jamais dans le depot :
+#      APPSTORE_ISSUER_ID   l'« Issuer ID » affiche en haut de la page Keys
+#      APPSTORE_KEY_ID      l'identifiant de la cle (10 caracteres)
+#      APPSTORE_PRIVATE_KEY le contenu du fichier .p8, encode en base64
+#      APPLE_TEAM_ID        ton Team ID (10 caracteres, page Membership)
+#
+# Aucun certificat a exporter, aucun profil a fabriquer : Xcode les cree tout
+# seul sur la machine de build grace a la cle d'API (-allowProvisioningUpdates).
+#
+# LE NUMERO DE BUILD monte tout seul a chaque lancement : deux envois
+# successifs sur TestFlight ne se marchent jamais dessus.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Construire l'app iPhone (TestFlight)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: construire-ios
+  cancel-in-progress: false
+
+jobs:
+  construire:
+    name: IPA signé, déposé sur TestFlight
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm ci --no-audit --no-fund
+
+      # Le site embarque dans l'app : exactement le meme que sur le web.
+      - name: Assembler le site embarqué
+        run: npm run build:web
+
+      - name: Synchroniser Capacitor
+        run: npx cap sync ios
+
+      - name: Installer les pods
+        working-directory: ios/App
+        run: pod install --repo-update
+
+      # On s'arrete net si un secret manque : mieux vaut un message clair
+      # qu'un build de 20 minutes qui echoue a la derniere seconde.
+      - name: Vérifier les secrets
+        env:
+          ISSUER: ${{ secrets.APPSTORE_ISSUER_ID }}
+          KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          P8: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          manque=""
+          [ -z "$ISSUER" ] && manque="$manque APPSTORE_ISSUER_ID"
+          [ -z "$KEY_ID" ] && manque="$manque APPSTORE_KEY_ID"
+          [ -z "$P8" ]     && manque="$manque APPSTORE_PRIVATE_KEY"
+          [ -z "$TEAM" ]   && manque="$manque APPLE_TEAM_ID"
+          if [ -n "$manque" ]; then
+            echo "::error::Secret(s) absent(s) :$manque — voir l'en-tete de .github/workflows/ios.yml"
+            exit 1
+          fi
+          echo "Les quatre secrets sont en place."
+
+      # La cle vit le temps du build, dans le dossier ou Apple la cherche.
+      # La machine est detruite juste apres le run.
+      - name: Poser la clé App Store Connect
+        env:
+          KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          P8: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys ~/.private_keys
+          printf '%s' "$P8" | base64 -d > ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8
+          cp ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8 ~/.private_keys/
+          chmod 600 ~/.appstoreconnect/private_keys/*.p8 ~/.private_keys/*.p8
+          echo "Cle en place."
+
+      - name: Archiver
+        working-directory: ios/App
+        env:
+          ISSUER: ${{ secrets.APPSTORE_ISSUER_ID }}
+          KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild -workspace App.xcworkspace -scheme App \
+            -configuration Release -sdk iphoneos \
+            -archivePath "$RUNNER_TEMP/Magofeed.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER" \
+            DEVELOPMENT_TEAM="$TEAM" \
+            CODE_SIGN_STYLE=Automatic \
+            MARKETING_VERSION="1.0.${GITHUB_RUN_NUMBER}" \
+            CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER}" \
+            archive
+
+      - name: Préparer les options d'export
+        env:
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/export.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${TEAM}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>destination</key><string>export</string>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Exporter l'IPA
+        env:
+          ISSUER: ${{ secrets.APPSTORE_ISSUER_ID }}
+          KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Magofeed.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/export.plist" \
+            -exportPath "$RUNNER_TEMP/ipa" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER"
+          ls -la "$RUNNER_TEMP/ipa"
+
+      - name: Envoyer sur TestFlight
+        env:
+          ISSUER: ${{ secrets.APPSTORE_ISSUER_ID }}
+          KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+        run: |
+          IPA=$(ls "$RUNNER_TEMP"/ipa/*.ipa | head -1)
+          if [ -z "$IPA" ]; then
+            echo "::error::Aucun .ipa produit."
+            exit 1
+          fi
+          xcrun altool --upload-app --type ios --file "$IPA" \
+            --apiKey "$KEY_ID" --apiIssuer "$ISSUER"
+          echo "Depose. Apple traite le build pendant 5 a 15 minutes, puis il"
+          echo "apparait dans TestFlight et sur ton iPhone."
+
+      # Un filet : meme si l'envoi echoue, l'IPA reste telechargeable en bas
+      # de la page du run, et tu peux le deposer a la main avec Transporter.
+      - name: Déposer l'IPA (section Artifacts de cette page)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: magofeed-ios-${{ github.run_number }}
+          path: ${{ runner.temp }}/ipa/*.ipa
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Refermer la porte
+        if: always()
+        run: rm -rf ~/.appstoreconnect/private_keys ~/.private_keys

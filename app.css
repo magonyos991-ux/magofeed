@@ -387,8 +387,11 @@ body.dark .dcard{background:#2a2a2a}
 }
 @keyframes glowpulse{0%,100%{outline-color:var(--glow,var(--accent))}50%{outline-color:transparent}}
 .dcard-photo{
-  position:relative;height:96px;
-  display:flex;align-items:flex-end;overflow:hidden;padding:8px;
+  /* 96 px etait trop bas : l'illustration etait a l'etroit et la carte avait
+     l'air d'une vignette. On lui donne de la place, et on CENTRE au lieu
+     d'aligner en bas — l'alignement en bas datait du tag qui vivait dessous. */
+  position:relative;height:138px;
+  display:flex;align-items:center;justify-content:center;overflow:hidden;padding:10px;
 }
 .dcard-rating{
   position:absolute;top:9px;left:9px;
@@ -406,13 +409,15 @@ body.dark .dcard{background:#2a2a2a}
   display:flex;align-items:center;justify-content:center;
   z-index:2;font-size:13px;cursor:pointer;
 }
+/* .dcard-tag : retire du rendu (il doublait le nom et barrait l'illustration).
+   La regle reste pour les quelques endroits qui l'emploient encore ailleurs. */
 .dcard-tag{
   font-size:8px;letter-spacing:1.2px;
   color:rgba(40,36,30,.7);font-weight:700;
   position:relative;z-index:1;
 }
-.dcard-info{padding:8px 11px 10px}
-.dcard-name{font-size:12.5px;font-weight:700;line-height:1.2;color:var(--s1);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.dcard-info{padding:11px 13px 13px}
+.dcard-name{font-size:13.5px;font-weight:800;line-height:1.25;color:var(--s1);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;letter-spacing:-.2px;min-height:2.5em}
 .dcard-bottom{display:flex;align-items:center;justify-content:space-between;margin-top:4px}
 .dcard-cat{font-size:10px;color:var(--s2)}
 
@@ -473,11 +478,17 @@ body:not(.dark) .gps-bar{background:#f0fdf4;border-bottom:1px solid #dcfce7;colo
 body.dark .gps-bar{background:#052e16;border-bottom:1px solid #14532d;color:#86efac}
 
 /* ── Map ── */
+/* LA CARTE EST UN APERCU, PAS LA PAGE.
+   Elle occupait 250 px — plus que la photo du produit (56 px) et plus que la
+   reponse a la question qu'on se pose. Sur un ecran de telephone, elle
+   repoussait le premier magasin hors de vue. A 150 px elle situe le quartier,
+   ce qui suffit pour decider de l'ouvrir en grand ; la liste, elle, remonte. */
 .map-box{
   margin:12px 14px;border-radius:18px;overflow:hidden;
-  height:250px;border:1px solid var(--border);
+  height:150px;border:1px solid var(--border);
   position:relative;
 }
+.map-box.map-fullscreen{height:100%}
 .map-box iframe{width:100%;height:100%;border:none;display:block}
 /* Carte embarquee (repliee) : autorise le defilement vertical de la page par-dessus
    la carte, pour atteindre la liste des magasins en dessous. En plein ecran, la carte
@@ -843,6 +854,21 @@ body.dark .disc-card{background:#2a2a2a}
 .set-row.sw-row{cursor:pointer}
 .set-row.sw-row:active{background:var(--bg3)}
 .set-row.sw-row:focus-visible{outline:2px solid var(--s1);outline-offset:-2px;border-radius:14px}
+
+/* ── La couleur du verre : huit pastilles sous la ligne du reglage. Celles
+   qu'on n'a pas encore gagnees restent visibles, en retrait, avec le numero
+   du niveau qu'il faut : c'est ce qui donne envie de monter. ── */
+.verre-choix{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:12px 15px 15px;border-top:1px solid var(--border)}
+.verre-opt{position:relative;display:flex;flex-direction:column;align-items:center;gap:5px;min-width:0;padding:9px 4px 7px;border-radius:14px;
+  border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.verre-opt.sel{border-color:var(--s1);box-shadow:inset 0 0 0 1px var(--s1)}
+.verre-opt.verrou{opacity:.55}
+.verre-opt.verrou svg{filter:grayscale(.6)}
+.verre-opt:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.verre-nom{font-size:11px;font-weight:700;line-height:1.15;text-align:center;overflow-wrap:anywhere}
+.verre-niv{position:absolute;top:5px;right:6px;font-size:10px;font-weight:800;padding:1px 6px;border-radius:999px;background:var(--s1);color:var(--app-bg);line-height:1.4}
+/* La fete de niveau annonce la teinte gagnee, juste sous l'ancien nom. */
+.lvup-couleur{font-size:12.5px;font-weight:700;opacity:.85;margin-top:6px}
 /* ── Bouton discret : remplace les anciens mots soulignes facon lien web.
    Une pastille bordee, ca se voit, ca se touche, et ca fait application. ── */
 .ghost-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 15px;border-radius:999px;border:1.5px solid var(--border);background:var(--bg2);color:var(--txt2);font-size:12.5px;font-weight:700;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .15s,border-color .15s,transform .12s;min-height:38px}
@@ -1145,28 +1171,40 @@ body.dark .leaflet-control-zoom a{background:rgba(42,42,42,.85)!important;color:
 .store-card:active{transform:scale(.98)}
 .searchbox:active{transform:scale(.985)}
 
-/* ══ CHARGEMENT — L'ONDE QUI SE PROPAGE ═══════════════════════════════════
-   Une grille carree de points ronds. Chaque point bat (echelle + opacite)
-   avec un retard proportionnel a sa distance au centre : l'onde part du
-   point central, dore, et gagne les bords. C'est le geste de la marque — le
-   symbole qui se propage — sans dessiner une bouteille, et il reste calme :
-   un ecran qui attend ne doit pas s'agiter.
-   CSS pur, transform + opacite seulement, aucun chronometre JS. Le balisage
-   (et le retard de chaque point) sort d'UNE fonction : ondeHTML(taille) dans
-   index.html. Trois tailles, jamais plus de 49 points :
-     .onde-7   9 px, pas 11 px   splash, attentes plein ecran
-     .onde-5   7 px, pas  8 px   cartes, etats vides
-     .onde-3   6 px, pas  5 px   en ligne, a cote d'un texte (« Actualisation… »)
-   Regardee en clair, en sombre et en mouvement reduit avant d'etre posee. ══ */
-.onde{display:grid;grid-template-columns:repeat(7,9px);gap:11px;width:max-content;margin:0 auto;flex-shrink:0}
-.onde i{display:block;width:9px;height:9px;border-radius:50%;background:var(--s1);
-  opacity:.18;transform:scale(.55);animation:magoOnde 2s ease-in-out infinite}
-.onde i.c{background:var(--gold-bg)}
-.onde-5{grid-template-columns:repeat(5,7px);gap:8px}
-.onde-5 i{width:7px;height:7px}
-.onde-3{display:inline-grid;grid-template-columns:repeat(3,6px);gap:5px;margin:0;vertical-align:middle}
-.onde-3 i{width:6px;height:6px}
-@keyframes magoOnde{0%{transform:scale(.55);opacity:.18}40%{transform:scale(1.35);opacity:1}100%{transform:scale(.55);opacity:.18}}
+/* ══ LE SONAR — le symbole d'attente de l'app ═══════════════════════════════
+   L'anneau dore du logo, immobile au centre (c'est toi, l'epingle) ; trois
+   ondes fines naissent de lui, s'elargissent en ralentissant et se dissipent :
+   l'app cherche autour de toi. Les ondes prennent la couleur du texte (--s1) ;
+   l'or reste reserve a l'anneau, comme sur le logo — des ondes dorees se
+   liraient comme une cible. CSS pur, transform + opacite seulement, aucun
+   chronometre JS. Le balisage sort d'UNE fonction : ondeHTML(taille) dans
+   index.html. Trois tailles :
+     .sonar.lg  56 px   attentes plein ecran
+     .sonar     40 px   cartes, etats vides
+     .sonar.xs  18 px   en ligne, a cote d'un texte : UNE onde, cycle plus court (1,6 s)
+   Le trou de l'anneau prend la couleur du fond (--trou, par defaut --app-bg ;
+   une surface --bg2 la surcharge).
+   Il remplace la grille carree de points (« l'onde ») : l'idee etait juste,
+   la grille la contredisait — on lisait un carre, pas une recherche. ══ */
+.sonar{--d:40px;--k:12px;--t:1.5px;--pic:.6;--trou:var(--app-bg);position:relative;width:var(--d);height:var(--d);margin:0 auto;flex-shrink:0;color:var(--s1)}
+.sonar.lg{--d:56px;--k:16px;--t:2px}
+.sonar.xs{--d:18px;--k:8px;--t:1px;display:inline-block;margin:0;vertical-align:middle}
+.sonar b{position:absolute;left:50%;top:50%;width:var(--k);height:var(--k);transform:translate(-50%,-50%);border-radius:50%;
+  background:radial-gradient(circle at 35% 35%,#e8c47a,#9a7228)}
+.sonar b::before,.sonar b::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);border-radius:50%}
+.sonar b::before{width:50%;height:50%;background:var(--trou)}
+/* Pose sur une surface --bg2 (resultat de scan, tableau de bord commercant), le
+   trou prend la couleur de cette surface : sinon une pastille couleur de page
+   apparait au centre de l'anneau. */
+.scan-result .sonar,.mb-card .sonar,.zone-card .sonar{--trou:var(--bg2)}
+.sonar b::after{width:26%;height:26%;background:radial-gradient(circle at 35% 35%,#e8c47a,#9a7228)}
+.sonar i{position:absolute;inset:0;border-radius:50%;border:var(--t) solid currentColor;opacity:0;transform:scale(.3);
+  animation:magoSonar 2.4s cubic-bezier(.2,.65,.3,1) infinite}
+.sonar i:nth-child(2){animation-delay:.8s}
+.sonar i:nth-child(3){animation-delay:1.6s}
+.sonar.xs i+i{display:none}
+.sonar.xs i{animation-duration:1.6s}
+@keyframes magoSonar{0%{transform:scale(.3);opacity:0}12%{opacity:var(--pic)}100%{transform:scale(1);opacity:0}}
 
 /* Le composant d'attente : l'onde moyenne (ou petite avec .sm, en ligne a
    cote de son texte). role="status" est porte par ce conteneur. */
@@ -1184,26 +1222,14 @@ body.dark .leaflet-control-zoom a{background:rgba(42,42,42,.85)!important;color:
   animation:magoBarre 1.25s cubic-bezier(.65,.05,.36,1) infinite}
 @keyframes magoBarre{0%{left:-40%}100%{left:100%}}
 
-/* Squelette scintillant : une liste qui se remplit ne doit pas sauter. */
-.mago-skel{height:14px;border-radius:7px;margin:9px 0;
-  background:linear-gradient(90deg,var(--bg3) 25%,var(--card-bg) 50%,var(--bg3) 75%);
-  background-size:280% 100%;animation:magoSkel 1.35s ease-in-out infinite}
-@keyframes magoSkel{0%{background-position:180% 0}100%{background-position:-80% 0}}
-
 /* Mouvement reduit : on garde l'information, on retire l'agitation. */
 @media (prefers-reduced-motion:reduce){
-  .onde i,#mago-barre i,.mago-skel{animation:none}
-  .onde i{opacity:.5;transform:none}
+  .sonar i,#mago-barre i{animation:none}
+  .sonar i{opacity:.25;transform:scale(.62)}
+  .sonar i:nth-child(2){opacity:.14;transform:scale(.84)}
+  .sonar i:nth-child(3){display:none}
   #mago-barre i{left:0;width:100%}
 }
-
-/* ── Ancien spinner : garde comme repli, plus utilise directement ── */
-.spinner{
-  width:26px;height:26px;
-  border:3px solid var(--bg3);border-top-color:var(--accent);
-  border-radius:50%;animation:spin .8s linear infinite;margin:10px auto;
-}
-@keyframes spin{to{transform:rotate(360deg)}}
 
 /* ── Header utility ── */
 .hd-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
@@ -1315,11 +1341,29 @@ body.dark .tuto-arrow.up{border-bottom-color:#2a2a2a}
 #splash.hidden{opacity:0;pointer-events:none}
 .splash-logo{font-size:48px;font-weight:800;letter-spacing:-2px;color:#fff;animation:splashIn .6s cubic-bezier(.16,1,.3,1) both;}
 .splash-sub{font-size:14px;font-weight:500;color:rgba(255,255,255,.45);letter-spacing:.5px;animation:splashIn .6s .15s cubic-bezier(.16,1,.3,1) both;}
-/* L'onde du splash : toujours sur le fond sombre #1a1714, quel que soit le
-   theme — d'ou les couleurs posees en dur (points creme, centre dore en FOND). */
-#splash-onde{margin-top:26px;animation:splashIn .6s .3s cubic-bezier(.16,1,.3,1) both}
-#splash .onde i{background:#f4f2ee}
-#splash .onde i.c{background:#e5a93a}
+/* Le verre du splash : toujours sur le fond sombre #1a1714, quel que soit le
+   theme — d'ou les couleurs en dur. Seul transform est anime (le liquide, la
+   houle, les bulles) : c'est ce qui continue de bouger pendant que le fil
+   principal compile le gros script. Le niveau (--y) et la transition (--dur,
+   --ease) sont poses par le script inline sous le splash, index.html. */
+/* Le verre apparait AVEC le logo, pas 0,3 s apres : avec le retard et le fondu
+   de 0,6 s d'avant, le liquide montait dans un verre encore invisible, et l'on
+   decouvrait un verre deja plein. */
+#splash-verre{margin-top:26px;overflow:visible;animation:splashIn .35s .05s cubic-bezier(.16,1,.3,1) both}
+#splash-verre .verre-liq{transform:translateY(var(--y,100px));transition:transform var(--dur,0s) var(--ease,linear)}
+#splash-verre .verre-vague{animation:verreHoule 1.8s linear infinite}
+#splash-verre .verre-bulle{opacity:0;animation:verreBulle 2.4s ease-in infinite}
+#splash-verre circle.verre-bulle:nth-of-type(2){animation-delay:.8s}
+#splash-verre circle.verre-bulle:nth-of-type(3){animation-delay:1.5s}
+@keyframes verreHoule{from{transform:translateX(-32px)}to{transform:translateX(0)}}
+@keyframes verreBulle{0%{transform:translateY(0);opacity:0}15%{opacity:.8}100%{transform:translateY(-58px);opacity:0}}
+/* Mouvement reduit : le verre est plein tout de suite (script inline), la
+   houle ne bouge pas et les bulles restent posees, visibles. Pose ICI, apres les regles du verre :
+   a specificite egale, c'est l'ordre qui tranche. */
+@media (prefers-reduced-motion:reduce){
+  #splash-verre .verre-vague,#splash-verre .verre-bulle{animation:none}
+  #splash-verre .verre-bulle{opacity:.5}   /* figees, mais visibles */
+}
 @keyframes splashIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 
 /* ── Respecte la préférence système "réduire les animations" ── */
@@ -2134,3 +2178,253 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]),textarea,select{f
 @media (prefers-reduced-motion:reduce){
   #sug.ouvert,.sug-row,.sug-note{animation:none}
 }
+
+/* ══ RECOMMANDATIONS ═════════════════════════════════════════════════════
+   Un onglet qui parle de gouts, jamais de sante, et qui montre ses chiffres
+   tels qu'ils sont. Le pied de page n'est pas masquable : c'est lui qui dit
+   que l'app ne donne pas de conseil, et que rien ne s'achete ici. */
+.reco-chiffres{
+  font-size:11.5px;font-weight:700;color:var(--s2);
+  background:var(--bg2);border:1.5px solid var(--border);
+  border-radius:999px;padding:8px 14px;margin-bottom:16px;text-align:center;
+}
+.reco-h{margin:18px 0 10px}
+.reco-h-t{font-size:13.5px;font-weight:800;color:var(--s1)}
+.reco-h-s{font-size:11.5px;font-weight:500;color:var(--s2);margin-top:2px;line-height:1.4}
+.reco-ligne{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 12px;margin-bottom:8px;
+  background:var(--card-bg);border:1.5px solid var(--border);border-radius:16px;
+  cursor:pointer;transition:transform .12s ease;
+  -webkit-tap-highlight-color:transparent;
+}
+.reco-ligne:active{transform:scale(.985)}
+.reco-vign{
+  width:38px;height:38px;border-radius:12px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;overflow:hidden;
+}
+.reco-vign svg,.reco-vign img{max-width:100%;max-height:100%}
+.reco-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+/* Le nom peut tenir sur deux lignes plutot que d'etre coupe : « Red Bull
+   Yellow Edition Tropical » devenait « Red Bull Yello... », ce qui ne dit
+   plus de quelle canette on parle. */
+.reco-n{font-size:13.5px;font-weight:700;color:var(--s1);line-height:1.3;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.reco-s{font-size:11px;font-weight:600;color:var(--s3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reco-act{
+  flex-shrink:0;padding:8px 13px;border-radius:999px;max-width:38%;
+  border:1.5px solid var(--s1);background:var(--s1);color:var(--app-bg);
+  font-size:11.5px;font-weight:800;cursor:pointer;font-family:inherit;
+  min-height:36px;
+}
+.reco-act:active{transform:scale(.95)}
+/* Les motifs : cinq pastilles, et pas un seul endroit ou ecrire une phrase. */
+.reco-mots{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 14px}
+.reco-mot{
+  padding:9px 15px;border-radius:999px;
+  border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);
+  font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;
+  min-height:40px;transition:all .18s cubic-bezier(.2,.8,.3,1);
+  -webkit-tap-highlight-color:transparent;
+}
+.reco-mot.on{background:var(--s1);color:var(--app-bg);border-color:var(--s1)}
+.reco-mot:active{transform:scale(.95)}
+/* Le classement ferme. Il ressemble a une carte eteinte, pas a une promesse. */
+.reco-classement{
+  margin-top:22px;padding:16px;border-radius:18px;
+  background:var(--bg2);border:1.5px dashed var(--border);
+}
+.reco-cl-t{font-size:13.5px;font-weight:800;color:var(--s2);margin-bottom:8px}
+.reco-cl-d{font-size:11.5px;font-weight:500;color:var(--s3);line-height:1.5;margin-bottom:6px}
+.reco-pied{
+  margin-top:18px;padding:12px 14px;border-radius:14px;
+  background:var(--bg3);
+  font-size:11px;font-weight:600;color:var(--s3);line-height:1.5;text-align:center;
+}
+/* A quatre onglets, « Recommandées » etait coupe par le text-overflow
+   existant sur un ecran de 375 px. Deux par ligne sous 420 px, une seule
+   ligne au-dela : aucun onglet n'est cache. */
+@media (max-width:420px){
+  /* Deux par ligne, et le conteneur perd sa forme de gelule : une pilule
+     etiree sur deux rangees a l'air d'un accident. Coins arrondis normaux,
+     interligne serre, chaque onglet garde sa pastille. */
+  .chasse-seg{flex-wrap:wrap;border-radius:18px;gap:4px}
+  .chasse-seg button{flex:1 1 46%;font-size:12px;padding:9px 4px}
+}
+
+/* ---- Accueil : la ligne de salutation ne se casse jamais en deux ----
+   Filet de securite si un prenom long passe quand meme : on coupe par des
+   points de suspension plutot que de pousser l'en-tete sur deux lignes. */
+#t-greeting{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+
+/* ---- Petits ecrans : l'en-tete se serre au lieu de deborder ----
+   Sur un ecran de 320 px, le bloc de gauche (logo + « Magofeed » + salutation)
+   refusait de retrecir : en flex, un element ne descend pas sous la largeur de
+   son contenu tant qu'on ne lui a pas donne min-width:0. Resultat, il poussait
+   les trois boutons de droite hors du cadre et l'avatar etait coupe net par le
+   bord. Un avatar coupe en deux, c'est exactement le genre de detail qui fait
+   dire « ce n'est pas fini ».
+   On autorise le bloc de gauche a se serrer, on fige celui de droite, et la
+   salutation se termine par des points de suspension si besoin. */
+.hd-top>:first-child{min-width:0;flex:1 1 auto}
+.hd-top>:first-child>div{min-width:0}
+.hd-top>:last-child{flex-shrink:0}
+.t-hero{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Meme cause pour la barre de recherche : un <input> a une largeur naturelle
+   d'environ 170 px que flex:1 seul ne reduit pas. La barre poussait le bouton
+   carte a moitie hors de l'ecran sur un 320 px. */
+.searchbox{min-width:0}
+.searchbox input{min-width:0}
+
+/* ---- Fiche d'une boisson : un en-tete qui tient sur une ligne ----
+   Le nom passait sur deux lignes et poussait les trois boutons ronds ; la
+   photo du produit faisait 56 px, soit le plus petit element d'un ecran qui
+   lui est consacre. On la passe a 72, on force le titre sur une ligne, et le
+   bloc d'informations tient desormais en deux lignes au lieu de quatre. */
+#res-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.res-hd .res-back{gap:10px}
+.res-product .res-emoji{width:72px;height:72px;flex-shrink:0}
+.res-product{gap:14px;align-items:center}
+#res-sub{font-size:12.5px;margin-bottom:6px}
+#res-fmt{margin:0}
+/* « Donne ton avis » a quitte l'en-tete pour devenir l'outil « Noter » : le
+   chip garde son id (du code y ecrit encore la note) mais ne s'affiche plus.
+   L'attribut hidden seul ne suffit pas face a un display:flex declare apres. */
+/* LA NOTE REDEVIENT UNE LIGNE, PAS UNE PASTILLE.
+   « Donne ton avis » etait un bouton noir, de la meme forme que « Canette
+   50cl » qui, lui, est une information. Une action et une information qui se
+   ressemblent, c'est le lecteur qui paie. La note se lit maintenant comme une
+   ligne de texte, sous la marque, et reste cliquable pour noter. */
+.res-note-ligne{display:inline-block;margin-top:4px;font-size:12px;font-weight:600;
+  color:rgba(255,255,255,.72);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.res-note-ligne:empty{display:none}
+/* Les outils ferment l'ecran : ils doivent passer AU-DESSUS du dock, pas
+   dessous. */
+#store-list{padding-bottom:calc(26px + env(safe-area-inset-bottom,0px))}
+
+/* ---- Fiche boisson : une seule grammaire visuelle ----
+   Les bords ne s'alignaient pas. Les cartes magasins et la barre de prix
+   ouvrent a 20 px du bord, les blocs ajoutes ouvraient a 16 : trois ou quatre
+   pixels d'ecart, invisibles separement, mais l'oeil suit une verticale et
+   voyait une colonne qui tremble. Un ecran « pas pro », c'est presque toujours
+   ca : des reglages chacun juste, jamais les memes.
+   Un seul retrait (20 px), un seul rayon de carte (18 px). */
+
+/* LES PASTILLES DE COMPTAGE ONT CHANGE DE FOND.
+   « 1 magasin · 1 ouvert » vivait dans l'en-tete sombre : fond noir translucide
+   et texte blanc. En les descendant au-dessus de la liste, sur fond clair, le
+   blanc sur un voile noir a 15 % donnait un gris delave, illisible. Elles
+   prennent desormais les couleurs du theme, comme tout ce qui les entoure. */
+#res-badges .rbadge{
+  background:var(--bg2);color:var(--s2);
+  border:1px solid var(--border);font-weight:700;
+}
+
+/* L'EN-TETE : la vignette prend la couleur de la boisson.
+   Un carre blanc translucide sur un degrade brun, c'est neutre et c'est mort.
+   Chaque fiche porte deja sa couleur (--teinte, posee a l'ouverture) : la
+   vignette s'en sert, et l'en-tete cesse d'etre le meme pour les 4455
+   boissons. */
+.res-product .res-emoji{
+  border-radius:18px;
+  background:var(--teinte,rgba(255,255,255,.18));
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);
+}
+.res-hd{padding-bottom:16px}
+.res-product{gap:13px}
+#res-sub{font-size:12.5px;font-weight:600;color:rgba(255,255,255,.80);margin-bottom:5px}
+.fmt-row{margin-top:7px}
+.fmt-chip{padding:4px 11px;font-size:11px}
+
+/* ---- Fiche boisson : le rythme vertical ----
+   Les formats debordaient sur trois rangees pour un Coca-Cola (quatre
+   contenants) : l'en-tete grandissait selon la boisson, et la page semblait
+   commencer plus bas une fois sur deux. Une seule ligne qui defile : la
+   hauteur de l'en-tete ne depend plus du nombre de formats. */
+.fmt-row{
+  flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;
+  -webkit-overflow-scrolling:touch;padding-bottom:2px;
+}
+.fmt-row::-webkit-scrollbar{display:none}
+.fmt-chip{flex:0 0 auto;white-space:nowrap}
+
+/* Un seul pas vertical entre les sections de la fiche, au lieu de six valeurs
+   reglees une par une. */
+#drink-reponse>div{padding-top:14px}
+#drink-nutri:empty{display:none}
+#res-demande:empty{display:none}
+
+/* ---- La rangee de confirmation, repliee ----
+   Une ligne de 26 px au lieu d'un bloc de 49, et le contenu arrive a la
+   demande. Le chevron tourne quand c'est ouvert : c'est le seul signe dont on
+   a besoin pour comprendre qu'il y a quelque chose dessous. */
+.comm-pli{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:7px 14px;border-top:1px solid var(--border);
+  font-size:11.5px;font-weight:600;color:var(--s3);
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+}
+.comm-pli svg{transition:transform .18s ease;flex-shrink:0}
+.comm-pli.ouvert{color:var(--s2)}
+.comm-pli.ouvert svg{transform:rotate(180deg)}
+.comm-bar[hidden]{display:none}
+
+/* ---- La carte d'un magasin : trois lignes au lieu de cinq ----
+   « Prix inconnu » occupait une ligne entiere pour dire qu'on ne sait pas.
+   Comme le mot « Fiabilite » au-dessus d'une barre vide, c'est une absence
+   qu'on affichait. Elle est partie ; quand un prix existe, il prend sa place.
+   Le reste se resserre : la carte passe de 190 a environ 90 px, soit trois
+   magasins et demi visibles d'un coup contre presque huit. */
+.store-card{margin:6px 20px;border-radius:18px}
+.store-top{padding:11px 13px;gap:11px}
+.store-ico{width:38px;height:38px;border-radius:12px}
+.store-name{font-size:14.5px;letter-spacing:-.15px}
+
+/* ---- La legende de l'apercu de carte ----
+   Deux bandeaux empiles — « L'a en rayon · Possible · Ne l'a pas » puis
+   « En stock seulement » — couvraient pres de la moitie d'une carte haute de
+   150 px. Les pins rouges ayant disparu de l'apercu, la legende n'a plus que
+   deux etats a nommer, et elle tient sur une ligne discrete. */
+.map-box:not(.map-fullscreen) .map-legend{
+  font-size:10px;padding:3px 8px;gap:7px;
+}
+.map-box:not(.map-fullscreen) .map-legend .lg-no{display:none}
+/* La regle qui vivait ici positionnait le filtre en absolu, du temps ou la
+   legende et lui etaient deux bandeaux empiles. Ils partagent une seule ligne
+   depuis, et .map-barre #map-instock-btn le met en position:static — mais
+   celle-ci, plus specifique, continuait d'imposer son remplissage par-dessus.
+   Un reliquat qui gagnait encore : retire. */
+
+/* ---- La bande d'information au-dessus de la carte ----
+   Legende et filtre sur une seule ligne, dans une seule pastille. Elle defile
+   horizontalement plutot que de passer a la ligne : la hauteur de la carte ne
+   depend plus de la largeur du telephone. */
+.map-barre{
+  position:absolute;top:8px;left:8px;right:46px;z-index:900;
+  display:flex;align-items:center;gap:6px;
+  overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+  background:color-mix(in srgb,var(--app-bg) 90%,transparent);
+  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
+  border:1px solid var(--border);border-radius:999px;padding:0 4px 0 0;
+}
+.map-barre::-webkit-scrollbar{display:none}
+.map-barre .map-legend{padding:5px 4px 5px 11px;gap:9px;flex:0 0 auto}
+.map-barre #map-instock-btn{
+  position:static;flex:0 0 auto;display:flex;align-items:center;gap:5px;
+  padding:4px 11px;border-radius:999px;border:1px solid var(--border);
+  background:var(--bg2);color:var(--s2);font-size:10px;font-weight:800;
+  cursor:pointer;white-space:nowrap;-webkit-tap-highlight-color:transparent;
+}
+/* ══ LE POINT DISAIT LE CONTRAIRE DE L'ETAT ════════════════════════════════
+   Il etait VERT PLEIN quand le filtre etait eteint, et blanc quand il etait
+   allume. Sur une fiche sans aucun magasin confirme, le seul point vert de
+   tout l'ecran appartenait donc a un bouton eteint — et la pastille verte
+   veut dire « en rayon » partout ailleurs dans l'application.
+   Eteint : un cercle creux, qui ne promet rien. Allume : plein, sur fond
+   vert. On ne peut plus confondre les deux. */
+.map-barre #map-instock-btn .pt{
+  width:7px;height:7px;border-radius:50%;flex-shrink:0;
+  background:transparent;border:1.5px solid currentColor;opacity:.75;
+}
+.map-barre #map-instock-btn.on{background:#16a34a;color:#fff;border-color:#16a34a}
+.map-barre #map-instock-btn.on .pt{background:#fff;border-color:#fff;opacity:1}
