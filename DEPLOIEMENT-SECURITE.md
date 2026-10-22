@@ -237,13 +237,16 @@ Avant tout changement de règles, le banc d'essai doit passer :
 ```
 cd functions-a-deployer/tests-regles
 npm install          # une seule fois
-npm test             # doit se terminer par : 291/291 conformes
+npm test             # doit se terminer SANS le moindre ECHEC
 ```
 
 Il attaque une base jetable sur ta machine. Rien ne part en ligne. S'il
 affiche le moindre `ECHEC`, **ne déploie pas** : dis-le-moi.
-Le total (260) grandit à chaque épreuve ajoutée — c'est l'absence d'échec qui
-compte, pas le chiffre. La consigne exigeait `148/148` : le banc en affiche 260
+Le total grandit à chaque épreuve ajoutée — c'est l'absence d'échec qui
+compte, et elle seule. Aucun chiffre n'est écrit ici, volontairement : une
+consigne qui fige un total devient fausse à la première épreuve ajoutée, et
+t'interdit alors de déployer une application pourtant tout en vert. C'est déjà
+arrivé deux fois
 depuis longtemps, donc elle interdisait de déployer alors que tout était vert.
 
 ## 2. Les Cloud Functions de base — DÉJÀ FAIT
