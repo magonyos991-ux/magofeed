@@ -5736,7 +5736,15 @@ window.fbSignOut = async function() {
 /* Consentement e-mails (RGPD) : stocke sur le profil, lu par les futures
    fonctions d'envoi (chasse trouvee...). Opt-in explicite, jamais par defaut. */
 window.fbSetEmailOptIn = async function(optIn) {
-  var u = auth.currentUser; if (!u) return;
+  /* ABANDONNER EN SILENCE, C'EST LE PIRE DES DEUX MONDES. Cette fonction
+     sortait sans rien faire quand l'identite n'etait pas encore prete — ce
+     qui arrive systematiquement dans les premieres secondes, et notamment
+     quand on arrive par le lien de desabonnement d'un e-mail. L'appelant,
+     lui, annonçait « tu ne recevras plus d'e-mails » et le consentement
+     restait intact cote serveur. On attend donc l'identite, et si elle ne
+     vient pas, on LEVE : c'est a l'appelant de dire la verite. */
+  var u = await ensureAuthed();
+  if (!u) throw new Error("magofeed/pas-de-compte");
   // SEUL le consentement est stocke. L'adresse, elle, reste dans Firebase Auth :
   // les Cloud Functions la lisent avec l'Admin SDK. Resultat : impossible de
   // recolter les adresses des membres, et impossible de faire envoyer un e-mail
@@ -6713,10 +6721,21 @@ window.fbIncrementScanCount = async function(drinkId) {
 };
 
 // Notes et recommandations communautaires, agrégées dans deux docs (clé = id boisson)
-window.fbAddRating = async function(drinkId, val) {
+/* UNE RE-NOTE REMPLACE, ELLE N'AJOUTE PAS UN VOTANT.
+   Cette fonction n'etait appelee que sur une PREMIERE note : changer sa note
+   ne partait nulle part, pendant que l'ecran annonçait « Note mise a jour »
+   et recalculait la moyenne affichee comme si elle etait communautaire.
+   Elle accepte desormais la note precedente : on envoie l'ECART (val - prev)
+   et on n'incremente le nombre de votants que la premiere fois. Sans cela,
+   repasser de 2 a 5 aurait compte deux votants pour une seule personne. */
+window.fbAddRating = async function(drinkId, val, prev) {
   try {
+    var ancienne = (typeof prev === "number" && prev > 0) ? prev : 0;
     var patch = {};
-    patch[String(drinkId)] = { sum: increment(val), count: increment(1) };
+    patch[String(drinkId)] = {
+      sum: increment(val - ancienne),
+      count: increment(ancienne ? 0 : 1)
+    };
     await setDoc(doc(db, "stats", "drinkRatings"), patch, { merge: true });
   } catch (e) { console.warn("Firestore rating error:", e); }
 };
@@ -24592,8 +24611,18 @@ function quickPrice(storeId,drinkId){
   try{localStorage.setItem("magoPrices",JSON.stringify(storePrices));}catch(e){}
   if(s){if(!s.prices)s.prices={};s.prices[drinkId]=v;}
   try{if(typeof trackLocalPrice==="function")trackLocalPrice(storeId,drinkId,v);}catch(e){}
-  try{if(typeof awardOnce==="function"&&awardOnce("price:"+storeId+":"+drinkId,24)){userStats.pts+=3;updateProfileStats();}}catch(e){}
-  toast("Prix enregistré : "+v.toFixed(2)+"€ · merci !");
+  /* ══ « PRIX ENREGISTRE » ALORS QU'IL NE QUITTAIT PAS LE TELEPHONE ═══════
+     Des trois portes de saisie de prix, celle-ci etait la seule a n'appeler
+     ni fbSavePrice ni fbAddReport : le prix restait dans le localStorage de
+     l'appareil, invisible pour tout le monde, et l'ecran disait « enregistre
+     · merci ». L'en-tete de fbSavePrice dit pourtant ce que cela veut dire :
+     « un prix vu par la communaute, partage entre tous les utilisateurs ».
+     Elle creditait aussi 3 points quand le bareme serveur de « prix » vaut 2
+     — et n'ecrivait aucun rapport, donc n'en versait aucun. */
+  if(s&&window.fbSavePrice)try{window.fbSavePrice(s.fbId||storeId,drinkId,v);}catch(e){}
+  if(s&&window.fbAddReport)try{window.fbAddReport(s.fbId||storeId,drinkId,"prix",{note:String(v)});}catch(e){}
+  try{if(typeof awardOnce==="function"&&awardOnce("price:"+storeId+":"+drinkId,24)){userStats.pts+=2;updateProfileStats();}}catch(e){}
+  toast(v.toFixed(2)+"\u20ac "+tr("enregistré · merci"));
   playSound("pop");
   try{if(exploreMap)exploreLoadStores(true);}catch(e){}
 }
@@ -26288,16 +26317,47 @@ function showFindLanding(d){
 var _deepLinkDone="";
 function _deepLinkSeal(){ _deepLinkDone=location.hash||""; }
 function _deepLinkSealed(){ return !!_deepLinkDone && _deepLinkDone===(location.hash||""); }
+/* Attend que le module Firebase soit la, coupe le consentement, et ne dit
+   « c'est fait » que lorsque ca l'est. Dix secondes d'attente au maximum :
+   au-dela, on l'avoue et on indique l'autre chemin. */
+function couperLesMails(essai){
+  essai=essai||0;
+  if(!window.fbSetEmailOptIn){
+    if(essai<40){ setTimeout(function(){couperLesMails(essai+1);},250); return; }
+    toast(tr("Désabonnement non enregistré — réessaie depuis Réglages"));
+    return;
+  }
+  window.fbSetEmailOptIn(false).then(function(){
+    toast(tr("Tu ne recevras plus d’e-mails de chasse"));
+  }).catch(function(){
+    window._emailOptIn=true;                 /* on n'a rien coupe : on le montre */
+    try{renderEmailOptInRow();}catch(e){}
+    toast(tr("Désabonnement non enregistré — réessaie depuis Réglages"));
+  });
+}
+window.couperLesMails=couperLesMails;
 function handleDeepLink(){
   // Desabonnement en un clic depuis un e-mail (#stopmails=uid) : obligation
   // legale. On coupe le consentement sans demander de se connecter d'abord.
   var mu=(location.hash||"").match(/#stopmails=([A-Za-z0-9_-]+)/);
   if(mu){
+    /* ══ LE DESABONNEMENT ANNONCAIT UN CONSENTEMENT QU'IL N'ECRIVAIT PAS ═══
+       Le commentaire juste au-dessus dit « obligation legale », et c'est
+       exactement ce qui ne se produisait pas. Deux causes se cumulaient.
+       (1) handleDeepLink tourne dans le script CLASSIQUE, qui s'execute avant
+       le <script type="module"> — differe par nature — ou vit
+       window.fbSetEmailOptIn. Le garde « if(window.fbSetEmailOptIn) » etait
+       donc faux, et comme la ligne suivante effaçait le #stopmails de l'URL,
+       les appels ulterieurs de handleDeepLink ne trouvaient plus rien.
+       (2) Meme chargee, la fonction abandonnait en silence tant que l'identite
+       n'etait pas prete — le cas de quiconque ouvre l'app par ce lien.
+       Le message de succes, lui, partait toujours, 900 ms plus tard, sans
+       rien savoir. On attend desormais, on ecrit, et on ne confirme QUE si
+       l'ecriture a reussi. */
     window._emailOptIn=false;
     try{renderEmailOptInRow();}catch(e){}
-    if(window.fbSetEmailOptIn)window.fbSetEmailOptIn(false).catch(function(){});
     try{history.replaceState(null,"",location.pathname);}catch(e){}
-    setTimeout(function(){toast("Tu ne recevras plus d'e-mails de chasse");},900);
+    couperLesMails(0);
     return;
   }
   // Raccourcis d'app (long-press sur l'icone installee -> Scanner / Chercher).
@@ -27876,7 +27936,10 @@ function setRating(val){
   renderStarPanel();
   try{var _rs=document.getElementById("rate-sheet");if(_rs&&_rs.style.display!=="none")renderRateSheet();}catch(e){}
   var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent=noteEnTete(curSel);
-  if(!prev&&window.fbAddRating)window.fbAddRating(curSel.id,val);
+  /* On envoie aussi les RE-NOTES : c'est l'ecart qui part, et le nombre de
+     votants ne bouge pas. Avant, « Note mise a jour » s'affichait sur une
+     note qui ne quittait jamais l'appareil. */
+  if(window.fbAddRating)window.fbAddRating(curSel.id,val,prev||0);
 }
 /* ══ CE QUE LES GENS RECOMMANDENT ══════════════════════════════════════
    Le fondateur veut « promouvoir » une boisson qu'on trouve bonne. Le mot
@@ -31678,11 +31741,27 @@ function authForgot(){
 function toggleEmailOptIn(){
   var u=window._fbUser;
   if(!u||u.isAnonymous||!u.email){toast(tr("Crée d'abord un compte Magofeed (Réglages → Compte)"));playSound("err");return;}
-  window._emailOptIn=!window._emailOptIn;
-  if(window.fbSetEmailOptIn)window.fbSetEmailOptIn(window._emailOptIn).catch(function(){});
+  /* Meme defaut que le desabonnement par lien : le catch etait VIDE,
+     l'interrupteur se repeignait et le message partait, que l'ecriture ait
+     abouti ou non. Un consentement qu'on croit avoir donne — ou retire — et
+     que le serveur n'a jamais reçu, c'est la pire des situations.
+     On bascule l'affichage tout de suite, parce qu'une interface qui attend
+     une seconde parait cassee, mais on REVIENT EN ARRIERE si l'ecriture
+     echoue, et on le dit. */
+  var voulu=!window._emailOptIn;
+  window._emailOptIn=voulu;
   renderEmailOptInRow();
-  toast(window._emailOptIn?tr("E-mails de chasse activés"):tr("E-mails de chasse désactivés"));
   playSound("pop");
+  if(!window.fbSetEmailOptIn){
+    window._emailOptIn=!voulu;renderEmailOptInRow();
+    toast(tr("Pas encore prêt — réessaie dans un instant"));return;
+  }
+  window.fbSetEmailOptIn(voulu).then(function(){
+    toast(voulu?tr("E-mails de chasse activés"):tr("E-mails de chasse désactivés"));
+  }).catch(function(){
+    window._emailOptIn=!voulu;renderEmailOptInRow();
+    toast(tr("Changement non enregistré — réessaie"));
+  });
 }
 function renderEmailOptInRow(){
   var t=document.getElementById("emailoptin-toggle");

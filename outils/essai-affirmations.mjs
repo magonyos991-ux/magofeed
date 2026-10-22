@@ -276,6 +276,96 @@ interdits.forEach(([nom,motif])=>{
   v("« "+nom+" » ne promet plus de points", !coupable, coupable?coupable.trim().slice(0,70):"aucune promesse");
 });
 
+/* ─── CINQUIEME SERIE — ne jamais annoncer un enregistrement qui n'a pas eu
+   lieu. Le desabonnement e-mail, l'interrupteur des reglages, le prix saisi
+   depuis la carte et la re-note d'une boisson annonçaient tous un succes sans
+   avoir rien ecrit. ──────────────────────────────────────────────────────── */
+const prom=await pg.evaluate(async()=>{
+  const out={};
+  const capter=async(fn,ms)=>{
+    const t=[]; const vrai=window.toast;
+    window.toast=function(x){t.push(String(x));};
+    try{ await fn(); }catch(e){ t.push("ERREUR:"+e.message); }
+    await new Promise(r=>setTimeout(r,ms||500));
+    window.toast=vrai; return t.join(" | ");
+  };
+  const vraiSet=window.fbSetEmailOptIn;
+
+  /* 1. Le module n'est pas encore la : rien ne doit etre promis. */
+  window.fbSetEmailOptIn=undefined;
+  out.sansModule=await capter(()=>{ window.couperLesMails(39); },600);
+
+  /* 2. L'ecriture echoue : on l'avoue et on remet l'interrupteur. */
+  window._emailOptIn=true;
+  window.fbSetEmailOptIn=function(){return Promise.reject(new Error("refus"));};
+  out.echec=await capter(()=>{ window.couperLesMails(0); },600);
+  out.apresEchec=window._emailOptIn;
+
+  /* 3. L'ecriture reussit : la, on peut le dire. */
+  let recu=null;
+  window.fbSetEmailOptIn=function(v){recu=v;return Promise.resolve();};
+  out.succes=await capter(()=>{ window.couperLesMails(0); },600);
+  out.valeurEcrite=recu;
+
+  /* 4. L'interrupteur des reglages, quand l'ecriture echoue. */
+  window._fbUser={isAnonymous:false,email:"x@y.z"};
+  window._emailOptIn=false;
+  window.fbSetEmailOptIn=function(){return Promise.reject(new Error("refus"));};
+  out.toggleEchec=await capter(()=>{ window.toggleEmailOptIn(); },600);
+  out.toggleApres=window._emailOptIn;
+  window.fbSetEmailOptIn=vraiSet;
+
+  /* 5. Le prix saisi depuis la carte doit partir vers la communaute. */
+  const d=DRINKS.find(x=>x.name==="Coca-Cola Original");
+  window.STORES.length=0;
+  window.STORES.push({id:"Q1",fbId:"Q1",name:"Magasin Prix",brand:"",lat:50.88,lng:4.35,
+                      dist:300,drinks:[d.id],confirmations:{}});
+  const envoyes=[];
+  const vp=window.fbSavePrice, vr=window.fbAddReport, vprompt=window.prompt;
+  window.fbSavePrice=function(){envoyes.push("prix-partage");return Promise.resolve();};
+  window.fbAddReport=function(a,b,t){envoyes.push("rapport:"+t);return Promise.resolve();};
+  window.prompt=function(){return "1,50";};
+  try{ localStorage.removeItem("magoAwards"); window.awardLog={}; }catch(e){}
+  const avantPts=window.userStats.pts;
+  await capter(()=>{ window.quickPrice("Q1",d.id); },400);
+  window.fbSavePrice=vp; window.fbAddReport=vr; window.prompt=vprompt;
+  out.prixEnvoye=envoyes.slice();
+  out.prixPoints=window.userStats.pts-avantPts;
+
+  /* 6. Une re-note doit partir, avec l'ecart et sans nouveau votant. */
+  const notes=[];
+  const vra=window.fbAddRating;
+  window.fbAddRating=function(id,val,prev){notes.push({val,prev});return Promise.resolve();};
+  window.curSel=d; window.userRatings={};
+  window.setRating(2);
+  window.setRating(5);
+  window.fbAddRating=vra;
+  out.notes=notes;
+  return out;
+});
+v("module absent : aucune promesse de desabonnement",
+  !/plus d/i.test(prom.sansModule)&&/réessaie/i.test(prom.sansModule),"« "+prom.sansModule+" »");
+v("ecriture refusee : on l'avoue",
+  /non enregistr/i.test(prom.echec)&&!/plus d.e-mails/i.test(prom.echec),"« "+prom.echec+" »");
+v("ecriture refusee : l'interrupteur revient en arriere",
+  prom.apresEchec===true,"_emailOptIn = "+prom.apresEchec);
+v("ecriture reussie : la, on peut le dire",
+  /plus d/i.test(prom.succes)&&prom.valeurEcrite===false,
+  "« "+prom.succes+" », valeur ecrite = "+prom.valeurEcrite);
+v("reglages : un refus ne s'annonce pas comme un succes",
+  /non enregistr/i.test(prom.toggleEchec)&&!/activés|désactivés/i.test(prom.toggleEchec),
+  "« "+prom.toggleEchec+" »");
+v("reglages : l'interrupteur revient a son etat reel",
+  prom.toggleApres===false,"_emailOptIn = "+prom.toggleApres);
+v("le prix part vraiment a la communaute",
+  prom.prixEnvoye.indexOf("prix-partage")!==-1&&prom.prixEnvoye.indexOf("rapport:prix")!==-1,
+  JSON.stringify(prom.prixEnvoye));
+v("le prix credite 2 points, le bareme du serveur", prom.prixPoints===2,"gain "+prom.prixPoints);
+v("la premiere note part sans note precedente",
+  prom.notes[0]&&prom.notes[0].val===2&&!prom.notes[0].prev,JSON.stringify(prom.notes[0]));
+v("la RE-note part, avec l'ancienne valeur",
+  prom.notes[1]&&prom.notes[1].val===5&&prom.notes[1].prev===2,JSON.stringify(prom.notes[1]));
+
 console.log("\n  L'APPLICATION N'AFFIRME QUE CE QU'ELLE SAIT\n");
 let ko=0;
 for(const [nom,ok,det] of etapes){ if(!ok)ko++; console.log("   "+(ok?"ok  ":"ECHEC")+"  "+nom.padEnd(46)+" "+det); }
