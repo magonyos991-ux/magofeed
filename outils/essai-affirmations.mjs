@@ -416,6 +416,44 @@ v("un lait vegetal sans sucres garde ses vraies valeurs",
   /0 g/.test(nut.lacte.html)&&/kcal/.test(nut.lacte.html),
   nut.lacte.cat+" — "+(nut.lacte.html.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim().slice(0,70)));
 
+/* ─── SEPTIEME SERIE — « zero » n'est pas « on ne sait pas » ─────────────── */
+const zeros=await pg.evaluate(async()=>{
+  const d=DRINKS.find(x=>x.name==="Coca-Cola Original");
+  const out={};
+  /* 1. Aucun magasin n'a d'horaire connu : le badge « 0 ouvert » doit
+        disparaitre, pas affirmer que tous sont fermes. */
+  window.STORES.length=0;
+  window._storeListExpanded=false; window.curBudget=null; window.curBrandFilter=null;
+  for(let i=0;i<8;i++)window.STORES.push({id:"H"+i,name:"Sans horaire "+i,brand:"",
+    lat:50.879+i*0.001,lng:4.351+i*0.001,dist:200+i*50,drinks:[d.id],confirmations:{}});
+  window.pick(d); await new Promise(r=>setTimeout(r,1600));
+  out.sansHoraires=(document.getElementById("res-badges")||{}).textContent||"";
+  /* 2. Les memes, avec des horaires connus : le badge revient. */
+  window.STORES.forEach(s=>{s.hours="24/7";});
+  window.renderStoreList(); await new Promise(r=>setTimeout(r,500));
+  out.avecHoraires=(document.getElementById("res-badges")||{}).textContent||"";
+  /* 3. Fiche d'un magasin charge en mode allege : on ne dit pas « 0 ». */
+  const allege={id:"L9",fbId:"L9",name:"Magasin Allege",brand:"",lat:50.88,lng:4.35,
+                dist:400,_pins:true,confirmations:{}};
+  window.STORES.push(allege);
+  window.curStoreDetail=allege;
+  window.magasinCompleter=function(){return new Promise(function(){});}; /* ne repond jamais */
+  try{ window.renderStoreDetail(); }catch(e){}
+  await new Promise(r=>setTimeout(r,400));
+  out.compteAllege=(document.getElementById("sd-drink-count")||{}).textContent||"";
+  out.listeAllege=((document.getElementById("sd-drink-list")||{}).textContent||"").trim();
+  return out;
+});
+v("aucun horaire connu : pas de « 0 ouvert »",
+  !/0\s*ouvert/.test(zeros.sansHoraires),"« "+zeros.sansHoraires.replace(/\s+/g," ").trim()+" »");
+v("horaires connus : le badge revient",
+  /8\s*ouverts/.test(zeros.avecHoraires),"« "+zeros.avecHoraires.replace(/\s+/g," ").trim()+" »");
+v("magasin allege : on ne dit pas « 0 referencee »",
+  !/^0\s/.test(zeros.compteAllege)&&/Lecture/i.test(zeros.compteAllege),
+  "« "+zeros.compteAllege+" »");
+v("magasin allege : pas d'« aucune boisson »",
+  !/aucune boisson/i.test(zeros.listeAllege),"« "+zeros.listeAllege.slice(0,60)+" »");
+
 console.log("\n  L'APPLICATION N'AFFIRME QUE CE QU'ELLE SAIT\n");
 let ko=0;
 for(const [nom,ok,det] of etapes){ if(!ok)ko++; console.log("   "+(ok?"ok  ":"ECHEC")+"  "+nom.padEnd(46)+" "+det); }

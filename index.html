@@ -20240,6 +20240,12 @@ function renderStoreList(){
   if(maxPrice){stores=stores.filter(function(s){var p=getStorePrice(s,curSel.id);return !p||p<=maxPrice;});}
   var totalStores=stores.length;
   var open=stores.filter(function(s){return storeOpenState(s)===true;}).length;
+  /* « 0 OUVERT » QUAND ON N'EN SAIT RIEN. storeOpenState rend null pour un
+     magasin dont les horaires sont inconnus : il ne compte donc pas comme
+     ouvert — et l'en-tete annonçait « 0 ouvert », ce qui se lit « aucun n'est
+     ouvert » alors que la verite est « on ne sait pas ». Quand AUCUN magasin
+     de la liste n'a d'horaire connu, le badge disparait au lieu d'affirmer. */
+  var horairesConnus=stores.filter(function(s){return storeOpenState(s)!==null;}).length;
   /* « 1193 MAGASINS » NE VEUT PAS DIRE « 1193 L'ONT ».
      magasinALaBoisson repond vrai dans trois cas : quelqu'un l'y a vue, la
      fiche la rattache, OU le rayon probable de l'enseigne la contient. Sur
@@ -20260,7 +20266,7 @@ function renderStoreList(){
   document.getElementById("res-badges").innerHTML=
     (surs?'<span class="rbadge">'+surs+' '+tr("en rayon")+'</span>':'')+
     (possibles?'<span class="rbadge">'+possibles+' '+(possibles>1?tr("possibles"):tr("possible"))+'</span>':'')+
-    '<span class="rbadge">'+open+' ouvert'+(open>1?"s":"")+'</span>'+
+    (horairesConnus?'<span class="rbadge">'+open+' ouvert'+(open>1?"s":"")+'</span>':'')+
     (_stats?'<span class="rbadge price">d\u00e8s '+fmtPrix(_stats.min)+'</span>':"");
 
   var el=document.getElementById("store-list");
@@ -20712,7 +20718,26 @@ function openStoreDetail(storeId){
   if(s._pins&&window.magasinCompleter){
     window.magasinCompleter(s).then(function(){
       if(curStoreDetail===s){try{_stripAutoDrinks(s);renderStoreDetail();}catch(e){}}
-    }).catch(function(e){console.warn("rayon du magasin indisponible:",e);});
+    }).catch(function(e){
+      /* L'ECHEC NE DOIT PAS RESTER MUET. Il n'etait qu'un console.warn : la
+         fiche gardait « Lecture du rayon… » indefiniment, sans que rien
+         n'indique que la lecture avait echoue. On le dit, et on propose de
+         recommencer — sans jamais ecrire « aucune boisson », qui serait une
+         absence constatee a la place d'une absence de reponse. */
+      console.warn("rayon du magasin indisponible:",e);
+      if(curStoreDetail!==s)return;
+      try{
+        var c=document.getElementById("sd-drink-count");
+        if(c)c.textContent=tr("Rayon non lu");
+        var l=document.getElementById("sd-drink-list");
+        if(l)l.innerHTML='<div style="padding:32px 20px;text-align:center;font-size:13px;color:var(--s3)">'+
+          tr("Impossible de lire le rayon de ce magasin pour l\u2019instant.")+
+          '<div style="margin-top:12px"><span role="button" tabindex="0" onclick="openStoreDetail(\''+
+          String(s.id).replace(/'/g,"")+'\')" style="display:inline-block;padding:9px 18px;border-radius:999px;'+
+          'background:var(--s1);color:var(--app-bg);font-size:12.5px;font-weight:800;cursor:pointer">'+
+          tr("Réessayer")+'</span></div></div>';
+      }catch(e2){}
+    });
   }
   _stripAutoDrinks(s);
   // Ouvert depuis la carte Explorer : le "retour" doit REVENIR sur la carte, pas
@@ -21299,8 +21324,24 @@ function renderStoreDetail(){
   // « disponibles » etait faux : la liste contient aussi les boissons signalees
   // en rupture (chaque ligne l'affiche). On annonce donc ce qu'on compte
   // vraiment : les boissons referencees dans ce magasin.
-  document.getElementById("sd-drink-count").textContent=drinks.length+" référencée"+(drinks.length>1?"s":"")+(drinks.length!==allDrinks.length?" / "+allDrinks.length:"");
   var listEl=document.getElementById("sd-drink-list");
+  /* ══ « 0 REFERENCEE » AVANT MEME D'AVOIR DEMANDE ══════════════════════════
+     Un magasin ouvert depuis un pin vient du chemin allege : il porte _pins
+     et n'a aucun tableau `drinks`. La fiche annonçait pourtant « 0 referencee »
+     et « Aucune boisson repertoriee pour ce magasin » — une absence CONSTATEE
+     — le temps d'un aller-retour reseau, et POUR TOUJOURS si la requete
+     echoue, puisque son erreur n'est qu'un console.warn.
+     Le code sait pourtant faire : le commentaire de fbZoneLegere dit
+     « pour qu'aucun code ne prenne un tableau vide pour il n'a rien — ce
+     serait la carte qui ment », et la feuille de carte affiche bien
+     « Lecture du rayon… ». renderStoreDetail ne connaissait pas cette regle.
+     On la lui apprend, avec la meme phrase. */
+  if(curStoreDetail&&curStoreDetail._pins){
+    document.getElementById("sd-drink-count").textContent=tr("Lecture du rayon\u2026");
+    listEl.innerHTML='<div style="padding:32px 20px;text-align:center;font-size:13px;color:var(--s3)">'+tr("Lecture du rayon\u2026")+'</div>';
+    return;
+  }
+  document.getElementById("sd-drink-count").textContent=drinks.length+" référencée"+(drinks.length>1?"s":"")+(drinks.length!==allDrinks.length?" / "+allDrinks.length:"");
   if(!allDrinks.length){listEl.innerHTML='<div style="padding:32px 20px;text-align:center;font-size:13px;color:var(--s3)">Aucune boisson répertoriée pour ce magasin</div>';return;}
   if(!drinks.length){listEl.innerHTML='<div style="padding:32px 20px;text-align:center;font-size:13px;color:var(--s3)">Aucun résultat pour ce filtre </div>';return;}
   listEl.innerHTML="";
