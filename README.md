@@ -126,6 +126,31 @@ Pour ajouter un mot de passe à un compte qui en est dépourvu, c'est
 compte, et la liaison répond `auth/email-already-in-use` en parlant du compte
 lui-même. Mesuré sur l'émulateur, pas déduit.
 
+**Récupérer son compte, et le protéger.** Chaque chemin a été mesuré à
+l'émulateur Firebase Auth, pas supposé :
+
+| Geste | Ce qui prouve que c'est bien la personne |
+|---|---|
+| Mot de passe oublié | Un lien à usage unique, envoyé dans la boîte aux lettres |
+| Changer son mot de passe | L'ancien mot de passe est exigé |
+| Changer son adresse | Un lien envoyé à la **nouvelle** adresse ; rien ne change avant qu'il soit ouvert |
+| Supprimer son compte | Le mot de passe, ou une reconnexion Google |
+
+Deux pièges méritent d'être connus avant d'y toucher :
+
+- **« Mot de passe oublié » ne doit jamais dire si l'adresse existe.** Sinon le
+  bouton devient un détecteur de comptes : on tape des adresses une par une pour
+  savoir qui est inscrit. `fbEmailReset` avale donc `auth/user-not-found` et rend
+  toujours la même réponse. Mesuré : sans cette normalisation, l'émulateur
+  distingue bien les deux cas.
+- **Changer son mot de passe ne déconnecte PAS les autres appareils.** Mesuré :
+  après une réinitialisation complète, la session de celui qui avait volé le mot
+  de passe continuait de vivre. Seul l'Admin SDK peut révoquer, d'où la fonction
+  `revoquerMesSessions` (`functions-a-deployer/comptes-securite.js`). Si elle
+  n'est pas déployée, l'app **le dit** au lieu d'annoncer une protection qui
+  n'existe pas. À savoir : un jeton déjà délivré reste valable jusqu'à une heure,
+  quoi qu'on fasse.
+
 **Les points.** Le score officiel est calculé **par le serveur**, à partir des
 documents que les contributions laissent (`reports`). Le client ne peut pas
 l'écrire — sinon n'importe qui s'attribuerait 999 999 points depuis la console
@@ -204,6 +229,7 @@ sur un `git push`. Depuis le dossier Firebase local :
 ```bash
 firebase deploy --only firestore:rules
 firebase deploy --only functions:<nom>       # une fonction précise
+firebase deploy --only functions:revoquerMesSessions   # couper les sessions
 ```
 
 Toujours lancer `npm test` (contrôle n° 2) **avant** de déployer des règles.
@@ -254,6 +280,7 @@ Toujours lancer `npm test` (contrôle n° 2) **avant** de déployer des règles.
 | `hunts` | Les chasses en cours | publique |
 | `watches` | Les alertes « préviens-moi quand on la trouve » | propriétaire |
 | `pushTokens` | Le jeton de notification, la position et **le rayon choisi** | soi seul |
+| — | Les adresses, mots de passe et liens de récupération vivent dans Firebase Auth, jamais dans Firestore. | — |
 | `alertesAdmin` | Le journal : ce que le serveur a tenté, et pourquoi il s'est tu | admin |
 
 Les règles complètes, avec le raisonnement derrière chacune, sont dans

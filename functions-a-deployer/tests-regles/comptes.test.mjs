@@ -41,7 +41,8 @@ import {
   GoogleAuthProvider, EmailAuthProvider, linkWithCredential, signInWithCredential,
   createUserWithEmailAndPassword, signInWithEmailAndPassword, sendEmailVerification,
   sendPasswordResetEmail, unlink, updatePassword, reauthenticateWithCredential,
-  deleteUser,
+  deleteUser, confirmPasswordReset, verifyPasswordResetCode, verifyBeforeUpdateEmail,
+  applyActionCode,
 } from "firebase/auth";
 
 const PORT_AUTH = 9399;
@@ -103,8 +104,22 @@ function credGoogle(id) {
   }));
 }
 
+/* La fonction serveur revoquerMesSessions tourne chez Firebase, pas ici. Ce
+   qu'on teste n'est pas SA mecanique (c'est l'Admin SDK) mais la facon dont
+   l'app s'en sert : reste-t-elle connectee apres un changement de mot de
+   passe, et surtout — dit-elle la verite quand la fonction n'est pas
+   deployee, au lieu d'annoncer une protection inexistante ? */
+let serveurRevocation = "en-ligne"; // ou "pas-deployee"
 const portee = {
-  auth, GoogleAuthProvider, EmailAuthProvider,
+  auth, GoogleAuthProvider, EmailAuthProvider, verifyBeforeUpdateEmail,
+  app: {}, getFunctions: () => ({}),
+  ensureAuthed: async () => auth.currentUser,
+  httpsCallable: () => async () => {
+    if (serveurRevocation === "pas-deployee") {
+      const e = new Error("non deployee"); e.code = "functions/not-found"; throw e;
+    }
+    return { data: { ok: true, depuis: "maintenant" } };
+  },
   linkWithCredential, signInWithCredential, createUserWithEmailAndPassword,
   signInWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail,
   unlink, updatePassword, reauthenticateWithCredential,
@@ -135,7 +150,10 @@ const codeExtrait = [
   methodeWindow("fbEmailSignUp"),
   methodeWindow("fbAjouterMotDePasse"),
   methodeWindow("fbEmailSignIn"),
+  methodeWindow("fbEmailReset"),
+  methodeWindow("fbRevoquerAutresSessions"),
   methodeWindow("fbChangerMotDePasse"),
+  methodeWindow("fbChangerAdresse"),
   methodeWindow("fbDelierMethode"),
   methodeWindow("fbSignOut"),
   methodeWindow("fbRenvoyerVerification"),
@@ -335,6 +353,164 @@ await epreuve("créer un compte natif envoie la vérification d'adresse", async 
   const pourLui = (oobCodes || []).filter((c) => c.email === "verif@exemple.be" && c.requestType === "VERIFY_EMAIL");
   vrai(pourLui.length >= 1,
     "AUCUN e-mail de vérification : Firebase effacera le mot de passe à la première connexion Google");
+});
+
+/* ── 7. LA RÉCUPÉRATION ET SES PROTECTIONS ───────────────────────────────────
+   Un compte avec mot de passe sans chaîne de récupération, c'est un compte
+   qu'on perd pour de bon le jour où on oublie six caractères. Et une chaîne de
+   récupération sans preuve de possession de la boîte aux lettres, c'est une
+   porte ouverte : il suffirait de connaître l'adresse de quelqu'un pour lui
+   prendre son compte. On vérifie donc les deux : que ça marche, et que ça
+   n'ouvre rien à ceux qui n'ont pas accès à l'adresse. */
+
+/* Les liens à usage unique vivent dans l'émulateur comme dans la boîte aux
+   lettres : c'est la seule façon de prouver qu'ils partent VRAIMENT. */
+async function liens(email, type) {
+  const r = await fetch("http://127.0.0.1:" + PORT_AUTH + "/emulator/v1/projects/magofeed-test/oobCodes");
+  const { oobCodes } = await r.json();
+  return (oobCodes || []).filter((c) => c.email === email && (!type || c.requestType === type));
+}
+
+await epreuve("« mot de passe oublié » envoie un lien à usage unique", async () => {
+  await table_rase();
+  await signInAnonymously(auth);
+  await F.fbEmailSignUp("oubli@exemple.be", "mot-de-passe-oublie");
+  await signOut(auth);
+  await F.fbEmailReset("oubli@exemple.be");
+  const l = await liens("oubli@exemple.be", "PASSWORD_RESET");
+  vrai(l.length >= 1, "aucun lien de réinitialisation n'est parti : le compte serait perdu pour de bon");
+});
+
+let lienUtilise = null;
+await epreuve("le lien reçu change RÉELLEMENT le mot de passe", async () => {
+  const l = await liens("oubli@exemple.be", "PASSWORD_RESET");
+  const code = l[l.length - 1].oobCode;
+  lienUtilise = code;
+  // Firebase vérifie le lien AVANT d'accepter : un lien inventé ne passe pas.
+  const pour = await verifyPasswordResetCode(auth, code);
+  egal(pour, "oubli@exemple.be", "le lien doit ne valoir que pour cette adresse");
+  await confirmPasswordReset(auth, code, "mon-nouveau-mot-de-passe");
+  const ancien = await codeDe(F.fbEmailSignIn("oubli@exemple.be", "mot-de-passe-oublie"));
+  vrai(ancien === "auth/invalid-credential" || ancien === "auth/wrong-password",
+    "l'ancien mot de passe devrait être mort, obtenu " + ancien);
+  const u = await F.fbEmailSignIn("oubli@exemple.be", "mon-nouveau-mot-de-passe");
+  vrai(!!u && !!u.uid, "le nouveau mot de passe devrait ouvrir le compte");
+});
+
+await epreuve("un lien de réinitialisation ne sert QU'UNE FOIS", async () => {
+  /* Le lien vient d'être consommé par l'épreuve précédente. On le rejoue tel
+     quel : un vieux courriel retrouvé ne doit pas redonner le compte. */
+  const rejoue = await codeDe(confirmPasswordReset(auth, lienUtilise, "encore-un-autre-mot"));
+  vrai(rejoue !== null,
+    "LE LIEN EST REJOUABLE : quiconque le retrouve dans un vieux courriel reprend le compte");
+});
+
+await epreuve("sans le lien, personne ne change le mot de passe de quelqu'un d'autre", async () => {
+  const invente = await codeDe(confirmPasswordReset(auth, "code-invente-de-toutes-pieces", "pirate123"));
+  vrai(invente !== null, "un lien inventé ne doit jamais être accepté");
+  const u = await F.fbEmailSignIn("oubli@exemple.be", "mon-nouveau-mot-de-passe");
+  vrai(!!u, "le compte doit être resté sur son mot de passe légitime");
+});
+
+await epreuve("« mot de passe oublié » ne révèle pas si un compte existe", async () => {
+  /* Répondre « adresse inconnue » ferait de ce bouton un détecteur de comptes :
+     n'importe qui saurait, adresse par adresse, qui est inscrit sur Magofeed. */
+  const code = await codeDe(F.fbEmailReset("personne-ici@exemple.be"));
+  egal(code, null, "la réponse doit être la même que pour une adresse connue");
+});
+
+await epreuve("changer son mot de passe exige l'ancien (téléphone laissé ouvert)", async () => {
+  await table_rase();
+  await signInAnonymously(auth);
+  await F.fbEmailSignUp("ouvert@exemple.be", "le-vrai-mot-de-passe");
+  const code = await codeDe(F.fbChangerMotDePasse("", "mot-de-passe-du-voleur"));
+  vrai(code !== null, "QUELQU'UN DEVANT LE TÉLÉPHONE POURRAIT PRENDRE LE COMPTE");
+  const u = await F.fbEmailSignIn("ouvert@exemple.be", "le-vrai-mot-de-passe");
+  vrai(!!u, "le mot de passe légitime doit être resté valable");
+});
+
+await epreuve("après un changement de mot de passe, CET appareil reste connecté", async () => {
+  /* La revocation emporte tous les jetons du compte, le notre compris. Si l'app
+     ne rouvrait pas une session, changer son mot de passe vous mettrait dehors
+     de votre propre telephone. */
+  serveurRevocation = "en-ligne";
+  await table_rase();
+  await signInAnonymously(auth);
+  await F.fbEmailSignUp("reste@exemple.be", "mot-de-passe-avant");
+  const avant = auth.currentUser.uid;
+  const r = await F.fbChangerMotDePasse("mot-de-passe-avant", "mot-de-passe-apres");
+  egal(r.autresAppareils, true, "la revocation aurait dû être demandée au serveur");
+  vrai(!!auth.currentUser, "ON A ÉTÉ DÉCONNECTÉ DE SON PROPRE TÉLÉPHONE");
+  egal(auth.currentUser.uid, avant, "et on doit être revenu sur LE MÊME compte");
+});
+
+await epreuve("si le serveur n'est pas déployé, l'app ne prétend PAS avoir déconnecté", async () => {
+  /* Annoncer « autres appareils déconnectés » alors que rien n'a été coupé,
+     c'est exactement le mensonge qui met quelqu'un en danger : il se croit
+     protégé et ne change rien d'autre. */
+  serveurRevocation = "pas-deployee";
+  await table_rase();
+  await signInAnonymously(auth);
+  await F.fbEmailSignUp("sansserveur@exemple.be", "mot-de-passe-un");
+  const r = await F.fbChangerMotDePasse("mot-de-passe-un", "mot-de-passe-deux");
+  egal(r.ok, true, "le mot de passe doit quand même avoir changé");
+  egal(r.autresAppareils, false, "L'APP PRÉTEND AVOIR DÉCONNECTÉ LES AUTRES APPAREILS");
+  egal(r.raison, "pas-deployee", "la raison doit être nommée, pour pouvoir le dire à l'écran");
+  const u = await F.fbEmailSignIn("sansserveur@exemple.be", "mot-de-passe-deux");
+  vrai(!!u, "le nouveau mot de passe doit fonctionner");
+  serveurRevocation = "en-ligne";
+});
+
+/* ── 8. CHANGER D'ADRESSE : LE LIEN PART VERS LA NOUVELLE ─────────────────── */
+let lienAdresse = null;
+
+await epreuve("changer d'adresse demande confirmation sur la NOUVELLE adresse", async () => {
+  await table_rase();
+  await signInAnonymously(auth);
+  await F.fbEmailSignUp("avant@exemple.be", "mot-de-passe-adresse");
+  await F.fbChangerAdresse("apres@exemple.be", "mot-de-passe-adresse");
+  /* L'emulateur range le lien sous l'ancienne adresse et porte la nouvelle
+     dans newEmail ; c'est vers cette derniere que Firebase expedie le
+     courriel. Ce qui compte, et ce qu'on verifie : le lien ne vaut QUE pour
+     l'adresse visee, et rien ne bouge avant qu'il soit ouvert. */
+  const l = (await liens("avant@exemple.be", "VERIFY_AND_CHANGE_EMAIL"))
+    .filter((c) => c.newEmail === "apres@exemple.be");
+  vrai(l.length >= 1,
+    "aucune demande de confirmation : on ne peut pas prouver que la nouvelle adresse est à nous");
+  lienAdresse = l[l.length - 1].oobCode;
+});
+
+await epreuve("l'adresse NE CHANGE PAS tant que le lien n'est pas ouvert", async () => {
+  await auth.currentUser.reload();
+  egal(auth.currentUser.email, "avant@exemple.be",
+    "L'ADRESSE A CHANGÉ SANS CONFIRMATION : on pourrait déplacer le compte d'un autre");
+  const u = await F.fbEmailSignIn("avant@exemple.be", "mot-de-passe-adresse");
+  vrai(!!u, "l'ancienne adresse doit continuer d'ouvrir le compte");
+});
+
+await epreuve("changer d'adresse sans le mot de passe est refusé", async () => {
+  const code = await codeDe(F.fbChangerAdresse("pirate@exemple.be", ""));
+  egal(code, "magofeed/mot-de-passe-requis", "le téléphone laissé ouvert ne doit pas suffire");
+  const mauvais = await codeDe(F.fbChangerAdresse("pirate@exemple.be", "pas-le-bon"));
+  vrai(mauvais === "auth/invalid-credential" || mauvais === "auth/wrong-password",
+    "un mot de passe faux doit être refusé, obtenu " + mauvais);
+  await auth.currentUser.reload();
+  egal(auth.currentUser.email, "avant@exemple.be", "l'adresse ne doit pas avoir bougé");
+});
+
+await epreuve("le lien ouvert fait VRAIMENT basculer l'adresse", async () => {
+  await applyActionCode(auth, lienAdresse);
+  await auth.currentUser.reload();
+  egal(auth.currentUser.email, "apres@exemple.be", "l'adresse devrait avoir basculé");
+  const u = await F.fbEmailSignIn("apres@exemple.be", "mot-de-passe-adresse");
+  vrai(!!u, "la nouvelle adresse doit ouvrir le compte avec le même mot de passe");
+  const ancienne = await codeDe(F.fbEmailSignIn("avant@exemple.be", "mot-de-passe-adresse"));
+  vrai(ancienne !== null, "l'ancienne adresse ne doit plus ouvrir le compte");
+});
+
+await epreuve("remettre la même adresse est refusé proprement", async () => {
+  const code = await codeDe(F.fbChangerAdresse("apres@exemple.be", "mot-de-passe-adresse"));
+  egal(code, "magofeed/meme-adresse", "il faut le dire, pas envoyer un lien pour rien");
 });
 
 await table_rase();

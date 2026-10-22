@@ -1369,7 +1369,7 @@ try{
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion, arrayRemove, deleteDoc, deleteField, startAt, endAt, startAfter, documentId, getCountFromServer, getDocFromServer, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getAuth, initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, browserPopupRedirectResolver, browserSessionPersistence, setPersistence, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, linkWithPopup, signInWithPopup, signInWithRedirect, linkWithRedirect, getRedirectResult, signInWithCredential, deleteUser, reauthenticateWithPopup, EmailAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, linkWithCredential, signOut, unlink, updatePassword, reauthenticateWithCredential, sendEmailVerification, fetchSignInMethodsForEmail } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getAuth, initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, browserPopupRedirectResolver, browserSessionPersistence, setPersistence, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, linkWithPopup, signInWithPopup, signInWithRedirect, linkWithRedirect, getRedirectResult, signInWithCredential, deleteUser, reauthenticateWithPopup, EmailAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, linkWithCredential, signOut, unlink, updatePassword, reauthenticateWithCredential, sendEmailVerification, fetchSignInMethodsForEmail, verifyBeforeUpdateEmail } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getMessaging, getToken, onMessage, isSupported } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 
@@ -5459,11 +5459,45 @@ window.fbEmailSignIn = async function(email, pass) {
   try { localStorage.setItem("magoHasPassword", "1"); } catch (e) {}
   return res.user;
 };
-window.fbEmailReset = function(email) { return sendPasswordResetEmail(auth, email); };
+window.fbEmailReset = async function(email) {
+  try { await sendPasswordResetEmail(auth, email); }
+  catch (e) {
+    /* « ADRESSE INCONNUE » NE DOIT JAMAIS SORTIR D'ICI. Ce bouton deviendrait
+       un detecteur de comptes : on taperait des adresses une par une pour
+       savoir qui est inscrit sur Magofeed, sans compte et sans trace. Firebase
+       masque le cas quand la protection contre l'enumeration est active dans la
+       console — mais on ne confie pas une fuite de donnees a un bouton radio
+       qu'on peut decocher. On normalise ICI.
+       Mesure a l'emulateur : sans cette normalisation, l'adresse inconnue rend
+       bien auth/user-not-found, et l'ecran affichait une erreur la ou une
+       adresse connue affichait « l'e-mail est parti ». La difference suffisait. */
+    if (!e || e.code !== "auth/user-not-found") throw e;
+  }
+  return true;
+};
 
 /* ── Les inverses. Qui dit creer un compte dit en changer le mot de passe,
    delier ce qu'on a lie, se deconnecter et partir. Chacun de ces gestes
    manquait : l'application savait entrer, jamais sortir. ── */
+
+/* COUPER LES SESSIONS DES AUTRES APPAREILS. Changer son mot de passe ne
+   deconnecte personne — mesure a l'emulateur Firebase Auth : apres une
+   reinitialisation complete, la session de celui qui avait vole le mot de
+   passe continuait de vivre. Seul le serveur peut revoquer (Admin SDK), d'ou
+   cet appel. Si la fonction n'est pas deployee, on le DIT au lieu de laisser
+   croire que les autres appareils sont dehors. */
+window.fbRevoquerAutresSessions = async function() {
+  try {
+    await ensureAuthed();
+    var call = httpsCallable(getFunctions(app, "europe-west1"), "revoquerMesSessions");
+    var res = await call({});
+    return (res && res.data) || { ok: false, reason: "sans-reponse" };
+  } catch (e) {
+    var code = String((e && e.code) || "");
+    if (/not-found|unimplemented|internal/.test(code)) return { ok: false, reason: "pas-deployee" };
+    return { ok: false, reason: code || String((e && e.message) || e) };
+  }
+};
 
 /* Changer de mot de passe. Firebase exige une connexion recente : on la refait
    avec l'ancien mot de passe, ce qui au passage verifie qu'on est bien le
@@ -5472,8 +5506,38 @@ window.fbChangerMotDePasse = async function(ancien, nouveau) {
   var u = auth.currentUser;
   if (!u || !u.email) { var e = new Error("no-user"); e.code = "magofeed/pas-adresse"; throw e; }
   if (!_aProvider(u, "password")) { var e2 = new Error("pas-de-mdp"); e2.code = "auth/no-such-provider"; throw e2; }
-  await reauthenticateWithCredential(u, EmailAuthProvider.credential(u.email, ancien));
+  var adresse = u.email;
+  await reauthenticateWithCredential(u, EmailAuthProvider.credential(adresse, ancien));
   await updatePassword(auth.currentUser, nouveau);
+  /* Le mot de passe est change ; les autres appareils, eux, sont toujours
+     ouverts. C'est tout l'interet du geste quand on se sait pirate — on le
+     fait donc ici, sans rien demander de plus. La revocation emporte AUSSI
+     notre propre jeton : on rouvre aussitot une session avec le mot de passe
+     qu'on vient d'enregistrer, pour que cet appareil-ci reste connecte. */
+  var revoc = await window.fbRevoquerAutresSessions();
+  if (revoc && revoc.ok) {
+    try { await signInWithEmailAndPassword(auth, adresse, nouveau); } catch (e3) { console.warn("reouverture:", e3); }
+  }
+  return { ok: true, autresAppareils: !!(revoc && revoc.ok), raison: (revoc && revoc.reason) || null };
+};
+
+/* CHANGER L'ADRESSE DU COMPTE. Le lien de confirmation part vers la NOUVELLE
+   adresse, et l'adresse ne change que lorsqu'il est ouvert : c'est ce qui
+   empeche de deplacer le compte de quelqu'un vers une boite a soi. On exige en
+   plus le mot de passe, pour que le telephone laisse ouvert sur une table ne
+   suffise pas. verifyBeforeUpdateEmail fait les deux ; updateEmail, lui,
+   changerait l'adresse immediatement et sans preuve — c'est pour cela qu'il
+   n'est pas utilise ici. */
+window.fbChangerAdresse = async function(nouvelle, motDePasse) {
+  var u = auth.currentUser;
+  if (!u || !u.email) { var e = new Error("no-user"); e.code = "magofeed/pas-adresse"; throw e; }
+  if (!_aProvider(u, "password")) { var e2 = new Error("pas-de-mdp"); e2.code = "auth/no-such-provider"; throw e2; }
+  if (String(nouvelle).toLowerCase() === String(u.email).toLowerCase()) {
+    var em = new Error("meme"); em.code = "magofeed/meme-adresse"; throw em;
+  }
+  if (!motDePasse) { var ep = new Error("mdp"); ep.code = "magofeed/mot-de-passe-requis"; throw ep; }
+  await reauthenticateWithCredential(u, EmailAuthProvider.credential(u.email, motDePasse));
+  await verifyBeforeUpdateEmail(auth.currentUser, nouvelle);
   return true;
 };
 
@@ -28731,6 +28795,11 @@ function renderCompte(){
   if(m.motDePasse){
     g.appendChild(_ligneCompte({icone:ICO_CLE,titre:tr("Changer mon mot de passe"),
       sous:tr("Il faudra l'ancien"),action:function(){openAuthSheet("chg");}}));
+    /* Changer d'adresse manquait completement. Sans cette ligne, quelqu'un qui
+       perd l'acces a sa boite aux lettres perd son compte : plus aucun
+       « mot de passe oublie » ne lui parviendra jamais. */
+    g.appendChild(_ligneCompte({icone:ICO_MAIL,titre:tr("Changer mon adresse e-mail"),
+      sous:tr("Un lien de confirmation part vers la nouvelle"),action:function(){openAuthSheet("mail");}}));
     if(m.nombre>1){
       g.appendChild(_ligneCompte({icone:ICO_CLE,titre:tr("Retirer le mot de passe"),
         sous:tr("Tu te connecteras avec Google seulement"),action:function(){delierMethode("password");}}));
@@ -28742,6 +28811,11 @@ function renderCompte(){
 
   g.appendChild(_ligneCompte({icone:ICO_SORTIE,titre:tr("Se déconnecter"),
     sous:tr("Ton compte et tes points restent intacts"),action:seDeconnecter}));
+  /* Le geste de quelqu'un qui se sait pirate. Changer son mot de passe ne
+     deconnecte PAS les autres appareils — mesure a l'emulateur. Il faut donc
+     une action qui le fasse vraiment, et qui le dise. */
+  g.appendChild(_ligneCompte({icone:ICO_SORTIE,titre:tr("Déconnecter tous les appareils"),
+    sous:tr("Si quelqu'un d'autre a eu accès à ton compte"),action:deconnecterPartout}));
 }
 
 function verifierMonAdresse(){
@@ -28758,6 +28832,24 @@ function delierMethode(pid){
   window.fbDelierMethode(pid).then(function(){
     renderCompte();toast(tr("Retiré"));playSound("pop");
   }).catch(function(e){toast(authErrorMsg(e&&e.code,e));playSound("err");});
+}
+function deconnecterPartout(){
+  if(!confirm(tr("Déconnecter TOUS les appareils, y compris celui-ci ?")+"\n\n"+
+     tr("Tu devras te reconnecter. Ton compte et tes points ne bougent pas.")))return;
+  toast(tr("Fermeture des sessions…"));
+  window.fbRevoquerAutresSessions().then(function(r){
+    if(r&&r.ok){
+      toast(tr("Tous les appareils ont été déconnectés"));
+      setTimeout(function(){location.reload();},900);
+      return;
+    }
+    /* On ne ment pas : si la fonction serveur n'est pas en ligne, rien n'a ete
+       coupe, et le dire est la seule facon utile de repondre. */
+    toast(r&&r.reason==="pas-deployee"
+      ? tr("Impossible : la fonction serveur n'est pas encore déployée")
+      : tr("Impossible pour le moment"));
+    playSound("err");
+  });
 }
 function seDeconnecter(){
   if(!confirm(tr("Te déconnecter de Magofeed ?")+"\n\n"+tr("Ton compte et tes points restent intacts : tu les retrouves en te reconnectant.")))return;
@@ -28807,23 +28899,26 @@ function authSetMode(m){
     b.style.background=on?onBg:"var(--bg2)";b.style.color=on?onCol:"var(--s1)";b.style.borderColor=on?onBg:"var(--border)";
   });
   if(ow)ow.style.display=(m==="up")?"flex":"none";
-  if(fg)fg.style.display=(m==="in"||m==="link")?"block":"none";
+  if(fg)fg.style.display=(m==="in"||m==="link"||m==="chg"||m==="mail")?"block":"none";
   if(pw2)pw2.style.display=(m==="chg")?"block":"none";
   if(em){
     em.readOnly=(m==="add"||m==="chg"||m==="del"||m==="link");
+    em.placeholder=(m==="mail")?tr("Nouvelle adresse e-mail"):"ton@email.com";
+    if(m==="mail")em.value="";
     em.style.opacity=em.readOnly?".6":"1";
     em.style.display=(m==="chg"||m==="del")?"none":"";
     if(m==="add"||m==="chg"||m==="del")em.value=mm.email||"";
   }
   if(pw){
     pw.autocomplete=(m==="up"||m==="add")?"new-password":"current-password";
-    pw.placeholder=(m==="chg"||m==="del")?tr("Mot de passe actuel"):tr("Mot de passe (6 caractères min.)");
+    pw.placeholder=(m==="chg"||m==="del"||m==="mail")?tr("Mot de passe actuel"):tr("Mot de passe (6 caractères min.)");
   }
   var T={
     "in":[tr("Compte Magofeed"),"",tr("Se connecter")],
     "up":[tr("Créer un compte Magofeed"),tr("Ton adresse et ton mot de passe. Google n'est pas nécessaire."),tr("Créer mon compte")],
     "add":[tr("Ajouter un mot de passe"),tr("Tu pourras entrer sans Google, avec cette même adresse. Ton compte, tes points et ton pseudo ne bougent pas."),tr("Enregistrer le mot de passe")],
     "chg":[tr("Changer mon mot de passe"),tr("Saisis l'ancien, puis le nouveau."),tr("Changer le mot de passe")],
+    "mail":[tr("Changer mon adresse e-mail"),tr("Le lien part vers la NOUVELLE adresse : ton adresse ne changera qu'une fois ce lien ouvert. Ton mot de passe actuel est demandé pour confirmer que c'est bien toi."),tr("Envoyer le lien de confirmation")],
     "del":[tr("Supprimer mon compte"),tr("Saisis ton mot de passe pour confirmer. Rien n'est effacé tant qu'il n'est pas juste."),tr("Supprimer définitivement")],
     "link":[tr("Relier Google à ton compte"),tr("Cette adresse a déjà un compte Magofeed. Entre son mot de passe une seule fois : Google sera relié au MÊME compte, avec tes points."),tr("Relier Google")]
   };
@@ -28841,6 +28936,7 @@ function authErrorMsg(code,e){
   if(a("magofeed/rien-en-attente"))return tr("Recommence depuis le bouton Google.");
   if(a("magofeed/mot-de-passe-requis"))return tr("Saisis ton mot de passe pour confirmer.");
   if(a("magofeed/pas-adresse"))return tr("Ce compte n'a pas encore d'adresse e-mail.");
+  if(a("magofeed/meme-adresse"))return tr("C'est déjà ton adresse actuelle.");
   if(a("email-already-in-use")||a("credential-already-in-use"))return tr("Cette adresse a déjà un compte — utilise « Se connecter ».");
   if(a("provider-already-linked")||a("magofeed/mot-de-passe-deja-defini"))return tr("Cette méthode est déjà liée à ton compte.");
   if(a("no-such-provider"))return tr("Cette méthode n'est pas liée à ton compte.");
@@ -28884,16 +28980,23 @@ function authSubmit(){
   else if(mode==="add")p=window.fbAjouterMotDePasse(pass);
   else if(mode==="chg")p=window.fbChangerMotDePasse(pass,pass2);
   else if(mode==="link")p=window.fbLierGoogleEnAttente(email,pass);
+  else if(mode==="mail")p=window.fbChangerAdresse(email,pass);
   else p=window.fbEmailSignIn(email,pass);
   p.then(function(user){
     if(optIn&&window.fbSetEmailOptIn)window.fbSetEmailOptIn(true).catch(function(){});
     window._emailOptIn=optIn||window._emailOptIn;
     closeAuthSheet();
-    updateAccountUI(user||window._fbUser);
+    updateAccountUI((user&&user.uid)?user:window._fbUser);
     try{renderEmailOptInRow();}catch(e){}
+    /* Pour un changement de mot de passe, « user » est le compte-rendu rendu
+       par fbChangerMotDePasse : il dit si les AUTRES appareils ont pu etre
+       deconnectes. On le repete a l'ecran, sans l'arrondir. */
+    var autres=(mode==="chg")&&user&&user.autresAppareils;
     toast(mode==="up"?tr("Compte créé — un e-mail de vérification vient de partir")
          :mode==="add"?tr("Mot de passe enregistré — un e-mail de vérification vient de partir")
-         :mode==="chg"?tr("Mot de passe changé")
+         :mode==="chg"?(autres?tr("Mot de passe changé · autres appareils déconnectés")
+                              :tr("Mot de passe changé — les autres appareils restent connectés"))
+         :mode==="mail"?tr("Lien envoyé — ouvre-le depuis ta nouvelle adresse pour confirmer")
          :mode==="link"?tr("Google est relié à ton compte Magofeed")
          :tr("Connecté"));
     playSound("win");
