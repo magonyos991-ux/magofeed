@@ -191,10 +191,14 @@ dit("le rattrapage compte ce qu'il a vraiment lu",
 const deploi = await readFile(join(process.cwd(), "DEPLOIEMENT-SECURITE.md"), "utf8");
 dit("la chasse aux codes-barres figure dans la commande de deploiement",
   /"chasse-codes\.js"/.test(deploi));
+/* Ce controle exigeait lui-meme « 280/280 conformes » dans le mode d'emploi :
+   il figeait donc le total qu'il reprochait au mode d'emploi de figer, et il
+   est devenu rouge des que le banc est passe a 291 epreuves. On verifie
+   desormais ce qui compte vraiment — qu'AUCUN total ne soit ecrit, et que la
+   consigne porte sur l'absence d'echec. */
 dit("le mode d'emploi n'exige plus un total de banc d'essai fige",
-  !/n'affiche pas `148\/148`, \*\*ne d\u00E9ploie pas\*\*/.test(deploi) &&
-  /280\/280 conformes/.test(deploi) && /moindre `ECHEC`/.test(deploi),
-  "il interdisait de deployer alors que le banc affichait 260/260, tout vert");
+  !/\d+\/\d+ conformes/.test(deploi) && /moindre `ECHEC`/.test(deploi),
+  "un total ecrit en dur devient faux des la premiere epreuve ajoutee");
 dit("une fonction non deployee le dit au lieu d'afficher « internal »",
   /functions\/internal.{0,40}functions\/not-found/s.test(src) && /pas encore d.{0,12}ploy/.test(src),
   "« Echec : functions/internal » ne veut rien dire pour qui le lit");

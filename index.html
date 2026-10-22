@@ -8206,9 +8206,21 @@ function doConfirm(btn,sid,did,val){
   }
 }
 
-function confirmWithPrice(sid,did){
-  var input=document.getElementById("price-input-"+sid);
-  var price=input?parseFloat(input.value):null;
+/* ══ ENREGISTRER UN STOCK NE DOIT PAS DEPENDRE D'UN CHAMP A L'ECRAN ═══════
+   doConfirm, pour un « je l'ai vue », n'enregistre RIEN : il remplace le
+   contenu de la barre de boutons par un champ « Prix vu ? », et c'est le OK
+   de ce champ qui appelle confirmWithPrice — lequel relit la valeur par
+   document.getElementById.
+   Le menu en arc de la carte appelait pourtant doConfirm avec une barre
+   FABRIQUEE : `{parentElement: document.createElement("div")}`, un element
+   jamais insere dans la page. Le champ de prix naissait donc dans le vide,
+   personne ne le voyait, personne n'appuyait sur OK — et la confirmation
+   n'etait jamais enregistree. En silence, sans message d'erreur. Le geste qui
+   fait vivre Magofeed, perdu a chaque fois qu'il partait d'un pin.
+   L'enregistrement vit desormais dans sa propre fonction, qui ne lit aucun
+   champ : confirmWithPrice lui passe le prix saisi, le menu en arc l'appelle
+   sans prix. Les deux chemins ecrivent exactement la meme chose. */
+function enregistrerStock(sid,did,price){
   var s=STORES.find(function(x){return x.id===sid||x.id===String(sid);});if(!s)return;
   if(!s.confirmations[did])s.confirmations[did]=0;
   s.confirmations[did]++;
@@ -8240,6 +8252,14 @@ function confirmWithPrice(sid,did){
   try{maybeRewardHuntHelp(did,s);}catch(e){}
   renderStoreList();
 }
+window.enregistrerStock=enregistrerStock;
+/* Le chemin de la LISTE : on relit le prix saisi, puis on enregistre. */
+function confirmWithPrice(sid,did){
+  var input=document.getElementById("price-input-"+sid);
+  var price=input?parseFloat(input.value):null;
+  enregistrerStock(sid,did,price);
+}
+window.confirmWithPrice=confirmWithPrice;
 
 /* ================================
    PROFILE STATS
@@ -25170,7 +25190,18 @@ function executerActionPin(cle,s){
       doConfirm(faux,String(s.fbId||s.id),did,v);
     }catch(e){ try{toast("Impossible d'enregistrer — réessaie");}catch(_){} }
   };
-  if(cle==="stock"){ poser(1); return; }
+  /* « Je l'ai vue » depuis un pin : on enregistre DIRECTEMENT, sans passer par
+     la barre de boutons que ce menu n'a pas. Le prix se renseigne depuis la
+     liste ou la fiche du magasin, la ou le champ existe vraiment. */
+  if(cle==="stock"){
+    try{
+      if(!awardFree("conf:"+String(s.fbId||s.id)+":"+did,24)){
+        toast("D\u00e9j\u00e0 pris en compte aujourd'hui pour ce magasin");playSound("err");return;
+      }
+      enregistrerStock(String(s.fbId||s.id),did,null);
+    }catch(e){ try{toast("Impossible d'enregistrer — réessaie");}catch(_){} }
+    return;
+  }
   if(cle==="rupture"){ poser(-1); return; }
   if(cle==="prix"){
     // en stock ET le prix : la goutte de prix vaut confirmation
