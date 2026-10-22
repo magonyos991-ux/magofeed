@@ -18367,7 +18367,14 @@ function renderFormats(d){
   var formats=getDrinkFormats(d);
   curFormat=formats[0];
   el.innerHTML=formats.map(function(f,i){
-    var label=(f.type==="canette"?"Canette ":"Bouteille ")+(f.cl>=100?(f.cl/100)+"L":f.cl+"cl");
+    /* 774 formats du catalogue sont des BRIQUES, et toutes s'affichaient
+       « Bouteille » : Capri-Sun n'a jamais ete vendu en bouteille. L'etiquette
+       suit desormais le type reel ; un type inconnu ne se deguise plus en
+       bouteille, il ne dit que la contenance. */
+    var _nomType={canette:tr("Canette"),bouteille:tr("Bouteille"),brique:tr("Brique"),
+                  gourde:tr("Gourde"),cannette:tr("Canette")};
+    var _t=_nomType[String(f.type||"").toLowerCase()]||"";
+    var label=(_t?_t+" ":"")+(f.cl>=100?(f.cl/100)+"L":f.cl+"cl");
     return '<span class="fmt-chip'+(i===0?" on":"")+'" onclick="selectFormat('+i+')">'+label+'</span>';
   }).join("");
 }
@@ -28505,10 +28512,15 @@ function nutriPourBoisson(d,suite){
      en magasin, le code rejoint la fiche — l'echec mis en cache aurait
      empeche la recherche pendant deux mois sur son telephone. */
   if(!codes.length){ if(suite)suite(null); return; }
-  var trouve={},reste=codes.length;
+  var trouve={},reste=codes.length,panne=false;
   function fini(){
     var v=_nutriPlausible(trouve);
-    c[k]={t:Date.now(),v:v};_nutriSauver();
+    /* UN RESEAU QUI TOMBE N'EST PAS UNE REPONSE. Le .catch avalait l'echec,
+       fini() ecrivait v:null, et ce null etait garde SOIXANTE JOURS : la
+       fiche affichait ensuite « OpenFoodFacts n'a pas ces valeurs » alors
+       qu'on n'avait jamais obtenu de reponse. On ne memorise donc que les
+       refus qui en sont vraiment — et on retentera a la prochaine ouverture. */
+    if(!(panne&&!v)){ c[k]={t:Date.now(),v:v};_nutriSauver(); }
     if(suite)suite(v);
   }
   codes.forEach(function(code){
@@ -28519,7 +28531,7 @@ function nutriPourBoisson(d,suite){
         if(trouve.sucre===undefined&&typeof n["sugars_100g"]==="number")trouve.sucre=n["sugars_100g"];
         if(trouve.kcal===undefined&&typeof n["energy-kcal_100g"]==="number")trouve.kcal=n["energy-kcal_100g"];
       }
-    }).catch(function(){}).then(function(){ if(--reste<=0)fini(); });
+    }).catch(function(){ panne=true; }).then(function(){ if(--reste<=0)fini(); });
   });
 }
 window.nutriPourBoisson=nutriPourBoisson;
@@ -28532,7 +28544,18 @@ window.nutriPourBoisson=nutriPourBoisson;
    mieux qu'un calcul sur un volume suppose. */
 function _volumeMl(d){
   try{
-    if(window.curSel&&String(curSel.id)===String(d&&d.id)&&window.curFormat&&curFormat.cl>0){
+    /* ══ ON NE MULTIPLIE PAS UNE VALEUR REELLE PAR UNE CONTENANCE INVENTEE ══
+       getDrinkFormats rend les formats de la fiche quand elle en a, et sinon
+       des « tailles usuelles par categorie ». 2 623 fiches sur 4 455 — 59 % —
+       n'en ont aucun : la pastille selectionnee y est une supposition. La
+       tuile multipliait pourtant le sucre aux 100 ml par cette supposition,
+       affichait « 28,1 g · par 330 ml » et signait « Source : OpenFoodFacts ».
+       OpenFoodFacts n'a jamais dit 330 ml, et Red Bull ne vend pas de
+       bouteille de 50 cl.
+       Le volume n'est donc retenu que s'il vient d'un format REEL de la fiche.
+       Sinon on reste aux 100 ml, qui est exactement ce que la source donne. */
+    var vrais=(d&&d.formats&&d.formats.length)?true:false;
+    if(vrais&&window.curSel&&String(curSel.id)===String(d&&d.id)&&window.curFormat&&curFormat.cl>0){
       var mlf=Math.round(curFormat.cl*10);
       if(mlf>=50&&mlf<=3000)return mlf;
     }
@@ -28578,10 +28601,14 @@ window.nutriDe=nutriDe;
    TANT QUE LA RECHERCHE EST EN COURS, ON SE TAIT. nutriPourBoisson interroge
    le reseau a l'ouverture de la fiche ; annoncer « inconnu » avant sa reponse
    serait affirmer une chose qu'on n'a pas encore verifiee. */
-function nutriInconnuHTML(d){
+function nutriInconnuHTML(d,raison){
   if(!d||!d.id)return "";
   var cb=(d.barcodes||[]).length;
-  if(cb){
+  /* L'attente reseau ne concerne PAS une contradiction : les valeurs sont
+     deja la, c'est leur coherence qui manque. Sans cette exception, le
+     message etait avale et la fiche n'affichait rien du tout — ce qui ne se
+     distingue pas d'un bloc oublie, exactement ce qu'on vient de corriger. */
+  if(cb&&raison!=="incoherent"){
     var repondu=false;
     try{
       var c=_nutriCache(),e=c[String(d.id)];
@@ -28589,15 +28616,17 @@ function nutriInconnuHTML(d){
     }catch(x){}
     if(!repondu)return "";                 /* on attend la reponse reseau */
   }
-  var phrase=cb?tr("OpenFoodFacts n\u2019a pas ces valeurs pour cette boisson.")
-               :tr("Cette boisson n\u2019a pas encore de code-barres au catalogue.");
+  var phrase=(raison==="incoherent")
+      ? tr("Les valeurs publiées se contredisent : on préfère ne rien affirmer.")
+      : (cb?tr("OpenFoodFacts n\u2019a pas ces valeurs pour cette boisson.")
+          :tr("Cette boisson n\u2019a pas encore de code-barres au catalogue."));
   return '<div style="padding:6px 20px 0"><div style="display:flex;align-items:center;gap:10px;'+
       'border:1px dashed var(--border);border-radius:14px;padding:11px 12px;background:var(--bg2)">'+
       '<div style="flex:1;min-width:0">'+
         '<div style="font-size:12.5px;font-weight:800;color:var(--s1)">'+tr("Sucre et calories inconnus")+'</div>'+
         '<div style="font-size:11.5px;color:var(--s2);margin-top:2px">'+phrase+'</div>'+
       '</div>'+
-      (cb?'':'<span role="button" tabindex="0" onclick="scannerPourNutrition()" '+
+      ((cb||raison==="incoherent")?'':'<span role="button" tabindex="0" onclick="scannerPourNutrition()" '+
         'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();scannerPourNutrition();}" '+
         'style="flex:0 0 auto;padding:8px 14px;border-radius:999px;background:var(--s1);color:var(--app-bg);'+
         'font-size:11.5px;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent">'+
@@ -28612,8 +28641,30 @@ function scannerPourNutrition(){
   try{playSound("pop");}catch(e){}
 }
 window.scannerPourNutrition=scannerPourNutrition;
+/* ══ DEUX CHIFFRES QUI NE PEUVENT PAS ETRE VRAIS ENSEMBLE ═════════════════
+   Dans une boisson sucree, les calories VIENNENT du sucre : quatre par
+   gramme. « Sucre 0 g » a cote de « 58 kcal » est donc impossible — et
+   l'ecran affichait les deux, cote a cote, sous la signature OpenFoodFacts,
+   avec le zero en vert rassurant.
+   SAUF DANS UN LACTE. Un lait d'avoine sans sucres ajoutes a bien zero gramme
+   de sucre et quarante calories, apportees par les lipides et les proteines.
+   Mesure sur le catalogue : trente fiches presentent ce couple, et VINGT-DEUX
+   sont des laits vegetaux parfaitement exacts. Les effacer aurait detruit de
+   bonnes donnees pour corriger huit sodas et jus.
+   On ne garde donc la contradiction que la ou elle en est vraiment une, et on
+   n'affiche alors NI l'un NI l'autre : on ne sait pas lequel des deux est
+   faux, donc on ne sait pas. */
+function _nutriIncoherente(d,v){
+  if(!v)return false;
+  var lacte=/lact|lait/i.test(String((d&&d.cat)||""));
+  if(!lacte&&v.sucre===0&&typeof v.kcal==="number"&&v.kcal>=20)return true;
+  if(v.kcal===0&&typeof v.sucre==="number"&&v.sucre>=4)return true;
+  return false;
+}
+window._nutriIncoherente=_nutriIncoherente;
 function nutriHTML(d){
   var v=nutriDe(d);
+  if(v&&_nutriIncoherente(d,v))return nutriInconnuHTML(d,"incoherent");
   if(!v)return nutriInconnuHTML(d);
   var ml=_volumeMl(d);
   var tuiles=[];

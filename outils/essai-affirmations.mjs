@@ -366,6 +366,56 @@ v("la premiere note part sans note precedente",
 v("la RE-note part, avec l'ancienne valeur",
   prom.notes[1]&&prom.notes[1].val===5&&prom.notes[1].prev===2,JSON.stringify(prom.notes[1]));
 
+/* ─── SIXIEME SERIE — la nutrition n'invente ni contenance ni certitude ──
+   2 623 fiches sur 4 455 n'ont aucun format : leur contenance etait devinee,
+   et la tuile multipliait le sucre par cette supposition en signant
+   « Source : OpenFoodFacts ». Et trente fiches portaient « 0 g de sucre » a
+   cote de calories — dont vingt-deux laits vegetaux ou c'est exact. */
+const nut=await pg.evaluate(async()=>{
+  const lire=(id)=>{
+    const d=DRINKS.find(x=>String(x.id)===String(id));
+    window.curSel=d; window.curFormat=null;
+    const fmts=window.getDrinkFormats(d);
+    window.curFormat=fmts[0];
+    return {nom:d.name, cat:d.cat, aDesFormats:!!(d.formats&&d.formats.length),
+            formats:fmts.map(f=>f.type+":"+f.cl),
+            volume:window._volumeMl(d),
+            html:window.nutriHTML(d)||""};
+  };
+  const etiquettes=(id)=>{
+    const d=DRINKS.find(x=>String(x.id)===String(id));
+    window.curSel=d;
+    const el=document.getElementById("res-fmt");
+    if(el){ window.renderFormats(d); return el.textContent.replace(/\s+/g," ").trim(); }
+    return "(pas d'element)";
+  };
+  return {
+    sansFormat: lire(102),      /* Coca-Cola Cherry : aucun format au catalogue */
+    avecFormat: lire(4401),     /* Minute Maid Pomme : formats reels, dont des briques */
+    incoherente: lire(202),     /* Fanta Fraise : 0 g de sucre et 58 kcal */
+    lacte: lire(14002),         /* Alpro Avoine Sans Sucres : 0 g et 44 kcal, exact */
+    etiquettesBrique: etiquettes(4401)
+  };
+});
+v("fiche sans format : aucun volume invente",
+  nut.sansFormat.volume===0&&!nut.sansFormat.aDesFormats,
+  "volume retenu = "+nut.sansFormat.volume+" (formats devines : "+nut.sansFormat.formats.join(", ")+")");
+v("fiche sans format : la valeur reste aux 100 ml",
+  /100 ml/.test(nut.sansFormat.html)&&!/par 330 ml/.test(nut.sansFormat.html),
+  nut.sansFormat.html?"bloc affiche":"aucun bloc");
+v("fiche avec formats reels : le volume est utilise",
+  nut.avecFormat.aDesFormats&&nut.avecFormat.volume>0,
+  "volume retenu = "+nut.avecFormat.volume+" ml");
+v("une brique ne s'appelle plus « Bouteille »",
+  /Brique/.test(nut.etiquettesBrique)&&!/Bouteille 20cl/.test(nut.etiquettesBrique),
+  "« "+nut.etiquettesBrique+" »");
+v("valeurs contradictoires : rien n'est affirme",
+  !/0 g/.test(nut.incoherente.html)&&/contredisent/.test(nut.incoherente.html),
+  nut.incoherente.cat+" — "+(nut.incoherente.html.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim().slice(0,90)));
+v("un lait vegetal sans sucres garde ses vraies valeurs",
+  /0 g/.test(nut.lacte.html)&&/kcal/.test(nut.lacte.html),
+  nut.lacte.cat+" — "+(nut.lacte.html.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim().slice(0,70)));
+
 console.log("\n  L'APPLICATION N'AFFIRME QUE CE QU'ELLE SAIT\n");
 let ko=0;
 for(const [nom,ok,det] of etapes){ if(!ok)ko++; console.log("   "+(ok?"ok  ":"ECHEC")+"  "+nom.padEnd(46)+" "+det); }
