@@ -93,11 +93,18 @@ jobs:
           } > android/keystore.properties
           echo "Cle de signature en place."
 
-      - name: Construire l'AAB signé
+      # DEUX FORMATS, POUR DEUX USAGES DIFFERENTS.
+      #   .aab  c'est ce que la Play Console exige. Il ne s'installe PAS sur un
+      #         telephone : Google le decoupe lui-meme pour chaque appareil.
+      #   .apk  c'est ce qui s'installe. Sans lui, on construisait une app que
+      #         personne — pas meme son auteur — ne pouvait poser sur son propre
+      #         telephone avant la publication au magasin. Or c'est exactement
+      #         ce qu'il faut pour la tester, et pour la montrer a quelqu'un.
+      - name: Construire l'AAB et l'APK signés
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew bundleRelease --no-daemon \
+          ./gradlew bundleRelease assembleRelease --no-daemon \
             -PmagoVersionCode=$((100 + GITHUB_RUN_NUMBER)) \
             -PmagoVersionName="1.0.${GITHUB_RUN_NUMBER}"
 
@@ -113,12 +120,35 @@ jobs:
             exit 1
           fi
           echo "AAB signe et pret : $(du -h "$AAB" | cut -f1)"
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          if [ ! -f "$APK" ]; then
+            echo "::error::Le fichier .apk n'a pas ete produit."
+            exit 1
+          fi
+          if ! jarsigner -verify "$APK" >/dev/null 2>&1; then
+            echo "::error::L'APK n'est pas signe — verifie les secrets ANDROID_*."
+            exit 1
+          fi
+          echo "APK signe et pret : $(du -h "$APK" | cut -f1)"
 
       - name: Déposer l'AAB (section Artifacts de cette page)
         uses: actions/upload-artifact@v4
         with:
           name: magofeed-play-${{ github.run_number }}
           path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 30
+
+      # Celui-ci s'installe directement : on le telecharge sur son telephone,
+      # on l'ouvre, et Magofeed apparait comme une vraie application — icone
+      # sur l'ecran d'accueil, plein ecran, verrouillee a la verticale, sans
+      # barre d'adresse. C'est le fichier a envoyer pour faire essayer l'app
+      # avant qu'elle soit au magasin.
+      - name: Déposer l'APK installable (section Artifacts de cette page)
+        uses: actions/upload-artifact@v4
+        with:
+          name: magofeed-a-installer-${{ github.run_number }}
+          path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
 

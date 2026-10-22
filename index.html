@@ -136,6 +136,15 @@ try{
 <link rel="stylesheet" href="app.css">
 </head>
 <body class="light">
+<!-- MAGOFEED SE TIENT A LA VERTICALE. Ce panneau ne s'affiche que sur un
+     TELEPHONE couche (voir la regle #paysage-stop dans app.css) : il cache
+     l'app au lieu de la laisser s'etirer, ce qui est le geste qui trahit un
+     site deguise en application. Sur ordinateur, il ne sort jamais. -->
+<div id="paysage-stop" role="alertdialog" aria-live="polite">
+  <div class="pivot" aria-hidden="true"></div>
+  <div class="titre">Magofeed se tient à la verticale</div>
+  <div class="sous">Remets ton téléphone droit pour continuer.</div>
+</div>
 
 <!-- Firebase status banner -->
 <div id="fb-status">Connexion Firebase…</div>
@@ -31681,6 +31690,23 @@ function updateAccountUI(user){
 ================================ */
 /* L'app d'un store EST deja installee : sans ce test, la coquille native
    proposait « ajoute l'app a l'ecran d'accueil » et le guide iOS. */
+/* VERROU D'ORIENTATION, premier essai : l'API du navigateur.
+   Elle ne marche QUE sur une app installee ou en plein ecran (Android
+   principalement) — iOS Safari l'ignore completement, et un onglet ordinaire
+   la refuse. On tente donc, sans rien promettre, et le panneau paysage de
+   app.css rattrape tous les cas ou elle echoue. Le vrai verrou, lui, est dans
+   AndroidManifest.xml et Info.plist : c'est l'app des stores qui tient
+   vraiment debout. */
+(function verrouillerPortrait(){
+  try{
+    if(!screen||!screen.orientation||!screen.orientation.lock)return;
+    var p=screen.orientation.lock("portrait");
+    /* Un refus est NORMAL (onglet classique, iOS, bureau). On l'avale : une
+       promesse rejetee non rattrapee salit la console a chaque ouverture et
+       ferait croire a une panne. */
+    if(p&&p.catch)p.catch(function(){});
+  }catch(e){}
+})();
 function isStandaloneMode(){try{if(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform())return true;}catch(e){}
   return window.matchMedia("(display-mode: standalone)").matches||window.navigator.standalone===true;}
 function isIOSDevice(){return /iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;}
