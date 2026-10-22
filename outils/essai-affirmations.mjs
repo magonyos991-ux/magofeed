@@ -153,6 +153,60 @@ v("le stock est pousse vers la base", pin.envoyes.indexOf("stock:1")!==-1, JSON.
 v("la contribution est comptee", pin.confirmsApres===pin.confirmsAvant+1,
   pin.confirmsAvant+" -> "+pin.confirmsApres);
 
+/* ─── TROISIEME SERIE — l'app annonce ce que le serveur versera ──────────
+   Elle annoncait « +3 pts » partout. Le serveur, lui, applique une regle de
+   distance : plein tarif a moins de 500 m, UN point pour un « je l'ai vue »
+   plus loin, ZERO pour une rupture signalee de loin. Le commentaire serveur
+   racontait deja le probleme — « une personne a vu deux fois +3 pts et garde
+   un profil a zero point » — mais seul le serveur avait ete corrige. */
+const pts=await pg.evaluate(async()=>{
+  const d=DRINKS.find(x=>x.name==="Coca-Cola Original");
+  window.curSel=d;
+  const faire=async(distM,type)=>{
+    window.STORES.length=0;
+    /* On place le magasin a la distance voulue depuis la position. */
+    const st={id:"S"+distM+type,fbId:"S"+distM+type,name:"Magasin "+distM+"m",brand:"",
+      lat:50.8793+(distM/111000), lng:4.3511, dist:distM,
+      drinks:[d.id], confirmations:{}, hours:"24/7"};
+    window.STORES.push(st);
+    window.userLat=50.8793; window.userLng=4.3511;
+    try{ localStorage.removeItem("magoAwards"); window.awardLog={}; }catch(e){}
+    const avant=window.userStats.pts;
+    const toasts=[]; const vrai=window.toast;
+    window.toast=function(t){toasts.push(String(t));};
+    const vraiRep=window.fbAddReport; window.fbAddReport=function(){return Promise.resolve();};
+    if(type==="stock") window.enregistrerStock(st.id,d.id,null);
+    else { var faux={parentElement:document.createElement("div")};
+           window.doConfirm(faux,st.id,d.id,-1); }
+    window.toast=vrai; window.fbAddReport=vraiRep;
+    return {surPlace:window._surPlaceSignalement(st), gain:window.userStats.pts-avant,
+            toast:toasts.join(" | ")};
+  };
+  return {
+    stockPres: await faire(200,"stock"),
+    stockLoin: await faire(3000,"stock"),
+    ruptPres:  await faire(200,"rupture"),
+    ruptLoin:  await faire(3000,"rupture"),
+    bareme:{pres:window.pointsVerses("stock",true), loin:window.pointsVerses("stock",false),
+            ruptPres:window.pointsVerses("rupture",true), ruptLoin:window.pointsVerses("rupture",false)}
+  };
+});
+v("bareme recopie du serveur : stock 3 / 1, rupture 3 / 0",
+  pts.bareme.pres===3&&pts.bareme.loin===1&&pts.bareme.ruptPres===3&&pts.bareme.ruptLoin===0,
+  JSON.stringify(pts.bareme));
+v("stock a 200 m : 3 points annonces et comptes",
+  pts.stockPres.surPlace===true&&pts.stockPres.gain===3&&/\+3 pt/.test(pts.stockPres.toast),
+  "gain "+pts.stockPres.gain+" — « "+pts.stockPres.toast+" »");
+v("stock a 3 km : UN point, pas trois",
+  pts.stockLoin.surPlace===false&&pts.stockLoin.gain===1&&/\+1 pt/.test(pts.stockLoin.toast),
+  "gain "+pts.stockLoin.gain+" — « "+pts.stockLoin.toast+" »");
+v("rupture a 200 m : 3 points",
+  pts.ruptPres.gain===3&&/\+3 pt/.test(pts.ruptPres.toast),
+  "gain "+pts.ruptPres.gain+" — « "+pts.ruptPres.toast+" »");
+v("rupture a 3 km : AUCUN point, et l'ecran ne ment plus",
+  pts.ruptLoin.gain===0&&!/\+\d+ pt/.test(pts.ruptLoin.toast),
+  "gain "+pts.ruptLoin.gain+" — « "+pts.ruptLoin.toast+" »");
+
 console.log("\n  L'APPLICATION N'AFFIRME QUE CE QU'ELLE SAIT\n");
 let ko=0;
 for(const [nom,ok,det] of etapes){ if(!ok)ko++; console.log("   "+(ok?"ok  ":"ECHEC")+"  "+nom.padEnd(46)+" "+det); }

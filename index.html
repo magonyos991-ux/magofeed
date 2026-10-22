@@ -8196,13 +8196,20 @@ function doConfirm(btn,sid,did,val){
     _noterObservation(s,did,false);
     if(window.fbAddReport)try{window.fbAddReport(s.fbId||sid,did,"rupture",{note:_provenance("fiche",s)});}catch(e){} // la preuve pour le serveur
     awardOnce("conf:"+sid+":"+did,24);
-    userStats.confirms++;userStats.pts+=3;flyPts(3);bumpDaily("confirms");
+    /* Une rupture signalee de loin ne rapporte RIEN cote serveur, et l'ecran
+       annoncait quand meme « +3 pts ». Le signalement reste utile et part
+       quand meme : c'est l'annonce qui etait fausse, pas le geste. */
+    var _gR=pointsVerses("rupture",_surPlaceSignalement(s));
+    userStats.confirms++;
+    if(_gR){userStats.pts+=_gR;flyPts(_gR);}
+    bumpDaily("confirms");
     trackStoreContribution(sid);
     resetWatchTrigger(did,sid);
     // Firebase
     if(window.fbConfirmStock) window.fbConfirmStock(sid, did, -1);
     if(window.fbTouchCache)window.fbTouchCache();
-    playSound("err");updateProfileStats();toast("Signalé · +3 pts");
+    playSound("err");updateProfileStats();
+    toast(_gR?tr("Signalé")+mentionPoints(_gR):tr("Signalé · merci"));
   }
 }
 
@@ -8242,13 +8249,19 @@ function enregistrerStock(sid,did,price){
   }
   if(!awardOnce("conf:"+sid+":"+did,24)){toast("D\u00e9j\u00e0 confirm\u00e9 aujourd'hui");renderStoreList();return;}
   if(window.fbAddReport)try{window.fbAddReport(s.fbId||sid,did,"stock",{note:_provenance("fiche",s)});}catch(e){} // la preuve pour le serveur
-  userStats.confirms++;userStats.pts+=3;flyPts(3);bumpDaily("confirms");
+  /* Un « je l'ai vue » hors des 500 m vaut UN point, pas trois : le serveur
+     paie le plein tarif a ce qui est verifiable, et un point a ce qui est
+     seulement utile. L'ecran annoncait trois dans les deux cas. */
+  var _gS=pointsVerses("stock",_surPlaceSignalement(s));
+  userStats.confirms++;
+  if(_gS){userStats.pts+=_gS;flyPts(_gS);}
+  bumpDaily("confirms");
   trackStoreContribution(sid);
   // Firebase
   if(window.fbConfirmStock) window.fbConfirmStock(sid, did, 1);
   if(window.fbTouchCache)window.fbTouchCache();
   playSound("pop");updateProfileStats();
-  toast(price?"✓ "+price.toFixed(2)+"€ enregistré · +3 pts":"✓ Stock confirmé · +3 pts");
+  toast((price?"\u2713 "+price.toFixed(2)+"\u20ac "+tr("enregistré"):"\u2713 "+tr("Stock confirmé"))+mentionPoints(_gS));
   try{maybeRewardHuntHelp(did,s);}catch(e){}
   renderStoreList();
 }
@@ -10993,6 +11006,36 @@ function _regimeSignalement(s){
 /* Sur place ou de memoire ? Cela ne change RIEN a ce qui est publie — cela
    change seulement ce que le serveur paiera (DIST_MAX_M, 500 m). On s'en sert
    uniquement pour ne pas promettre des points qui ne viendront pas. */
+/* ══ CE QUE LE SERVEUR VERSERA VRAIMENT ═══════════════════════════════════
+   L'application annoncait des montants que le serveur ne versait pas. Le
+   commentaire de crediterContribution le raconte deja, mot pour mot : « L'app,
+   elle, annoncait +3 pts. Une personne a donc signale deux boissons, vu deux
+   fois +3 pts, et garde un profil a zero point sans que rien ne le lui
+   explique. » Le serveur avait ete corrige ; l'annonce, jamais.
+   Et il n'y a PAS deux compteurs, contrairement a ce que dit le bareme
+   serveur : adopterScoreServeur fait `userStats.pts = d.points`, un
+   ecrasement pur. Tout point annonce localement disparait des que le score
+   serveur arrive. Un seul compteur, celui du serveur.
+   SOURCE DE VERITE : functions-a-deployer/points-et-parrainage.js —
+   BAREME_REPORT (~118), MONTANT_DE_MEMOIRE = 1 (129), DIST_MAX_M = 500 (335)
+   et la regle « SIGNALER DE LOIN RAPPORTE MOINS, PAS RIEN » (~284-306).
+   La distance ne joue QUE sur « stock » et « rupture » : les autres types
+   touchent leur plein tarif ou que l'on soit. */
+var BAREME_SERVEUR={stock:3,rupture:3,contrefacon:3,codebarre:2,badstore:2,nouveau:2,prix:2};
+function pointsVerses(type,surPlace){
+  var plein=BAREME_SERVEUR[type]||0;
+  if(surPlace)return plein;
+  if(type==="stock")return 1;      /* MONTANT_DE_MEMOIRE : utile, non verifiable */
+  if(type==="rupture")return 0;    /* « Une RUPTURE garde le zero » */
+  return plein;
+}
+window.pointsVerses=pointsVerses;
+/* La mention de points a coller a un message, ou rien quand il n'y en a pas.
+   Jamais « +0 pts » : on ne parle pas de points quand il n'y en a aucun. */
+function mentionPoints(n){
+  return n>0?" \u00b7 +"+n+" "+(n>1?tr("pts"):tr("pt")):"";
+}
+window.mentionPoints=mentionPoints;
 function _surPlaceSignalement(s){
   var d = _distanceSignalement(s);
   return d != null && d <= SIGNAL_SUR_PLACE_M;
@@ -19222,10 +19265,16 @@ function repondreIndication(did,sid,ok){
     if(w){w.verdict="ko";w.verdictAt=Date.now();}
   }
   if(window.fbTouchCache)try{window.fbTouchCache();}catch(e){}
+  /* Repondre a une indication ecrit un rapport « stock » (oui) ou
+     « rupture » (non) : le serveur applique donc la meme regle de distance
+     qu'ailleurs. L'ecran annoncait « +3 pts » dans les deux cas, alors qu'un
+     « non » donne de loin ne rapporte rien du tout. */
+  var _gT=pointsVerses(ok?"stock":"rupture",_surPlaceSignalement(s));
   var gagne=false;
   if(libre&&awardOnce("conf:"+storeId+":"+did,24)){
-    gagne=true;userStats.confirms=(userStats.confirms||0)+1;userStats.pts+=3;
-    try{flyPts(3);}catch(e){}try{bumpDaily("confirms");}catch(e){}
+    gagne=_gT>0;userStats.confirms=(userStats.confirms||0)+1;
+    if(_gT){userStats.pts+=_gT;try{flyPts(_gT);}catch(e){}}
+    try{bumpDaily("confirms");}catch(e){}
   }
   trackStoreContribution(storeId);
   updateProfileStats();
@@ -19233,10 +19282,10 @@ function repondreIndication(did,sid,ok){
   saveWatches();
   if(ok){
     try{playSound("win");}catch(e){}
-    toast(_tr("tipThanksOk").replace("{s}",s.name)+(gagne?" · +3 pts":""));
+    toast(_tr("tipThanksOk").replace("{s}",s.name)+mentionPoints(gagne?_gT:0));
   }else{
     try{playSound("err");}catch(e){}
-    toast(_tr("tipThanksKo")+(gagne?" · +3 pts":""));
+    toast(_tr("tipThanksKo")+mentionPoints(gagne?_gT:0));
     // La chasse continue : l'alerte repart chercher ailleurs.
     try{resetWatchTrigger(did,storeId);}catch(e){}
   }

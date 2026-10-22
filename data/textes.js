@@ -36,6 +36,11 @@
    ============================================================================ */
 
 var TEXTES = {
+  "enregistré": {ar:"مُسجَّل",de:"gespeichert",en:"saved",es:"registrado",it:"registrato",nl:"opgeslagen",pl:"zapisane",pt:"registado",tr:"kaydedildi",zh:"已记录"},
+  "pt": {ar:"نقطة",de:"Pkt",en:"pt",es:"pt",it:"pt",nl:"pt",pl:"pkt",pt:"pt",tr:"puan",zh:"分"},
+  "pts": {ar:"نقاط",de:"Pkt",en:"pts",es:"pts",it:"pti",nl:"ptn",pl:"pkt",pt:"pts",tr:"puan",zh:"分"},
+  "Signalé": {ar:"تم الإبلاغ",de:"Gemeldet",en:"Reported",es:"Señalado",it:"Segnalato",nl:"Gemeld",pl:"Zgłoszone",pt:"Assinalado",tr:"Bildirildi",zh:"已上报"},
+  "Signalé · merci": {ar:"تم الإبلاغ · شكرًا",de:"Gemeldet · danke",en:"Reported · thanks",es:"Señalado · gracias",it:"Segnalato · grazie",nl:"Gemeld · bedankt",pl:"Zgłoszone · dzięki",pt:"Assinalado · obrigado",tr:"Bildirildi · teşekkürler",zh:"已上报 · 谢谢"},
   "— appuie sur Envoyer pour ouvrir sa fiche.": {ar:"— اضغط إرسال لفتح صفحتها.",de:"— tipp auf Senden, um ihre Seite zu öffnen.",en:"— tap Send to open its page.",es:"— toca Enviar para abrir su ficha.",it:"— tocca Invia per aprire la sua scheda.",nl:"— tik op Verzenden om de pagina te openen.",pl:"— dotknij Wyślij, aby otworzyć jej stronę.",pt:"— toca em Enviar para abrir a ficha.",tr:"— sayfasını açmak için Gönder'e dokun.",zh:"—— 点「发送」打开它的页面。"},
   "— change de mode juste au-dessus.": {ar:"— غيّر الوضع أعلاه مباشرة.",de:"— wechsle den Modus direkt darüber.",en:"— switch mode just above.",es:"— cambia de modo justo arriba.",it:"— cambia modalità qui sopra.",nl:"— wissel van modus hierboven.",pl:"— zmień tryb tuż powyżej.",pt:"— muda de modo mesmo acima.",tr:"— hemen yukarıdan modu değiştir.",zh:"—— 在上方切换模式。"},
   "— cherche la boisson que tu as vue en rayon, puis tape dessus.": {ar:"— ابحث عن المشروب الذي رأيته على الرفّ، ثم اضغط عليه.",de:"— such das Getränk, das du im Regal gesehen hast, und tipp drauf.",en:"— look for the drink you saw on the shelf, then tap it.",es:"— busca la bebida que viste en el estante y tócala.",it:"— cerca la bevanda che hai visto sullo scaffale, poi toccala.",nl:"— zoek het drankje dat je in het schap zag en tik erop.",pl:"— znajdź napój, który widziałeś na półce, i dotknij go.",pt:"— procura a bebida que viste na prateleira e toca nela.",tr:"— rafta gördüğün içeceği ara, sonra ona dokun.",zh:"—— 找到你在货架上看到的饮料，然后点它。"},
