@@ -91,6 +91,16 @@ Object.assign(exports, require("./catalogue-ia"));
    annoncait le contraire. chasse-codes.js le demandait pourtant noir sur blanc
    dans sa propre section DEPLOIEMENT. ─────────────────────────────────────*/
 Object.assign(exports, require("./chasse-codes"));
+/* ── « X personnes ont cherche cette boisson ». Meme oubli que chasse-codes,
+   et meme consequence : l'application ECRIT dans `demand` depuis des semaines,
+   un document par appareil, par boisson et par jour. Personne ne les resumait.
+   Le document public `stats/drinkDemand` que la fiche lit n'existait donc
+   jamais, et le compteur ne s'affichait sur aucune boisson — pendant que la
+   collecte, elle, tournait.
+   Aucun secret, aucune dependance npm, aucune decision a prendre : c'est un
+   resume nocturne qui n'ecrit qu'un seul document, sans identifiant ni
+   position. Il n'y avait rien a attendre. ─────────────────────────────────*/
+Object.assign(exports, require("./agreger-demande"));
 
 /* ══════════════════════════════════════════════════════════════════════════
    PAS ENCORE BRANCHE — et pourquoi
