@@ -67,7 +67,7 @@ Sur « règles et index seulement » — vérifié, la clé neuve ne passe pas n
 
 Donc tant que cette page n'est pas faite, **rien** ne part : ni les règles, ni
 les fonctions. Ce n'est pas le fichier de déploiement qui coince — ses neuf
-étapes passent, le serveur démarre, les 280 épreuves sont vertes.
+étapes passent, le serveur démarre, les 291 épreuves sont vertes.
 
 Comment le régler :
 
@@ -116,7 +116,7 @@ qui choisis le moment.
 
 ### Ce que le bouton fait, dans l'ordre
 
-1. Lance les **280 épreuves** des règles sur un vrai émulateur Firestore.
+1. Lance les **291 épreuves** des règles sur un vrai émulateur Firestore.
    Une seule qui échoue, et le déploiement n'a pas lieu.
 2. Assemble le dossier que Firebase attend, vérifie que chaque module branché
    dans `index.js` est bien présent, et contrôle la syntaxe de chaque fichier.
@@ -224,7 +224,7 @@ champs que le client ne peut pas écrire, `pointsDons` devient lisible par
 l'admin seul, et la **vitrine d'un commerce** (`stores/{id}/photos/{p1..p12}`)
 s'ouvre au gérant qui a le pass complet — lecture publique, douze photos au
 plus, le plafond étant porté par le nom du document. Lance le banc d'essai du
-§1 avant de déployer : il compte **280 épreuves**, dont huit pour cette
+§1 avant de déployer : il compte **291 épreuves**, dont huit pour cette
 vitrine et trois pour le signalement d'un message privé.
 
 ## 1. Les règles Firestore — dans la commande de la section 0 bis
@@ -237,7 +237,7 @@ Avant tout changement de règles, le banc d'essai doit passer :
 ```
 cd functions-a-deployer/tests-regles
 npm install          # une seule fois
-npm test             # doit se terminer par : 280/280 conformes
+npm test             # doit se terminer par : 291/291 conformes
 ```
 
 Il attaque une base jetable sur ta machine. Rien ne part en ligne. S'il

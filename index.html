@@ -158,29 +158,125 @@ try{
     </svg>
     <div class="splash-logo">Mago<span style="color:#c69a57">feed</span></div>
     <div class="splash-sub">Trouve ta boisson</div>
-    <div id="splash-onde"></div>
+    <!-- LE VERRE QUI SE REMPLIT. Peint des que le navigateur arrive ici, avant
+         le catalogue et le gros script : le remplissage commence a la premiere
+         image. Toujours sur fond sombre #1a1714, d'ou les couleurs en dur.
+         La couleur du liquide passe par deux variables (--verre-hi / --verre-lo)
+         pour qu'un reglage de teinte puisse la changer sans toucher au dessin. -->
+    <svg id="splash-verre" viewBox="0 0 64 100" width="64" height="100" aria-hidden="true">
+      <defs>
+        <linearGradient id="verreOr" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" style="stop-color:var(--verre-hi,#e8c47a)"/>
+          <stop offset="1" style="stop-color:var(--verre-lo,#9a7228)"/>
+        </linearGradient>
+        <clipPath id="verreClip"><path d="M14 8 H50 L45 90 Q44.5 95 39.5 95 H24.5 Q19.5 95 19 90 Z"/></clipPath>
+      </defs>
+      <g clip-path="url(#verreClip)"><g class="verre-liq">
+        <path class="verre-vague" d="M-64 0 Q-56 -3 -48 0 T-32 0 T-16 0 T0 0 T16 0 T32 0 T48 0 T64 0 T80 0 T96 0 T112 0 T128 0 V6 H-64 Z" fill="url(#verreOr)"/>
+        <rect x="0" y="4" width="64" height="120" fill="url(#verreOr)"/>
+        <circle class="verre-bulle" cx="27" cy="72" r="1.7" fill="#fff8e8"/>
+        <circle class="verre-bulle" cx="35" cy="80" r="1.2" fill="#fff8e8"/>
+        <circle class="verre-bulle" cx="40" cy="66" r="1.4" fill="#fff8e8"/>
+      </g></g>
+      <path d="M14 8 H50 L45 90 Q44.5 95 39.5 95 H24.5 Q19.5 95 19 90 Z" fill="none" stroke="#f4f2ee" stroke-width="2.5" stroke-linejoin="round"/>
+    </svg>
   </div>
   <script>
-  /* ── L'ONDE QUI SE PROPAGE — le SEUL generateur du motif de chargement ──
-     Une grille carree de points ; chaque point recoit, en style, un retard
-     d'animation proportionnel a sa distance (euclidienne) au centre : l'onde
-     part du point central, dore, vers les bords. Le mouvement est en CSS pur
-     (.onde dans app.css) — ici aucun chronometre, seulement du balisage.
-     Definie ICI, avant tout le reste, parce que le splash s'en sert au tout
-     premier rendu, bien avant que le gros script du bas n'ait ete lu.
-       taille : 7 (splash, plein ecran) · 5 (cartes, etats vides) · 3 (en
-       ligne, a cote d'un texte). Jamais plus de 49 points.
-     Le pas entre deux anneaux grandit quand la grille retrecit : avec trois
-     anneaux, un pas de 0,16 s ferait clignoter le tout d'un bloc. */
+  /* ── LE SONAR — le SEUL generateur du motif d'attente dans l'app ──────────
+     L'anneau dore du logo, immobile (c'est toi, l'epingle) ; trois ondes
+     fines naissent de lui, s'elargissent et se dissipent : l'app cherche
+     autour de toi. CSS pur (.sonar dans app.css), aucun chronometre.
+     Definie ICI, avant tout le reste, parce que les premiers ecrans s'en
+     servent avant que le gros script du bas n'ait ete lu.
+       taille : 7 (grand, attentes plein ecran) · 5 (cartes, etats vides)
+       · 3 (en ligne, a cote d'un texte : une seule onde, cycle plus court).
+     Le nom ondeHTML est garde : une quinzaine d'appels en dependent
+     (directs, et via magoLoader).
+     Le carre de points qu'il remplace voulait etre une onde ; dessine sur
+     une grille carree, il se lisait comme un carre de points sans sens. */
   function ondeHTML(taille){
-    var n=(taille===3||taille===5)?taille:7, c=(n-1)/2, pas=(n===7?.16:(n===5?.2:.3)), html="";
-    for(var i=0;i<n*n;i++){
-      var d=Math.sqrt(Math.pow(i%n-c,2)+Math.pow(Math.floor(i/n)-c,2));
-      html+=d?'<i style="animation-delay:'+(Math.round(d*pas*100)/100)+'s"></i>':'<i class="c"></i>';
-    }
-    return '<div class="onde onde-'+n+'" aria-hidden="true">'+html+'</div>';
+    var cls=taille===3?" xs":(taille===7?" lg":"");
+    return '<div class="sonar'+cls+'" aria-hidden="true"><i></i><i></i><i></i><b></b></div>';
   }
-  document.getElementById("splash-onde").innerHTML=ondeHTML(7);
+  /* ── LA COULEUR DU VERRE — une seule table pour toute l'app ──────────────
+     Chaque niveau debloque la teinte de SA boisson : c'est la meme que celle
+     du verre de la fete de passage de niveau (LEVEL_LIQUIDE en derive).
+     « or » (la marque) et « citron » (niveau 1) sont ouverts a tout le monde.
+     Les seuils sont ceux de LEVELS (0/50/150/300/600/1200/2500) ; la regle
+     Firestore verreValide() les repete : si l'un change, changer l'autre.
+     Le choix vit dans users/{uid}.verre (le compte fait foi) et en copie
+     locale magoVerre, parce que le splash s'affiche avant Firebase. */
+  window.MAGO_VERRES={
+    or:       {nom:"Or",                 hi:"#e8c47a",lo:"#9a7228",seuil:0,    niveau:null},
+    citron:   {nom:"Citron",             hi:"#f6dd6a",lo:"#e3ad1c",seuil:0,    niveau:0},
+    orange:   {nom:"Orange",             hi:"#ffb14a",lo:"#e2661a",seuil:50,   niveau:1},
+    peche:    {nom:"P\u00EAche",          hi:"#f5915c",lo:"#c8541a",seuil:150,  niveau:2},
+    grenadine:{nom:"Grenadine",          hi:"#f2606f",lo:"#b3213c",seuil:300,  niveau:3},
+    menthe:   {nom:"Menthe",             hi:"#5fd6a0",lo:"#12915f",seuil:600,  niveau:4},
+    myrtille: {nom:"Myrtille",           hi:"#56aef2",lo:"#1657b2",seuil:1200, niveau:5},
+    legende:  {nom:"Or de L\u00E9gende",  hi:"#f7d97c",lo:"#bf8a0e",seuil:2500, niveau:6}
+  };
+  window.MAGO_VERRE_ORDRE=["or","citron","orange","peche","grenadine","menthe","myrtille","legende"];
+  (function(){try{
+    var id=localStorage.getItem("magoVerre"), v=window.MAGO_VERRES[id];
+    var el=document.getElementById("splash-verre");
+    if(v&&el){el.style.setProperty("--verre-hi",v.hi);el.style.setProperty("--verre-lo",v.lo);}
+  }catch(e){}})();
+  /* ── LE VERRE DU SPLASH — plein a l'instant ou l'app s'ouvre ─────────────
+     1. Des maintenant, le liquide monte vite puis ralentit vers le bord, sans
+        jamais atteindre le haut tout seul : c'est le chargement reel (donnees,
+        gros script), dont la duree n'est pas connue d'avance.
+     2. Quand l'app est prete, initSplash() appelle magoSplashPret() : le verre
+        finit de se remplir d'ou qu'il en soit (0,38 s), tient plein 0,3 s, puis
+        le splash s'efface. Avant, le splash attendait 1 400 ms FIXES apres que
+        l'app etait prete : une seconde et demie perdue a chaque lancement.
+     Seul transform est anime : c'est ce qui continue de bouger pendant que le
+     fil principal compile. La position courante est lue par la transition
+     elle-meme, donc aucun saut quand « pret » arrive en plein remplissage. */
+  (function(){try{
+    var liq=document.querySelector("#splash-verre .verre-liq");
+    if(!liq)return;
+    var calme=false;try{calme=window.matchMedia("(prefers-reduced-motion: reduce)").matches;}catch(e){}
+    /* Second splash juste apres le premier (le service worker vient de se
+       mettre a jour et a recharge la page) : le verre ne repart pas de vide,
+       sinon on le voit se vider d'un coup et recommencer. */
+    var relance=false;try{relance=sessionStorage.getItem("mago_sw_reloaded")==="1";}catch(e){}
+    function regler(dur,ease,y){liq.style.setProperty("--dur",dur);liq.style.setProperty("--ease",ease);liq.style.setProperty("--y",y);}
+    /* T0 : la premiere image de la page web. Sur telephone, l'ecran de
+       lancement NATIF (le M fixe) couvre encore la page pendant ~0,4 s a
+       cet instant : tout ce qui se passe avant est invisible. */
+    var T0=Date.now(); window.__splashT0=T0;
+    regler("0s","linear",relance?"40px":"100px");
+    void liq.getBoundingClientRect();
+    if(calme)regler("0s","linear","9px");
+    /* Une courbe moins pressee qu'avant (.2,.6,.2,1 faisait 70 % du chemin
+       dans la premiere demi-seconde, c'est-a-dire derriere l'ecran natif) :
+       ici ~60 % a 1,1 s, puis le ralenti vers le bord. */
+    else regler(relance?"1.2s":"2.6s","cubic-bezier(.3,.2,.2,1)","24px");
+    /* LE REMPLISSAGE DOIT ETRE VU. Sur un telephone a cache chaud, l'app est
+       prete ~0,5 s apres T0 : le verre finissait de se remplir avant meme
+       d'etre visible, et l'on ne voyait qu'un verre deja plein qui s'efface
+       (constate sur enregistrement d'ecran). On garantit donc 1,1 s de
+       remplissage visible depuis T0 avant de finir. Sur un appareil lent, le
+       chargement reel depasse ce minimum et rien n'est ajoute. */
+    var MINIMUM=1100; window.__splashMinimum=MINIMUM;
+    window.magoSplashPret=function(fin){
+      window.__splashPretAt=Date.now();
+      var attente=calme?0:Math.max(0,MINIMUM-(Date.now()-T0));
+      setTimeout(function(){
+      if(!calme)regler(".38s","cubic-bezier(.3,.7,.2,1)","9px");
+      setTimeout(function(){
+        /* Une image de plus : l'accueil a eu sa passe de style sous le splash.
+           Mais l'app peut etre passee en arriere-plan pendant le remplissage :
+           la, requestAnimationFrame ne tourne pas, le minuteur si — fin() part
+           quand meme, et une seule fois quel que soit le premier arrive. */
+        var fait=false;function go(){if(fait)return;fait=true;try{fin();}catch(e){}}
+        if(document.hidden){go();return;}
+        requestAnimationFrame(go);setTimeout(go,120);
+      },calme?300:680);
+      },attente);
+    };
+  }catch(e){}})();
   </script>
 
   <!-- TUTORIAL -->
@@ -790,6 +886,14 @@ try{
           <div class="set-txt"><div class="set-title">Aider en discret</div><div class="set-sub">Ton nom n'apparaît pas quand tu dépannes</div></div>
           <div id="discret-toggle" class="sw" aria-hidden="true"><div class="sw-knob"></div></div>
         </div>
+        <!-- La couleur du verre qui se remplit a l'ouverture : une recompense de
+             niveau. Les teintes pas encore gagnees restent visibles, avec le
+             niveau qu'il faut. Peint par peindreVerres(). -->
+        <div id="verre-row" class="set-row static">
+          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12l-1.5 16.5a2 2 0 0 1-2 1.5h-5a2 2 0 0 1-2-1.5Z"/><path d="M7 11h10"/></svg></div>
+          <div class="set-txt"><div class="set-title">Couleur du verre</div><div class="set-sub">Le verre qui se remplit à l'ouverture</div></div>
+        </div>
+        <div id="verre-choix" class="verre-choix" role="radiogroup" aria-label="Couleur du verre"></div>
       </div>
       <div class="set-sec">Position</div>
       <div class="set-group">
@@ -5611,6 +5715,15 @@ window.fbDireMerci = async function(id) {
    est respecte cote SERVEUR au moment d'ecrire le coup de main, pas a
    l'affichage — un reglage de confidentialite qui ne tiendrait qu'a
    l'interface n'en serait pas un. */
+/* La couleur du verre : un choix de la personne, ecrit par elle — mais la
+   regle Firestore verreValide() n'accepte qu'une teinte que ses points
+   debloquent. Si elle refuse, l'appelant remet la copie locale d'avant. */
+window.fbVerreTeinte = async function(id) {
+  await ensureAuthed();
+  var user = auth.currentUser; if (!user) return false;
+  await setDoc(userDocRef(user.uid), { verre: String(id) }, { merge: true });
+  return true;
+};
 window.fbAideDiscrete = async function(actif) {
   await ensureAuthed();
   var user = auth.currentUser; if (!user) return false;
@@ -7465,7 +7578,7 @@ function _showRaw(s){
   if(s==="discover"){try{window._huntsCache=null;}catch(e){}}
   if(s==="profile"){try{majLigneAmis();}catch(e){}try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}try{renderDonCard();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
-  if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}}
+  if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}try{peindreVerres();}catch(e){}}
   if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderChasseCodes();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{_verifierAides();}catch(e){}try{renderChasse();}catch(e){}    // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
     // le filtre boisson de la carte (sinon la carte rouvrait toujours sur la derniere
     // boisson cherchee, ex. "Red Bull", au lieu de montrer tous les magasins).
@@ -8375,15 +8488,11 @@ function confettiBurst(){
 
    CE QUI N'EST PAS AFFIRME. On ne montre ni classement, ni comparaison, ni
    nombre de joueurs : seulement le palier atteint et les points reels. */
-var LEVEL_LIQUIDE=[
-  ["#f6dd6a","#e3ad1c"], // Curieux — citron
-  ["#ffb14a","#e2661a"], // Explorateur — orange
-  ["#f5915c","#c8541a"], // Chasseur — peche
-  ["#f2606f","#b3213c"], // Connaisseur — grenadine
-  ["#5fd6a0","#12915f"], // Expert — menthe
-  ["#56aef2","#1657b2"], // Maitre des rayons — bleu
-  ["#f7d97c","#bf8a0e"]  // Legende — or
-];
+/* Les teintes de la fete de niveau sont celles du verre du splash (MAGO_VERRES,
+   definie sous le splash) : une seule table, deux usages. */
+var LEVEL_LIQUIDE=["citron","orange","peche","grenadine","menthe","myrtille","legende"].map(function(id){
+  var v=window.MAGO_VERRES[id]; return [v.hi,v.lo];
+});
 function celebrateLevelUp(lv){
   var reduit=false;try{reduit=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;}catch(e){}
   var prevName=tr((LEVELS[lv.idx-1]&&LEVELS[lv.idx-1][1])||"Débutant");
@@ -8398,6 +8507,7 @@ function celebrateLevelUp(lv){
   ov.innerHTML='<div class="lvup-box">'+
     '<div class="lvup-kick">'+sanitize(tr("Niveau supérieur"))+'</div>'+
     '<div class="lvup-old">'+sanitize(prevName)+'</div>'+
+    '<div class="lvup-couleur">'+sanitize(trh("Nouvelle couleur de verre : {teinte}",{teinte:tr((window.MAGO_VERRES[["citron","orange","peche","grenadine","menthe","myrtille","legende"][lv.idx]]||{nom:""}).nom)}))+'</div>'+
     '<svg class="lvup-verre" width="150" height="200" viewBox="0 0 132 176" aria-hidden="true">'+
       '<defs>'+
         '<clipPath id="'+uid+'c"><path d="'+cup+'"/></clipPath>'+
@@ -11777,7 +11887,7 @@ function onBarcodeDetected(r){
   }
 }
 /* ── CHARGEMENT : deux formes, un seul vocabulaire ────────────────────────
-   magoLoader() : l'onde qui se propage (ondeHTML, definie sous le splash),
+   magoLoader() : le sonar (ondeHTML, definie sous le splash),
    quand l'ecran est VIDE et qu'on attend — moyenne seule, ou petite EN LIGNE
    a cote de son texte (petit=true).
    magoCharge() : la barre fine du haut, quand l'ecran est DEJA rempli et
@@ -13852,6 +13962,7 @@ function renderNearby(){
     : all.slice();
 
   var card=document.createElement("div");
+  card.className="zone-card";
   card.style.cssText="background:var(--bg2);border:1.5px solid var(--border);border-radius:18px;padding:14px 16px 12px";
 
   // En-tete commun : point vert vivant + titre + raccourci carte.
@@ -26282,6 +26393,63 @@ function _chasseDistLabel(distKm){
    tout de suite, puis on envoie au serveur — et on remet l'interrupteur dans
    son etat d'origine si l'envoi echoue, plutot que de laisser croire a un
    reglage qui n'a pas pris. */
+/* ══ LA COULEUR DU VERRE ═══════════════════════════════════════════════════
+   Le verre du splash se remplit de la boisson qu'on a choisie. Les teintes
+   sont celles des niveaux (MAGO_VERRES, sous le splash) : chaque niveau
+   debloque la sienne, l'or et le citron sont ouverts a tous. Meme mecanique
+   que « aider en discret » : copie locale d'abord (le splash la lit avant
+   Firebase), serveur ensuite, retour en arriere + toast si la regle refuse. */
+function verreActuel(){
+  var id=null;try{id=localStorage.getItem("magoVerre");}catch(e){}
+  return (id&&window.MAGO_VERRES&&window.MAGO_VERRES[id])?id:"or";
+}
+function verreDebloque(id,pts){var v=window.MAGO_VERRES&&window.MAGO_VERRES[id];return !!v&&pts>=v.seuil;}
+function verreMiniSVG(v,uid){
+  var cup='M14 8 H50 L45 90 Q44.5 95 39.5 95 H24.5 Q19.5 95 19 90 Z';
+  return '<svg viewBox="0 0 64 100" width="22" height="34" aria-hidden="true"><defs><linearGradient id="'+uid+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="'+v.hi+'"/><stop offset="1" stop-color="'+v.lo+'"/></linearGradient></defs>'
+    +'<path d="'+cup+'" fill="url(#'+uid+')"/><path d="'+cup+'" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>';
+}
+function verreLibelleVerrou(v){
+  var niv=(v.niveau!=null&&LEVELS[v.niveau])?tr(LEVELS[v.niveau][1]):"";
+  return trh("D\u00E8s le niveau {n} \u00B7 {nom}",{n:v.niveau+1,nom:niv});
+}
+function peindreVerres(){
+  var host=document.getElementById("verre-choix"); if(!host||!window.MAGO_VERRES)return;
+  var pts=0;try{pts=ptsNets();}catch(e){}
+  var actuel=verreActuel(), h="";
+  (window.MAGO_VERRE_ORDRE||[]).forEach(function(id){
+    var v=window.MAGO_VERRES[id], ok=verreDebloque(id,pts), sel=id===actuel;
+    var nom=sanitize(tr(v.nom));
+    h+='<button type="button" class="verre-opt'+(sel?" sel":"")+(ok?"":" verrou")+'" role="radio" aria-checked="'+(sel?"true":"false")
+      +'" aria-label="'+nom+(ok?"":" \u2014 "+sanitize(verreLibelleVerrou(v)))+'" data-verre="'+id+'" onclick="choisirVerre(\''+id+'\')">'
+      +verreMiniSVG(v,"vo-"+id)
+      +'<span class="verre-nom">'+nom+'</span>'
+      +(ok?'':'<span class="verre-niv" aria-hidden="true">'+(v.niveau+1)+'</span>')
+      +'</button>';
+  });
+  host.innerHTML=h;
+}
+function choisirVerre(id){
+  var v=window.MAGO_VERRES&&window.MAGO_VERRES[id]; if(!v)return;
+  var pts=0;try{pts=ptsNets();}catch(e){}
+  if(!verreDebloque(id,pts)){
+    toast(verreLibelleVerrou(v));
+    try{playSound("pop");}catch(e){}
+    return;
+  }
+  var avant=verreActuel(); if(avant===id)return;
+  try{localStorage.setItem("magoVerre",id);}catch(e){}
+  peindreVerres();
+  try{playSound("pop");}catch(e){}
+  toast(trh("Verre : {teinte}",{teinte:tr(v.nom)}));
+  if(!window.fbVerreTeinte)return;
+  window.fbVerreTeinte(id).catch(function(){
+    try{localStorage.setItem("magoVerre",avant);}catch(e){}
+    peindreVerres();
+    toast("R\u00E9glage non enregistr\u00E9, r\u00E9essaie");
+  });
+}
+
 function peindreAideDiscrete(){
   var t=document.getElementById("discret-toggle"),r=document.getElementById("discret-row");
   var on=false;
@@ -28662,14 +28830,20 @@ function initSplash(){
     var ob=document.getElementById("onboarding");
     if(ob)ob.style.display="none";
   }
-  setTimeout(function(){
+  /* L'app est prete ICI : l'accueil est construit, le catalogue en memoire.
+     Le verre du splash finit de se remplir, puis le splash s'efface (voir le
+     script sous le splash). Avant : 1 400 ms fixes, apres que tout etait pret. */
+  var fermer=function(){
+    window.__splashCacheAt=Date.now();
     splash.classList.add("hidden");
     setTimeout(function(){splash.style.display="none";},400);
     // La pastille chasse etait calculee PENDANT le splash (donc masquee par la
     // garde anti-intro) et rien ne la recalculait apres : elle n'apparaissait
     // qu'au premier changement d'onglet. On la reevalue des que le splash part.
     try{renderChasse();}catch(e){}
-  },1400);
+  };
+  if(typeof window.magoSplashPret==="function")window.magoSplashPret(fermer);
+  else setTimeout(fermer,0);
 }
 
 /* ================================
@@ -31672,7 +31846,7 @@ function renderAmis(){
   if(AMIS.q.length>=2){
     body.appendChild(amisTitre(tr("Résultats")));
     if(AMIS.cherche){
-      body.innerHTML+='<div style="padding:22px 0">'+magoLoader(true,tr("Recherche…"))+'</div>';
+      body.innerHTML+='<div style="padding:22px 0;text-align:center">'+magoLoader(true,tr("Recherche…"))+'</div>';
       try{traduirePage();}catch(e){}return;
     }
     if(!(AMIS.res||[]).length){
@@ -32932,6 +33106,7 @@ try{
   setMode(savedMode||"light");
   setLang(savedLang||"fr");
   initSoundToggle();
+  try{peindreVerres();}catch(e){}
   initSettingsPseudo();
   renderCats("cats-home");renderCats("cats-search");renderBrandsRail();
   var dl=document.getElementById("disc-list");
@@ -33048,6 +33223,17 @@ try{
     }
     // Consentement e-mails (opt-in RGPD) charge avec le profil.
     window._emailOptIn=!!d.emailOptIn;
+    /* La couleur du verre vient du compte ; la copie locale ne sert qu'au
+       splash, qui s'affiche avant Firebase. Le compte fait foi ; s'il n'en a
+       pas encore et que cet appareil en a une, on la lui envoie. */
+    try{
+      var vLocal=localStorage.getItem("magoVerre");
+      if(typeof d.verre==="string"&&window.MAGO_VERRES&&window.MAGO_VERRES[d.verre]){
+        if(d.verre!==vLocal){localStorage.setItem("magoVerre",d.verre);try{peindreVerres();}catch(err){}}
+      }else if(vLocal&&vLocal!=="or"&&window.MAGO_VERRES&&window.MAGO_VERRES[vLocal]&&window.fbVerreTeinte){
+        window.fbVerreTeinte(vLocal).catch(function(){});
+      }
+    }catch(err){}
     try{renderEmailOptInRow();}catch(err){}
     // Les vrais points sont maintenant chargés : la détection de niveau peut se
     // fier à eux (fête un niveau gagné pendant que l'app était fermée).

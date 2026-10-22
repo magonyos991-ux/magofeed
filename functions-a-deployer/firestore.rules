@@ -141,12 +141,39 @@ service cloud.firestore {
                 && (!('type' in d.avatar) || (d.avatar.type is string && d.avatar.type.size() <= 8))
                 && (!('v' in d.avatar) || d.avatar.v is string)));
     }
+    /* LA COULEUR DU VERRE EST UNE RECOMPENSE DE NIVEAU. Le client l'ecrit lui-
+       meme (c'est son choix), mais seulement une teinte que ses points
+       debloquent — sinon tout le monde s'offrirait l'Or de Legende depuis la
+       console du navigateur. Les seuils sont ceux de LEVELS et de MAGO_VERRES
+       dans index.html (0/50/150/300/600/1200/2500) : si l'un change, changer
+       l'autre. On ne verifie que si la teinte CHANGE : une personne dont les
+       points baissent (sanction, contribution annulee) garde sa teinte et peut
+       toujours ecrire le reste de son profil. Le langage des regles ne boucle
+       pas : une ligne par teinte, comme recentValide(). `points` peut manquer
+       sur un profil neuf, d'ou get('points', 0). */
+    function verreValide() {
+      let d = request.resource.data;
+      let pts = resource.data.get('points', 0);
+      return !changed().hasAny(['verre'])
+        || (d.verre is string && (
+             d.verre == 'or' || d.verre == 'citron'
+          || (d.verre == 'orange'    && pts >= 50)
+          || (d.verre == 'peche'     && pts >= 150)
+          || (d.verre == 'grenadine' && pts >= 300)
+          || (d.verre == 'menthe'    && pts >= 600)
+          || (d.verre == 'myrtille'  && pts >= 1200)
+          || (d.verre == 'legende'   && pts >= 2500)));
+    }
     match /users/{uid} {
       allow read: if true;
       /* Les memes interdictions qu'en modification : sinon il suffisait
          d'effacer son profil et de le recreer pour repartir sans penalite. */
       allow create: if isSelf(uid) && profilValide()
-        && !request.resource.data.keys().hasAny(champsServeur());
+        && !request.resource.data.keys().hasAny(champsServeur())
+        /* A la creation il n'y a pas de document existant, donc pas de points :
+           seules les deux teintes ouvertes a tous sont acceptees. */
+        && (!('verre' in request.resource.data)
+            || request.resource.data.verre in ['or', 'citron']);
       // Les compteurs d'e-mails sont ecrits par les Cloud Functions (Admin SDK,
       // qui contourne ces regles). Le client n'y touche pas, sinon il lui
       // suffirait de les remettre a zero pour contourner l'anti-spam.
@@ -168,7 +195,8 @@ service cloud.firestore {
       //   refCode       le code court du parrain, attribue par le serveur
       allow update: if isSelf(uid)
         && profilValide()
-        && !changed().hasAny(champsServeur());
+        && !changed().hasAny(champsServeur())
+        && verreValide();
       allow delete: if isSelf(uid) || isAdmin();
       /* Sous-collections eventuelles (favoris, etc.) : reservees au proprietaire.
          ATTENTION : il faut DEUX segments ({col}/{doc=**}), pas un seul. Ecrit

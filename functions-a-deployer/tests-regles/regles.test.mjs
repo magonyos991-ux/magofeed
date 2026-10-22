@@ -970,6 +970,45 @@ await doit('bloque : l admin lui-meme ne peut pas ecrire un don',
 await doit('bloque : effacer une alerte pour cacher un echec',
   ()=>assertFails(deleteDoc(doc(ad,'alertesAdmin','a1'))));
 
+/* ── La couleur du verre : une recompense de niveau, pas un champ libre ────
+   Sans regle, `verre` serait accepte avec n'importe quelle valeur (users/ n'a
+   pas de liste blanche) : chacun s'offrirait l'Or de Legende. Les seuils sont
+   ceux de LEVELS dans index.html. Identites dediees, semees avec leurs points. */
+await env.withSecurityRulesDisabled(async (c)=>{
+  const db=c.firestore();
+  await setDoc(doc(db,'users','v0'),{pseudo:'Vzero',points:0});
+  await setDoc(doc(db,'users','v150'),{pseudo:'Vcent',points:150});
+  await setDoc(doc(db,'users','v2500'),{pseudo:'Vleg',points:2500});
+  await setDoc(doc(db,'users','vsans'),{pseudo:'Vsans'});           // profil neuf : pas de champ points
+});
+const v0=env.authenticatedContext('v0').firestore();
+const v150=env.authenticatedContext('v150').firestore();
+const v2500=env.authenticatedContext('v2500').firestore();
+const vsans=env.authenticatedContext('vsans').firestore();
+await doit('verre : l or est ouvert a tout le monde',
+  ()=>assertSucceeds(setDoc(doc(v0,'users','v0'),{verre:'or'},{merge:true})));
+await doit('verre : le citron (niveau 1) aussi',
+  ()=>assertSucceeds(setDoc(doc(v0,'users','v0'),{verre:'citron'},{merge:true})));
+await doit('bloque : l orange avant 50 points',
+  ()=>assertFails(setDoc(doc(v0,'users','v0'),{verre:'orange'},{merge:true})));
+await doit('verre : la peche a 150 points',
+  ()=>assertSucceeds(setDoc(doc(v150,'users','v150'),{verre:'peche'},{merge:true})));
+await doit('bloque : la menthe a 150 points',
+  ()=>assertFails(setDoc(doc(v150,'users','v150'),{verre:'menthe'},{merge:true})));
+await doit('verre : l Or de Legende a 2500 points',
+  ()=>assertSucceeds(setDoc(doc(v2500,'users','v2500'),{verre:'legende'},{merge:true})));
+await doit('bloque : une teinte inconnue, meme pour une Legende',
+  ()=>assertFails(setDoc(doc(v2500,'users','v2500'),{verre:'arc-en-ciel'},{merge:true})));
+await doit('bloque : une teinte qui n est pas un texte',
+  ()=>assertFails(setDoc(doc(v2500,'users','v2500'),{verre:7},{merge:true})));
+await doit('verre : un profil sans champ points n a que l or et le citron',
+  async ()=>{ await assertSucceeds(setDoc(doc(vsans,'users','vsans'),{verre:'citron'},{merge:true}));
+              await assertFails(setDoc(doc(vsans,'users','vsans'),{verre:'orange'},{merge:true})); });
+await doit('verre : le reste du profil s ecrit sans toucher la teinte',
+  ()=>assertSucceeds(setDoc(doc(v0,'users','v0'),{streak:4},{merge:true})));
+await doit('bloque : naitre directement en Or de Legende',
+  ()=>assertFails(setDoc(doc(nv,'users','verre-neuf'),{pseudo:'Neo',verre:'legende'})));
+
 R.forEach(r=>console.log(r[0],'|',r[1]));
 console.log('\n'+(R.length-ko)+'/'+R.length+' conformes');
 await env.cleanup();
