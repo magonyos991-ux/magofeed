@@ -8083,10 +8083,18 @@ function missionSiTrouvee(did,nomMagasin){
     var d=(DRINKS||[]).find(function(x){return Number(x.id)===Number(did);});
     m.done=true;
     try{localStorage.setItem("magoMission",JSON.stringify(m));}catch(e){}
-    userStats.pts+=30;
+    /* LA MISSION DU JOUR NE RAPPORTE AUCUN POINT, ET N'EN A JAMAIS RAPPORTE.
+       Elle vit dans localStorage (`magoMission`) ; aucun declencheur serveur ne
+       la connait, et fbSyncUserStats n'envoie plus `points` — la regle
+       Firestore le refuse, c'est ecrit noir sur blanc a cote de l'envoi. Le
+       « +30 pts » etait donc efface des la prochaine lecture du score.
+       La mission garde ce qui la rend agreable : les confettis, le son, et le
+       fait d'avoir trouve. Elle ne promet plus ce qu'elle ne peut pas tenir.
+       Le geste de confirmation qui l'accomplit, lui, rapporte bien ses points
+       par le chemin normal — trois sur place, un de loin. */
     setTimeout(function(){
-      try{flyPts(30);playSound("win");confettiBurst();}catch(e){}
-      toast(trh("Mission accomplie ! Tu as rep\u00e9r\u00e9 \u00ab {b} \u00bb \u00b7 +30 pts",{b:(d&&d.name)||""}));
+      try{playSound("win");confettiBurst();}catch(e){}
+      toast(trh("Mission accomplie ! Tu as repéré « {b} »",{b:(d&&d.name)||""}));
     },700);
     try{renderWantedDrink();}catch(e){}
     try{updateProfileStats();}catch(e){}
@@ -11317,7 +11325,7 @@ function confirmFamilyFormat(family,barcode,fmt){
   if(window.fbAddFormatSuggestion){
     window.fbAddFormatSuggestion(family.id,family.name,String(barcode),fmt).catch(function(e){console.warn(e);});
   }
-  if(awardOnce("fmt:"+String(barcode),FOREVER)){userStats.pts+=2;}
+  awardOnce("fmt:"+String(barcode),FOREVER);   /* marque l'action, ne paie pas */
   updateProfileStats();
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
   var alt=document.getElementById("scan-not-family");
@@ -11325,7 +11333,7 @@ function confirmFamilyFormat(family,barcode,fmt){
   var btn=document.getElementById("scan-btn");
   if(btn){btn.textContent=tr("Voir les magasins");btn.style.background=family.color;btn.onclick=function(){stopScan();pick(family);};}
   playSound("win");
-  toast("Format ajout\u00E9 \u00E0 "+family.name+" \u00B7 +2 pts");
+  toast(trh("Format ajouté à {n} · merci",{n:family.name}));
 }
 function hasVariantExtras(offName,candidate){
   var n=normFamilyTxt(offName||"");
@@ -13427,6 +13435,7 @@ function todayKey(){
   var d=new Date();
   return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 }
+window.yesterdayKey=yesterdayKey;
 function yesterdayKey(){
   var d=new Date(Date.now()-86400000);
   return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
@@ -13440,8 +13449,12 @@ function bumpStreak(){
   if(userStreak.streak>userStreak.best)userStreak.best=userStreak.streak;
   try{localStorage.setItem("magoStreak",JSON.stringify(userStreak));}catch(e){/* quota */}
   if(userStreak.streak>=2){
-    userStats.pts+=2;
-    toast(trh("{n} jour(s) d'affil\u00E9e ! +2 pts bonus",{n:userStreak.streak}));
+    /* La serie vit dans localStorage et nulle part ailleurs : aucun rapport
+       n'est ecrit, donc aucun declencheur serveur ne la voit, et
+       fbSyncUserStats n'envoie plus `points`. Le « +2 pts bonus » disparaissait
+       a la prochaine lecture du score. La serie reste ce qu'elle est — une
+       raison de revenir — sans promettre de points. */
+    toast(trh("{n} jour(s) d'affilée !",{n:userStreak.streak}));
   }
   renderStreak();
 }
@@ -14300,11 +14313,10 @@ function renderMissions(){
   // bonus une seule fois par jour
   if(all&&localStorage.getItem("magoMissionBonus")!==dailyStats.date){
     try{localStorage.setItem("magoMissionBonus",dailyStats.date);}catch(e){}
-    userStats.pts+=10;
-    flyPts(10);
+    /* Meme chose : un bonus local que le serveur ignore et que la prochaine
+       lecture du score efface. On garde la fete, on retire la promesse. */
     playSound("win");
-    toast("Missions du jour accomplies \u00B7 +10 pts bonus !");
-    if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
+    toast(tr("Missions du jour accomplies !"));
   }
   var rows=defs.map(function(m){
     var ok=m.have>=m.need;
@@ -14316,7 +14328,7 @@ function renderMissions(){
   host.innerHTML='<div style="background:var(--bg2);border:1.5px solid '+(all?"#c69a57":"var(--border)")+';border-radius:18px;padding:13px 16px 9px">'+
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">'+
       '<div style="font-size:13px;font-weight:800;color:var(--s1)">'+sanitize(tr("Missions du jour"))+'</div>'+
-      '<div style="font-size:11px;font-weight:800;color:'+(all?"#c69a57":"var(--s2)")+'">'+(all?"\u2713 +10 pts":done+"/"+defs.length)+'</div>'+
+      '<div style="font-size:11px;font-weight:800;color:'+(all?"#c69a57":"var(--s2)")+'">'+(all?"\u2713":done+"/"+defs.length)+'</div>'+
     '</div>'+rows+'</div>';
   try{renderChasse();}catch(e){}
 }
@@ -20937,12 +20949,12 @@ function openFridgeResults(res){
     // Partage : la meme ecriture Firestore que l'assignation communautaire.
     var p=window.fbCommunityAddDrinks?window.fbCommunityAddDrinks(s.fbId||s.id,ids):Promise.resolve();
     Promise.resolve(p).then(function(){
-      if(awardOnce("fridge:"+s.id+":"+_dailyKey(),FOREVER)){userStats.pts+=10;flyPts(10);}
+      awardOnce("fridge:"+s.id+":"+_dailyKey(),FOREVER);   /* marque, ne paie pas */
       if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
       if(window.fbTouchCache)window.fbTouchCache();
       ov.remove();
       try{renderStoreDetail();}catch(e){}
-      toast("✓ "+ids.length+" boissons ajoutées à "+s.name+" · +10 pts");
+      toast("\u2713 "+trh("{n} boissons ajoutées à {s}",{n:ids.length,s:s.name}));
       playSound("win");
     }).catch(function(){
       ov.remove();
@@ -22355,11 +22367,26 @@ function openDiscPhotoSheet(discId,discName){
           renderDiscoveries();
           host.style.display="none";
           take.disabled=false;take.textContent="Ajoute une photo du produit";
-          if(awardOnce("dphoto:"+String(id),FOREVER)){userStats.pts+=3;flyPts(3);}
+          /* ══ LES GESTES QUE LE SERVEUR NE CREDITE PAS ══════════════════
+             discoveryPhotos, formatSuggestions, les votes sur une decouverte
+             deja proposee, l'ajout en lot depuis le scan de frigo, le partage
+             et la note : aucune de ces ecritures n'a de declencheur de credit.
+             Les seuls qui paient sont crediterContribution et crediterEntraide
+             sur `reports`, crediterDecouverte et crediterPromotion sur
+             `discoveries` — et ce dernier ne se declenche qu'a la CREATION,
+             jamais sur un vote, qui est une mise a jour.
+             Le « +N pts » local ne survivait d'ailleurs pas : adopterScoreServeur
+             ecrase userStats.pts avec le score serveur a chaque ouverture du
+             profil. L'utilisateur voyait donc des points apparaitre, puis
+             disparaitre sans explication.
+             On garde awardOnce — il marque l'action comme faite et evite le
+             rejeu — et on retire ce qui n'existe pas. Le geste reste utile, et
+             le message le dit. */
+          awardOnce("dphoto:"+String(id),FOREVER);
           bumpDaily("photos");updateProfileStats();
           if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
           playSound("win");
-          toast("Photo envoy\u00E9e \u00B7 +3 pts");
+          toast(tr("Photo envoyée · merci"));
         }).catch(function(e){
           console.warn(e);
           take.disabled=false;take.textContent="Ajoute une photo du produit";
@@ -22438,7 +22465,7 @@ function addDiscovery(name,brand,barcode,cat){
       already.votes=(already.votes||0)+1;
       markVotedDiscovery(already.id);
       userStats.pts+=2;
-      toast("Déjà suggérée · vote ajouté +2 pts");
+      toast(tr("Déjà suggérée · ton vote est compté"));
       contribute=true;
     }
   } else {
@@ -26202,14 +26229,14 @@ function shareDrink(d){
   var text="O\u00f9 trouver \u00ab "+d.name+" \u00bb pr\u00e8s de chez toi ? Magofeed te montre les magasins qui l'ont \u2014 gratuit :";
   if(navigator.share){
     navigator.share({title:"O\u00f9 trouver "+d.name+" \u00b7 Magofeed",text:text,url:url}).then(function(){
-      if(awardOnce("share:"+d.id,24)){userStats.pts+=2;flyPts(2);updateProfileStats();toast("Partag\u00e9 \u00b7 +2 pts");if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);}
+      if(awardOnce("share:"+d.id,24)){updateProfileStats();toast(tr("Partagé · merci"));}
     }).catch(function(){});
   }else{
     // Repli desktop : on copie le lien ET le texte d'accroche, pret a coller.
     var payload=text+" "+url;
     var copy=navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(payload):Promise.reject();
     Promise.resolve(copy).then(function(){toast("Lien copi\u00e9 \u2014 colle-le o\u00f9 tu veux !");playSound("pop");
-      if(awardOnce("share:"+d.id,24)){userStats.pts+=2;flyPts(2);updateProfileStats();if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);}
+      if(awardOnce("share:"+d.id,24)){updateProfileStats();}
     }).catch(function(){prompt("Copie ce lien :",url);});
   }
 }
@@ -27839,7 +27866,7 @@ function setRating(val){
   else{agg.sum+=val;agg.count+=1;}
   drinkRatingsAgg[curSel.id]=agg;
   curSel.stars=Math.round((agg.sum/agg.count)*10)/10;
-  if(!prev&&awardOnce("star:"+curSel.id,FOREVER)){userStats.pts+=2;toast("★ "+val+"/5 enregistré · +2 pts");}
+  if(!prev&&awardOnce("star:"+curSel.id,FOREVER)){toast("\u2605 "+val+"/5 "+tr("enregistré · merci"));}
   else{toast("★ Note mise \u00e0 jour : "+val+"/5");}
   updateProfileStats();playSound("pop");
   renderStarPanel();

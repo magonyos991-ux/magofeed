@@ -207,6 +207,59 @@ v("rupture a 3 km : AUCUN point, et l'ecran ne ment plus",
   pts.ruptLoin.gain===0&&!/\+\d+ pt/.test(pts.ruptLoin.toast),
   "gain "+pts.ruptLoin.gain+" — « "+pts.ruptLoin.toast+" »");
 
+/* ─── QUATRIEME SERIE — aucun point promis la ou le serveur n'en verse ───
+   Six gestes annonçaient des points qu'aucun declencheur serveur ne credite :
+   la photo d'une decouverte, l'ajout d'un format, le vote sur une decouverte
+   deja proposee, l'ajout en lot depuis le scan de frigo, le partage, la note,
+   la serie quotidienne et la mission du jour. Le « +N » local ne survivait
+   meme pas : adopterScoreServeur ecrase userStats.pts avec le score serveur. */
+const zero=await pg.evaluate(async()=>{
+  const d=DRINKS.find(x=>x.name==="Coca-Cola Original");
+  window.curSel=d;
+  const mesure=(nom,fn)=>{
+    try{ localStorage.removeItem("magoAwards"); window.awardLog={}; }catch(e){}
+    const avant=window.userStats.pts; const t=[]; const vrai=window.toast;
+    window.toast=function(x){t.push(String(x));};
+    let err=null; try{ fn(); }catch(e){ err=String(e.message).slice(0,60); }
+    window.toast=vrai;
+    return {nom, gain:window.userStats.pts-avant, toast:t.join(" | "), err};
+  };
+  const res=[];
+  /* La note d'une boisson : aucun rapport n'est ecrit. */
+  res.push(mesure("note",()=>{ window.userRatings={}; window.setRating(4); }));
+  /* La serie quotidienne : localStorage, rien d'autre. */
+  res.push(mesure("serie",()=>{
+    /* « hier » exactement : sinon bumpStreak repart a 1 et n'atteint jamais
+       le seuil de deux jours — le controle passerait sans rien exercer. */
+    window.userStreak={streak:4,best:4,last:window.yesterdayKey()};
+    window.bumpStreak();
+  }));
+  return res;
+});
+zero.forEach(z=>{
+  v("« "+z.nom+" » : aucun point fantome", z.gain===0, "gain "+z.gain+(z.err?" (erreur: "+z.err+")":""));
+  v("« "+z.nom+" » : rien n'est promis a l'ecran", !/\+\s*\d+\s*(pts?|points?)/i.test(z.toast),
+    "« "+z.toast+" »");
+});
+
+/* Controle de source pour les gestes qu'on ne peut pas declencher ici. */
+import { readFile as _lire } from "node:fs/promises";
+const src=await _lire("/home/user/magofeed/index.html","utf8");
+const interdits=[
+  ["photo de decouverte","Photo envoy"],
+  ["format ajoute","Format ajout"],
+  ["vote sur une decouverte","vote ajout"],
+  ["scan de frigo","boissons ajout"],
+  ["mission du jour","Mission accomplie"],
+  ["missions du jour","Missions du jour accomplies"],
+];
+interdits.forEach(([nom,motif])=>{
+  /* La ligne qui porte ce message ne doit plus annoncer de points. */
+  const lignes=src.split("\n").filter(l=>l.indexOf(motif)!==-1 && l.indexOf("*")!==0 && !/^\s*\*/.test(l));
+  const coupable=lignes.find(l=>/\+\s*\d+\s*pts/.test(l) && !/^\s*\/\*/.test(l));
+  v("« "+nom+" » ne promet plus de points", !coupable, coupable?coupable.trim().slice(0,70):"aucune promesse");
+});
+
 console.log("\n  L'APPLICATION N'AFFIRME QUE CE QU'ELLE SAIT\n");
 let ko=0;
 for(const [nom,ok,det] of etapes){ if(!ok)ko++; console.log("   "+(ok?"ok  ":"ECHEC")+"  "+nom.padEnd(46)+" "+det); }
