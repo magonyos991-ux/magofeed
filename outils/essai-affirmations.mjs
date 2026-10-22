@@ -244,7 +244,12 @@ zero.forEach(z=>{
 
 /* Controle de source pour les gestes qu'on ne peut pas declencher ici. */
 import { readFile as _lire } from "node:fs/promises";
-const src=await _lire("/home/user/magofeed/index.html","utf8");
+/* On retire les commentaires AVANT de chercher : ce fichier en contient des
+   milliers, et plusieurs CITENT les phrases fautives pour expliquer pourquoi
+   elles ont ete retirees. Chercher dedans ferait echouer le controle sur sa
+   propre explication. */
+const srcBrut=await _lire("/home/user/magofeed/index.html","utf8");
+const src=srcBrut.replace(/\/\*[\s\S]*?\*\//g,"").replace(/^\s*\/\/.*$/gm,"");
 const interdits=[
   ["photo de decouverte","Photo envoy"],
   ["format ajoute","Format ajout"],
@@ -252,11 +257,22 @@ const interdits=[
   ["scan de frigo","boissons ajout"],
   ["mission du jour","Mission accomplie"],
   ["missions du jour","Missions du jour accomplies"],
+  ["carte mission accomplie","Mission du jour accomplie"],
+  ["carte mission a trouver","On ne sait pas encore o"],
 ];
+/* Filet large : plus AUCUN « +30 pts » nulle part dans le code vivant. La
+   mission ne rapporte rien, quel que soit l'ecran qui en parle — deux cartes
+   de l'accueil l'annonçaient encore en HTML, hors de portee d'un controle qui
+   ne regardait que les toasts. */
+{
+  const lignes=src.split("\n").filter(l=>/\+30 pts/.test(l));
+  v("plus aucun « +30 pts » dans le code vivant", lignes.length===0,
+    lignes.length?lignes[0].trim().slice(0,80):"aucun");
+}
 interdits.forEach(([nom,motif])=>{
   /* La ligne qui porte ce message ne doit plus annoncer de points. */
-  const lignes=src.split("\n").filter(l=>l.indexOf(motif)!==-1 && l.indexOf("*")!==0 && !/^\s*\*/.test(l));
-  const coupable=lignes.find(l=>/\+\s*\d+\s*pts/.test(l) && !/^\s*\/\*/.test(l));
+  const lignes=src.split("\n").filter(l=>l.indexOf(motif)!==-1);
+  const coupable=lignes.find(l=>/\+\s*\d+\s*pts/.test(l));
   v("« "+nom+" » ne promet plus de points", !coupable, coupable?coupable.trim().slice(0,70):"aucune promesse");
 });
 
