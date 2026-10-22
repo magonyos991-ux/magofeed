@@ -91,6 +91,12 @@ Object.assign(exports, require("./catalogue-ia"));
    annoncait le contraire. chasse-codes.js le demandait pourtant noir sur blanc
    dans sa propre section DEPLOIEMENT. ─────────────────────────────────────*/
 Object.assign(exports, require("./chasse-codes"));
+/* ── Couper les sessions des autres appareils. Mesure a l'emulateur : changer
+   son mot de passe, ou le reinitialiser par courriel, ne deconnecte AUCUN
+   autre appareil. Quelqu'un qui se sait pirate faisait donc le seul geste
+   qu'il connaisse — et ne se protegeait de rien. Seul l'Admin SDK peut
+   revoquer, d'ou cette fonction. ──────────────────────────────────────────*/
+Object.assign(exports, require("./comptes-securite"));
 /* ── « X personnes ont cherche cette boisson ». Meme oubli que chasse-codes,
    et meme consequence : l'application ECRIT dans `demand` depuis des semaines,
    un document par appareil, par boisson et par jour. Personne ne les resumait.

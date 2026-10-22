@@ -182,12 +182,27 @@ exports.antiFarmRupture = onDocumentCreated(
        sanction est volontairement ineffacable. On exige donc un compte lie a
        une methode de connexion reelle (Google ou e-mail) et vieux d'une
        semaine — la contradiction reste facile pour un habitue, impossible pour
-       un compte fabrique a l'instant. */
+       un compte fabrique a l'instant.
+       MISE A JOUR : « e-mail » ne suffit plus — il faut que l'adresse ait ete
+       CONFIRMEE par un clic sur le lien envoye. Voir le test plus bas. */
     const reels = new Set();
     for (const u of contradicteurs) {
       try {
         const acc = await getAuth().getUser(u);
-        const vraiCompte = Array.isArray(acc.providerData) && acc.providerData.length > 0;
+        /* « Avoir une methode de connexion » ne prouve plus rien depuis qu'on
+           peut creer un compte Magofeed avec une adresse inventee, qui n'a meme
+           pas besoin d'exister. Deux comptes fabriques, une semaine d'attente,
+           et la sanction — 3 points par couple, ineffacable par dessein —
+           tombait sur un contributeur honnete.
+           On exige donc qu'un TIERS ait verifie l'identite : soit un
+           fournisseur externe (Google), soit le lien de verification
+           reellement clique dans la boite aux lettres. */
+        const providers = Array.isArray(acc.providerData)
+          ? acc.providerData.map(function (pr) { return pr && pr.providerId; }).filter(Boolean)
+          : [];
+        const parTiers = providers.some(function (id) { return id !== "password"; });
+        const parEmailVerifie = providers.indexOf("password") !== -1 && acc.emailVerified === true;
+        const vraiCompte = parTiers || parEmailVerifie;
         const ancien = Date.now() - Date.parse(acc.metadata.creationTime) > 7 * 86400000;
         if (vraiCompte && ancien) reels.add(u);
       } catch (e) { /* compte introuvable : il ne compte pas */ }
