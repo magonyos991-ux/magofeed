@@ -272,13 +272,26 @@ async function principal() {
      l'ecart depassera forcement le seuil : il se relit a la main, une fois.
      Ensuite, semaine apres semaine, 5 % a du sens. */
   let communes = 0, changees = 0;
+  const exemples = [];
   for (const cle of Object.keys(lu.horaires)) {
     if (ancien[cle] === undefined) continue;
     communes++;
-    if (ancien[cle] !== lu.horaires[cle]) changees++;
+    if (ancien[cle] !== lu.horaires[cle]) {
+      changees++;
+      if (exemples.length < 12) exemples.push(cle + " : « " + ancien[cle] + " » -> « " + lu.horaires[cle] + " »");
+    }
   }
   const derive = communes ? changees / communes : 0;
   dire("derive : " + changees + " valeurs changees sur " + communes + " communes (" + (100 * derive).toFixed(2) + " %)");
+  /* MONTRER CE QUI CHANGE, TOUJOURS. Un pourcentage de derive ne dit pas si
+     la Belgique a bouge ou si la requete s'est mise a formater autrement.
+     Douze exemples suffisent a trancher a l'œil, et ils coutent douze lignes
+     de journal. Sans eux, « relance avec GABARIT=true » est une invitation a
+     ecraser 13 000 valeurs sans les avoir regardees. */
+  if (exemples.length) {
+    dire("exemples de ce qui change :");
+    exemples.forEach((x) => dire("  " + x));
+  }
   if (communes && derive > SEUIL_DERIVE) {
     if (!gabarit) throw new Error("derive de " + (100 * derive).toFixed(2) + " % : la Belgique n'a pas change d'avis en une semaine. Rien n'est ecrit. Relis, puis relance avec GABARIT=true si c'est legitime.");
     dire("  GABARIT : derive acceptee pour ce premier passage");
