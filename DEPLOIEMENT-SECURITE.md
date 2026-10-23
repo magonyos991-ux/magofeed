@@ -9,7 +9,7 @@ Mesuré directement dans le projet, pas déclaré.
 
 | Vérification | Résultat |
 |---|---|
-| Fonctions déployées | 30 sur 30, aucune absente |
+| Fonctions déployées | 29 sur 29 (`importerHoraires` débranchée exprès, voir plus bas) |
 | Soldes figés (`pointsHerites`) | 115 sur 115 |
 | Profils ayant perdu des points à la bascule | 0 |
 | Profils remis à zéro | 0 |
@@ -252,8 +252,16 @@ depuis longtemps, donc elle interdisait de déployer alors que tout était vert.
 ## 2. Les Cloud Functions de base — DÉJÀ FAIT
 
 Vérifié : `identifyDrink`, `confirmAiDrink`, `identifyFridge`, `remplirEnseignes`,
-`importerHoraires`, `antiFarmRupture`, `fiche`, `kofiWebhook`, `sendTestPush`,
-`sendTestEmail` et les quatre notifications répondent toutes. Rien à faire ici.
+`antiFarmRupture`, `fiche`, `kofiWebhook`, `sendTestPush`, `sendTestEmail` et les
+quatre notifications répondent toutes. Rien à faire ici.
+
+`importerHoraires` a été **débranchée**. Elle était déployée, et son bouton
+d'administration promettait d'écrire « sur tous les magasins qui n'en ont pas »
+alors que le code écrivait dès que la valeur différait : un clic effaçait les
+horaires saisis par les commerçants. Elle est encore vivante en production
+**jusqu'à ton prochain `firebase deploy --only functions`**, qui la supprimera.
+Le bouton, lui, a disparu de l'application : plus rien ne peut l'appeler. Le
+pourquoi complet est en tête de `functions-a-deployer/importer-horaires.js`.
 
 Depuis la réorganisation, elles sont branchées dans le `index.js` unique et
 repartent avec toutes les autres à chaque déploiement. Tu n'as plus de liste de

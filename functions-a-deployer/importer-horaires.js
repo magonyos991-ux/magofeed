@@ -1,19 +1,45 @@
 /**
- * Magofeed — IMPORT DES HORAIRES REELS (OpenStreetMap), cote serveur.
+ * Magofeed — IMPORT DES HORAIRES OPENSTREETMAP : DEBRANCHE, ET POURQUOI.
  *
- * « Je veux les horaires de tous les magasins, comme Google Maps. »
- * Les horaires existent librement dans OpenStreetMap ; ils sont moissonnes
- * pour toute la Belgique dans data/horaires-osm-be.json (publie avec le
- * site). Cette fonction telecharge ce fichier, parcourt la collection stores
- * avec l'Admin SDK, et ecrit les horaires sur chaque magasin importe d'OSM
- * (identifiants « o<id> » ou champ osm) qui n'en a pas encore. L'app affiche
- * alors Ouvert/Ferme d'apres les VRAIS horaires — l'heuristique ne reste
- * qu'en dernier recours pour les magasins ajoutes a la main.
+ * CE QU'ELLE PROMETTAIT : « ecrit les horaires sur chaque magasin importe
+ * d'OSM qui n'en a pas encore ». CE QU'ELLE FAISAIT : elle ecrivait des que la
+ * valeur differait. Son seul garde-fou etait une egalite de chaine, jamais un
+ * test « ce magasin a-t-il deja un horaire ». La boite de dialogue
+ * d'administration repetait la meme promesse a l'ecran. Un clic, et les
+ * horaires qu'un commercant avait saisis lui-meme partaient sans retour, sur
+ * une base de 169 comptes reels.
  *
- * Deploiement (meme rituel que remplirEnseignes) :
- *   curl.exe -o importer-horaires.js https://magonyos991-ux.github.io/magofeed/functions-a-deployer/importer-horaires.js
- *   + dans index.js : Object.assign(exports, require("./importer-horaires"));
- *   firebase deploy --only functions:importerHoraires
+ * ET ELLE NE SERVAIT A RIEN. L'application lit deja data/horaires-osm-be.json
+ * A L'AFFICHAGE, en chargement paresseux : chargerHorairesOSM + osmIdDe +
+ * horairesReels font la jointure par identifiant OpenStreetMap au moment ou la
+ * fiche s'ouvre. Ecrire ces memes horaires dans Firestore n'ajoutait aucun
+ * affichage.
+ *
+ * PIRE, CELA RENDAIT LE RAFRAICHISSEMENT HEBDOMADAIRE INERTE. openInfo essaie
+ * s.hours EN PREMIER ; des que le champ est rempli, horairesReels n'est plus
+ * jamais consulte pour ce magasin. Publier un fichier plus frais la semaine
+ * suivante n'aurait donc rien corrige sur les magasins touches par l'import —
+ * l'inverse exact de ce qui etait demande.
+ *
+ * ET LE FICHIER N'EST PAS CE QUE SON NOM DIT. Ses cles sont des identifiants
+ * OpenStreetMap NUS, qui melangent nœuds et chemins dans un seul espace de
+ * noms. Un meme nombre peut designer les deux : 8112413 est a la fois un nœud
+ * supprime et un chemin vivant — un Kaufland d'Aix-la-Chapelle, en ALLEMAGNE,
+ * dont l'horaire est bien celui inscrit dans le fichier. Le fichier contient
+ * donc de l'etranger, et la jointure par nombre nu est ambigue par
+ * construction. Figer cela dans 34 786 documents de production aurait grave
+ * des horaires faux en les presentant comme des faits.
+ *
+ * CE QUI EST FAIT A LA PLACE : le champ `hours` reste reserve aux horaires
+ * d'origine HUMAINE, le fichier sert l'affichage, et son rafraichissement est
+ * un simple remplacement de fichier qui ne touche aucun document.
+ *
+ * ELLE RESTE ICI, CORRIGEE, PLUTOT QUE SUPPRIMEE : si quelqu'un la rebranche
+ * un jour, elle doit etre incapable de detruire. Le garde-fou ci-dessous
+ * refuse tout magasin qui porte deja un horaire, et la lecture de
+ * l'identifiant couvre enfin le champ osmId que le client lit depuis
+ * longtemps. Elle n'est PAS exportee : voir le bloc « PAS ENCORE BRANCHE »
+ * de index.js.
  */
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { initializeApp, getApps } = require("firebase-admin/app");
@@ -36,7 +62,7 @@ exports.importerHoraires = onCall(
     if (!rep.ok) throw new HttpsError("unavailable", "Jeu d'horaires introuvable (" + rep.status + ").");
     const horaires = await rep.json();
 
-    let parcourus = 0, ecrits = 0, dejaFait = 0;
+    let parcourus = 0, ecrits = 0, dejaFait = 0, proteges = 0;
     let last = null;
     for (;;) {
       let q = db.collection("stores").orderBy("__name__").limit(600);
@@ -47,13 +73,19 @@ exports.importerHoraires = onCall(
       for (const d of snap.docs) {
         parcourus++;
         const v = d.data() || {};
-        // identifiant OSM : champ osm, ou id de document « o12345 »
-        let osm = v.osm != null ? String(v.osm) : null;
-        if (!osm && /^o\d+$/.test(d.id)) osm = d.id.slice(1);
+        // identifiant OSM : champ osm, champ osmId, ou id de document « o12345 »
+        // Meme ordre que osmIdDe cote client : les trois formes coexistent en base.
+        let osm = null;
+        if (v.osm != null && /^\d+$/.test(String(v.osm))) osm = String(v.osm);
+        else if (v.osmId != null && /^\d+$/.test(String(v.osmId))) osm = String(v.osmId);
+        else if (/^o\d+$/.test(d.id)) osm = d.id.slice(1);
         if (!osm) continue;
         const h = horaires[osm];
         if (!h) continue;
         if (v.hours === h) { dejaFait++; continue; }
+        // JAMAIS par-dessus un horaire existant. On ne sait pas qui l'a ecrit :
+        // il peut venir d'un commercant, et rien dans la base ne le dit.
+        if (v.hours != null && String(v.hours).trim() !== "") { proteges++; continue; }
         batch.update(d.ref, { hours: h });
         ecrits++;
         if (++n >= 450) { await batch.commit(); batch = db.batch(); n = 0; }
@@ -62,7 +94,7 @@ exports.importerHoraires = onCall(
       last = snap.docs[snap.docs.length - 1];
       if (snap.size < 600) break;
     }
-    console.log("importerHoraires:", parcourus, "parcourus,", ecrits, "horaires ecrits,", dejaFait, "deja a jour");
-    return { parcourus, ecrits, dejaFait, dansLeJeu: Object.keys(horaires).length };
+    console.log("importerHoraires:", parcourus, "parcourus,", ecrits, "ecrits,", dejaFait, "deja a jour,", proteges, "proteges");
+    return { parcourus, ecrits, dejaFait, proteges, dansLeJeu: Object.keys(horaires).length };
   }
 );

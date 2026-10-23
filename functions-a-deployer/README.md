@@ -66,7 +66,7 @@ plus bas.
 | `scan-frigo.js` | une photo de frigo, tout un rayon | `ANTHROPIC_API_KEY` (en place) |
 | `commerces-monde.js` | commerces du monde entier via Overture Maps | aucun |
 | `remplir-enseignes.js` | rayon **probable** d'une enseigne, jamais « vérifié » | aucun |
-| `importer-horaires.js` | horaires d'ouverture depuis OpenStreetMap | aucun |
+| `importer-horaires.js` | **débranchée** : elle écrasait les horaires saisis | aucun |
 | `partage.js` | aperçu des liens partagés | aucun |
 | `sauvegarde.js` | sauvegarde de la base, chaque nuit et à la demande | aucun |
 | `don-notification.js` | notification à chaque don Ko-fi | `KOFI_JETON` (en place) |
