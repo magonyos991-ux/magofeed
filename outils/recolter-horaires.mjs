@@ -132,7 +132,10 @@ async function recolter() {
         });
         if (rep.ok) {
           const txt = await rep.text();
-          if (txt.length < 100000) throw new Error("reponse trop courte (" + txt.length + " octets) — probablement une page d'erreur");
+          /* Overpass repond 200 avec un message d'erreur dans le corps quand
+             la requete ne lui plait pas. Recopier SON texte, pas seulement le
+             mien : sans cela on diagnostique a l'aveugle. */
+          if (txt.length < 100000) throw new Error("reponse trop courte (" + txt.length + " octets). Overpass a dit : " + txt.replace(/\s+/g, " ").trim().slice(0, 400));
           dire("  recu " + txt.length + " octets");
           return { texte: txt, endpoint: base };
         }
