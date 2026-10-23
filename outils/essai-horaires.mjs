@@ -127,6 +127,18 @@ const puce=await pg.evaluate(()=>{
   };
 });
 
+/* Les applications de magasin embarquent leur propre copie du fichier : sans
+   ce detour, un rafraichissement hebdomadaire ne les atteindrait jamais. */
+const chemins=await pg.evaluate(()=>{
+  if(typeof window._cheminsHoraires!=="function")return{absente:true};
+  const web=window._cheminsHoraires();
+  const avant=window.Capacitor;
+  window.Capacitor={isNativePlatform:()=>true};
+  const natif=window._cheminsHoraires();
+  window.Capacitor=avant;
+  return{web:web,natif:natif};
+});
+
 const etapes=[];
 const v=(nom,cond,det)=>etapes.push([nom,!!cond,det||""]);
 v("« 0h (24/7) » se lit",            r.fr24==="24/7", "normaliserHoraires -> "+r.fr24);
@@ -165,6 +177,14 @@ if(puce.absente||puce.erreur){
   v("puce « Ouvert » : jette la devinette", puce.gardeLaDevinette===false, puce.nbGardes+" garde(s)");
   v("puce « Ouvert » : garde le fait",      puce.aUneCle24?puce.gardeLeFait===true:true, puce.aUneCle24?"24/7 garde":"aucune valeur 24/7");
   v("puce « Ouvert » : compte les inconnus",puce.inconnusComptes===2, "_exploreInconnus="+puce.inconnusComptes+" (devinette + sans horaire)");
+}
+/* Le chemin du fichier selon la coquille. */
+if(chemins.absente){
+  v("chemins des horaires : joignables", false, "_cheminsHoraires introuvable");
+}else{
+  v("web : le chemin relatif, rien de plus", chemins.web.length===1&&chemins.web[0]==="data/horaires-osm-be.json", chemins.web.join(" puis "));
+  v("natif : la copie PUBLIEE d'abord",     chemins.natif.length===2&&/^https:\/\//.test(chemins.natif[0]), chemins.natif.join(" puis "));
+  v("natif : repli sur la copie embarquee", chemins.natif[1]==="data/horaires-osm-be.json", chemins.natif[1]);
 }
 
 console.log("\n  L'APPLICATION NE SE CONTREDIT PLUS SUR LES HORAIRES\n");

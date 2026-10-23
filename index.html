@@ -1030,6 +1030,15 @@ try{
           <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="M4 17l5-5 4 4 3-3 4 4"/></svg></div>
           <div class="set-txt"><div class="set-title">Photos produits</div><div class="set-sub">Open Food Facts · CC-BY-SA</div></div>
         </div>
+        <!-- Meme raison : redistribuer 34 786 horaires d'ouverture forme une
+             base derivee d'OpenStreetMap, et l'ODbL demande l'attribution au
+             niveau de la DONNEE, pas seulement sur le fond de carte (ou elle
+             existe deja). data/horaires-osm-be.meta.json la porte aussi, pour
+             qui lit le depot. -->
+        <div class="set-row static">
+          <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></div>
+          <div class="set-txt"><div class="set-title">Horaires d’ouverture</div><div class="set-sub">OpenStreetMap · ODbL 1.0</div></div>
+        </div>
       </div>
       <div id="admin-section" style="display:none">
         <div class="set-sec">Administration</div>
@@ -29054,11 +29063,40 @@ function heuristicHours(name,type){
    garde ensuite). Tant qu'il n'est pas la, on retombe sur l'heuristique :
    aucune regression, juste une precision qui arrive. */
 var HORAIRES_OSM=null, _horairesEtat=0;   // 0 rien, 1 en cours, 2 pret, 3 echec
+/* ══ LES APPLICATIONS INSTALLEES LISAIENT UN INSTANTANE FIGE ════════════════
+   Le dossier data/ est recopie dans www/ puis enfourne dans l'AAB et l'IPA :
+   sur Android et iOS, « data/horaires-osm-be.json » designe la copie embarquee
+   le jour de la compilation. Un rafraichissement hebdomadaire du depot ne les
+   atteindrait donc JAMAIS — elles afficheraient les horaires du jour de
+   l'envoi sur les magasins, pendant des mois.
+   En coquille native, on tente donc d'abord la copie publiee avec le site, et
+   on retombe sur la copie embarquee a la moindre erreur. Meme donnee, meme
+   source, aucune devinette ajoutee : le repli garantit qu'une coupure reseau
+   ne degrade rien. Sur le web et en PWA, rien ne change — le chemin relatif
+   EST la copie publiee. */
+var URL_HORAIRES_PUBLIEE="https://magonyos991-ux.github.io/magofeed/data/horaires-osm-be.json";
+function _cheminsHoraires(){
+  var natif=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
+  return natif?[URL_HORAIRES_PUBLIEE,"data/horaires-osm-be.json"]:["data/horaires-osm-be.json"];
+}
 function chargerHorairesOSM(){
   if(_horairesEtat)return;
   _horairesEtat=1;
-  fetch("data/horaires-osm-be.json")
-    .then(function(r){ if(!r.ok)throw 0; return r.json(); })
+  var chemins=_cheminsHoraires();
+  var essayer=function(i){
+    /* Delai maximal sur le chemin RESEAU seulement. Sans lui, une connexion
+       qui traine laisserait _horairesEtat a 1 indefiniment, et l'accueil
+       afficherait « Horaires en cours de chargement… » pour toujours au lieu
+       de retomber sur la copie embarquee. Le dernier chemin est local : il n'a
+       pas besoin de delai, et lui en imposer un casserait le repli sur un
+       telephone lent. */
+    var dernier=(i+1>=chemins.length);
+    var p=dernier?fetch(chemins[i]):fetchWithTimeout(chemins[i],6000);
+    return p
+      .then(function(r){ if(!r.ok)throw 0; return r.json(); })
+      .catch(function(e){ if(!dernier)return essayer(i+1); throw e; });
+  };
+  essayer(0)
     .then(function(j){
       HORAIRES_OSM=j; _horairesEtat=2;
       /* Les ecrans deja peints affichaient « Ouvert » selon l'heuristique :

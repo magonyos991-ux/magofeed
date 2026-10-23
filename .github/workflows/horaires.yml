@@ -1,0 +1,120 @@
+name: Rafraîchir les horaires belges
+
+# data/horaires-osm-be.json a été ajouté le 28 août 2026 par un seul commit, et
+# personne ne savait le refabriquer : aucun script, aucune note, et le message
+# du commit qui l'apporte n'en dit pas un mot. Il a vieilli huit semaines sans
+# que rien ne le signale.
+#
+# Ce flux est le générateur qui manquait. Il tourne tout seul chaque lundi,
+# récolte les horaires chez OpenStreetMap, ne remplace le fichier QUE si la
+# récolte est saine, et publie le site — sans quoi personne ne verrait rien.
+#
+# Il n'écrit RIEN dans Firestore. L'application lit ce fichier à l'affichage et
+# préfère toujours l'horaire saisi par le commerçant : remplacer ce fichier ne
+# peut donc effacer aucune saisie. « Rafraîchis sans changer ceux qui ont été
+# modifiés » est tenu par construction.
+
+on:
+  schedule:
+    # Lundi 03h17 UTC. Pas à l'heure pile : les tâches planifiées du monde
+    # entier se bousculent à :00 et GitHub les retarde alors de plusieurs
+    # dizaines de minutes.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      gabarit:
+        description: "Premier passage : accepter l'écart avec le fichier hérité"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: horaires-osm
+  cancel-in-progress: false
+
+jobs:
+  recolter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Récolter les horaires chez OpenStreetMap
+        # Le script refuse d'écrire si la récolte est trop maigre ou si trop de
+        # valeurs changent d'un coup. Dans ce cas il sort en code 1, le flux
+        # s'arrête ici, et le fichier précédent reste en place.
+        run: node outils/recolter-horaires.mjs
+        env:
+          GABARIT: ${{ inputs.gabarit }}
+
+      - name: Committer seulement s'il y a un changement
+        id: commit
+        run: |
+          set -e
+          if git diff --quiet -- data/horaires-osm-be.json data/horaires-osm-be.meta.json; then
+            echo "change=non" >> "$GITHUB_OUTPUT"
+            echo "Aucun horaire belge n'a changé cette semaine."
+            exit 0
+          fi
+          git config user.name  "Rafraichissement des horaires"
+          git config user.email "actions@github.com"
+          git add data/horaires-osm-be.json data/horaires-osm-be.meta.json
+          # Heredoc, jamais une substitution de commande dans -m : un meta
+          # illisible produirait un message vide ou un commit cassé.
+          git commit -F - <<'MSG'
+          Horaires belges rafraichis (OpenStreetMap, ODbL 1.0)
+
+          Recolte hebdomadaire automatique. Le detail chiffre de ce passage
+          est dans data/horaires-osm-be.meta.json : combien de nouveaux, de
+          modifies, d'absents gardes, et la derive mesuree.
+
+          Aucun document Firestore n'est touche par ce flux.
+          MSG
+          git push
+          echo "change=oui" >> "$GITHUB_OUTPUT"
+
+      - name: Publier le site, sinon personne ne verra le nouveau fichier
+        # DEUX RAISONS, et l'oubli de cette étape annulerait tout le reste.
+        # 1. Une poussée faite avec GITHUB_TOKEN ne déclenche pas « on: push »,
+        #    donc pages.yml ne repartirait jamais tout seul.
+        # 2. sw.js sert tout le même-origine en CACHE D'ABORD, sous un nom de
+        #    cache tamponné à l'empreinte du commit par pages.yml. Sans nouveau
+        #    déploiement, les applications déjà installées continueraient de
+        #    lire l'ancienne copie pour toujours.
+        if: steps.commit.outputs.change == 'oui'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X POST \
+            repos/${{ github.repository }}/actions/workflows/pages.yml/dispatches \
+            -f ref=main
+
+      - name: Dire ce qui s'est passé
+        # Pas de « if: always() » : si la récolte a échoué, le meta sur le
+        # disque est celui de la semaine dernière, et l'afficher laisserait
+        # croire que ce passage-ci a réussi.
+        run: |
+          if [ -f data/horaires-osm-be.meta.json ]; then
+            echo "### Horaires belges" >> "$GITHUB_STEP_SUMMARY"
+            node -e '
+              const m = require("./data/horaires-osm-be.meta.json");
+              const l = [
+                ["Horaires publiés", m.nbCles],
+                ["Nouveaux", m.nbNouveaux],
+                ["Modifiés", m.nbModifies],
+                ["Absents gardés", m.nbAbsentsGardes],
+                ["Oubliés (8 semaines absents)", m.nbOublies],
+                ["Dérive (pour mille)", m.deriveParMille],
+                ["Lignes rejetées", m.lignesRejetees],
+                ["Récolté le", m.date],
+              ];
+              console.log("| | |\n|---|---|");
+              for (const [k, v] of l) console.log("| " + k + " | " + v + " |");
+            ' >> "$GITHUB_STEP_SUMMARY"
+          fi
