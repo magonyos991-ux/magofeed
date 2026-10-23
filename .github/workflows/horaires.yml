@@ -49,7 +49,14 @@ jobs:
         # Le script refuse d'écrire si la récolte est trop maigre ou si trop de
         # valeurs changent d'un coup. Dans ce cas il sort en code 1, le flux
         # s'arrête ici, et le fichier précédent reste en place.
-        run: node outils/recolter-horaires.mjs
+        #
+        # La sortie est gardée dans un fichier, parce qu'un échec à 3h17 du
+        # matin dont on ne peut pas lire la raison ne sert à personne : le pas
+        # « Dire ce qui s'est passé » la recopie dans le résumé du passage,
+        # succès ou échec.
+        run: |
+          set -o pipefail
+          node outils/recolter-horaires.mjs 2>&1 | tee "$RUNNER_TEMP/recolte.log"
         env:
           GABARIT: ${{ inputs.gabarit }}
 
@@ -96,12 +103,22 @@ jobs:
             -f ref=main
 
       - name: Dire ce qui s'est passé
-        # Pas de « if: always() » : si la récolte a échoué, le meta sur le
-        # disque est celui de la semaine dernière, et l'afficher laisserait
-        # croire que ce passage-ci a réussi.
+        # « if: always() » parce que c'est en cas d'ECHEC que ce résumé sert le
+        # plus. Mais le tableau chiffré, lui, n'est écrit que si la récolte a
+        # réussi : sinon le meta sur le disque est celui de la semaine
+        # dernière, et l'afficher laisserait croire que ce passage-ci est
+        # passé.
+        if: always()
         run: |
-          if [ -f data/horaires-osm-be.meta.json ]; then
-            echo "### Horaires belges" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Horaires belges" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$RUNNER_TEMP/recolte.log" ]; then
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat "$RUNNER_TEMP/recolte.log" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "La récolte n'a même pas démarré." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "${{ steps.commit.outcome }}" != "skipped" ] && [ -f data/horaires-osm-be.meta.json ]; then
             node -e '
               const m = require("./data/horaires-osm-be.meta.json");
               const l = [
