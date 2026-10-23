@@ -149,10 +149,18 @@ async function recolter() {
       try {
         await attendreCreneau(base);
         dire("  interrogation de " + base + " (essai " + (essai + 1) + ")");
+        /* BORNE DE TEMPS COTE CLIENT. La requete annonce [timeout:900] a
+           Overpass, mais rien n'obligeait fetch() a rendre la main : une
+           connexion qui pend aurait fait tourner le flux pendant des heures,
+           une fois par semaine, sans rien produire. Une recolte saine rend en
+           moins de deux minutes ; au-dela de cinq, on passe au miroir
+           suivant. */
+        const minuteur = AbortSignal.timeout(300000);
         const rep = await fetch(base + "/interpreter", {
           method: "POST",
           headers: Object.assign({ "Content-Type": "text/plain" }, UA),
           body: REQUETE,
+          signal: minuteur,
         });
         if (rep.ok) {
           const txt = await rep.text();
