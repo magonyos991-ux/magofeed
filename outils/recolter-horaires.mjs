@@ -44,8 +44,13 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
 const RACINE = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
-const FICHIER = RACINE + "/data/horaires-osm-be.json";
-const META = RACINE + "/data/horaires-osm-be.meta.json";
+/* --sortie <dossier> : ecrire ailleurs que dans data/. Sert au banc d'essai,
+   qui doit pouvoir rejouer une recolte complete sans toucher au fichier du
+   depot. En production l'option n'est jamais passee. */
+const _iSortie = process.argv.indexOf("--sortie");
+const DOSSIER = _iSortie !== -1 ? process.argv[_iSortie + 1] : RACINE + "/data";
+const FICHIER = DOSSIER + "/horaires-osm-be.json";
+const META = DOSSIER + "/horaires-osm-be.meta.json";
 
 const UA = { "User-Agent": "Magofeed-horaires/1.0 (application communautaire de boissons sans alcool; contact via github.com/magonyos991-ux/magofeed)" };
 const MIROIRS = [
@@ -173,9 +178,26 @@ async function recolter() {
    Une valeur OpenStreetMap peut theoriquement contenir un retour a la ligne
    ou une tabulation. La ligne est alors inexploitable : on la COMPTE et on la
    jette, on ne devine pas. Un chiffre de rejets qui grimpe est un signal. */
+/* Overpass entoure de guillemets toute valeur qui contient une virgule ou un
+   point-virgule — c'est-a-dire la MOITIE des horaires, puisque « ; » est le
+   separateur de blocs d'OpenStreetMap. Sans ce decodage, le premier passage
+   voyait 37,41 % de « derive » : onze valeurs sur douze etaient identiques au
+   caractere pres, a deux guillemets pres. Le garde-fou a refuse d'ecrire, et
+   il avait raison : une recolte qui reformate n'est pas une recolte.
+   Convention CSV : les guillemets internes sont doubles. Une valeur qui est
+   elle-meme une phrase entre guillemets — le fichier en contient — ressort
+   donc intacte apres ce decodage, et surtout pas amputee. */
+function _deciterer(champ) {
+  const t = champ.trim();
+  if (t.length >= 2 && t.charCodeAt(0) === 34 && t.charCodeAt(t.length - 1) === 34) {
+    return t.slice(1, -1).replace(/""/g, '"');
+  }
+  return t;
+}
+
 function lireCsv(texte) {
   const horaires = Object.create(null);
-  let rejetees = 0, doublons = 0, vides = 0;
+  let rejetees = 0, doublons = 0, vides = 0, deciterees = 0;
   const lignes = texte.split("\n");
   for (const brute of lignes) {
     const ligne = brute.replace(/\r$/, "");
@@ -183,13 +205,14 @@ function lireCsv(texte) {
     const morceaux = ligne.split("\t");
     if (morceaux.length !== 2) { rejetees++; continue; }
     const cle = morceaux[0].trim();
-    const valeur = morceaux[1].trim();
+    const valeur = _deciterer(morceaux[1]);
+    if (valeur !== morceaux[1].trim()) deciterees++;
     if (!/^\d+$/.test(cle)) { rejetees++; continue; }   // en-tete, ou ligne cassee
     if (!valeur) { vides++; continue; }
     if (horaires[cle] !== undefined) { doublons++; }
     horaires[cle] = valeur;
   }
-  return { horaires, rejetees, doublons, vides };
+  return { horaires, rejetees, doublons, vides, deciterees };
 }
 
 /* ── LA FUSION ─────────────────────────────────────────────────────────────
@@ -252,7 +275,7 @@ async function principal() {
 
   const lu = lireCsv(texte);
   const nb = Object.keys(lu.horaires).length;
-  dire("recolte : " + nb + " horaires, " + lu.rejetees + " lignes rejetees, " + lu.doublons + " doublons de cle, " + lu.vides + " valeurs vides");
+  dire("recolte : " + nb + " horaires, " + lu.rejetees + " lignes rejetees, " + lu.doublons + " doublons de cle, " + lu.vides + " valeurs vides, " + lu.deciterees + " valeurs entre guillemets decodees");
   if (lu.doublons) dire("  ATTENTION : des doublons de cle, inconnus jusqu'ici. A regarder.");
   if (!nb) throw new Error("recolte vide : on n'ecrit rien, le fichier precedent reste en place");
 
@@ -316,6 +339,7 @@ async function principal() {
     doublons: lu.doublons,
     lignesRejetees: lu.rejetees,
     valeursVides: lu.vides,
+    valeursDeciterees: lu.deciterees,
     deriveParMille: Math.round(derive * 1000),
     absents: f.absences,
     perimetre: "boite [sud,ouest,nord,est] = " + BOITE.join(", ") + " — la Belgique ET sa bande frontaliere (Lille, Aix-la-Chapelle, sud des Pays-Bas, Luxembourg). Le nom du fichier dit « be » ; son contenu est plus large, et c'est voulu.",
