@@ -56,7 +56,15 @@ jobs:
         # succès ou échec.
         run: |
           set -o pipefail
-          node outils/recolter-horaires.mjs 2>&1 | tee "$RUNNER_TEMP/recolte.log"
+          if ! node outils/recolter-horaires.mjs 2>&1 | tee "$RUNNER_TEMP/recolte.log"; then
+            # En ANNOTATION, pas seulement dans le journal : une annotation
+            # s'affiche en tête du passage et se lit par l'API, alors que le
+            # journal d'un pas raté ne se lit qu'à la main, dans le navigateur.
+            # C'est la différence entre « ça a raté » et « voilà pourquoi ».
+            RAISON=$(grep -m1 '^ECHEC' "$RUNNER_TEMP/recolte.log" || tail -n 4 "$RUNNER_TEMP/recolte.log" | tr '\n' ' ')
+            echo "::error title=Récolte des horaires::${RAISON}"
+            exit 1
+          fi
         env:
           GABARIT: ${{ inputs.gabarit }}
 
