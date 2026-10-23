@@ -80,16 +80,35 @@ const SEMAINES_AVANT_OUBLI = 8;
    nœuds et chemins seulement, jamais de relations : l'application n'en
    demande jamais et prefixe « o » les deux autres. Une relation creerait des
    cles qui ne s'apparient a rien. */
+/* UNE BOITE, PAS LA BELGIQUE ADMINISTRATIVE — ET C'EST VOULU.
+   Le premier essai de ce script interrogeait area["ISO3166-1"="BE"]. Il a
+   ramene 63,3 % du fichier existant, et le garde-fou de volume a refuse
+   d'ecrire. Le garde-fou avait raison : ce n'etait pas la Belgique qui avait
+   retreci, c'etait MA requete qui etait plus etroite que la recolte d'origine.
+
+   Le fichier herite a ete moissonne sur la boite ci-dessous, celle que le
+   depot utilise deja pour la Belgique (growth/seed-osm.js, growth/couverture.js).
+   Elle deborde volontairement : growth/couverture.js le dit mot pour mot,
+   « la bbox de la Belgique mord sur Lille et Aix-la-Chapelle ». Mesure sur
+   400 cles tirees au hasard et resolues contre l'API OpenStreetMap : 98,5 %
+   des entrees sont dans cette boite, et environ une sur dix est a moins de
+   33 km du centre de Lille — plusieurs a 300 m de sa place centrale.
+
+   Ce debordement n'est pas un defaut a corriger, c'est la reponse au besoin
+   du fondateur : il cherchait un commerce ouvert A LILLE, a 23 h. Passer a la
+   frontiere administrative aurait supprime cette couverture-la en silence.
+   Le nom du fichier dit « be » ; son perimetre est la Belgique ET sa bande
+   frontaliere. Le fichier meta le repete, pour qui lirait le nom seul. */
+const BOITE = [49.49, 2.54, 51.51, 6.41];   // sud, ouest, nord, est
 const REQUETE = [
-  '[out:csv(::id,"opening_hours";false;"\\t")][timeout:900];',
-  'area["ISO3166-1"="BE"][admin_level=2]->.be;',
+  '[out:csv(::id,"opening_hours";false;"\\t")][timeout:900][bbox:' + BOITE.join(",") + "];",
   "(",
-  '  node["opening_hours"]["shop"](area.be);',
-  '  way ["opening_hours"]["shop"](area.be);',
-  '  node["opening_hours"]["amenity"="fuel"](area.be);',
-  '  way ["opening_hours"]["amenity"="fuel"](area.be);',
-  '  node["opening_hours"]["amenity"="marketplace"](area.be);',
-  '  way ["opening_hours"]["amenity"="marketplace"](area.be);',
+  '  node["opening_hours"]["shop"];',
+  '  way ["opening_hours"]["shop"];',
+  '  node["opening_hours"]["amenity"="fuel"];',
+  '  way ["opening_hours"]["amenity"="fuel"];',
+  '  node["opening_hours"]["amenity"="marketplace"];',
+  '  way ["opening_hours"]["amenity"="marketplace"];',
   ");",
   "out;",
 ].join("\n");
@@ -286,6 +305,7 @@ async function principal() {
     valeursVides: lu.vides,
     deriveParMille: Math.round(derive * 1000),
     absents: f.absences,
+    perimetre: "boite [sud,ouest,nord,est] = " + BOITE.join(", ") + " — la Belgique ET sa bande frontaliere (Lille, Aix-la-Chapelle, sud des Pays-Bas, Luxembourg). Le nom du fichier dit « be » ; son contenu est plus large, et c'est voulu.",
     licence: "ODbL 1.0",
     lien: "https://www.openstreetmap.org/copyright",
     note: "Les valeurs sont recopiees TELLES QUELLES. Les anomalies connues (virgule la ou OpenStreetMap attend un point-virgule) sont reparees A LA LECTURE par _reparerSeparateur dans index.html, jamais dans ce fichier : nettoyer ici viderait outils/essai-horaires.mjs de son sujet.",
