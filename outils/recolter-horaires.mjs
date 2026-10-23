@@ -58,7 +58,6 @@ const MIROIRS = [
   "https://overpass.kumi.systems/api",
   "https://overpass.private.coffee/api",
 ];
-const ATTENTES = [30, 60, 90, 120];
 const SEUIL_VOLUME = 0.95;   // une recolte sous 95 % de la precedente est une panne
 const SEUIL_DERIVE = 0.05;   // plus de 5 % de valeurs changees en une semaine : on regarde
 const SEMAINES_AVANT_OUBLI = 8;
@@ -142,13 +141,25 @@ async function attendreCreneau(base) {
   }
 }
 
+/* ON CHANGE DE MIROIR AVANT D'INSISTER, ET ON N'INSISTE PAS LONGTEMPS.
+   La premiere version essayait quatre fois chaque miroir avant de passer au
+   suivant : douze tentatives, vingt minutes, sur des services qui repondaient
+   deja 502 et 504. Insister sur un serveur sature n'aide personne — ni lui,
+   ni nous. Deux tours de trois miroirs suffisent : le premier attrape la
+   panne d'un miroir, le second, cinq minutes plus tard, attrape le creneau
+   qui se libere. Au-dela, ce n'est plus de la malchance, et la tache revient
+   de toute facon la semaine prochaine, fichier precedent intact. */
 async function recolter() {
   let derniere = null;
-  for (const base of MIROIRS) {
-    for (let essai = 0; essai < ATTENTES.length; essai++) {
+  for (let tour = 0; tour < 2; tour++) {
+    if (tour > 0) {
+      dire("  les trois miroirs ont refuse ; on laisse passer cinq minutes");
+      await dors(300);
+    }
+    for (const base of MIROIRS) {
       try {
         await attendreCreneau(base);
-        dire("  interrogation de " + base + " (essai " + (essai + 1) + ")");
+        dire("  interrogation de " + base + " (tour " + (tour + 1) + ")");
         /* BORNE DE TEMPS COTE CLIENT. La requete annonce [timeout:900] a
            Overpass, mais rien n'obligeait fetch() a rendre la main : une
            connexion qui pend aurait fait tourner le flux pendant des heures,
@@ -175,11 +186,11 @@ async function recolter() {
       } catch (e) {
         derniere = String((e && e.message) || e);
       }
-      dire("  echec (" + derniere + "), nouvelle tentative dans " + ATTENTES[essai] + " s");
-      await dors(ATTENTES[essai]);
+      dire("  echec (" + derniere + "), on passe au miroir suivant");
+      await dors(20);
     }
   }
-  throw new Error("Overpass injoignable sur les " + MIROIRS.length + " miroirs : " + derniere);
+  throw new Error("Overpass injoignable sur les " + MIROIRS.length + " miroirs, deux tours : " + derniere + ". Le fichier de la semaine derniere reste publie ; la tache reviendra lundi prochain.");
 }
 
 /* ── LECTURE DU CSV ────────────────────────────────────────────────────────
