@@ -24,7 +24,8 @@ const PORT = 8123;
 const CENTER = { lat: 50.8275, lng: 4.3720 };               // Flagey, Ixelles
 const WHEN = new Date('2026-10-14T21:40:00+02:00');         // soir : le night shop est ouvert
 const PSEUDO = 'Ilias';
-const MILKIS = 11083, RAMUNE = 10074;
+const DRINK_ID = Number(process.env.DRINK_ID || 11083), DRINK_QUERY = process.env.DRINK_QUERY || 'Milkis', DRINK_NAME = process.env.DRINK_NAME || 'Milkis Original';
+const MILKIS = DRINK_ID, RAMUNE = 10074;
 const CACHE_V = (fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').match(/CACHE_DATA_V = "([^"]+)"/) || [])[1] || '0902a';
 const now = WHEN.getTime();
 const H2 = 2 * 3600e3;
@@ -260,11 +261,11 @@ async function main() {
   // 1. recherche « Milkis »
   await tap('#t-placeholder', 1000); await mark('recherche-ouverte');
   await page.locator('#q').click({ force: true });
-  await page.keyboard.type('Milkis', { delay: 160 });
+  await page.keyboard.type(DRINK_QUERY, { delay: 160 });
   await wait(1200); await mark('suggestions'); await shot('suggestions');
 
   // 2. la carte des magasins qui l'ont
-  await tapText('Milkis Original', 5200); await mark('carte-milkis', { barre: await textOf('#map-box') });
+  await tapText(DRINK_NAME, 5200); await mark('carte-milkis', { barre: await textOf('#map-box') });
   await shot('carte-milkis'); await wait(800);
 
   // 3. la fiche et la liste des magasins
