@@ -19,9 +19,11 @@ const OUT = path.join(DIR, 'out');
 fs.mkdirSync(OUT, { recursive: true });
 const SHOTS = process.argv.includes('--shots');
 const BXL = process.argv.includes('--bruxelles');
+const DON = process.argv.includes('--don');
 const PORT = 8123;
 
-const CENTER = { lat: 50.8275, lng: 4.3720 };               // Flagey, Ixelles
+const FLAGEY = { lat: 50.8275, lng: 4.3720 };
+const CENTER = { lat: Number(process.env.CENTER_LAT || FLAGEY.lat), lng: Number(process.env.CENTER_LNG || FLAGEY.lng) };  // Flagey par défaut, ou la ville voulue
 const WHEN = new Date('2026-10-14T21:40:00+02:00');         // soir : le night shop est ouvert
 const PSEUDO = 'Ilias';
 const DRINK_ID = Number(process.env.DRINK_ID || 11083), DRINK_QUERY = process.env.DRINK_QUERY || 'Milkis', DRINK_NAME = process.env.DRINK_NAME || 'Milkis Original';
@@ -49,7 +51,7 @@ function haversineM(a, b, c, d) {
   const R = 6371000, p = Math.PI / 180, x = (c - a) * p, y = (d - b) * p;
   return 2 * R * Math.asin(Math.sqrt(Math.sin(x / 2) ** 2 + Math.cos(a * p) * Math.cos(c * p) * Math.sin(y / 2) ** 2));
 }
-for (const s of STORES) s.dist = Math.round(haversineM(CENTER.lat, CENTER.lng, s.lat, s.lng));
+for (const s of STORES) { s.lat += CENTER.lat - FLAGEY.lat; s.lng += CENTER.lng - FLAGEY.lng; s.dist = Math.round(haversineM(CENTER.lat, CENTER.lng, s.lat, s.lng)); }
 
 
 /* ── Vrais magasins de la base (lecture seule, REST) pour la carte de Bruxelles ── */
@@ -244,6 +246,18 @@ async function main() {
   const appBox = await page.locator('#app').boundingBox().catch(() => null);
   await mark('accueil', { appBox, texteAutour: await textOf('#home') });
   await shot('accueil'); await wait(1500);
+
+  if (DON) {
+    await page.evaluate(() => { try { show('profile'); } catch (e) {} }); await wait(1500); await mark('profil'); await shot('don-profil');
+    const carte = page.locator('#don-card').getByText('Soutenir le projet', { exact: false }).first();
+    if (await carte.boundingBox().catch(() => null)) await tapLoc(carte, 1800); else { await page.evaluate(() => { try { openDon('profil'); } catch (e) {} }); await wait(1800); }
+    await mark('don-feuille'); await shot('don-feuille');
+    await page.keyboard.press('Escape'); await wait(600);
+    await page.evaluate(() => { try { navTo('settings'); } catch (e) { try { show('settings'); } catch (e2) {} } }); await wait(1500); await shot('don-reglages');
+    await mark('fin');
+    await page.close(); await ctx.close(); await browser.close(); srv.close();
+    return;
+  }
 
   if (BXL) {
     await wait(1200);
