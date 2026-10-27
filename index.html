@@ -17795,6 +17795,20 @@ function initLeafletMap(lat,lng){
   // le bouton plein ecran (voir toggleDrinkMapFull, qui les reactive).
   map.dragging.disable();
   map.scrollWheelZoom.disable();
+  /* A la souris, deplacer l'apercu ne vole aucun geste de defilement (la
+     molette, elle, reste a la page) : le glisser reste donc actif sur
+     ordinateur. Au doigt, il reste coupe — c'est le defilement de page qui
+     compte (voir ci-dessus). */
+  if(window.matchMedia&&matchMedia("(pointer:fine)").matches)map.dragging.enable();
+  /* Toucher l'apercu (hors pin) = l'ouvrir en grand. L'apercu est une
+     invitation, pas une impasse : avant, seul le petit ⛶ en haut a droite
+     le faisait, et un doigt pose sur la carte ne donnait RIEN. Leaflet
+     n'emet pas ce click apres un glisser ni sur un pin : les pins gardent
+     leur role (itineraire), le glisser souris garde le sien. */
+  map.on("click",function(){
+    var bx=document.getElementById("map-box");
+    if(bx&&!bx.classList.contains("map-fullscreen")){try{toggleDrinkMapFull();}catch(e){}}
+  });
   /* LE SEUL SIGNAL HONNETE QUE L'UTILISATEUR A DEPLACE LA CARTE, C'EST dragstart.
      Pas touchstart : hors plein ecran le glisser est coupe expres (juste
      au-dessus), donc un doigt pose sur la carte est le DEBUT D'UN DEFILEMENT
@@ -18022,7 +18036,10 @@ function toggleDrinkMapFull(){
      suivre, sinon le plein ecran garde la vue serree de l'apercu. */
   try{ if(window.rafraichirLegende)window.rafraichirLegende(); }catch(e){}
   setTimeout(function(){
-    try{if(window._leafletMap)cadrerSurLesPins(window._leafletMap);}catch(e){}
+    /* Pas de recadrage sur les pins si un itineraire est en cours : c'est lui
+       qui commande la vue (routeFromMarker vient peut-etre de nous ouvrir en
+       plein ecran expres pour le tracer). */
+    try{if(window._leafletMap&&!window._drinkRouteLayer)cadrerSurLesPins(window._leafletMap);}catch(e){}
     window._mapCadragePilote=false;
   },420);
   // En plein ecran, on rend la carte pleinement interactive ; repliee, on recoupe
@@ -18035,6 +18052,13 @@ function toggleDrinkMapFull(){
       try{ if(window._zoomCtrl)window._zoomCtrl.addTo(m); }catch(eZ){}
     }else{
       m.dragging.disable();m.scrollWheelZoom.disable();
+      if(m.touchZoom)m.touchZoom.disable();if(m.doubleClickZoom)m.doubleClickZoom.disable();
+      // Sur ordinateur, l'apercu replie garde le glisser souris (voir initLeafletMap).
+      if(window.matchMedia&&matchMedia("(pointer:fine)").matches)m.dragging.enable();
+      /* L'itineraire vit en plein ecran (il y est passe tout seul au trace) :
+         replier la carte le ferme aussi, sinon sa banniere recouvrait tout
+         l'apercu — l'etat « catastrophe » du retour terrain. */
+      try{clearDrinkRoute();}catch(eR){}
       try{ if(window._zoomCtrl)m.removeControl(window._zoomCtrl); }catch(eZ2){}
     }
   }
@@ -18083,6 +18107,12 @@ function routeFromMarker(storeId){
   // Filets de securite : sans magasin, sans carte ou sans position -> fiche classique.
   if(!s||!s.lat||!s.lng||!map||typeof userLat!=="number"||!userLat){openStoreSheet(storeId);return;}
   var box=document.getElementById("map-box");
+  /* Un itineraire a besoin d'une vraie carte. Trace depuis l'apercu replie
+     (deplacement coupe, 210 px de haut), il s'affichait ECRASE sous sa
+     propre banniere — « la carte en petit est une catastrophe » (retour
+     terrain). On passe donc en plein ecran AVANT de tracer ; ✕ ou Annuler
+     pour en sortir. */
+  if(box&&!box.classList.contains("map-fullscreen")){try{toggleDrinkMapFull();}catch(e){}}
   try{haptic("pop");}catch(e){}
   clearDrinkRoute();
   // 1) Feedback INSTANTANE : trait pointille a vol d'oiseau, tout de suite.
