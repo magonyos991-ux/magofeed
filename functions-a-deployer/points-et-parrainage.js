@@ -127,6 +127,16 @@ const BAREME_REPORT = {
 /* Ce que vaut un « je l'ai vue » quand on ne peut pas prouver qu'on y etait :
    l'information reste vraie et utile, elle n'est simplement pas verifiable. */
 const MONTANT_DE_MEMOIRE = 1;
+/* LE CANAPÉ A UNE PORTÉE. Un « je l'ai vue » de mémoire vaut un point, mais pas
+   soixante fois par jour : au-delà de dix magasins DISTINCTS dans la journée
+   UTC, les rapports de mémoire sont enregistrés (ils servent à tout le monde)
+   et ne paient plus. Dix, pas moins : quelqu'un qui refuse la géolocalisation
+   est « de mémoire » même debout devant le rayon, et une vraie tournée de
+   commerces tient en dix. Sur place avec la position, rien ne change. */
+const MAGASINS_DE_MEMOIRE_JOUR = 10;
+/* Les constats de rayon qu'on ne peut pas faire depuis chez soi : comme le
+   stock, ils passent au tarif de mémoire sans preuve de présence. */
+const TYPES_DE_RAYON = ["stock", "contrefacon", "nouveau"];
 const POINTS_DECOUVERTE = 20;   // proposer une decouverte
 const POINTS_PROMOTION = 50;    // elle entre au catalogue
 
@@ -267,6 +277,25 @@ async function dejaCompteAujourdhui(rep, idCourant) {
   });
 }
 
+/* Combien de magasins distincts ont déjà été payés « de mémoire » aujourd'hui.
+   Même requête que l'anti-rejeu ; en cas de panne on compte au maximum, c'est
+   le côté prudent (on ne paie pas, on ne retire rien). */
+async function magasinsDeMemoireAujourdhui(uid, idCourant) {
+  const debut = Timestamp.fromDate(new Date(jourUTC() + "T00:00:00Z"));
+  const q = await requeteSure("magasins de memoire du jour", db.collection("reports")
+    .where("by", "==", uid)
+    .where("createdAt", ">=", debut)
+    .limit(80));
+  if (!q.ok) return MAGASINS_DE_MEMOIRE_JOUR;
+  const vus = new Set();
+  q.docs.forEach((s) => {
+    if (s.id === idCourant) return;
+    const o = s.data() || {};
+    if (o.counted === true && o.raison === "de memoire" && (o.credited || 0) > 0) vus.add(String(o.storeId));
+  });
+  return vus.size;
+}
+
 /* ── Une contribution laisse un document `reports` : c'est elle qui paie ── */
 exports.crediterContribution = onDocumentCreated(
   { document: "reports/{id}", region: REGION },
@@ -293,9 +322,13 @@ exports.crediterContribution = onDocumentCreated(
        et le plafond quotidien comme l'anti-farm continuent de s'appliquer.
        Une RUPTURE garde le zero : retirer une boisson d'un rayon devant lequel
        on ne se trouve pas, ca n'aide personne, et ca peut nuire. */
-    if ((rep.type === "stock" || rep.type === "rupture") && !surPlace(rep)) {
-      if (rep.type !== "stock") {
+    if ((TYPES_DE_RAYON.includes(rep.type) || rep.type === "rupture") && !surPlace(rep)) {
+      if (rep.type === "rupture") {
         await snap.ref.set({ counted: true, credited: 0, raison: "trop loin" }, { merge: true });
+        return;
+      }
+      if (await magasinsDeMemoireAujourdhui(rep.by, snap.id) >= MAGASINS_DE_MEMOIRE_JOUR) {
+        await snap.ref.set({ counted: true, credited: 0, raison: "de memoire, magasins" }, { merge: true });
         return;
       }
       const verseLoin = await crediter(rep.by, MONTANT_DE_MEMOIRE, rep.type);

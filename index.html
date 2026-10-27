@@ -3307,7 +3307,8 @@ window.fbLoadLeaderboard = async function() {
                         + (Number(data.discAccepted) || 0);
       if (contributions <= 0) return;
       if (!parPseudo[cle] || pts > parPseudo[cle].points) {
-        parPseudo[cle] = { uid: d.id, pseudo: pseudo, points: pts, streak: data.streak || 0 };
+        parPseudo[cle] = { uid: d.id, pseudo: pseudo, points: pts, streak: data.streak || 0,
+                           penaltyAt: data.penaltyAt || null, pointsHerites: data.pointsHerites };
       }
     });
     var rows = Object.keys(parPseudo).map(function(k){ return parPseudo[k]; })
@@ -6897,7 +6898,7 @@ function initGPS(){
     // raffinage a +7 s s'en chargera avec la vraie position.
     if(window.fbRepositionMyHunts&&!window._huntsRepositioned&&(drinkWatches||[]).length&&_acc<=200){window._huntsRepositioned=true;window.fbRepositionMyHunts(userLat,userLng,drinkWatches);}
     // Recalcule immédiatement les distances des magasins déjà en mémoire (chargés autour du centre par défaut)
-    STORES.forEach(function(s){s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));});
+    STORES.forEach(function(s){s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));s._distDeMoi=true;});
     STORES.sort(function(a,b){return(a.dist||0)-(b.dist||0);});
     if(curSel)renderStoreList();
     try{renderDeals();}catch(e){}
@@ -6970,7 +6971,7 @@ try{
     window.addEventListener("fbStoresLoaded",function(e){
       if(!window._posProvisional)return;
       var list=e.detail||[];
-      list.forEach(function(s){if(typeof s.lat==="number")s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));});
+      list.forEach(function(s){if(typeof s.lat==="number"){s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));s._distDeMoi=true;}});
       list.sort(function(a,b){return(a.dist||0)-(b.dist||0);});
     });
   })();
@@ -6996,7 +6997,7 @@ function refreshLocation(cb,opts){
     if(window.fbHeartbeat)try{window.fbHeartbeat();}catch(e){}   // meme raison qu'au demarrage
     try{renderGeoRow();}catch(e){}
     if(window.fbRepositionMyHunts&&!window._huntsRepositioned&&(drinkWatches||[]).length){window._huntsRepositioned=true;window.fbRepositionMyHunts(userLat,userLng,drinkWatches);}
-    STORES.forEach(function(s){if(typeof s.lat==="number")s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));});
+    STORES.forEach(function(s){if(typeof s.lat==="number"){s.dist=Math.round(haversine(userLat,userLng,s.lat,s.lng));s._distDeMoi=true;}});
     STORES.sort(function(a,b){return(a.dist||0)-(b.dist||0);});
     var dot=document.getElementById("gps-dot");if(dot)dot.style.background="#22c55e";
     // Recharge depuis Firestore les magasins REELLEMENT autour de la position
@@ -7660,6 +7661,7 @@ function badgeTier(def){
 var earnedBadges={};
 try{earnedBadges=JSON.parse(localStorage.getItem("magoBadges3")||"{}");}catch(e){}
 function checkBadges(){
+  if(window._feteNiveauEnCours)return;   // la fête de niveau passe d'abord ; on repasse à sa fermeture
   var changed=false;
   badgeDefs().forEach(function(def){
     var tier=badgeTier(def);
@@ -7799,7 +7801,7 @@ function renderLeaderboard(){
     row.style.cssText="display:flex;align-items:center;gap:12px;padding:9px 0;cursor:pointer"+(i<leaderboardRows.length-1?";border-bottom:1px solid var(--border)":"");
     var rlv=levelInfo(r.points||0),rcol=levelPseudoColor(rlv.idx);
     row.innerHTML=rankBadge(i)+
-      '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:'+(isMe?"800":"600")+';color:'+(rcol||"var(--s1)")+';'+levelHalo(rlv.idx)+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(r.pseudo)+(isMe?' <span style="font-size:11px;font-weight:700;color:var(--s2)">'+((LANGS[curLang]||LANGS.fr).me)+'</span>':"")+(r.streak>=2?' <span style="display:inline-flex;align-items:center;gap:1px;font-size:11px;font-weight:700;color:#e67e22;vertical-align:-1px" title="'+attr(trh("{n} jours d\'affil\u00E9e",{n:r.streak}))+'">'+svgFlame(12,"#e67e22")+r.streak+'</span>':"")+'</div>'+
+      '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:'+(isMe?"800":"600")+';color:'+(rcol||"var(--s1)")+';'+levelHalo(rlv.idx)+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(r.pseudo)+(cocheConfiance(r.points||0,r.penaltyAt)?nameCheckHTML():'')+(isMe?' <span style="font-size:11px;font-weight:700;color:var(--s2)">'+((LANGS[curLang]||LANGS.fr).me)+'</span>':"")+(r.streak>=2?' <span style="display:inline-flex;align-items:center;gap:1px;font-size:11px;font-weight:700;color:#e67e22;vertical-align:-1px" title="'+attr(trh("{n} jours d\'affil\u00E9e",{n:r.streak}))+'">'+svgFlame(12,"#e67e22")+r.streak+'</span>':"")+'</div>'+
       levelPastille(rlv.idx)+
       '<div style="font-size:12.5px;font-weight:700;color:var(--s1);flex-shrink:0">'+nbSur(r.points)+' pts</div>'+
       '<span style="font-size:13px;color:var(--s3);flex-shrink:0">\u203A</span>';
@@ -7906,7 +7908,7 @@ function remplirAutour(panel,r,pts,fermer){
       div.setAttribute("aria-label","Voir le profil de "+x.pseudo);
       div.style.cssText="display:flex;align-items:center;gap:12px;padding:9px 0;cursor:pointer"+sep;
       div.innerHTML=rankBadge(L.rang-1)+
-        '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:600;color:'+(rcol||"var(--s1)")+';'+levelHalo(rlv.idx)+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(x.pseudo)+'</div>'+
+        '<div style="flex:1;min-width:0;font-size:13.5px;font-weight:600;color:'+(rcol||"var(--s1)")+';'+levelHalo(rlv.idx)+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(x.pseudo)+(cocheConfiance(x.points||0,x.penaltyAt)?nameCheckHTML():'')+'</div>'+
         levelPastille(rlv.idx)+
         '<div style="font-size:12.5px;font-weight:700;color:var(--s1);flex-shrink:0">'+nbSur(x.points)+' pts</div>'+
         '<span style="font-size:13px;color:var(--s3);flex-shrink:0">\u203A</span>';
@@ -7944,10 +7946,12 @@ function openPlayerProfile(r){
 function publicBadges(st){
   st=st||{};
   var defs=[
-    {key:"reliable",name:"Fiable",tiers:[3,15,50],value:st.confirms||0},
-    {key:"discoverer",name:"D\u00E9couvreur",tiers:[1,5,15],value:st.discAccepted||0},
-    {key:"streak",name:"Assidu",tiers:[3,7,30],value:st.bestStreak||st.streak||0},
-    {key:"star",name:"\u00C9toile",tiers:[100,500,2000],value:st.points||0}
+    /* Les mêmes cinq paliers que badgeDefs : une Étoile platine vue par les
+       autres s'appelait « or », faute des deux dernières marches. */
+    {key:"reliable",name:"Fiable",tiers:[3,15,50,150,400],value:st.confirms||0},
+    {key:"discoverer",name:"D\u00E9couvreur",tiers:[1,5,15,40,100],value:st.discAccepted||0},
+    {key:"streak",name:"Assidu",tiers:[3,7,30,90,365],value:st.bestStreak||st.streak||0},
+    {key:"star",name:"\u00C9toile",tiers:[100,500,2000,7500,25000],value:st.points||0}
   ];
   var out=[];
   defs.forEach(function(d){
@@ -8083,7 +8087,14 @@ function flyPts(n){
   });});
   setTimeout(function(){el.remove();},1050);
 }
-var LEVELS=[[0,"Curieux",""],[50,"Explorateur",""],[150,"Chasseur",""],[300,"Connaisseur",""],[600,"Expert",""],[1200,"Ma\u00EEtre des rayons",""],[2500,"L\u00E9gende",""]];
+/* ONZE PALIERS. Les sept premiers ne bougent jamais (seuil ni nom) : les index
+   sont mémorisés dans magoLevelSeen et magoQuartVu, et un palier inséré sous
+   2 500 déclencherait une fausse fête chez tout le monde. On n'ajoute qu'au-
+   dessus. Le serveur plafonne à 60 points par jour : un seuil S demande au
+   moins S/60 jours de contributions comptées (parrainage et points hérités à
+   part), donc 67, 117, 200 et 334 jours pour les quatre derniers. */
+var LEVELS=[[0,"Curieux",""],[50,"Explorateur",""],[150,"Chasseur",""],[300,"Connaisseur",""],[600,"Expert",""],[1200,"Ma\u00EEtre des rayons",""],[2500,"L\u00E9gende",""],
+  [4000,"Pilier du quartier",""],[7000,"Cartographe",""],[12000,"Sentinelle",""],[20000,"Oracle",""]];
 /* Célébration au passage de niveau : son + toast + confettis (pur DOM, sans lib). */
 function confettiBurst(){
   var host=document.createElement("div");
@@ -8132,7 +8143,11 @@ var LEVEL_LIQUIDE=[
   ["#f2606f","#b3213c"], // Connaisseur — grenadine
   ["#5fd6a0","#12915f"], // Expert — menthe
   ["#56aef2","#1657b2"], // Maitre des rayons — bleu
-  ["#f7d97c","#bf8a0e"]  // Legende — or
+  ["#f7d97c","#bf8a0e"], // Legende — or
+  ["#d6eaf0","#3f7a8a"], // Pilier du quartier — platine
+  ["#d9e2ff","#5664c4"], // Cartographe — cristal
+  ["#8d7bb5","#2e2834"], // Sentinelle — obsidienne
+  ["#ffd1e1","#7ec4f5"]  // Oracle — prismatique
 ];
 function celebrateLevelUp(lv){
   var reduit=false;try{reduit=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;}catch(e){}
@@ -8140,6 +8155,10 @@ function celebrateLevelUp(lv){
   var teinte=LEVEL_LIQUIDE[lv.idx]||LEVEL_LIQUIDE[LEVEL_LIQUIDE.length-1];
   var cup="M30 20 L102 20 L94 150 Q93 160 84 160 L48 160 Q39 160 38 150 Z";
   var uid="lvq"+(lv.idx);
+  /* Pendant la fête, les badges se taisent (checkBadges rejoue à la fermeture) :
+     deux fêtes superposées, c'est deux fêtes gâchées. */
+  window._feteNiveauEnCours=true;
+  try{pushActivity({key:"niveau:"+lv.idx,type:"niveau",title:lv.name,body:tr(LEVEL_PERKS[lv.idx]||""),ts:Date.now()});}catch(ePA){}
   var ov=document.createElement("div");
   ov.className="lvup-ov";
   ov.setAttribute("role","dialog");
@@ -8175,11 +8194,14 @@ function celebrateLevelUp(lv){
     '<div class="lvup-name">'+sanitize(lv.name)+'</div>'+
     '<div class="lvup-sub">'+sanitize(trh("Niveau {n} sur {t} · {p} points",{n:lv.idx+1,t:LEVELS.length,p:ptsNets()}))+'</div>'+
     '<button class="lvup-btn" type="button">'+sanitize(tr("Continuer"))+'</button>'+
+    (navigator.share?'<button class="lvup-btn lvup-share" type="button">'+sanitize(tr("Partager"))+'</button>':'')+
   '</div>';
   document.body.appendChild(ov);
   var ferme=false,arreterSon=null;
   function close(){
     if(ferme)return;ferme=true;
+    window._feteNiveauEnCours=false;
+    setTimeout(function(){try{checkBadges();}catch(eB){}},700);
     /* On FAIT DESCENDRE la fete, on ne la coupe pas. La fete est programmee a
        l'avance dans le contexte audio : sans ca, fermer la carte au bout de
        deux secondes laissait les feux d'artifice partir sur un ecran deja
@@ -8190,8 +8212,12 @@ function celebrateLevelUp(lv){
     ov.classList.remove("on");
     setTimeout(function(){if(ov.parentNode)ov.remove();},380);
   }
-  var bt=ov.querySelector(".lvup-btn");
+  var bt=ov.querySelector(".lvup-btn:not(.lvup-share)");
   if(bt){bt.onclick=close;try{setTimeout(function(){bt.focus();},400);}catch(e){}}
+  var sh=ov.querySelector(".lvup-share");
+  if(sh)sh.onclick=function(){
+    try{navigator.share({text:trh("J'ai atteint le niveau {n}, {t}, sur Magofeed",{n:lv.idx+1,t:lv.name}),url:location.origin+location.pathname}).catch(function(){});}catch(eS){}
+  };
   ov.addEventListener("click",function(e){if(e.target===ov)close();});
   var verre=ov.querySelector(".lvup-verre"),bulles=ov.querySelector(".lvup-bulles");
   requestAnimationFrame(function(){
@@ -8237,7 +8263,7 @@ function celebrateLevelUp(lv){
        sonPalierNiveau — impossible de les desynchroniser a nouveau.
        1500 ms = l'instant ou le verre est plein ; les decalages negatifs sont
        les tirs qui partent pendant qu'il finit de se remplir. */
-    var tirs=((window.LEVEL_SON&&LEVEL_SON[lv.idx])||{}).tirs||[];
+    var tirs=((window.LEVEL_SON&&(LEVEL_SON[lv.idx]||LEVEL_SON[LEVEL_SON.length-1]))||{}).tirs||[];
     if(!tirs.length){
       setTimeout(function(){if(!ferme)try{confettiBurst();}catch(e){}},1700);
     }else{
@@ -8329,7 +8355,7 @@ function verifierQuart(lv){
    c'est TOUS les effets sonores qui se feraient couper, scanner compris. */
 function celebrerQuart(lv,pts,pct,q){
   var reduit=false;try{reduit=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;}catch(e){}
-  var teinte=(window.LEVEL_LIQUIDE&&LEVEL_LIQUIDE[lv.idx])||["#f0b840","#c8621a"];
+  var teinte=(window.LEVEL_LIQUIDE&&(LEVEL_LIQUIDE[lv.idx]||LEVEL_LIQUIDE[LEVEL_LIQUIDE.length-1]))||["#f0b840","#c8621a"];
   var reste=Math.max(0,lv.next-pts);
   /* L'AVANTAGE DU NIVEAU SUIVANT NE SE DIT QU'AU DERNIER QUART. Entre 25 % et
      75 % du meme niveau, l'avantage ne change pas : afficher la meme phrase
@@ -8549,20 +8575,25 @@ function levelInfo(pts){
    chacune de ces sept lignes est maintenant adossee a du code qui la peint. */
 var LEVEL_PERKS=[
   "Toutes les fonctions de base de Magofeed",
-  "Ton pseudo passe en bronze, sur ton profil et au classement",
-  "Le cadre bronze autour de ton avatar, avec ton numéro de niveau",
-  "Ta pastille de niveau à côté de ton pseudo au classement",
-  "Le cadre et le pseudo en argent, visibles par toute la communauté",
-  "Le cadre et le pseudo en or, plus la coche de confiance sur ton profil",
-  "Le cadre Légende, animé, et le halo doré : les seuls de l'app"
+  "Ton pseudo passe en bronze, sur ton profil, au classement et dans la messagerie",
+  "Le cadre bronze autour de ton avatar, avec ton numéro de niveau, sur ton profil et sur ta fiche publique",
+  "Ta pastille de niveau à côté de ton pseudo, au classement et dans la messagerie",
+  "Le cadre et le pseudo en argent, sur ton profil, ta fiche publique, le classement et la messagerie",
+  "Le cadre et le pseudo en or, plus la coche de confiance que les autres voient aussi, tant que ton compte n'a pas de sanction depuis trois mois",
+  "Le cadre Légende qui tourne, le halo doré, et ton titre écrit sous ton pseudo, sur ton profil, ta fiche publique et dans la messagerie",
+  "Le cadre, le pseudo et le titre en platine, le premier métal après l'or, ta pastille pleine au classement et un anneau platine autour de ton avatar dans la messagerie",
+  "Le cadre cristal, avec un éclat blanc qui fait le tour de ton avatar, sur ton profil et ta fiche publique",
+  "Le cadre obsidienne, le seul anneau sombre de l'app, avec ses reflets violets sur ton avatar, ton pseudo et ton titre",
+  "Le cadre Oracle à trois teintes, qui tourne lentement en sens inverse, son double halo rose et ciel autour de ton avatar, et un reflet rose sur ton pseudo"
 ];
 /* LE MÉTAL DU PALIER : trois teintes (ombre, base, reflet) pour le cadre de
    l'avatar, la médaille et le pseudo. Bronze dès Explorateur, argent à Expert,
    or à Maître des rayons ; Légende garde l'or et le fait tourner. */
 function levelTier(idx){
-  var metal=idx>=5?"or":idx>=4?"argent":idx>=1?"bronze":"";
-  /* Les teintes elles-mêmes vivent dans app.css (.tier-bronze, .tier-argent,
-     .tier-or), en deux versions, clair et sombre : ici on ne pose que la classe. */
+  var metal=idx>=10?"prismatique":idx>=9?"obsidienne":idx>=8?"cristal":idx>=7?"platine":idx>=5?"or":idx>=4?"argent":idx>=1?"bronze":"";
+  /* Les teintes elles-mêmes vivent dans app.css (.tier-*), en deux versions,
+     clair et sombre : ici on ne pose que la classe. Le tour de l'anneau et le
+     halo, gagnés à Légende, restent ACQUIS au-dessus, dans la teinte du métal. */
   return{metal:metal,cls:metal?"tier-"+metal:"",legende:idx>=6};
 }
 function icoLock(z){    return _svg('<rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8.5 10.5V7.8a3.5 3.5 0 0 1 7 0v2.7"/>',z); }
@@ -8580,21 +8611,53 @@ function icoHand(z){    return _svg('<path d="M6.5 12.5V6a1.5 1.5 0 0 1 3 0v6"/>
    purement et simplement coupe des que le pseudo est un peu long. */
 function levelPastille(idx){
   if(!(idx>=3))return "";
-  var c=levelPseudoColor(idx)||"var(--s2)";
-  return '<span class="lv-past" style="color:'+c+';border-color:'+c+'">'+(idx+1)+'</span>';
+  var t=levelTier(idx);
+  return '<span class="lv-past '+t.cls+(idx>=7?' plein':'')+'">'+(idx+1)+'</span>';
 }
 /* LE HALO DE LEGENDE (palier 7). Un text-shadow fixe, pas un degrade anime :
    un degrade sur background-clip:text repeint le texte a chaque image, sans
    arret, tant qu'il est a l'ecran — au classement, une Legende peut rester
    affichee des minutes. */
 function levelHalo(idx){
-  return (idx>=6)?"text-shadow:0 0 12px rgba(209,154,30,.75),0 0 3px rgba(209,154,30,.5)":"";
+  if(!(idx>=6))return "";
+  var m=levelTier(idx).metal;
+  return "text-shadow:0 0 12px var(--lv-glow-"+m+"),0 0 3px var(--lv-glow-"+m+")";
 }
 window.levelPastille=levelPastille;window.levelHalo=levelHalo;
-// Couleur de pseudo debloquee selon le niveau (lisible en clair ET sombre).
+// Couleur de pseudo debloquee selon le niveau : une variable par métal, qui
+// change avec le thème (lisible en clair ET sombre, vérifiée par le contraste).
 function levelPseudoColor(idx){
-  return ["","#b0763a","#b0763a","#b0763a","#9aa1aa","#d19a1e","#d19a1e"][idx]||"";
+  var m=levelTier(idx).metal;
+  return m?"var(--lv-txt-"+m+")":"";
 }
+/* LE NIVEAU D'UNE AUTRE PERSONNE se lit sur son document public : points, et
+   la sanction si elle n'a pas encore été déduite (profil d'avant la bascule).
+   Même formule que le classement, pour qu'une fiche et une ligne de classement
+   ne disent jamais deux niveaux différents. */
+function ptsNetsDe(u){
+  u=u||{};var p=Number(u.points)||0;
+  if(u.pointsHerites===undefined)p-=Number(u.penalty)||0;
+  return p>0?p:0;
+}
+/* LA COCHE DE CONFIANCE, la même règle pour soi et pour les autres : Maître
+   des rayons ou plus, et aucune sanction depuis trois mois (penaltyAt est écrit
+   par le serveur seul). */
+var COCHE_FENETRE_MS=90*86400000;
+function cocheConfiance(pts,penaltyAt){
+  if(levelInfo(pts).idx<5)return false;
+  var t=(typeof penaltyAt==="number")?penaltyAt:(penaltyAt?msgMs(penaltyAt):0);
+  return !(t&&(Date.now()-t)<COCHE_FENETRE_MS);
+}
+function nameCheckHTML(){return '<span class="name-check" title="'+attr(tr("Contributeur de confiance"))+'">\u2713</span>';}
+/* Le titre sous le pseudo, dès Légende : le nom du palier, dans son métal. */
+function levelTitreHTML(lv){
+  if(!lv||lv.idx<6)return "";
+  return '<div class="name-title '+levelTier(lv.idx).cls+'">'+sanitize(lv.name)+'</div>';
+}
+function levelNiveauLigne(lv){
+  return '<div class="c2" style="font-size:12px;font-weight:600;margin-top:3px">'+sanitize(trh("Niveau {n}",{n:lv.idx+1}))+' \u00B7 '+sanitize(lv.name)+'</div>';
+}
+window.ptsNetsDe=ptsNetsDe;window.cocheConfiance=cocheConfiance;
 // Statut de confiance : base sur les vraies contributions validees.
 // (La ponderation cote serveur — anti-triche — se branchera dessus plus tard.)
 function trustLevel(){
@@ -8634,7 +8697,7 @@ function renderRewards(){
     '</div>'+
     (lv.next?('<div class="lv-hero-track"><div class="lv-hero-fill" style="width:'+pct+'%"></div></div>'+
       '<div class="lv-hero-sub">'+sanitize(trh("Plus que {n} points pour devenir {a}",{n:toNext,a:lv.nextName}))+'</div>'+
-      '<div class="lv-hero-next">'+icoSpark(15)+'<span>'+sanitize(tr("Prochain avantage"))+' : '+sanitize(tr(LEVEL_PERKS[lv.idx+1]||""))+'</span></div>')
+      (LEVEL_PERKS[lv.idx+1]?'<div class="lv-hero-next">'+icoSpark(15)+'<span>'+sanitize(tr("Prochain avantage"))+' : '+sanitize(tr(LEVEL_PERKS[lv.idx+1]))+'</span></div>':''))
      :'<div class="lv-hero-sub">'+sanitize(tr("Tu es au sommet — merci pour tout ce que tu apportes à la communauté."))+'</div>')+
   '</div>';
   // 1bis) Points retires par le serveur : on l'affiche, sans detour.
@@ -8646,23 +8709,37 @@ function renderRewards(){
   }
   // 2) L'échelle des paliers : chaque marche dit ce qu'elle débloque, et le code le peint.
   h+='<div class="t-section" style="padding:6px 0 10px">'+sanitize(tr("L'échelle des paliers"))+'</div>';
-  h+='<div class="ladder">';
+  /* Onze marches ne tiennent pas sur un écran de 320 px : les paliers déjà
+     franchis (sauf le dernier) se replient, de même que ceux au-delà du
+     surlendemain. Trois sections nomment les métaux. */
+  var marches=[];
   LEVELS.forEach(function(L,i){
     var got=lv.idx>=i;
     var suivant=(i===lv.idx+1);          // LE palier a viser : mis en avant
     var t=levelTier(i);
     var manque=Math.max(0,L[0]-pts);
-    h+='<div class="lad-row'+(got?' got':'')+(i===0?' base':'')+(suivant?' next':'')+(got||suivant?'':' locked')+(t.cls?' '+t.cls:'')+'">'+
+    var tete=(i===0?"Bronze, argent, or":i===7?"Au-delà de l'or":i===10?"Le sommet":"");
+    marches.push({i:i,tete:tete,html:
+      '<div class="lad-row'+(got?' got':'')+(i===0?' base':'')+(suivant?' next':'')+(got||suivant?'':' locked')+(t.cls?' '+t.cls:'')+'">'+
       '<div class="lad-medal">'+(i+1)+'</div>'+
       '<div class="lad-body">'+
         '<div class="lad-name">'+sanitize(tr(L[1]))+'<span class="lad-pts">· '+L[0]+' pts</span></div>'+
         '<div class="lad-desc">'+sanitize(tr(LEVEL_PERKS[i]||""))+'</div>'+
         (suivant&&manque?'<div class="perk-todo">'+sanitize(trh("Encore {n} point(s)",{n:manque}))+'</div>':'')+
+        (!got&&manque?'<div class="lad-days">'+sanitize(trh("Au moins {n} jours au plafond de 60 points par jour",{n:Math.ceil(manque/60)}))+'</div>':'')+
       '</div>'+
       (got?'<span class="perk-ok">'+icoOk(16)+'</span>':(suivant?'<span class="perk-tag">'+sanitize(tr("Prochain"))+'</span>':'<span class="lad-lock">'+icoLock(15)+'</span>'))+
-    '</div>';
+    '</div>'});
   });
-  h+='</div>';
+  var rendu=function(m){return (m.tete?'<div class="lad-head">'+sanitize(tr(m.tete))+'</div>':'')+m.html;};
+  var avant=marches.filter(function(m){return lv.idx>=3&&m.i<lv.idx;});
+  var apres=marches.filter(function(m){return m.i>lv.idx+2;});
+  var milieu=marches.filter(function(m){return avant.indexOf(m)<0&&apres.indexOf(m)<0;});
+  h+='<div class="ladder">'+
+    (avant.length?'<details class="lad-fold"><summary>'+sanitize(trh("{n} paliers franchis",{n:avant.length}))+'</summary>'+avant.map(rendu).join('')+'</details>':'')+
+    milieu.map(rendu).join('')+
+    (apres.length?'<details class="lad-fold"><summary>'+sanitize(tr("Et ensuite"))+'</summary>'+apres.map(rendu).join('')+'</details>':'')+
+  '</div>';
   // 2bis) Comment gagner des points : le barème que le SERVEUR applique
   //       (functions-a-deployer/points-et-parrainage.js), pas les montants
   //       d'encouragement affichés en passant. C'est celui-là qui classe.
@@ -8682,12 +8759,18 @@ function renderRewards(){
   }).join('')+'</div>';
   h+='<div class="pts-note">'+sanitize(tr("Plafond : 60 points par jour. Un stock vu de loin vaut 1 point. Seul ce que le serveur a compté pèse au classement."))+'</div>';
   // 3) Statut de confiance (#2 reputation — partie visible)
-  h+='<div class="t-section" style="padding:6px 0 10px">Confiance</div>';
+  var cocheTxt=lv.idx>=5
+    ?(cocheConfiance(pts,userStats.penaltyAt)?tr("Ta coche de confiance est visible des autres."):tr("Ta coche de confiance est masquée pendant trois mois après une sanction."))
+    :trh("La coche de confiance arrive au palier {t}.",{t:tr(LEVELS[5][1])});
+  var preuves=Number(userStats.pointsPreuves)||0;
+  h+='<div class="t-section" style="padding:6px 0 10px">'+sanitize(tr("Confiance"))+'</div>';
   h+='<div style="background:var(--bg2);border-radius:16px;padding:15px;margin-bottom:16px">'+
     '<div style="display:flex;align-items:center;gap:10px"><span style="display:none">'+conf.emoji+'</span>'+
-      '<div style="flex:1"><div style="font-size:13.5px;font-weight:800;color:'+conf.color+'">'+conf.name+'</div>'+
-      '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:1px">'+(userStats.discAccepted||0)+' découverte(s) acceptée(s) · '+(userStats.confirms||0)+' confirmation(s)</div></div></div>'+
-    '<div style="font-size:11px;line-height:1.55;color:var(--s3);margin-top:10px">Plus tu contribues avec des infos justes, plus ta parole compte. Bientôt, tes ajouts seront validés plus vite grâce à ta réputation.</div>'+
+      '<div style="flex:1"><div style="font-size:13.5px;font-weight:800;color:'+conf.color+'">'+sanitize(tr(conf.name))+'</div>'+
+      '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:1px">'+(userStats.discAccepted||0)+' '+sanitize(tr("découverte(s) acceptée(s)"))+' · '+(userStats.confirms||0)+' '+sanitize(tr("confirmation(s)"))+'</div></div></div>'+
+    '<div style="font-size:11.5px;font-weight:700;color:var(--s1);margin-top:10px">'+sanitize(cocheTxt)+'</div>'+
+    (preuves?'<div style="font-size:11px;font-weight:600;color:var(--s2);margin-top:4px">'+sanitize(trh("{n} points comptés par le serveur depuis tes contributions vérifiables",{n:preuves}))+'</div>':'')+
+    '<div style="font-size:11px;line-height:1.55;color:var(--s3);margin-top:10px">'+sanitize(tr("Plus tu contribues avec des infos justes, plus ta parole compte."))+'</div>'+
     /* La regle anti-triche est ECRITE, en clair, avant la faute. Une sanction
        qu'on decouvre apres coup est vecue comme un bug ; annoncee, elle tient
        lieu de garde-fou. */
@@ -8712,12 +8795,14 @@ function renderRewards(){
   h+='<div class="t-section" style="padding:6px 0 10px">Classement</div>';
   h+='<div onclick="show(\'profile\')" role="button" tabindex="0" style="background:var(--bg2);border-radius:16px;padding:15px;margin-bottom:16px;cursor:pointer">'+
     '<div style="font-size:13.5px;font-weight:800;color:var(--s1)">'+titreRang+'</div>'+
-    '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:3px">'+sousRang+' Bientôt : classements mensuels et par ville. ›</div>'+
+    '<div style="font-size:11.5px;font-weight:600;color:var(--s2);margin-top:3px">'+sousRang+' ›</div>'+
   '</div>';
-  // 5) Recompenses partenaires — ROADMAP HONNETE (#4)
-  h+='<div class="t-section" style="padding:6px 0 10px">Bientôt : récompenses</div>';
+  // 5) Recompenses partenaires : RIEN n'existe aujourd'hui, et on le dit.
+  //    Pas de liste de cadeaux hypothétiques : une promesse sans code derrière
+  //    est exactement ce que cet écran s'interdit.
+  h+='<div class="t-section" style="padding:6px 0 10px">'+sanitize(tr("Récompenses partenaires"))+'</div>';
   h+='<div style="background:linear-gradient(135deg,#fff3e0,#ffe8cc);border:1.5px solid #f0b840;border-radius:16px;padding:15px">'+
-    '<div style="font-size:12.5px;line-height:1.65;color:#7a4a10;font-weight:600">Quand des marques de boissons rejoindront Magofeed, les <b>meilleurs contributeurs seront les premiers récompensés</b> (échantillons, avant-premières, réductions).</div>'+
+    '<div style="font-size:12.5px;line-height:1.65;color:#7a4a10;font-weight:600">'+sanitize(tr("Aucune récompense partenaire n'existe aujourd'hui. Si une marque rejoint Magofeed un jour, les contributeurs les plus fiables seront servis en premier."))+'</div>'+
     '<div style="font-size:11px;line-height:1.5;color:#9a6a2a;margin-top:8px">On te promet une seule chose : <b>rien de faux</b>. Aucune récompense ne sera annoncée tant qu\'elle n\'existe pas vraiment. Tes points, eux, sont déjà en train de s\'accumuler.</div>'+
   '</div>';
   host.innerHTML=h;
@@ -8740,7 +8825,6 @@ function adopterScoreServeur(){
   }).catch(function(){});
 }
 function updateProfileStats(){
-  try{checkBadges();}catch(e){}
   var _scn=0;try{_scn=Object.keys(scanCounts||{}).length;}catch(e){}
   var _st=function(id,v){var el=document.getElementById(id);if(el)el.textContent=(v==null?0:v);};
   _st("stat-scans",_scn);
@@ -8775,7 +8859,7 @@ function updateProfileStats(){
       '<div class="lvl-foot">'+
         '<span>'+(lv.next
           ?('Encore <b>'+reste+' point'+(reste>1?'s':'')+'</b> pour devenir <b>'+sanitize(lv.nextName)+'</b>')
-          :'Niveau maximum atteint')+'</span>'+
+          :sanitize(tr("Niveau maximum atteint")))+'</span>'+
         '<span class="lvl-go">Voir'+_chev()+'</span>'+
       '</div>'+
     '</div>';
@@ -8783,6 +8867,7 @@ function updateProfileStats(){
   renderBadges();
   try{applyPseudoDisplays();}catch(e){} // couleur/anneau de pseudo debloques suivent le niveau
   try{checkLevelUp();}catch(e){}
+  try{checkBadges();}catch(e){}      // après le niveau : un seuil commun ne fait plus deux fêtes
   try{maybeAskFeedback();}catch(e){} // invite douce à donner son avis (1x, après un peu de contribution)
   if(window.fbSyncUserStats)window.fbSyncUserStats(userStats);
   try{ renderProfileScans(); }catch(e){}
@@ -9815,7 +9900,7 @@ function saveNewStore(){
   if(typeof userLat==="number"&&userLat){
     var R=6371000,dLat=(s.lat-userLat)*Math.PI/180,dLng=(s.lng-userLng)*Math.PI/180;
     var a=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(userLat*Math.PI/180)*Math.cos(s.lat*Math.PI/180)*Math.sin(dLng/2)*Math.sin(dLng/2);
-    s.dist=Math.round(R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)));
+    s.dist=Math.round(R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)));s._distDeMoi=true;
   }
   // Creation VERIFIEE : pas de celebration avant la confirmation de la base.
   // (Le bug ARARAT : une ecriture echouee en silence = magasin fantome qui
@@ -10317,7 +10402,14 @@ var SIGNAL_PORTEE_M = 100000;
    (aucune position, ou magasin sans coordonnees) : on laisse passer, comme
    avant — quelqu'un qui refuse la localisation n'est pas un tricheur. */
 function _distanceSignalement(s){
-  if (s && typeof s.dist === "number" && isFinite(s.dist)) return Math.round(s.dist);
+  /* s.dist N'EST FIABLE QUE MESURÉE DEPUIS MOI. Les magasins chargés par la
+     carte portent une distance au CENTRE DE LA CARTE (normalizeStore), et le
+     serveur croit le nombre qu'on lui écrit : sans position connue, un « vu en
+     rayon » cliqué depuis le canapé passait pour « sur place » et touchait le
+     plein tarif. On ne lit s.dist que si un recalcul depuis userLat l'a posée
+     (_distDeMoi) ; sinon on recalcule ; sinon la distance est inconnue, et le
+     rapport part honnêtement « de mémoire ». */
+  if (s && s._distDeMoi && typeof s.dist === "number" && isFinite(s.dist)) return Math.round(s.dist);
   if (s && typeof s.lat === "number" && isFinite(s.lat) && typeof s.lng === "number"
       && typeof userLat === "number" && userLat && typeof userLng === "number") {
     try {
@@ -10400,11 +10492,11 @@ function _ecrireRattachement(s,ctx){
      laisse passer : quelqu'un qui a refuse la localisation n'est pas un
      tricheur, et son signalement restera de toute facon « probable ». */
   var _reg=_regimeSignalement(s);
-  if(ctx.drinkId!=null&&!_reg.ok){ _refusTropLoin(); return; }
+  if(ctx.drinkId!=null&&!_reg.ok){ _refusTropLoin(); return false; }
   var tagKey="tag:"+(ctx.drinkId!=null?ctx.drinkId:(ctx.discoveryId!=null?"d"+ctx.discoveryId:"b"+ctx.pendingBarcode))+":"+sid;
   if(!awardFree(tagKey,FOREVER)){
     toast("D\u00e9j\u00e0 rattach\u00e9 \u00e0 "+sanitize(s.name));
-    return;
+    return false;
   }
   if(ctx.drinkId!=null){
     // Boisson du catalogue : disponibilite confirmee dans ce magasin
@@ -10497,6 +10589,7 @@ function _ecrireRattachement(s,ctx){
     // d'itineraire (bouton -> "Confirme"), pas par l'ecran de scan.
   }else if(ctx.drinkId!=null){renderPriceAfterTag(s,ctx.drinkId,ctx);}
   else{renderWhereFound(null);}
+  return true;
 }
 
 function tagScanToStore(s){
@@ -10510,8 +10603,13 @@ function tagScanToStore(s){
   window._rattachEnCours=true;
   return confirmerRattachement(ctxCopie,s).then(function(ok){
     window._rattachEnCours=false;
-    if(ok)_ecrireRattachement(s,ctxCopie);
-    return ok;
+    if(!ok)return false;
+    /* Trois états : false = la personne a dit non ; "refus" = elle a dit oui
+       mais le rattachement a été refusé (déjà fait, ou trop loin) ; true = écrit.
+       La carte n'écrit son rapport que sur true : un refus ignoré fabriquait
+       un document reports permanent, donc de vrais points, pour un
+       rattachement qui n'avait jamais eu lieu. */
+    return _ecrireRattachement(s,ctxCopie)===true?true:"refus";
   }).catch(function(e){
     /* SANS CE CATCH, une seule exception dans la construction de la fiche
        laisserait le drapeau leve et rendrait tout rattachement impossible EN
@@ -17119,7 +17217,8 @@ var ACT_META={
   penalty:      {label:"Points retirés", col:"#dc2626"},
   msg:          {label:"Message",      col:"var(--s1)"},
   ami:          {label:"Demande d'ami",col:"#c69a57"},
-  amiOk:        {label:"Ami accepté",  col:"#16a34a"}
+  amiOk:        {label:"Ami accepté",  col:"#16a34a"},
+  niveau:       {label:"Nouveau palier",col:"var(--lv-txt-or)"}
 };
 function _actMeta(type){ return ACT_META[type]||{label:"Info",col:"var(--s2)"}; }
 /* Vignette : la VRAIE photo du produit quand on connait la boisson, sinon le
@@ -17138,7 +17237,7 @@ function _activityIcon(type){
   // Entraide : « on t'a dit ou » (tip), « confirmee grace a toi » (tipOk), « pas trouvee » (tipKo).
   var colTip=type==="tip"?"#e67e22":type==="tipOk"?"#16a34a":type==="tipKo"?"#dc2626":null;
   if(type==="tip"||type==="tipKo")type="hunt";else if(type==="tipOk")type="found";
-  var col=colTip||(type==="found"?"#16a34a":type==="promoted"?"#c69a57":type==="hunt"?"#e67e22":(type==="photoRejected"||type==="penalty")?"#dc2626":"var(--s2)");
+  var col=colTip||(type==="found"?"#16a34a":type==="promoted"?"#c69a57":type==="hunt"?"#e67e22":(type==="photoRejected"||type==="penalty")?"#dc2626":type==="niveau"?"var(--lv-txt-or)":"var(--s2)");
   var p="";
   if(type==="found")p='<path d="M20 6 9 17l-5-5"/>';
   else if(type==="promoted")p='<path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3"/><path d="M7 5H4v2a3 3 0 0 0 3 3"/>';
@@ -17147,6 +17246,7 @@ function _activityIcon(type){
   // Sanction : une etoile barree. Le meme trait que le reste, aucun emoji.
   else if(type==="penalty")p='<path d="M12 3.6l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 16l-4.8 2.5.9-5.4-3.9-3.8 5.4-.8L12 3.6z"/><path d="M4 20 20 4"/>';
   else if(type==="msg")p='<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7.5 8.5 6 8.5-6"/>';
+  else if(type==="niveau")p='<path d="M4 20h16"/><path d="M6 20v-6h4v6M14 20V9h4v11"/><path d="M12 3.5l1.2 2.5 2.8.4-2 2 .5 2.7-2.5-1.3-2.5 1.3.5-2.7-2-2 2.8-.4z"/>';
   else if(type==="ami"||type==="amiOk")p='<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>';
   else p='<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>';
   return '<span style="width:34px;height:34px;border-radius:11px;background:color-mix(in srgb,'+col+' 14%,transparent);display:flex;align-items:center;justify-content:center;color:'+col+'"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+p+'</svg></span>';
@@ -17941,7 +18041,7 @@ function mapStockReport(storeId,inStock){
        accord descend donc dans le .then. */
     lastScanContext={drinkId:did,from:"map"};
     tagScanToStore(s).then(function(ok){
-      if(!ok)return;
+      if(ok!==true)return;
       if(window.fbAddReport)window.fbAddReport(s.fbId||sid,did,"stock",{note:_provenance("carte",s)}); // trace admin (pseudo)
       // Retour visuel : les deux boutons laissent place à une confirmation calme.
       var row=document.getElementById("route-stock-row");
@@ -17953,7 +18053,9 @@ function mapStockReport(storeId,inStock){
     });
     return;
   }else{
-    if(!awardFree("mapstk:"+sid+":"+did,24)){toast("Déjà signalé aujourd'hui");playSound("err");return;}
+    /* awardFree ne fait que LIRE : la clé n'était jamais posée, et chaque clic
+       écrivait un rapport de rupture de plus. awardOnce la pose. */
+    if(!awardOnce("mapstk:"+sid+":"+did,24)){toast(tr("Déjà signalé aujourd'hui"));playSound("err");return;}
     if(window.fbAddReport)window.fbAddReport(s.fbId||sid,did,"rupture",{note:_provenance("carte",s)}); // trace admin (pseudo)
     if(!s.confirmations)s.confirmations={};
     s.confirmations[did]=(s.confirmations[did]||0)-1;_noterObservation(s,did,false);
@@ -21263,7 +21365,7 @@ function openAvatarPicker(){
     host.appendChild(inner);
     document.body.appendChild(host);
     var grid=inner.querySelector("#avatar-emoji-grid");
-    AVATAR_EMOJIS.forEach(function(em){
+    AVATAR_EMOJIS.filter(Boolean).forEach(function(em){   // la liste a été purgée : pas de bouton vide
       var b=document.createElement("button");
       b.textContent=em;
       b.setAttribute("aria-label","Avatar "+em);
@@ -23582,7 +23684,7 @@ function exploreLoadStores(useCache){
     if(typeof userLat==="number"&&userLat&&typeof _distM==="function"){
       list.forEach(function(s){
         if(typeof s.lat==="number"&&typeof s.lng==="number"){
-          s.dist=Math.round(_distM(userLat,userLng,s.lat,s.lng));
+          s.dist=Math.round(_distM(userLat,userLng,s.lat,s.lng));s._distDeMoi=true;
         }
       });
     }
@@ -26455,7 +26557,7 @@ function applyPseudoDisplays(){
     name.style.color=metal?"":(col||"");
     name.style.textShadow=metal?"":levelHalo(lv.idx);
     // Perk niv.6+ (Maître) : coche de confiance sur le pseudo, hors du dégradé
-    if(lv.idx>=5){var ck=document.createElement("span");ck.textContent="✓";ck.title="Contributeur de confiance";ck.className="name-check";name.appendChild(ck);}
+    if(cocheConfiance(ptsNets(),userStats.penaltyAt)){var ck=document.createElement("span");ck.textContent="✓";ck.title=tr("Contributeur de confiance");ck.className="name-check";name.appendChild(ck);}
   }
   var el=document.getElementById("profile-pseudo-display");if(el)el.textContent=userPseudo;
   var initials=document.getElementById("avatar-initials");if(initials)initials.textContent=userPseudo.charAt(0).toUpperCase();
@@ -26471,6 +26573,14 @@ function applyPseudoDisplays(){
     wrap.style.cssText="--pct:"+pct+"%";
     wrap.title=framed?(lv.name+" · "+pct+" %"):"";
     var chip=document.getElementById("ava-chip");if(chip)chip.textContent=String(lv.idx+1);
+  }
+  /* Dès Légende, la ligne sous le pseudo devient le TITRE du palier, dans son
+     métal. En dessous, elle reprend le libellé du compte (updateAccountUI le
+     range dans data-compte) ou « Membre Magofeed ». */
+  var st=document.getElementById("profile-status-display");
+  if(st){
+    if(lv.idx>=6){st.style.cssText="";st.className="name-title "+tier.cls;st.textContent=lv.name;st.dataset.titre="1";}
+    else{delete st.dataset.titre;st.style.cssText="font-size:12px;font-weight:500;margin-top:3px";st.className="c2";st.textContent=st.dataset.compte||"Membre Magofeed";}
   }
 }
 function editPseudo(){
@@ -28563,7 +28673,8 @@ function updateAccountUI(user){
   }
   if(isGoogle&&nameEl&&statusEl){
     nameEl.textContent=user.displayName||userPseudo;
-    statusEl.textContent=accountLabel;
+    statusEl.dataset.compte=accountLabel;
+    if(!statusEl.dataset.titre)statusEl.textContent=accountLabel;
     if(avatarEl&&user.photoURL){
       avatarEl.style.background="none";
       avatarEl.textContent='';
@@ -28777,16 +28888,24 @@ function openUserProfile(u){
   var ppBadges=publicBadges(u);
   var body=document.getElementById("userprofile-body");if(!body)return;
   window._ppCourant=u;
-  var av=avatarHTML(u.avatar,76)||'<span style="font-size:30px;font-weight:800;color:#fff">'+sanitize((u.pseudo||"?").charAt(0).toUpperCase())+'</span>';
+  var av=avatarHTML(u.avatar,76)||'<span style="font-size:30px;font-weight:800;color:var(--app-bg)">'+sanitize((u.pseudo||"?").charAt(0).toUpperCase())+'</span>';
   var seen=timeAgoShort(u.updatedAt);
   var favs=(u.favs||[]).map(function(id){return DRINKS.find(function(d){return Number(d.id)===Number(id);});}).filter(Boolean);
   /* Chaque case est un bouton : taper dessus raconte ce que le chiffre veut
      dire, au nom du joueur regarde (feuille narrative, meme gabarit que la
      fiche d'un badge). */
   var statCell=function(v,label,key){return '<div class="pp-cell" data-pp="'+key+'" role="button" tabindex="0" aria-label="'+attr(_tr("ppSeeStats").replace("{l}",label))+'" style="flex:1;background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:13px 8px;text-align:center"><div style="font-size:19px;font-weight:800;color:var(--s1)">'+v+'</div><div style="font-size:10.5px;font-weight:600;color:var(--s2);margin-top:2px">'+label+'</div></div>';};
+  /* Le niveau de la personne regardée, avec les mêmes signes que sur son
+     propre profil : cadre à deux anneaux, pseudo dans le métal, coche selon la
+     règle commune, titre dès Légende. Tout se dérive du document public. */
+  var ppPts=ptsNetsDe(u),plv=levelInfo(ppPts),ptier=levelTier(plv.idx);
+  var ppPct=plv.next?Math.max(0,Math.min(100,Math.round((ppPts-plv.floor)/(plv.next-plv.floor)*100))):100;
   body.innerHTML='<div style="text-align:center;margin-bottom:14px">'+
-    '<div style="width:76px;height:76px;border-radius:50%;background:var(--s1);display:flex;align-items:center;justify-content:center;overflow:hidden;margin:0 auto 10px">'+av+'</div>'+
-    '<div style="font-size:18px;font-weight:800;color:var(--s1)">'+sanitize(u.pseudo||"Explorateur")+'</div>'+
+    '<div class="ava-wrap'+(plv.idx>=2?' framed':'')+(ptier.legende?' legende':'')+(ptier.cls?' '+ptier.cls:'')+'" style="--pct:'+ppPct+'%;margin-bottom:10px"><div class="ava-ring" aria-hidden="true"></div><div class="ava-metal" aria-hidden="true"></div>'+
+      '<div style="width:76px;height:76px;border-radius:50%;background:var(--s1);display:flex;align-items:center;justify-content:center;overflow:hidden;position:absolute;left:12px;top:12px">'+av+'</div>'+
+      '<div class="ava-chip" aria-hidden="true">'+(plv.idx+1)+'</div></div>'+
+    '<div class="lv-name'+(ptier.cls?' '+ptier.cls:'')+'" style="font-size:18px;font-weight:800;'+levelHalo(plv.idx)+'">'+sanitize(u.pseudo||"Explorateur")+(cocheConfiance(ppPts,u.penaltyAt)?nameCheckHTML():'')+'</div>'+
+    (plv.idx>=6?levelTitreHTML(plv):levelNiveauLigne(plv))+
     (seen?'<div style="font-size:11.5px;font-weight:600;color:var(--s3);margin-top:3px">Dernière activité : '+seen+'</div>':"")+
     '<div class="pp-btns" id="pp-btns"></div>'+
   '</div>'+
@@ -29025,7 +29144,20 @@ function msgDepuis(ms){
 function msgAvatar(u,cls){
   var av=avatarHTML(u&&u.avatar,cls==="lg"?44:cls==="sm"?36:46);
   var ini=sanitize(String((u&&u.pseudo)||"?").charAt(0).toUpperCase());
-  return '<div class="msg-av'+(cls?" "+cls:"")+'" aria-hidden="true">'+(av||ini)+'</div>';
+  var lvA=levelInfo(ptsNetsDe(u||{}));   // dès le platine, un anneau du métal autour de l'avatar
+  var ring=lvA.idx>=7?" ringed "+levelTier(lvA.idx).cls:"";
+  return '<div class="msg-av'+(cls?" "+cls:"")+ring+'" aria-hidden="true">'+(av||ini)+'</div>';
+}
+/* Le pseudo d'une personne dans la messagerie : coloré par son niveau, avec sa
+   pastille et sa coche À CÔTÉ (jamais dedans : .msg-name porte un ellipsis). */
+function msgNomHTML(u,cls){
+  var lvN=levelInfo(ptsNetsDe(u||{})),tN=levelTier(lvN.idx);
+  return '<div style="display:flex;align-items:center;gap:8px;min-width:0"><div class="'+(cls||"msg-name")+' lv-name'+(tN.cls?' '+tN.cls:'')+'">'+sanitize((u&&u.pseudo)||_tr("msgSomeone"))+'</div>'+
+    levelPastille(lvN.idx)+(cocheConfiance(ptsNetsDe(u||{}),u&&u.penaltyAt)?nameCheckHTML():'')+'</div>';
+}
+function msgNiveauTxt(u){
+  var lvM=levelInfo(ptsNetsDe(u||{}));
+  return lvM.idx>=6?sanitize(lvM.name):_tr("msgLevel").replace("{n}",lvM.idx+1);
 }
 function msgPseudo(uid){var u=MSG.users[uid];return (u&&u.pseudo)?String(u.pseudo):_tr("msgSomeone");}
 /* Fiche publique d'un correspondant : cache local un jour, chargement en
@@ -29048,6 +29180,7 @@ function msgUser(uid,force){
 }
 function msgRetenirUser(uid,x){
   MSG.users[uid]={pseudo:String(x.pseudo||"").slice(0,24),avatar:x.avatar||null,points:nbSur(x.points),confirms:nbSur(x.confirms),
+    penaltyAt:msgMs(x.penaltyAt)||0,pointsHerites:(x.pointsHerites===undefined?undefined:nbSur(x.pointsHerites)),
     signals:nbSur(x.signals),discAccepted:nbSur(x.discAccepted),streak:nbSur(x.streak),bestStreak:nbSur(x.bestStreak),
     updatedAt:msgMs(x.updatedAt)||null,createdAt:msgMs(x.createdAt)||null,at:Date.now()};
   try{
@@ -29246,7 +29379,7 @@ function amisLigne(uid,u,sous){
   var row=document.createElement("div");
   row.className="msg-row";
   row.innerHTML=msgAvatar(u)+
-    '<div style="flex:1;min-width:0"><div class="msg-name">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</div>'+
+    '<div style="flex:1;min-width:0">'+msgNomHTML(u)+
     '<div class="msg-prev">'+sous+'</div></div>';
   return row;
 }
@@ -29371,8 +29504,8 @@ function renderAmis(){
         var uid=amisAutre(l),u=msgUser(uid)||{pseudo:_tr("msgSomeone")};
         var d=document.createElement("div");
         d.className="req-card";
-        d.innerHTML='<div class="req-top">'+msgAvatar(u,"lg")+'<div style="flex:1;min-width:0"><div class="msg-name">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</div>'+
-          '<div class="req-meta">'+_tr("msgLevel").replace("{n}",(levelInfo(nbSur(u.points)).idx+1))+' · '+_tr("msgConfirmsN").replace("{n}",nbSur(u.confirms))+'</div></div></div>'+
+        d.innerHTML='<div class="req-top">'+msgAvatar(u,"lg")+'<div style="flex:1;min-width:0">'+msgNomHTML(u)+
+          '<div class="req-meta">'+msgNiveauTxt(u)+' · '+_tr("msgConfirmsN").replace("{n}",nbSur(u.confirms))+'</div></div></div>'+
           '<div class="req-actions">'+
             '<button class="msg-bp" data-ami-ok="'+attr(uid)+'">'+tr("Accepter")+'</button>'+
             '<button class="msg-bs" data-ami-non="'+attr(uid)+'">'+_tr("msgDecline")+'</button>'+
@@ -29678,8 +29811,8 @@ function renderMessages(){
 function msgCarteDemande(c){
   var o=msgAutreDe(c),u=msgUser(o)||{};
   var contribs=nbSur(u.confirms)+nbSur(u.signals)+nbSur(u.discAccepted);
-  var lv=levelInfo(nbSur(u.points));
-  var meta=_tr("msgLevel").replace("{n}",lv.idx+1)+' · '+_tr("msgConfirmsN").replace("{n}",nbSur(u.confirms));
+  var lv=levelInfo(ptsNetsDe(u));
+  var meta=msgNiveauTxt(u)+' · '+_tr("msgConfirmsN").replace("{n}",nbSur(u.confirms));
   var neuf=false;
   if(u.createdAt){
     var mois="";try{mois=new Date(u.createdAt).toLocaleDateString(msgLocale(),{month:"long",year:"numeric"});}catch(e){}
@@ -29688,7 +29821,7 @@ function msgCarteDemande(c){
   }
   var quote=c.lastMsg?msgApercu(c):"";
   return '<div class="req-card" data-cid="'+attr(c.cid)+'" role="button" tabindex="0" aria-label="'+attr(_tr("msgOpenRequest"))+'" onclick="if(!event.target.closest(\'button\'))openThread(\''+attr(c.cid)+'\',\''+attr(o)+'\')" onkeydown="if(event.key===\'Enter\'){openThread(\''+attr(c.cid)+'\',\''+attr(o)+'\');}">'+
-    '<div class="req-top">'+msgAvatar(u,"lg")+'<div style="flex:1;min-width:0"><div class="msg-name">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</div><div class="req-meta">'+meta+'</div>'+
+    '<div class="req-top">'+msgAvatar(u,"lg")+'<div style="flex:1;min-width:0">'+msgNomHTML(u)+'<div class="req-meta">'+meta+'</div>'+
     (neuf?'<span class="req-warn"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 8v5M12 16.5h.01"/><circle cx="12" cy="12" r="9"/></svg>'+_tr("msgNewAccount")+'</span>':'')+'</div></div>'+
     (quote?'<div class="req-quote">« '+sanitize(quote)+' »</div>':'<div class="req-quote" style="color:var(--s3)">'+_tr("msgNoText")+'</div>')+
     '<div class="req-actions">'+
@@ -29793,7 +29926,7 @@ function renderThreadHead(){
   var actif=u.updatedAt?timeAgoShort(u.updatedAt):null;
   el.innerHTML='<div class="th-ico" role="button" tabindex="0" aria-label="'+attr(_tr("msgBack"))+'" onclick="threadRetour()" onkeydown="if(event.key===\'Enter\'){threadRetour();}">←</div>'+
     '<div role="button" tabindex="0" style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;cursor:pointer" aria-label="'+attr(_tr("msgSeeProfile")+" "+(u.pseudo||""))+'" onclick="msgVoirProfil()" onkeydown="if(event.key===\'Enter\'){msgVoirProfil();}">'+
-      msgAvatar(u,"sm")+'<div style="flex:1;min-width:0"><div class="th-hd-name">'+sanitize(u.pseudo||_tr("msgSomeone"))+'</div>'+
+      msgAvatar(u,"sm")+'<div style="flex:1;min-width:0">'+msgNomHTML(u,"th-hd-name")+
       (actif?'<div class="th-hd-sub">'+_tr("msgActive").replace("{t}",sanitize(actif))+'</div>':'')+'</div></div>'+
     '<div class="th-ico" role="button" tabindex="0" aria-label="'+attr(_tr("msgMore"))+'" onclick="msgMenuThread()" onkeydown="if(event.key===\'Enter\'){msgMenuThread();}"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></div>';
 }
@@ -30758,6 +30891,7 @@ try{
        interdisent au client de l'ecrire. On l'adopte tel quel (pas de max :
        une sanction peut etre levee par un admin, elle doit pouvoir baisser). */
     userStats.penalty=Number(d.penalty)||0;
+    userStats.penaltyAt=msgMs(d.penaltyAt)||0;   // la date de la dernière sanction décide de la coche
     /* pointsPreuves vient du serveur et de lui seul : c'est ce qui ouvre le
        scan de frigo aux contributeurs. Le serveur retranche de toute facon ;
        ici on ne decide que d'afficher ou non le bouton. */

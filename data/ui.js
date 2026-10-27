@@ -48,7 +48,7 @@ function haptic(type,arg){
        tombe sur un evenement reel de l'audio (la canette a 1,52 s, les feux a
        1,80 / 2,22 / 2,68 s). Un telephone ne sait pas vibrer « plus fort » :
        il vibre PLUS DE FOIS, parce qu'il se passe plus de choses. */
-    else if(type==="niveau")navigator.vibrate(VIBRE_NIVEAU[arg|0]||VIBRE_NIVEAU[0]);
+    else if(type==="niveau")navigator.vibrate(VIBRE_NIVEAU[arg|0]||VIBRE_NIVEAU[VIBRE_NIVEAU.length-1]);
     else if(type==="gorgee")navigator.vibrate(VIBRE_GORGEE);
     else if(type==="err")navigator.vibrate(35);
     else navigator.vibrate(10);
@@ -329,7 +329,14 @@ var LEVEL_SON=[
 /* 3 Connaisseur       */ {f0:340,f1:1150,bulles:17,queue:1.00,canette:0.52,fanf:[392,587],                   tirs:[],                                              etincelles:0},
 /* 4 Expert            */ {f0:340,f1:1250,bulles:18,queue:1.15,canette:0.60,fanf:[392,523,784],               tirs:[[-0.20,0.85]],                                  etincelles:0},
 /* 5 Maitre des rayons */ {f0:345,f1:1360,bulles:19,queue:1.30,canette:0.68,montee:0.55,fanf:[294,392,587,784],           tirs:[[-0.38,0.85],[-0.04,1.00]],                     etincelles:0},
-/* 6 Legende           */ {f0:350,f1:1500,bulles:22,queue:1.70,canette:0.80,montee:1.00,fanf:[196,392,523,659,784,1047],  tirs:[[-0.46,0.90],[-0.20,1.00],[0.10,1.10],[0.48,1.30]],etincelles:2.0}
+/* 6 Legende           */ {f0:350,f1:1500,bulles:22,queue:1.70,canette:0.80,montee:1.00,fanf:[196,392,523,659,784,1047],  tirs:[[-0.46,0.90],[-0.20,1.00],[0.10,1.10],[0.48,1.30]],etincelles:2.0},
+/* Au-dessus de Legende, la fete garde ses quatre feux : la hauteur monte d'une
+   soixantaine de hertz par palier et la pluie d'etincelles s'allonge, pour que
+   la progression s'entende sans rajouter de bruit. */
+/* 7 Pilier du quartier*/ {f0:355,f1:1560,bulles:23,queue:1.75,canette:0.82,montee:1.00,fanf:[196,392,523,659,784,1047],  tirs:[[-0.46,0.90],[-0.20,1.00],[0.10,1.10],[0.48,1.30]],etincelles:2.4},
+/* 8 Cartographe       */ {f0:360,f1:1620,bulles:24,queue:1.80,canette:0.84,montee:1.00,fanf:[196,392,523,659,784,1047],  tirs:[[-0.46,0.90],[-0.20,1.00],[0.10,1.10],[0.48,1.30]],etincelles:2.8},
+/* 9 Sentinelle        */ {f0:365,f1:1680,bulles:25,queue:1.85,canette:0.86,montee:1.00,fanf:[196,392,523,659,784,1047],  tirs:[[-0.46,0.90],[-0.20,1.00],[0.10,1.10],[0.48,1.30]],etincelles:3.2},
+/* 10 Oracle           */ {f0:370,f1:1740,bulles:26,queue:1.90,canette:0.88,montee:1.00,fanf:[196,392,523,659,784,1047],  tirs:[[-0.46,0.90],[-0.20,1.00],[0.10,1.10],[0.48,1.30]],etincelles:3.6}
 ];
 
 /* LE SON D'UN PASSAGE DE NIVEAU. Un seul point d'entree.
@@ -385,7 +392,7 @@ function sonGorgee(ac,t,idx,dest){
      elle chuchote a 405-630 Hz, a Legende a 675-1050 Hz. Meme petit son, mais
      dans le registre du niveau ou l'on se trouve : la progression s'entend
      meme dans les trois paliers intermediaires. */
-  var p=LEVEL_SON[idx]||LEVEL_SON[0];
+  var p=LEVEL_SON[idx]||LEVEL_SON[LEVEL_SON.length-1];
   sonRemplissage(ac,t,{duree:0.34,f0:p.f1*0.45,f1:p.f1*0.70,bulles:3,queue:0.30,vol:0.45},dest);
 }
 
@@ -405,7 +412,12 @@ var VIBRE_NIVEAU=[
 /* 3 Connaisseur */ [10,70,10,70,14, 1346,22],                              // + la canette a 1,52 s
 /* 4 Expert      */ [10,70,10,70,14, 1346,22, 258,30],                      // + un feu a 1,80 s
 /* 5 Maitre      */ [10,70,10,70,14, 1346,22, 258,30, 390,38],              // + un feu a 2,22 s
-/* 6 Legende     */ [10,70,10,70,14, 1346,22, 258,30, 390,38, 430,46]       // + le bouquet a 2,68 s
+/* 6 Legende     */ [10,70,10,70,14, 1346,22, 258,30, 390,38, 430,46],      // + le bouquet a 2,68 s
+/* 7 a 10 : memes temps que Legende, la fete n'a pas plus d'evenements */
+/* 7 Pilier      */ [10,70,10,70,14, 1346,22, 258,30, 390,38, 430,46],
+/* 8 Cartographe */ [10,70,10,70,14, 1346,22, 258,30, 390,38, 430,46],
+/* 9 Sentinelle  */ [10,70,10,70,14, 1346,22, 258,30, 390,38, 430,46],
+/* 10 Oracle     */ [10,70,10,70,14, 1346,22, 258,30, 390,38, 430,46]
 ];
 /* La gorgee : une seule pichenette, plus courte que le « pop » d'un bouton. */
 var VIBRE_GORGEE=[8,40,10];

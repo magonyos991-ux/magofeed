@@ -48,6 +48,11 @@ const PAIRES = [
   ['--warn-txt', '--warn-bg'], ['--danger-txt', '--danger-bg'], ['--danger-txt', '--card-bg'],
   ['--gold-on', '--gold-bg'], ['--cta-on', '--cta-bg'], ['#ffffff', '--ok-solid'],
   ['--app-bg', '--s1'],
+  /* Les couleurs plates des métaux de niveau : pseudo des listes, pastille du
+     classement, titre sous le pseudo. Sur le fond de l'app, des cartes et des
+     cartes de la messagerie. */
+  ...['bronze', 'argent', 'or', 'platine', 'cristal', 'obsidienne', 'prismatique']
+    .flatMap((m) => [['--lv-txt-' + m, '--app-bg'], ['--lv-txt-' + m, '--bg2'], ['--lv-txt-' + m, '--card-bg']]),
 ];
 const SEUIL = 4.5;
 let ko = 0;
