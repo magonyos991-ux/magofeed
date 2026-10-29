@@ -604,6 +604,7 @@ try{
           <div class="scan-frame"><span class="scan-corners"></span></div>
         </div>
         <div id="scan-torch" onclick="toggleTorch()" role="button" tabindex="0" aria-label="Lampe torche" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleTorch();}" style="display:none;position:absolute;top:12px;right:12px;z-index:6;width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);align-items:center;justify-content:center;cursor:pointer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2h6l-1 7H10L9 2z"/><path d="M10 9h4v4l-2 9-2-9V9z"/></svg></div>
+        <div id="scan-reco" onclick="reconnaitreCanette()" role="button" tabindex="0" aria-label="Reconnaître la boisson sans code-barres" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();reconnaitreCanette();}" style="display:none;position:absolute;left:12px;right:12px;bottom:12px;z-index:6;padding:13px 16px;border-radius:999px;background:rgba(0,0,0,.55);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);color:#fff;font-size:13.5px;font-weight:800;text-align:center;cursor:pointer;font-family:'Space Grotesk',sans-serif">Pas de code-barres ? Reconnaître la canette</div>
         <div class="scan-idle">
           <div class="si-ico"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></svg></div>
           <div class="si-t">Prêt à scanner</div>
@@ -9582,6 +9583,12 @@ function startScan(){
         var _tb=document.getElementById("scan-torch");
         if(_tb)_tb.style.display=(_caps&&_caps.torch)?"flex":"none";
       }catch(e){}
+      /* La reconnaissance visuelle n'a de sens que si la brique IA du serveur
+         est branchée (meme fonction que la photo du formulaire Proposer). */
+      try{
+        var _rb=document.getElementById("scan-reco");
+        if(_rb){_rb.style.display=window.fbIdentifyDrink?"block":"none";_rb.textContent=_RECO_LIBELLE;}
+      }catch(e){}
       hint.textContent=tr("Approche le code-barre…");
       /* CE QUI MANQUAIT QUAND CA NE PREND PAS.
          L'ecran disait « approche le code-barre » et ne disait plus rien
@@ -9785,7 +9792,142 @@ function stopScan(){
   }catch(e){}
   window._scanStream=null;
   scanActive=false;
+  // Le bouton de reconnaissance visuelle vit avec la camera : camera coupee,
+  // bouton range, et une analyse en vol ne garde pas la main sur l'interface.
+  try{var _rb=document.getElementById("scan-reco");if(_rb)_rb.style.display="none";}catch(e){}
+  window._recoEnCours=false;
 }
+/* ── RECONNAITRE LA CANETTE, SANS CODE-BARRES ────────────────────────────────
+   En rayon, le code-barres est parfois introuvable (canette tournee, givre,
+   gencive de prix par-dessus). Pendant que la camera tourne, un bouton envoie
+   UNE image de la video a la meme brique IA que la photo du formulaire
+   « Proposer » (fbIdentifyDrink, deja deployee) et propose les fiches du
+   catalogue qui correspondent. L'app n'affirme JAMAIS toute seule : elle dit
+   ce qu'elle a lu, propose 1 a 4 candidates dessinees, et c'est l'utilisateur
+   qui confirme d'un tap — le code-barres reste le chemin de la certitude.
+   Zero cout nouveau : la fonction serveur et sa cle existent deja. */
+var _RECO_LIBELLE="Pas de code-barres ? Reconnaître la canette";
+function reconnaitreCanette(){
+  if(window._recoEnCours)return;
+  /* La video qui a VRAIMENT un flux : #scan-video d'habitude, mais le repli
+     Quagga peut creer la sienne dans .scan-area. */
+  var video=document.getElementById("scan-video");
+  if(!video||!video.videoWidth){
+    var vids=document.querySelectorAll("#s-scan .scan-area video");
+    for(var vi=0;vi<vids.length;vi++){if(vids[vi].videoWidth){video=vids[vi];break;}}
+  }
+  if(!video||!video.videoWidth||!scanActive){toast("Active d'abord la caméra");try{playSound("err");}catch(e){}return;}
+  if(!window.fbIdentifyDrink){toast("Reconnaissance indisponible — scanne le code-barres");return;}
+  window._recoEnCours=true;
+  var btn=document.getElementById("scan-reco");
+  if(btn){btn.style.opacity=".6";btn.textContent="Je regarde la canette…";}
+  var hint=document.getElementById("scan-hint");
+  if(hint)hint.textContent=tr("Tiens-la droite et stable une seconde…");
+  try{haptic("pop");}catch(e){}
+  var fini=function(){
+    window._recoEnCours=false;
+    if(btn){btn.style.opacity="";btn.textContent=_RECO_LIBELLE;}
+  };
+  var data;
+  try{
+    // Une seule image, reduite : assez pour lire la canette, leger a envoyer.
+    var w=video.videoWidth,h=video.videoHeight,maxSide=900,sc=Math.min(1,maxSide/Math.max(w,h));
+    var c=document.createElement("canvas");
+    c.width=Math.round(w*sc);c.height=Math.round(h*sc);
+    c.getContext("2d").drawImage(video,0,0,c.width,c.height);
+    data=c.toDataURL("image/jpeg",0.8);
+  }catch(e){fini();toast("Capture impossible — réessaie");return;}
+  Promise.resolve(window.fbIdentifyDrink(data)).then(function(r){
+    fini();
+    if(!r||!r.ok){toast("Reconnaissance indisponible — scanne le code-barres");try{playSound("err");}catch(e){}return;}
+    ouvrirChoixReco(r);
+  }).catch(function(){fini();toast("Reconnaissance indisponible — scanne le code-barres");try{playSound("err");}catch(e){}});
+}
+/* Les candidates du catalogue pour ce que l'IA a lu : d'abord le
+   rapprochement strict (trouverBoissonProche, concu pour l'anti-doublon),
+   puis les meilleures de la recherche floue (_topBoissons, le meme classement
+   que l'ecran recherche). Jamais plus de 4 : on choisit d'un pouce. */
+function _candidatsReco(r){
+  var out=[],vus={};
+  var pousser=function(d){if(d&&d.id!=null&&!vus[d.id]){vus[d.id]=1;out.push(d);}};
+  try{
+    var prox=trouverBoissonProche(String(r.name||""),String(r.brand||""));
+    if(prox&&prox.drink)pousser(prox.drink);
+  }catch(e){}
+  var q=(String(r.brand||"")+" "+String(r.name||"")).trim();
+  try{if(q)_topBoissons(q,6).forEach(pousser);}catch(e){}
+  if(out.length<3&&r.name){try{_topBoissons(String(r.name),4).forEach(pousser);}catch(e){}}
+  return out.slice(0,4);
+}
+function fermerChoixReco(){var ov=document.getElementById("reco-sheet");if(ov)ov.remove();}
+function recoVersFiche(id){
+  fermerChoixReco();
+  try{stopScan();resetScanUI();}catch(e){}
+  var d=(DRINKS||[]).find(function(x){return Number(x.id)===Number(id);});
+  if(d){pick(d);try{playSound("pop");}catch(e){}}
+}
+function recoVersProposition(){
+  var lu=window._recoLu||{};
+  fermerChoixReco();
+  try{stopScan();resetScanUI();}catch(e){}
+  try{
+    openProposeForm();
+    var n=document.getElementById("propose-name");if(n&&!n.value)n.value=String(lu.nom||"");
+    var b=document.getElementById("propose-brand");if(b&&!b.value)b.value=String(lu.marque||"");
+    try{if(typeof proposeDejaPlusTard==="function")proposeDejaPlusTard();}catch(e2){}
+  }catch(e){}
+}
+function ouvrirChoixReco(r){
+  fermerChoixReco();
+  window._recoLu={nom:String(r.name||""),marque:String(r.brand||"")};
+  var ov=document.createElement("div");
+  ov.id="reco-sheet";
+  ov.setAttribute("role","dialog");ov.setAttribute("aria-modal","true");
+  ov.style.cssText="position:fixed;inset:0;z-index:8600;background:rgba(12,10,8,.55)";
+  ov.onclick=function(e){if(e.target===ov)fermerChoixReco();};
+  var corps="";
+  /* ZERO ALCOOL, MEME ICI : la fonction serveur ecarte deja l'alcool, mais si
+     elle le signale, on le dit en face plutot que de proposer des candidates. */
+  if(r.isAlcohol){
+    corps='<div style="padding:8px 2px 2px;font-size:14px;font-weight:600;color:var(--s1);line-height:1.5">'+
+      "C'est une boisson alcoolisée. Magofeed n'en référence aucune — zéro alcool, c'est la règle."+
+      '</div>'+
+      '<button onclick="fermerChoixReco()" style="width:100%;margin-top:14px;padding:14px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">Compris</button>';
+  }else if(!r.isDrink){
+    corps='<div style="padding:8px 2px 2px;font-size:14px;font-weight:600;color:var(--s1);line-height:1.5">'+
+      "Je ne vois pas de boisson sur l'image. Rapproche-toi de la canette, bien en face, et réessaie."+
+      '</div>'+
+      '<button onclick="fermerChoixReco()" style="width:100%;margin-top:14px;padding:14px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">Réessayer</button>';
+  }else{
+    var cands=_candidatsReco(r);
+    var luTxt=sanitize(String(r.name||""))+(r.brand?" · "+sanitize(String(r.brand||"")):"");
+    corps='<div style="font-size:12px;font-weight:700;color:var(--s2);margin:0 2px 10px">Lu sur la canette : '+(luTxt||"—")+'</div>';
+    if(cands.length){
+      cands.forEach(function(d){
+        corps+='<div onclick="recoVersFiche('+Number(d.id)+')" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:10px;border:1.5px solid var(--border);border-radius:16px;background:var(--bg2);margin-bottom:8px;cursor:pointer">'+
+          '<div style="width:46px;height:46px;flex-shrink:0;border-radius:12px;overflow:hidden">'+drinkIconHTML(d)+'</div>'+
+          '<div style="flex:1;min-width:0">'+
+            '<div style="font-size:14px;font-weight:800;color:var(--s1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sanitize(desechapper(d.name||""))+'</div>'+
+            '<div style="font-size:11.5px;font-weight:600;color:var(--s2)">'+sanitize(desechapper(d.brand||""))+(d.cat?" · "+sanitize(d.cat):"")+'</div>'+
+          '</div>'+
+          '<div style="font-size:18px;color:var(--s3)">›</div>'+
+        '</div>';
+      });
+    }else{
+      corps+='<div style="padding:4px 2px 10px;font-size:13.5px;font-weight:600;color:var(--s1);line-height:1.5">Rien d\'assez proche au catalogue pour l\'affirmer.</div>';
+    }
+    corps+='<button onclick="fermerChoixReco()" style="width:100%;margin-top:6px;padding:13px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Aucune de celles-là — je scanne le code-barres</button>'+
+      '<button onclick="recoVersProposition()" style="width:100%;margin-top:8px;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">Elle n\'est pas au catalogue ? Propose-la</button>';
+  }
+  ov.innerHTML='<div onclick="event.stopPropagation()" style="position:absolute;left:0;right:0;bottom:0;max-height:78vh;overflow-y:auto;background:var(--app-bg);border-radius:22px 22px 0 0;padding:18px 20px calc(24px + env(safe-area-inset-bottom,0px))">'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'+
+      '<div style="font-size:17px;font-weight:800;color:var(--s1)">C\'est laquelle ?</div>'+
+      '<div onclick="fermerChoixReco()" role="button" tabindex="0" aria-label="Fermer" style="width:34px;height:34px;border-radius:12px;background:var(--bg2);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--s1)">✕</div>'+
+    '</div>'+corps+'</div>';
+  document.body.appendChild(ov);
+  try{playSound("pop");}catch(e){}
+}
+
 // Flash / torche : marche là où le navigateur l'autorise (Android). Sur iPhone,
 // Apple bloque le contrôle du flash en web -> le bouton n'apparaît même pas.
 function toggleTorch(){
