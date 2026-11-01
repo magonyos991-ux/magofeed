@@ -188,7 +188,27 @@ async function refundDailySlot(uid, kind) {
 async function readEmail(uid) {
   try {
     const u = await getAuth().getUser(String(uid));
-    return String((u && u.email) || "").trim();
+    const mail = String((u && u.email) || "").trim();
+    if (!mail) return "";
+    /* UNE ADRESSE NON VERIFIEE N'EST PAS UNE ADRESSE.
+       Le raisonnement du commentaire ci-dessus — « l'adresse vient d'Auth, donc
+       c'est la seule source de verite » — ne vaut que pour Google, qui l'a deja
+       verifiee chez lui. Depuis qu'on peut creer un compte Magofeed avec une
+       adresse quelconque, il ne vaut plus : rien n'empeche de s'inscrire avec
+       l'adresse de quelqu'un d'autre, de cocher le consentement sur SON propre
+       profil, et de faire envoyer par Magofeed des e-mails a une personne qui
+       n'a jamais rien demande. C'est un relais de courrier ouvert, au nom du
+       domaine de l'app — le meilleur moyen de finir en indesirable partout.
+       On exige donc une preuve : le lien de verification clique, ou une adresse
+       portee par un fournisseur tiers qui l'a deja verifiee. */
+    if (u.emailVerified === true) return mail;
+    const parTiers = (u.providerData || []).some(function (pr) {
+      return pr && pr.providerId && pr.providerId !== "password" &&
+             String(pr.email || "").toLowerCase() === mail.toLowerCase();
+    });
+    if (parTiers) return mail;
+    console.log("readEmail: adresse non verifiee, envoi refuse:", uid);
+    return "";
   } catch (e) {
     console.warn("readEmail:", e && e.message);
     return "";
@@ -368,9 +388,12 @@ exports.sendTestEmail = onCall(
       return { ok: false, reason: "profil-illisible", detail: String(e && e.message || e).slice(0, 200) };
     }
 
-    // Adresse issue du jeton signé par Firebase (ou d'Auth) — jamais d'un
-    // champ que le téléphone aurait pu écrire lui-même.
-    const to = String((req.auth.token && req.auth.token.email) || "").trim() || (await readEmail(uid));
+    /* L'adresse passe par readEmail, qui exige qu'elle soit VERIFIEE.
+       Elle etait lue d'abord dans le jeton (req.auth.token.email), ce qui
+       court-circuitait ce controle : le jeton porte l'adresse du compte,
+       verifiee ou non. Un compte inscrit avec l'adresse d'autrui pouvait donc
+       declencher un envoi vers cette adresse. */
+    const to = await readEmail(uid);
     if (!to || to.indexOf("@") === -1) return { ok: false, reason: "sans-adresse" };
     if (d.emailOptIn !== true) return { ok: false, reason: "sans-consentement" };
     if (!(await takeDailySlot(uid, "test"))) return { ok: false, reason: "quota-test" };

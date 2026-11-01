@@ -478,14 +478,17 @@ body:not(.dark) .gps-bar{background:#f0fdf4;border-bottom:1px solid #dcfce7;colo
 body.dark .gps-bar{background:#052e16;border-bottom:1px solid #14532d;color:#86efac}
 
 /* ── Map ── */
-/* LA CARTE EST UN APERCU, PAS LA PAGE.
-   Elle occupait 250 px — plus que la photo du produit (56 px) et plus que la
-   reponse a la question qu'on se pose. Sur un ecran de telephone, elle
-   repoussait le premier magasin hors de vue. A 150 px elle situe le quartier,
-   ce qui suffit pour decider de l'ouvrir en grand ; la liste, elle, remonte. */
+/* LA CARTE EST UN APERCU, PAS LA PAGE — mais un apercu LISIBLE.
+   A 250 px elle repoussait le premier magasin hors de vue ; reduite a 150 px,
+   le retour terrain est tombe : « la carte en petit est une catastrophe » —
+   trop petite pour situer quoi que ce soit, d'autant que la banniere
+   d'itineraire la recouvrait. 210 px est le compromis mesure : on situe le
+   quartier, et le bloc « le plus proche qui l'a » reste visible sous elle.
+   Depuis, l'apercu s'ouvre aussi en grand d'un simple toucher, et tracer un
+   itineraire passe en plein ecran tout seul (voir routeFromMarker). */
 .map-box{
   margin:12px 14px;border-radius:18px;overflow:hidden;
-  height:150px;border:1px solid var(--border);
+  height:210px;border:1px solid var(--border);
   position:relative;
 }
 .map-box.map-fullscreen{height:100%}
@@ -879,8 +882,10 @@ body.dark .disc-card{background:#2a2a2a}
 
 /* ── Scanner : trois etats (idle / live / result), voir setScanState ── */
 #s-scan[data-state="idle"] .scan-area,#s-scan[data-state="idle"] #scan-hint,#s-scan[data-state="idle"] #scan-tips,
-#s-scan[data-state="idle"] #scan-manual-toggle,#s-scan[data-state="idle"] #scan-cancel,#s-scan[data-state="idle"] #scan-btn{display:none!important}
-#s-scan[data-state="result"] .scan-area,#s-scan[data-state="result"] #scan-tips,#s-scan[data-state="result"] #scan-cancel,#s-scan[data-state="result"] #scan-manual-toggle{display:none!important}
+#s-scan[data-state="idle"] #scan-manual-toggle,#s-scan[data-state="idle"] #scan-cancel,#s-scan[data-state="idle"] #scan-btn,
+#s-scan[data-state="idle"] #scan-reco{display:none!important}
+#s-scan[data-state="result"] .scan-area,#s-scan[data-state="result"] #scan-tips,#s-scan[data-state="result"] #scan-cancel,#s-scan[data-state="result"] #scan-manual-toggle,
+#s-scan[data-state="result"] #scan-reco{display:none!important}
 #s-scan:not([data-state="idle"]) #scan-cta{display:none}
 /* ── Mes trouvailles : grille du journal ── */
 .find-chip{min-height:44px;padding:0 14px;font-size:11.5px}
@@ -2428,3 +2433,55 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]),textarea,select{f
 }
 .map-barre #map-instock-btn.on{background:#16a34a;color:#fff;border-color:#16a34a}
 .map-barre #map-instock-btn.on .pt{background:#fff;border-color:#fff;opacity:1}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MAGOFEED SE TIENT A LA VERTICALE
+   ──────────────────────────────────────────────────────────────────────────
+   Le proprietaire l'a dit mieux que n'importe quelle specification : « quand
+   je mets mon telephone a l'horizontale, ca fait changer mon application
+   horizontalement. Je ne veux pas de ca. Ca doit etre une application
+   mobile. Verticale. »
+
+   Il a raison, et pas seulement par gout. Une page web s'etire quand on
+   tourne l'ecran ; une application, non. Instagram, TikTok, Snapchat sont
+   verrouillees en portrait, et c'est exactement ce que l'oeil reconnait comme
+   « une vraie app ». Un ecran qui bascule en paysage, c'est le signe qui
+   trahit le site deguise.
+
+   TROIS VERROUS, PARCE QU'AUCUN NE SUFFIT SEUL :
+     1. AndroidManifest.xml  android:screenOrientation="portrait"
+     2. Info.plist           une seule orientation autorisee
+     3. ici                  pour le navigateur, qui ignore les deux premiers
+   Un onglet Chrome ou Safari tourne quoi qu'on fasse : « orientation » dans
+   le manifeste PWA n'est respecte qu'une fois l'app installee, et iOS ne le
+   respecte jamais. Ce dernier verrou n'empeche donc pas la rotation — il
+   empeche l'app de s'y ETIRER, ce qui revient au meme a l'oeil.
+
+   La condition vise les TELEPHONES couches, pas les ordinateurs : un ecran
+   d'ordinateur est large ET haut, un telephone couche est large et BAS.
+   D'ou le plafond de hauteur, sans lequel ce panneau s'afficherait sur
+   chaque PC — et il n'y a aucune raison d'embeter quelqu'un sur un ordinateur.
+   ══════════════════════════════════════════════════════════════════════════ */
+#paysage-stop{display:none}
+@media (orientation:landscape) and (max-height:500px) and (pointer:coarse){
+  #paysage-stop{
+    display:flex;position:fixed;inset:0;z-index:99999;
+    flex-direction:column;align-items:center;justify-content:center;gap:14px;
+    background:var(--app-bg,#1a1714);color:var(--s1,#f6f1e9);
+    text-align:center;padding:24px;
+    font-family:'Space Grotesk',system-ui,sans-serif;
+  }
+  /* L'app reste montee derriere : on la cache seulement. Rien n'est detruit,
+     rien n'est recharge, et le retour a la verticale est instantane. */
+  body > *:not(#paysage-stop){visibility:hidden}
+  #paysage-stop .pivot{
+    width:46px;height:70px;border:2.5px solid #c69a57;border-radius:9px;
+    animation:paysage-pivot 2.2s ease-in-out infinite;
+  }
+  #paysage-stop .titre{font-size:17px;font-weight:800;max-width:300px;line-height:1.3}
+  #paysage-stop .sous{font-size:13px;font-weight:600;opacity:.65;max-width:300px;line-height:1.4}
+}
+@keyframes paysage-pivot{
+  0%,40%{transform:rotate(90deg)}
+  70%,100%{transform:rotate(0deg)}
+}

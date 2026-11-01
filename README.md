@@ -51,7 +51,9 @@ data/
 
 functions-a-deployer/ Les Cloud Functions (Node, europe-west1) + firestore.rules.
                       ⚠ Ce dossier n'est PAS déployé par la CI : voir « Déployer ».
-  tests-regles/       260 épreuves qui attaquent la base sur un émulateur.
+  tests-regles/       Les épreuves sur émulateur : 280 sur les règles Firestore
+                      (regles.test.mjs) et 15 sur le compte et ses liaisons
+                      (comptes.test.mjs, émulateur Auth).
 
 outils/               Scripts de contrôle en ligne de commande (traductions,
                       catalogue, essais navigateur). Aucun n'est nécessaire pour
@@ -104,6 +106,51 @@ c'est le meilleur moyen de faire couper les notifications à tout le monde.
 dès que les magasins sont chargés : elle ne doit jamais envoyer chercher ce qui
 est déjà partout.
 
+**Le compte.** Trois portes, **un seul joueur** derrière. On peut entrer avec
+Google, avec un compte Magofeed natif (adresse + mot de passe, sans Google), ou
+les deux — et quand c'est la même adresse, les deux ouvrent le **même compte**,
+avec les mêmes points. Deux choses à ne jamais perdre de vue :
+
+- **L'uid EST l'identité.** Points, pseudo, série et classement vivent sous
+  `users/{uid}`. Un uid qui change, c'est un joueur qui perd tout, et Firebase
+  ne l'annonce pas : il ouvre simplement un autre compte. C'est pour ça que
+  toute la logique de liaison est couverte par un banc d'essai (contrôle n° 3).
+- **Une adresse non vérifiée fait disparaître le mot de passe.** Firebase retire
+  tout moyen de connexion non vérifié dès qu'un fournisseur de confiance arrive
+  sur la même adresse. Sans l'e-mail de vérification, le compte natif
+  s'autodétruit à la première connexion Google, et l'app répond « mot de passe
+  incorrect » à quelqu'un qui tape le bon.
+
+Pour ajouter un mot de passe à un compte qui en est dépourvu, c'est
+`updatePassword`, **pas** `linkWithCredential` : l'adresse appartient déjà au
+compte, et la liaison répond `auth/email-already-in-use` en parlant du compte
+lui-même. Mesuré sur l'émulateur, pas déduit.
+
+**Récupérer son compte, et le protéger.** Chaque chemin a été mesuré à
+l'émulateur Firebase Auth, pas supposé :
+
+| Geste | Ce qui prouve que c'est bien la personne |
+|---|---|
+| Mot de passe oublié | Un lien à usage unique, envoyé dans la boîte aux lettres |
+| Changer son mot de passe | L'ancien mot de passe est exigé |
+| Changer son adresse | Un lien envoyé à la **nouvelle** adresse ; rien ne change avant qu'il soit ouvert |
+| Supprimer son compte | Le mot de passe, ou une reconnexion Google |
+
+Deux pièges méritent d'être connus avant d'y toucher :
+
+- **« Mot de passe oublié » ne doit jamais dire si l'adresse existe.** Sinon le
+  bouton devient un détecteur de comptes : on tape des adresses une par une pour
+  savoir qui est inscrit. `fbEmailReset` avale donc `auth/user-not-found` et rend
+  toujours la même réponse. Mesuré : sans cette normalisation, l'émulateur
+  distingue bien les deux cas.
+- **Changer son mot de passe ne déconnecte PAS les autres appareils.** Mesuré :
+  après une réinitialisation complète, la session de celui qui avait volé le mot
+  de passe continuait de vivre. Seul l'Admin SDK peut révoquer, d'où la fonction
+  `revoquerMesSessions` (`functions-a-deployer/comptes-securite.js`). Si elle
+  n'est pas déployée, l'app **le dit** au lieu d'annoncer une protection qui
+  n'existe pas. À savoir : un jeton déjà délivré reste valable jusqu'à une heure,
+  quoi qu'on fasse.
+
 **Les points.** Le score officiel est calculé **par le serveur**, à partir des
 documents que les contributions laissent (`reports`). Le client ne peut pas
 l'écrire — sinon n'importe qui s'attribuerait 999 999 points depuis la console
@@ -140,15 +187,24 @@ publication** ; les autres se lancent à la main.
 npm install eslint@9.15.0 eslint-plugin-html@8.1.2 --no-save
 npx eslint .
 
-# 2. Les 260 épreuves des règles Firestore (il faut Java pour l'émulateur).
+# 2. Les 280 épreuves des règles Firestore (il faut Java pour l'émulateur).
 #    Tournent aussi dans la CI, et y bloquent le déploiement.
 cd functions-a-deployer/tests-regles && npm install && npm test
 
-# 3. Les traductions : aucun texte français ne doit rester dans une autre langue.
+# 3. Le compte Magofeed : les scénarios de liaison, contre l'émulateur Auth.
+#    Tourne aussi dans la CI, et y bloque le déploiement.
+cd functions-a-deployer/tests-regles && npm run test:comptes
+
+# 4. Les traductions : aucun texte français ne doit rester dans une autre langue.
 node outils/inventaire-textes.mjs     # combien de textes visibles non traduits
 node outils/verifier-textes.mjs       # clés orphelines, échappées, tr() sans entrée
 node outils/fusionner-textes.mjs x.json   # verser un lot de traductions
 ```
+
+Le banc des comptes extrait les **vraies fonctions** de `index.html` et les fait
+tourner contre l'émulateur Firebase Auth : c'est Firebase qui rend les codes
+d'erreur, pas une imitation maison. Une réécriture ne prouverait que la
+réécriture — et un test écrit à côté du code passe sur du code cassé.
 
 **Le principe des traductions** : le **texte français est la clé**. Écrire
 `tr("Ta zone")` dans le code suffit, à condition que `"Ta zone"` existe dans
@@ -162,7 +218,7 @@ en français dans les dix langues, en silence.
 
 **Le site** — automatique. `git push origin main` déclenche
 `.github/workflows/pages.yml`, qui :
-1. lance les 260 épreuves des règles (échec ⇒ rien n'est publié) ;
+1. lance les épreuves des règles (échec ⇒ rien n'est publié) ;
 2. lance ESLint (échec ⇒ rien n'est publié) ;
 3. régénère les pages de partage, tamponne le service worker, publie.
 
@@ -173,6 +229,7 @@ sur un `git push`. Depuis le dossier Firebase local :
 ```bash
 firebase deploy --only firestore:rules
 firebase deploy --only functions:<nom>       # une fonction précise
+firebase deploy --only functions:revoquerMesSessions   # couper les sessions
 ```
 
 Toujours lancer `npm test` (contrôle n° 2) **avant** de déployer des règles.
@@ -185,6 +242,14 @@ Toujours lancer `npm test` (contrôle n° 2) **avant** de déployer des règles.
   Cloud Function, ou un déclencheur qui part sur des milliers de documents, coûte
   de l'argent réel. Une alerte de budget dans la console Google Cloud n'est pas
   un luxe.
+- **Deux réglages de la console Firebase font vivre ou mourir le compte natif.**
+  Ils ne sont dans aucun fichier du dépôt :
+  1. *Authentication → Settings → User account linking* doit être sur
+     **« Link accounts that use the same email »**. Sur l'autre option, Google et
+     le compte Magofeed d'une même adresse donnent **deux comptes**, deux scores,
+     deux places au classement — sans la moindre erreur à l'écran.
+  2. *Authentication → Sign-in method* doit avoir **Adresse e-mail/Mot de passe**
+     activé, en plus de Google et Anonyme.
 - **`firestore.rules` est la seule vraie défense.** Le client est public : tout ce
   qu'il peut écrire, n'importe qui peut l'écrire. Toute modification de ce fichier
   passe par le banc d'essai.
@@ -207,6 +272,7 @@ Toujours lancer `npm test` (contrôle n° 2) **avant** de déployer des règles.
 | `stores` | Les magasins, leurs boissons, les confirmations | publique |
 | `catalog` | Les fiches boissons ajoutées après coup | publique |
 | `users` | Profils publics (pseudo, score, badges) — **jamais d'e-mail** | publique |
+| — | Les méthodes de connexion liées ne sont **pas** en base : elles viennent de `user.providerData` (Firebase Auth). Un champ Firestore serait public et réinscriptible depuis la console du navigateur. | — |
 | `reports` | La preuve d'une contribution ; c'est elle qui crédite les points | restreinte |
 | `conversations` / `messages` | La messagerie. Identifiant `a_b`, les deux uid triés | membres |
 | `amis` | Les liens d'amitié. Même forme : `a_b` | membres |
@@ -214,6 +280,7 @@ Toujours lancer `npm test` (contrôle n° 2) **avant** de déployer des règles.
 | `hunts` | Les chasses en cours | publique |
 | `watches` | Les alertes « préviens-moi quand on la trouve » | propriétaire |
 | `pushTokens` | Le jeton de notification, la position et **le rayon choisi** | soi seul |
+| — | Les adresses, mots de passe et liens de récupération vivent dans Firebase Auth, jamais dans Firestore. | — |
 | `alertesAdmin` | Le journal : ce que le serveur a tenté, et pourquoi il s'est tu | admin |
 
 Les règles complètes, avec le raisonnement derrière chacune, sont dans

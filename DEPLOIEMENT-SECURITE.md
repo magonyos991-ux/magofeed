@@ -9,7 +9,7 @@ Mesuré directement dans le projet, pas déclaré.
 
 | Vérification | Résultat |
 |---|---|
-| Fonctions déployées | 30 sur 30, aucune absente |
+| Fonctions déployées | 29 sur 29 (`importerHoraires` débranchée exprès, voir plus bas) |
 | Soldes figés (`pointsHerites`) | 115 sur 115 |
 | Profils ayant perdu des points à la bascule | 0 |
 | Profils remis à zéro | 0 |
@@ -144,7 +144,7 @@ dossier se remet à diverger. Elle sauvegarde ton `firebase.json` et ton
 `index.js` sous `.avant` avant de les remplacer.
 
 ```powershell
-cd C:\Users\ilias\magofeed-functions; $b="https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"; if (Test-Path firebase.json) { Copy-Item firebase.json firebase.json.avant -Force }; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firebase.json.modele") -OutFile "firebase.json"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.rules") -OutFile "firestore.rules"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.indexes.json") -OutFile "firestore.indexes.json"; cd functions; if (Test-Path index.js) { Copy-Item index.js index.js.avant -Force }; foreach ($f in @("index.js","points-et-parrainage.js","anti-farm.js","notifications-push.js","emails-brevo.js","reconnaissance-ia.js","scan-frigo.js","commerces-monde.js","remplir-enseignes.js","importer-horaires.js","partage.js","sauvegarde.js","don-notification.js","outils-admin.js","notif-admin.js","catalogue-ia.js","messages-push.js","chasse-codes.js","dons.js","verification-commercant.js","recap-fondateur.js","migration-geohash.js")) { Invoke-WebRequest -UseBasicParsing -Uri ($b+$f) -OutFile $f; Write-Host "ok $f" }; npm install @duckdb/node-api geofire-common @google-cloud/firestore @anthropic-ai/sdk; cd ..; firebase deploy --only firestore:indexes; firebase deploy --only firestore:rules; firebase deploy --only functions
+cd C:\Users\ilias\magofeed-functions; $b="https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"; if (Test-Path firebase.json) { Copy-Item firebase.json firebase.json.avant -Force }; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firebase.json.modele") -OutFile "firebase.json"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.rules") -OutFile "firestore.rules"; Invoke-WebRequest -UseBasicParsing -Uri ($b+"firestore.indexes.json") -OutFile "firestore.indexes.json"; cd functions; if (Test-Path index.js) { Copy-Item index.js index.js.avant -Force }; if (Test-Path package.json) { Copy-Item package.json package.json.avant -Force }; foreach ($f in @("package.json","index.js","points-et-parrainage.js","anti-farm.js","notifications-push.js","emails-brevo.js","reconnaissance-ia.js","scan-frigo.js","commerces-monde.js","remplir-enseignes.js","importer-horaires.js","agreger-demande.js","comptes-securite.js","partage.js","sauvegarde.js","don-notification.js","outils-admin.js","notif-admin.js","catalogue-ia.js","messages-push.js","chasse-codes.js","dons.js","verification-commercant.js","recap-fondateur.js","migration-geohash.js")) { Invoke-WebRequest -UseBasicParsing -Uri ($b+$f) -OutFile $f; Write-Host "ok $f" }; npm install; cd ..; firebase deploy --only firestore:indexes; firebase deploy --only firestore:rules; firebase deploy --only functions
 ```
 
 Le détail de ce que contient ce dossier, fichier par fichier, est dans
@@ -237,20 +237,31 @@ Avant tout changement de règles, le banc d'essai doit passer :
 ```
 cd functions-a-deployer/tests-regles
 npm install          # une seule fois
-npm test             # doit se terminer par : 291/291 conformes
+npm test             # doit se terminer SANS le moindre ECHEC
 ```
 
 Il attaque une base jetable sur ta machine. Rien ne part en ligne. S'il
 affiche le moindre `ECHEC`, **ne déploie pas** : dis-le-moi.
-Le total (260) grandit à chaque épreuve ajoutée — c'est l'absence d'échec qui
-compte, pas le chiffre. La consigne exigeait `148/148` : le banc en affiche 260
+Le total grandit à chaque épreuve ajoutée — c'est l'absence d'échec qui
+compte, et elle seule. Aucun chiffre n'est écrit ici, volontairement : une
+consigne qui fige un total devient fausse à la première épreuve ajoutée, et
+t'interdit alors de déployer une application pourtant tout en vert. C'est déjà
+arrivé deux fois
 depuis longtemps, donc elle interdisait de déployer alors que tout était vert.
 
 ## 2. Les Cloud Functions de base — DÉJÀ FAIT
 
 Vérifié : `identifyDrink`, `confirmAiDrink`, `identifyFridge`, `remplirEnseignes`,
-`importerHoraires`, `antiFarmRupture`, `fiche`, `kofiWebhook`, `sendTestPush`,
-`sendTestEmail` et les quatre notifications répondent toutes. Rien à faire ici.
+`antiFarmRupture`, `fiche`, `kofiWebhook`, `sendTestPush`, `sendTestEmail` et les
+quatre notifications répondent toutes. Rien à faire ici.
+
+`importerHoraires` a été **débranchée**. Elle était déployée, et son bouton
+d'administration promettait d'écrire « sur tous les magasins qui n'en ont pas »
+alors que le code écrivait dès que la valeur différait : un clic effaçait les
+horaires saisis par les commerçants. Elle est encore vivante en production
+**jusqu'à ton prochain `firebase deploy --only functions`**, qui la supprimera.
+Le bouton, lui, a disparu de l'application : plus rien ne peut l'appeler. Le
+pourquoi complet est en tête de `functions-a-deployer/importer-horaires.js`.
 
 Depuis la réorganisation, elles sont branchées dans le `index.js` unique et
 repartent avec toutes les autres à chaque déploiement. Tu n'as plus de liste de

@@ -45,13 +45,20 @@ function exigences() {
 /* Ce que la commande telecharge : la liste @("a.js","b.js",...) du README. */
 function listeDuReadme() {
   const md = readFileSync(README, "utf8");
-  const m = md.match(/@\(("index\.js"[^)]*)\)/);
+  /* On s'ancre sur « foreach ($f in @( », pas sur le premier nom de la liste :
+     la version precedente exigeait que « index.js » soit en tete, et ajouter
+     package.json devant faisait croire que la commande avait disparu. */
+  const m = md.match(/foreach \(\$f in @\(([^)]*)\)/);
   if (!m) return null;
-  return m[1].split(",").map((x) => x.trim().replace(/^"|"$/g, "").replace(/\.js$/, "")).filter(Boolean);
+  return m[1].split(",").map((x) => x.trim().replace(/^"|"$/g, "")).filter(Boolean);
 }
 
 const { modules, absents } = exigences();
-const liste = listeDuReadme();
+const listeBrute = listeDuReadme();
+/* La liste melange des modules (.js) et des fichiers de configuration. Les
+   deux comptent, mais pas de la meme facon. */
+const CONFIG = listeBrute ? listeBrute.filter((x) => !x.endsWith(".js")) : [];
+const liste = listeBrute ? listeBrute.filter((x) => x.endsWith(".js")).map((x) => x.replace(/\.js$/, "")) : null;
 
 console.log("le serveur a besoin de " + modules.length + " fichiers (index.js et tout ce qu'il entraine)\n");
 dit(absents.length === 0, "chaque fichier exige existe dans le depot" + (absents.length ? " — introuvable(s) : " + absents.join(", ") : ""));
@@ -63,9 +70,20 @@ if (liste) {
   /* Un fichier en trop ne casse rien (migration-geohash.js est un script a
      lancer a la main, volontairement present), mais un fichier qui n'existe
      pas ferait echouer le telechargement avant meme le deploiement. */
-  const fantomes = liste.filter((m) => !existsSync(join(DOSSIER, m + ".js")));
+  const fantomes = liste.concat(CONFIG.map((c) => c.replace(/\.[^.]+$/, "")))
+    .filter((m) => !existsSync(join(DOSSIER, m + ".js")) && !CONFIG.some((c) => c.replace(/\.[^.]+$/, "") === m && existsSync(join(DOSSIER, c))));
   dit(fantomes.length === 0,
     "la commande ne demande aucun fichier inexistant" + (fantomes.length ? " — fantome(s) : " + fantomes.map((x) => x + ".js").join(", ") : ""));
+  /* package.json N'EST PAS un detail. Il porte les versions que le code
+     attend — firebase-functions en tete. Le 23 octobre 2026 il manquait a la
+     commande : le CLI a prevenu « package.json indicates an outdated version
+     of firebase-functions », puis le deploiement est mort sur « User code
+     failed to load. Cannot determine backend specification. Timeout after
+     10000 ». Les index et les regles etaient deja passes ; les fonctions, non.
+     Un « npm install » de quatre paquets choisis a la main ne remplace pas le
+     manifeste. */
+  dit(CONFIG.indexOf("package.json") !== -1,
+    "la commande telecharge package.json (les versions que le code exige)");
   const enTrop = liste.filter((m) => modules.indexOf(m) === -1);
   if (enTrop.length) console.log("  .  | telecharges sans etre exiges (normal pour un script manuel) : " + enTrop.join(", "));
 }

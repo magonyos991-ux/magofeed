@@ -60,9 +60,6 @@ Object.assign(exports, require("./commerces-monde"));
       rien. ─────────────────────────────────────────────────────────────────*/
 Object.assign(exports, require("./remplir-enseignes"));
 
-/* ── L'import des horaires d'ouverture depuis OpenStreetMap. ──────────────*/
-Object.assign(exports, require("./importer-horaires"));
-
 /* ── L'apercu des liens partages pour ce qui n'a pas de page pre-generee. ─*/
 Object.assign(exports, require("./partage"));
 
@@ -91,6 +88,22 @@ Object.assign(exports, require("./catalogue-ia"));
    annoncait le contraire. chasse-codes.js le demandait pourtant noir sur blanc
    dans sa propre section DEPLOIEMENT. ─────────────────────────────────────*/
 Object.assign(exports, require("./chasse-codes"));
+/* ── Couper les sessions des autres appareils. Mesure a l'emulateur : changer
+   son mot de passe, ou le reinitialiser par courriel, ne deconnecte AUCUN
+   autre appareil. Quelqu'un qui se sait pirate faisait donc le seul geste
+   qu'il connaisse — et ne se protegeait de rien. Seul l'Admin SDK peut
+   revoquer, d'ou cette fonction. ──────────────────────────────────────────*/
+Object.assign(exports, require("./comptes-securite"));
+/* ── « X personnes ont cherche cette boisson ». Meme oubli que chasse-codes,
+   et meme consequence : l'application ECRIT dans `demand` depuis des semaines,
+   un document par appareil, par boisson et par jour. Personne ne les resumait.
+   Le document public `stats/drinkDemand` que la fiche lit n'existait donc
+   jamais, et le compteur ne s'affichait sur aucune boisson — pendant que la
+   collecte, elle, tournait.
+   Aucun secret, aucune dependance npm, aucune decision a prendre : c'est un
+   resume nocturne qui n'ecrit qu'un seul document, sans identifiant ni
+   position. Il n'y avait rien a attendre. ─────────────────────────────────*/
+Object.assign(exports, require("./agreger-demande"));
 
 /* ══════════════════════════════════════════════════════════════════════════
    PAS ENCORE BRANCHE — et pourquoi
@@ -119,6 +132,24 @@ Object.assign(exports, require("./chasse-codes"));
    jour, tous les jours.
 
      Object.assign(exports, require("./recap-fondateur"));
+
+   ──────────────────────────────────────────────────────────────────────────
+
+   L'import des horaires OpenStreetMap. DEBRANCHE EXPRES, pas en attente.
+   Elle etait branchee et deployee, et son bouton d'administration promettait
+   d'ecrire « sur tous les magasins qui n'en ont pas » alors que le code
+   ecrivait des que la valeur differait : un clic effacait les horaires saisis
+   par les commercants. Elle ne servait a rien non plus, parce que
+   l'application lit deja le fichier d'horaires A L'AFFICHAGE, et elle rendait
+   le rafraichissement hebdomadaire inerte, parce que openInfo prefere
+   s.hours au fichier. Tout est raconte en tete de importer-horaires.js.
+
+     Object.assign(exports, require("./importer-horaires"));
+
+   Ne la rebranche pas pour « gagner du temps ». Si tu le fais quand meme, le
+   garde-fou ajoute dans le fichier refuse desormais tout magasin qui porte
+   deja un horaire — elle ne peut plus detruire, mais elle n'apporte toujours
+   rien.
 
    ══════════════════════════════════════════════════════════════════════════
    CE QUI N'EST PAS ICI, ET NE DOIT PAS Y ETRE

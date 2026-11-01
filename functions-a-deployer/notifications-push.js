@@ -539,10 +539,23 @@ exports.notifyStockToWatchers = onDocumentUpdated(
            15, celle qu'utilise deja notifyHuntNearby : une seule regle pour les
            deux chemins. */
         const radius = (typeof wd.radius === "number" && wd.radius >= 1 && wd.radius <= 50) ? wd.radius : 15;
-        if (sLat != null && wd.lat != null && _dist(sLat, sLng, wd.lat, wd.lng) > radius) continue;
+        /* ══ « PRES DE TOI » QUAND ON NE SAIT PAS OU EST LA PERSONNE ═══════
+           Le filtre ne s'appliquait QUE si les deux positions etaient connues.
+           Une veille posee sans geolocalisation porte lat:null (toggleFav
+           ecrit `lat: userLat || null`) : la condition n'etait donc jamais
+           remplie, et la poussee partait quelle que soit la distance. Quelqu'un
+           a Bruxelles recevait « Trouvee pres de toi » pour un magasin de
+           Marseille.
+           On ne supprime pas l'alerte — elle a ete demandee, et la boisson a
+           bien ete vue. On arrete seulement d'affirmer une proximite qu'on ne
+           peut pas constater : sans position, le titre ne parle plus de
+           distance. Avec les deux positions, la regle du rayon s'applique
+           comme avant. */
+        const onSaitOu = (sLat != null && wd.lat != null);
+        if (onSaitOu && _dist(sLat, sLng, wd.lat, wd.lng) > radius) continue;
         const dName = String(wd.drinkName || "Ta boisson").slice(0, 40);
         const storeId = String(event.params.id);
-        const titre = "Trouvee pres de toi";
+        const titre = onSaitOu ? "Trouvee pres de toi" : "Ta boisson a ete reperee";
         const corps = "« " + dName + " » vient d'être repérée chez " + sName + ". Fonce l'acheter avant qu'elle parte !";
         const donnees = { type: "found", drinkId: String(drinkId), storeId: storeId };
         const lien = APP_URL + "#store=" + encodeURIComponent(storeId);
