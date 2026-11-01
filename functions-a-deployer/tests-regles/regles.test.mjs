@@ -1009,6 +1009,37 @@ await doit('verre : le reste du profil s ecrit sans toucher la teinte',
 await doit('bloque : naitre directement en Or de Legende',
   ()=>assertFails(setDoc(doc(nv,'users','verre-neuf'),{pseudo:'Neo',verre:'legende'})));
 
+/* ── La revendication d'un magasin porte ses preuves ─────────────────────────
+   Un paiement ne prouve pas qui tient la boutique ; le numero d'entreprise, le
+   telephone du magasin et la photo du code du jour, si. La regle verifie la
+   FORME de chaque preuve (dont la cle mod 97 du numero d'entreprise) et refuse
+   tout champ inconnu. 0477472701 a une cle juste ; 0123456789 non. */
+const PREUVE='data:image/jpeg;base64,'+'A'.repeat(400);
+const PREUVE_TROP='data:image/jpeg;base64,'+'A'.repeat(220001);
+const demandeRev=(extra)=>Object.assign({storeId:'s1',storeName:'Night Ixelles',by:ALICE,byPseudo:'Alice',
+  contact:'Alice 0470 00 00 00',role:'gerante',note:'',status:'pending',createdAt:serverTimestamp(),
+  bce:'0477472701',telephone:'02 123 45 67',preuve:PREUVE,code:'123456',codeJour:'2026-11-01'},extra||{});
+await doit('bloque : un numero d entreprise a la cle fausse',
+  ()=>assertFails(setDoc(doc(a,'shopClaims','s1'),demandeRev({bce:'0123456789'}))));
+await doit('bloque : un numero d entreprise qui n a pas dix chiffres',
+  ()=>assertFails(setDoc(doc(a,'shopClaims','s1'),demandeRev({bce:'477472701'}))));
+await doit('bloque : une photo de preuve trop lourde',
+  ()=>assertFails(setDoc(doc(a,'shopClaims','s1'),demandeRev({preuve:PREUVE_TROP}))));
+await doit('bloque : une « photo » qui n est pas une image',
+  ()=>assertFails(setDoc(doc(a,'shopClaims','s1'),demandeRev({preuve:'data:text/html;base64,PHNjcmlwdD4='}))));
+await doit('bloque : un code qui n a pas six chiffres',
+  ()=>assertFails(setDoc(doc(a,'shopClaims','s1'),demandeRev({code:'12345'}))));
+await doit('bloque : un champ inconnu glisse dans la demande',
+  ()=>assertFails(setDoc(doc(a,'shopClaims','s1'),demandeRev({certified:true}))));
+await doit('revendication : Alice depose avec ses trois preuves',
+  ()=>assertSucceeds(setDoc(doc(a,'shopClaims','s1'),demandeRev())));
+await doit('bloque : Mallory ne lit pas la demande d Alice (ni sa photo)',
+  ()=>assertFails(getDoc(doc(m,'shopClaims','s1'))));
+await doit('revendication : l admin lit la demande et ses preuves',
+  ()=>assertSucceeds(getDoc(doc(ad,'shopClaims','s1'))));
+await doit('bloque : le demandeur ne se certifie pas lui-meme',
+  ()=>assertFails(setDoc(doc(a,'shopClaims','s1'),{status:'approved'},{merge:true})));
+
 R.forEach(r=>console.log(r[0],'|',r[1]));
 console.log('\n'+(R.length-ko)+'/'+R.length+' conformes');
 await env.cleanup();

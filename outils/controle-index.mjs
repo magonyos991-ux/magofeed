@@ -27,6 +27,7 @@ const ATTENDUS = [
   "conversations|members:CONTAINS|lastAt:DESCENDING",
   "stores|drinks:CONTAINS|lat:ASCENDING",
   "stores|drinksVerified:CONTAINS|lat:ASCENDING",
+  "reports|type:ASCENDING|createdAt:ASCENDING",   // confirmations humaines / 7 j (administration)
 ];
 const REFERENCE = "functions-a-deployer/firestore.indexes.json";
 
