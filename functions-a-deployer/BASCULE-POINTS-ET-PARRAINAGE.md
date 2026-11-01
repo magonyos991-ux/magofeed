@@ -15,20 +15,38 @@ n'y a plus rien à déclarer.
 
 ## Avant de commencer — ce qu'il te faut
 
-**Le projet Cloud Functions n'est pas dans ce dépôt.** Ce dossier
-(`functions-a-deployer/`) ne contient que les fichiers à copier ; il n'y a ici
-ni `firebase.json`, ni `.firebaserc`, ni dossier `functions/`. `firebase deploy`
-ne peut donc pas être lancé depuis ce dépôt. Repère d'abord le dossier où vit
-ton projet Firebase (celui qui contient `firebase.json`), et travaille là-bas.
+**Où vit le code serveur : ici.** Ce paragraphe disait le contraire, et il
+avait raison le jour où il a été écrit — ce n'est plus vrai. Tout le serveur est
+dans ce dossier (voir `README.md` : « un seul dossier, une seule vérité »), et le
+déploiement part d'ici, de deux façons :
+
+- le bouton **« Run workflow »** de `.github/workflows/serveur.yml` (il assemble
+  `firebase.json` depuis `firebase.json.modele` et déploie) ;
+- ou la commande PowerShell du `README.md`, depuis ton dossier local.
+
+**N'invente pas un second dossier de déploiement.** C'est exactement ce qui a
+déjà fait proposer à Firebase de *supprimer* des fonctions en ligne : un dossier
+incomplet, déployé, et Firebase conclut que les fonctions manquantes ont été
+retirées exprès.
 
 **Vérifie les versions.** `points-et-parrainage.js` importe
 `firebase-functions/v2/...` et `firebase-admin/firestore`, donc :
 
-- Node 18 minimum (`"engines": {"node": "20"}` dans `functions/package.json`)
+- **Node 22** (`"engines": {"node": "22"}` dans `functions-a-deployer/package.json`).
+  Ce plancher ne vient pas d'un choix : `@google-cloud/firestore` 9.x déclare
+  `engines: node >=22`. `firebase-functions` 6.6 (`>=14.10`) et `firebase-admin`
+  13.10 (`>=18`) sont plus permissifs — c'est donc Firestore qui commande.
 - `firebase-functions` v4 ou plus
 - `firebase-admin` v11 ou plus
 
-Sur un projet resté en v1 / Node 16, le déploiement échoue à l'import.
+**Et ne redescends jamais ce champ à 20.** Google a décommissionné le runtime
+Node.js 20 le **31 octobre 2026** : le déploiement est refusé d'office, avant
+même de regarder ton code (« Runtime Node.js 20 was decommissioned on
+2026-10-31. To deploy you must first upgrade your runtime version »). C'est la
+panne qu'on a eue. La note en tête de `package.json` le rappelle.
+
+Sur un projet resté en v1, le déploiement échoue à l'import ; sur un projet resté
+en Node 20 ou moins, il est refusé **avant** l'import (runtime décommissionné).
 
 **Il te faut un document `admins/{ton uid}`.** L'étape 3 en dépend et répondra
 `permission-denied` sinon. Pour connaître ton uid, ouvre l'app puis, dans la
