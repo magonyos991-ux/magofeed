@@ -149,19 +149,37 @@ jobs:
           if (declare !== runner) {
             stop("engines.node vaut \"" + declare + "\" mais ce runner tourne sur Node " + runner + ". Le paquet serait verifie sur un moteur et deploye sur un autre. Aligne node-version (serveur.yml) et engines.node (functions-a-deployer/package.json).");
           }
-          const table = require(process.env.RUNNER_TEMP + "/cli/node_modules/firebase-tools/lib/deploy/functions/runtimes/supported/types.js").RUNTIMES;
+          const cli = process.env.RUNNER_TEMP + "/cli/node_modules/firebase-tools";
+          const versionCli = JSON.parse(fs.readFileSync(cli + "/package.json", "utf8")).version;
+          const table = require(cli + "/lib/deploy/functions/runtimes/supported/types.js").RUNTIMES;
+          /* CETTE TABLE EST UN MIROIR LOCAL, ET IL PEUT ETRE PERIME.
+             Mesure : firebase-tools 13.35.1 annonce la fin de nodejs22 au
+             2027-10-31, la 15.34.2 au 2028-10-31 -- un an d'ecart, et c'est la
+             15 qui a raison. Un refus venant d'ici peut donc etre un FAUX
+             positif fabrique par le CLI epingle. D'ou les deux remedes nommes
+             dans chaque message : monter le runtime, ou monter le CLI. */
+          const connus = Object.keys(table).filter((k) => k.startsWith("nodejs"));
           const info = table["nodejs" + declare];
           if (!info) {
-            stop("Le CLI Firebase ne connait pas nodejs" + declare + ". Connus : " + Object.keys(table).filter((k) => k.startsWith("nodejs")).join(", ") + ". Monte firebase-tools AVANT de monter le runtime.");
+            stop("Le CLI Firebase " + versionCli + " ne connait pas nodejs" + declare + ". Connus : " + connus.join(", ") + ". Monte firebase-tools AVANT de monter le runtime : c'est l'outil qui est le plafond, pas Google.");
           }
           const aujourdhui = new Date();
+          const miroir = " (date lue dans la table du CLI " + versionCli + ", qui est un miroir LOCAL : verifie la vraie date chez Google avant de bouger le runtime -- si elle est plus lointaine, c'est le CLI qu'il faut monter, pas le moteur)";
           if (aujourdhui >= new Date(info.decommissionDate)) {
-            stop(info.friendly + " a ete DECOMMISSIONNE le " + info.decommissionDate + ". Aucun deploiement ne passera. Monte engines.node ET node-version.");
+            stop(info.friendly + " serait DECOMMISSIONNE depuis le " + info.decommissionDate + " : ce CLI refusera de deployer. Deux remedes, dans cet ordre : 1) monter firebase-tools, dont la table est peut-etre perimee ; 2) si la date est confirmee chez Google, monter engines.node ET node-version." + miroir);
           }
           if (aujourdhui >= new Date(info.deprecationDate)) {
-            console.log("::warning::" + info.friendly + " est deprecie depuis le " + info.deprecationDate + " et sera decommissionne le " + info.decommissionDate + ". Planifie la montee MAINTENANT, pas le jour de la panne.");
+            console.log("::warning::" + info.friendly + " est deprecie depuis le " + info.deprecationDate + " et serait decommissionne le " + info.decommissionDate + ". Planifie la montee MAINTENANT, pas le jour de la panne." + miroir);
           }
-          console.log("Moteur : nodejs" + declare + " | runner Node " + runner + " | deprecie le " + info.deprecationDate + " | decommissionne le " + info.decommissionDate);
+          /* Le CLI epingle est-il devenu le plafond ? S'il ne connait pas le
+             majeur pair suivant, la prochaine montee de runtime sera bloquee
+             par l'outil. Autant le savoir des maintenant qu'au moment ou on
+             cherche a monter sous la pression d'un deploiement impossible. */
+          const suivant = Number(declare) + 2;
+          if (!table["nodejs" + suivant]) {
+            console.log("::warning::Le CLI Firebase " + versionCli + " ne connait pas encore nodejs" + suivant + " (il s'arrete a " + connus[connus.length - 1] + "). C'est LUI qui plafonne la prochaine montee de runtime : monte firebase-tools d'abord, dans un changement separe.");
+          }
+          console.log("Moteur : nodejs" + declare + " | runner Node " + runner + " | CLI " + versionCli + " | deprecie le " + info.deprecationDate + " | decommissionne le " + info.decommissionDate);
           FIN
           node "$RUNNER_TEMP/verif-moteur.cjs"
 
