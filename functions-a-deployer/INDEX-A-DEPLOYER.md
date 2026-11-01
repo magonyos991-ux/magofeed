@@ -38,6 +38,7 @@ une requête, le lien te la donnera.
 | `reports` | `by` + `createdAt` | l'anti-rejeu : « cette personne a-t-elle déjà été créditée aujourd'hui ? » |
 | `reports` | `storeId` + `createdAt` | l'entraide : qui a indiqué ce magasin récemment |
 | `reports` | `by` + `huntCreditedBy` | le plafond par paire : éviter que deux amis se créditent en boucle |
+| `reports` | `type` + `createdAt` | l'administration : « confirmations humaines / 7 j », le chiffre qui dit si la boucle tourne |
 | `reports` | `by` + `counted` | le filleul est-il vraiment actif |
 | `reports` | `storeId` + `drinkId` + `type` + `createdAt` | l'anti-farm : les annonces contredites sur place |
 | `referrals` | `parrain` + `status` | les plafonds de parrainage |

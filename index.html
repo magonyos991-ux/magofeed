@@ -4596,7 +4596,7 @@ window.fbSubmitShopClaim = async function(store, infos) {
   var user = await ensureAuthed();
   if (!store) throw new Error("magasin inconnu");
   var sid = String(store.fbId || store.id);
-  await setDoc(doc(db, "shopClaims", sid), {
+  var demande = {
     storeId: sid,
     storeName: String(store.name || "").slice(0, 80),
     by: user.uid,
@@ -4606,7 +4606,21 @@ window.fbSubmitShopClaim = async function(store, infos) {
     note: String((infos && infos.note) || "").slice(0, 300),
     status: "pending",
     createdAt: serverTimestamp()
-  });
+  };
+  /* Les preuves : numero d'entreprise (dix chiffres), telephone du magasin,
+     photo du code du jour, et le code que l'app affichait ce jour-la. Un champ
+     vide n'est pas ecrit : la regle verifie la forme de ce qui est present. */
+  var bce = String((infos && infos.bce) || "").replace(/\D/g, "").slice(0, 10);
+  if (bce) demande.bce = bce;
+  var tel = String((infos && infos.telephone) || "").trim().slice(0, 30);
+  if (tel) demande.telephone = tel;
+  var preuve = String((infos && infos.preuve) || "");
+  if (preuve && preuve.length <= 220000) demande.preuve = preuve;
+  var code = String((infos && infos.code) || "").slice(0, 6);
+  if (code) demande.code = code;
+  var codeJour = String((infos && infos.codeJour) || "").slice(0, 10);
+  if (codeJour) demande.codeJour = codeJour;
+  await setDoc(doc(db, "shopClaims", sid), demande);
   return true;
 };
 /* L'etat de MA demande sur ce magasin. Sert a ne pas proposer deux fois la
@@ -4847,10 +4861,15 @@ window.fbFounderStats = async function() {
     cnt(query(collection(db, "users"))),
     cnt(query(collection(db, "photoSuggestions"))),
     cnt(query(collection(db, "users"), where("createdAt", ">=", t0))), // nouveaux aujourd'hui
-    cnt(query(collection(db, "users"), where("createdAt", ">=", t7)))  // nouveaux / 7 j
+    cnt(query(collection(db, "users"), where("createdAt", ">=", t7))), // nouveaux / 7 j
+    /* Les confirmations faites par des PERSONNES : un document reports de type
+       stock. Les remplissages d'enseigne n'ecrivent jamais dans reports, donc
+       ce compte ne peut pas etre gonfle par un import. C'est le seul chiffre
+       qui dit si la boucle tourne. Index requis : reports (type, createdAt). */
+    cnt(query(collection(db, "reports"), where("type", "==", "stock"), where("createdAt", ">=", t7)))
   ]);
   var online = await window.fbCountOnline();
-  return { discToday: res[0], activeToday: res[1], storesWeek: res[2], totalUsers: res[3], pendingPhotos: res[4], newToday: res[5], newWeek: res[6], onlineNow: online };
+  return { discToday: res[0], activeToday: res[1], storesWeek: res[2], totalUsers: res[3], pendingPhotos: res[4], newToday: res[5], newWeek: res[6], confirmWeek: res[7], onlineNow: online };
 };
 
 /* ── Présence en temps réel (usage RÉEL, chiffres honnêtes) ──
@@ -22239,8 +22258,47 @@ function mbConfirmer(sid,did){
    proposee, et personne ne voit un bouton qui ne marche pas.
    Le jour ou tu deploies : passe-le a true, c'est la seule ligne a changer. */
 var VERIF_PAIEMENT=false;
+/* ══ LES PREUVES D'UNE REVENDICATION ═══════════════════════════════════════
+   Un paiement ne prouve pas qui tient une boutique ; trois choses, oui :
+   le numero d'entreprise (registre public BCE : l'adresse du point de vente y
+   figure), le telephone du magasin, et une photo du code du jour prise sur
+   place. L'administrateur voit les trois, cote a cote, et decide. */
+function numeroEntreprise(txt){ return String(txt||"").replace(/\D/g,"").slice(0,10); }
+/* Numero d'entreprise belge : dix chiffres, commence par 0 ou 1, et les deux
+   derniers valent 97 moins (les huit premiers modulo 97). Tolere « BE »,
+   points et espaces : on ne garde que les chiffres. */
+function numeroEntrepriseValide(txt){
+  var n=numeroEntreprise(txt);
+  if(!/^[01]\d{9}$/.test(n))return false;
+  return (97-(Number(n.slice(0,8))%97))===Number(n.slice(8));
+}
+function numeroEntrepriseAffiche(n){ n=numeroEntreprise(n); return n.length===10?n.slice(0,4)+"."+n.slice(4,7)+"."+n.slice(7):n; }
+function jourLocal(){ var d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+/* Le code du jour : six chiffres derives du compte, du magasin et de la date.
+   Il n'a rien de secret — il prouve la PRESENCE : la photo doit le montrer,
+   ecrit a la main, devant le comptoir ou le rayon, le jour meme. L'admin
+   recalcule le meme code depuis la demande (by, storeId, codeJour) et compare
+   avec la photo. Pas de serveur a appeler, rien a deployer. */
+function codeDuJour(uid,storeId,jour){
+  var t=String(uid||"")+"|"+String(storeId||"")+"|"+String(jour||jourLocal()), h=2166136261;
+  for(var i=0;i<t.length;i++){h^=t.charCodeAt(i);h=Math.imul(h,16777619)>>>0;}
+  return String(h%1000000).padStart(6,"0");
+}
+function claimPhotoChoisie(input){
+  var f=input&&input.files&&input.files[0]; if(!f)return;
+  var ap=document.getElementById("claim-photo-apercu");
+  window._claimPreuve=null;
+  /* Memes reglages que la vitrine : la borne des regles est en caracteres
+     base64 (220 000), et un code a six chiffres doit rester lisible. */
+  compressPhotoFile(f,function(dataUrl){
+    window._claimPreuve=dataUrl;
+    if(ap){ap.hidden=false;ap.innerHTML='<img src="'+dataUrl+'" alt="">';}
+    try{playSound("pop");}catch(e){}
+  },function(){ toast("Photo illisible — réessaie"); },{maxSide:1400,maxKb:420});
+}
 function claimThisShop(){
   var s=curStoreDetail; if(!s)return;
+  window._claimPreuve=null;
   var old=document.getElementById("claim-ov"); if(old)old.remove();
   var ov=document.createElement("div");
   ov.id="claim-ov";
@@ -22271,7 +22329,20 @@ function claimThisShop(){
       '<label class="claim-lab" for="claim-role">Ton rôle</label>'+
       '<input id="claim-role" class="claim-in" maxlength="40" placeholder="Gérant, propriétaire, responsable rayon…">'+
       '<label class="claim-lab" for="claim-note">Un mot pour nous aider à vérifier</label>'+
-      '<textarea id="claim-note" class="claim-in" rows="2" maxlength="300" placeholder="Ouvert 7j/7, je suis là le matin. Numéro de TVA BE0123…"></textarea>'+
+      '<textarea id="claim-note" class="claim-in" rows="2" maxlength="300" placeholder="Ouvert 7j/7, je suis là le matin."></textarea>'+
+      /* LES TROIS PREUVES. Le numero d'entreprise est verifie (cle mod 97) et
+         se recoupe avec le registre public ; le telephone est celui de la
+         boutique ; la photo montre le code du jour, ecrit a la main, sur
+         place. Voir numeroEntrepriseValide / codeDuJour plus haut. */
+      '<label class="claim-lab" for="claim-bce">Numéro d\'entreprise</label>'+
+      '<input id="claim-bce" class="claim-in" inputmode="numeric" maxlength="16" placeholder="0123.456.789 — il est sur tes tickets de caisse">'+
+      '<label class="claim-lab" for="claim-phone">Téléphone du magasin</label>'+
+      '<input id="claim-phone" class="claim-in" inputmode="tel" autocomplete="tel" maxlength="30" placeholder="02 123 45 67 — celui de la boutique">'+
+      '<div class="claim-code"><div class="claim-code-num" id="claim-code">'+codeDuJour((window._fbUser&&window._fbUser.uid)||"",String(s.fbId||s.id),jourLocal())+'</div>'+
+        '<div class="claim-code-txt">Écris ce code sur un papier et photographie-le devant ton comptoir ou ton rayon, aujourd\'hui.</div></div>'+
+      '<label class="claim-lab" for="claim-photo">Photo du code, prise sur place</label>'+
+      '<input id="claim-photo" type="file" accept="image/*" capture="environment" class="claim-in" onchange="claimPhotoChoisie(this)">'+
+      '<div id="claim-photo-apercu" class="claim-apercu" hidden></div>'+
       '<button class="claim-send" onclick="claimSubmit()">Envoyer ma demande</button>'+
       '<button class="claim-cancel" onclick="closeClaim()">Plus tard</button>'+
     '</div>';
@@ -22338,6 +22409,20 @@ function claimSubmit(){
     var el=document.getElementById("claim-contact"); if(el)el.focus();
     return;
   }
+  var bce=(document.getElementById("claim-bce")||{}).value||"";
+  if(!numeroEntrepriseValide(bce)){
+    toast("Le numéro d'entreprise ne semble pas valide — dix chiffres, il est sur tes tickets de caisse");
+    try{playSound("err");}catch(e){}
+    var eb=document.getElementById("claim-bce"); if(eb)eb.focus();
+    return;
+  }
+  if(!window._claimPreuve){
+    toast("Ajoute la photo du code du jour, prise dans le magasin");
+    try{playSound("err");}catch(e){}
+    return;
+  }
+  var telephone=(document.getElementById("claim-phone")||{}).value||"";
+  var jour=jourLocal();
   if(!window.fbSubmitShopClaim){toast("Connexion indisponible — réessaie plus tard");return;}
   /* Un compte anonyme perd son identifiant a la moindre reinstallation : le
      magasin resterait attache a un compte qui n'existe plus, et le gerant
@@ -22355,7 +22440,9 @@ function claimSubmit(){
      bouton restait sur « Envoi... » indefiniment et on ne savait pas si la
      demande etait partie. Douze secondes, puis on rend la main. */
   var _fini=false;
-  var _envoi=window.fbSubmitShopClaim(s,{contact:contact,role:role,note:note});
+  var _envoi=window.fbSubmitShopClaim(s,{contact:contact,role:role,note:note,
+    bce:numeroEntreprise(bce),telephone:telephone,preuve:window._claimPreuve,
+    code:codeDuJour((window._fbUser&&window._fbUser.uid)||"",String(s.fbId||s.id),jour),codeJour:jour});
   setTimeout(function(){
     if(_fini)return;
     _fini=true;
@@ -30727,6 +30814,7 @@ function renderFounderDash(){
   window.fbFounderStats().then(function(s){
     var grid=document.getElementById("fd-grid");if(!grid)return;
     grid.innerHTML=onlineTile(s.onlineNow)+
+      tile(icoPulse(17),s.confirmWeek,"confirmations humaines / 7 j",true)+
       tile(icoPulse(17),s.activeToday,"actifs aujourd'hui")+
       tile(icoUserPlus(17),s.newWeek,"nouveaux / 7 j",true)+
       tile(icoUsers(17),s.totalUsers,"joueurs au total")+
@@ -31511,6 +31599,25 @@ function renderShopClaims(){
         '<div class="cl-line"><b>Contact</b> '+sanitize(r.contact||"—")+'</div>'+
         '<div class="cl-line"><b>Rôle</b> '+sanitize(r.role||"—")+'</div>'+
         (r.note?'<div class="cl-line"><b>Mot</b> '+sanitize(r.note)+'</div>':'')+
+        /* LES TROIS PREUVES, pour decider en deux minutes : le numero
+           d'entreprise avec le registre public a un clic (l'adresse du point
+           de vente doit etre celle du magasin), le telephone de la boutique a
+           appeler, et la photo du code du jour — avec le code attendu,
+           recalcule ici, a comparer a ce qui est ecrit sur la photo. */
+        (r.bce
+          ? '<div class="cl-line"><b>N° d\'entreprise</b> '+sanitize(numeroEntrepriseAffiche(r.bce))+(numeroEntrepriseValide(r.bce)?'':' <b style="color:#b91c1c">(clé invalide)</b>')+
+            ' · <a href="https://kbopub.economie.fgov.be/kbopub/toonondernemingps.html?ondernemingsnummer='+encodeURIComponent(numeroEntreprise(r.bce))+'" target="_blank" rel="noopener">fiche officielle</a></div>'
+          : '<div class="cl-line quiet">Pas de numéro d\'entreprise fourni</div>')+
+        (r.telephone?'<div class="cl-line"><b>Téléphone du magasin</b> <a href="tel:'+sanitize(String(r.telephone).replace(/[^+\d]/g,""))+'">'+sanitize(r.telephone)+'</a></div>':'')+
+        (function(){
+          var ok=typeof r.preuve==="string"&&/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+\/=]+$/.test(r.preuve)&&r.preuve.length<=220000;
+          if(!ok)return '<div class="cl-line quiet">Pas de photo du code</div>';
+          var attendu=codeDuJour(r.by,String(r.docId||r.storeId),r.codeJour);
+          return '<div class="cl-line"><b>Code attendu</b> <span class="cl-code">'+sanitize(attendu)+'</span>'+
+            (r.codeJour?' <span class="quiet">(le '+sanitize(r.codeJour)+')</span>':'')+
+            (r.code&&r.code!==attendu?' <b style="color:#b91c1c">— l\'app avait affiché '+sanitize(r.code)+'</b>':'')+'</div>'+
+            '<img class="cl-preuve" src="'+r.preuve+'" alt="Photo du code prise sur place" onclick="this.classList.toggle(\'grand\')">';
+        })()+
         '<div class="cl-line quiet">Compte '+sanitize(r.byPseudo||"?")+' · magasin '+sanitize(String(r.docId||""))+
             (String(r.storeId||"")!==String(r.docId||"")?' <b style="color:#b91c1c">(le champ dit '+sanitize(String(r.storeId||""))+' — incoherent)</b>':'')+'</div>'+
         (r.reason?'<div class="cl-line quiet">Motif du refus : '+sanitize(r.reason)+'</div>':'')+
