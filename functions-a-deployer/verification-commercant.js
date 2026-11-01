@@ -20,8 +20,19 @@
  * s'affiche simplement pas.
  *
  * CE QUE CA POSE, ET CE QUE CA NE POSE PAS
- * Un paiement reussi prouve UNE chose : qui tient la boutique. Il pose donc
- * 'certified' (« tenu par son gerant ») et la fiche privee merchants/{uid}.
+ * ⚠️ CORRECTION (lue a tete reposee) : un paiement reussi NE PROUVE PAS qui
+ * tient la boutique. Il prouve qu'une personne a une carte a son nom — pas que
+ * cette personne tient CE magasin. N'importe quel utilisateur avec une carte
+ * pourrait « verifier » n'importe quel magasin pas encore certifie, premier
+ * arrive premier servi. La preuve de propriete vient d'AILLEURS : le numero
+ * d'entreprise (BCE, registre public, adresse de l'unite d'etablissement), le
+ * telephone public du magasin, une photo du code du jour prise sur place — et
+ * la validation dans l'Administration. Le paiement n'est qu'un signal de plus
+ * et un moyen d'encaisser, jamais la preuve seule. Tel quel, ce fichier ne
+ * doit PAS poser 'certified' : il devra se brancher sur la demande validee.
+ * (Texte d'origine, conserve pour memoire : « Un paiement reussi prouve UNE
+ * chose : qui tient la boutique. ») Il pose aujourd'hui 'certified' (« tenu par
+ * son gerant ») et la fiche privee merchants/{uid}.
  * Il ne pose JAMAIS 'drinksVerified' (« rayon vu sur place », un fait
  * constate) ni 'partner' (« mis en avant », de la publicite). Ces trois
  * signaux sont separes dans l'app exactement pour cette raison : on ne vend
