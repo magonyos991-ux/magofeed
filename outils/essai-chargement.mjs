@@ -47,7 +47,11 @@ async function ouvrir(options,attente,init){
     geolocation:{latitude:50.8793,longitude:4.3511},permissions:["geolocation"]},options||{}));
   const pg=await ctx.newPage();
   pg.on("pageerror",e=>erreurs.push("ERREUR JS : "+String(e.message).slice(0,140)));
-  await pg.route(/tile\.openstreetmap\.org|basemaps\.cartocdn\.com/,r=>r.abort());
+  /* Les vignettes OpenFoodFacts aussi : ce sont des <img> de l'accueil, et
+     l'evenement load attend chacune. Sur un reseau qui les fait trainer, la
+     page restait « en chargement » trente secondes alors que l'app etait
+     prete — et c'est l'ouverture qu'on mesure ici, pas un serveur d'images. */
+  await pg.route(/tile\.openstreetmap\.org|basemaps\.cartocdn\.com|images\.openfoodfacts\.org/,r=>r.abort());
   await pg.addInitScript(()=>{try{localStorage.setItem("magoOnboard","1");localStorage.setItem("magoob","1");}catch(e){}});
   if(init)await pg.addInitScript(init);
   await pg.goto(`http://127.0.0.1:${port}/index.html`,{waitUntil:attente||"load"});
