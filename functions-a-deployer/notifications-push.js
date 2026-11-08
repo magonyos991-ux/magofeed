@@ -313,7 +313,16 @@ exports.notifyHuntNearby = onDocumentWritten(
        « aucun appareil enregistre » — un journal qui ment est pire que pas de
        journal. On ecrit donc titre/corps/pousseesEnvoyees/jetonsTrouves comme
        outils-admin, et la RAISON va dans le corps, en francais. */
-    const _tracer = async function (titre, corps, jetons, poussees) {
+    /* DECLARATION DE FONCTION, PAS « const _tracer = function » — ET C'EST VOULU.
+       Le voisin juste en dessous s'ecrit « const _cle = function », alors
+       harmoniser celui-ci parait propre. Ne le fais pas : ce journal est appele
+       plus haut dans le meme corps (la sortie « boisson inconnue »), et un
+       const n'existe pas encore a cet endroit — zone morte, ReferenceError, et
+       la ligne de journal censee expliquer le silence n'est jamais ecrite.
+       Mesure faite : « Cannot access '_tracer' before initialization ». Une
+       declaration de fonction, elle, est hissee avec sa valeur dans tout le
+       corps : elle est appelable d'ou que ce soit, au-dessus comme en dessous. */
+    async function _tracer(titre, corps, jetons, poussees) {
       try {
         await db.collection("alertesAdmin").add({
           titre: String(titre).slice(0, 120),
@@ -326,7 +335,7 @@ exports.notifyHuntNearby = onDocumentWritten(
           drinkId: String(after.drinkId != null ? after.drinkId : event.params.drinkId)
         });
       } catch (e) { /* le journal ne doit jamais faire echouer l'envoi */ }
-    };
+    }
     const verrous = [
       { ref: db.collection("_meta").doc("huntPush_d_" + _cle(after.drinkId != null ? after.drinkId : event.params.drinkId)),
         ms: 6 * 3600 * 1000, nom: "boisson" },
