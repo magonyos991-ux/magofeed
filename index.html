@@ -850,6 +850,13 @@ try{
            masquait TOUTE action des qu'on etait connecte : ni lier, ni delier,
            ni changer de mot de passe, ni se deconnecter. -->
       <div class="set-group" id="compte-group"></div>
+      <!-- LE COMMERCANT. Une porte visible des reglages : avant, le seul chemin
+           etait un bouton discret tout en bas d'une fiche, que personne ne
+           trouvait sans qu'on le lui dise. Rendu par renderCommercantRow :
+           guide pour qui n'a pas encore de boutique, liste de ses magasins
+           pour le gerant certifie. -->
+      <div class="set-sec">Commerçant</div>
+      <div class="set-group" id="commercant-group"></div>
       <div class="set-sec">Préférences</div>
       <div class="set-group">
         <div class="set-row" onclick="openLangSheet()" role="button" tabindex="0" aria-label="Choisir la langue" onkeydown="if(event.key==='Enter'){openLangSheet();}">
@@ -1315,6 +1322,7 @@ try{
           <button class="sd-icon" id="sd-share-btn" onclick="shareStore()" aria-label="Partager ce magasin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg><span>Partager</span></button>
         </div>
       </div>
+      <div id="sd-coord" style="padding:0 20px"></div>
       <div id="sd-annonce"></div>
       <div id="sd-vitrine" style="padding:0 20px 4px"></div>
       <div style="padding:16px 20px 0">
@@ -1373,10 +1381,10 @@ try{
             <b>Scanner mon frigo</b>
             <i>Une photo du frigo — toutes les boissons sont reconnues et ajoutées d'un coup</i>
           </button>
-          <button class="sd-adm" onclick="ownerEditHours()">
+          <button class="sd-adm" id="sd-btn-fiche" onclick="ouvrirEditionFiche()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 1.8"/></svg>
-            <b>Modifier mes horaires</b>
-            <i>Le filtre « Ouvert » de la carte s'appuie dessus — garde-les justes</i>
+            <b>Modifier ma fiche</b>
+            <i>Nom, adresse, téléphone, site, horaires, description — ce que tes clients lisent</i>
           </button>
         </div>
       </div>
@@ -2480,6 +2488,10 @@ function compactStore(s) {
   return {
     id: s.id, fbId: s.fbId, name: s.name, brand: s.brand || "", emoji: s.emoji,
     lat: s.lat, lng: s.lng, type: s.type || "", hours: s.hours || null,
+    /* Les coordonnees du commerce et le drapeau « demande en cours » : sans
+       eux, le cache (6 h) rouvrait une fiche muette le lendemain. */
+    address: s.address || "", phone: s.phone || "", website: s.website || "", description: s.description || "",
+    claimPending: s.claimPending === true,
     dist: s.dist, drinks: drinks, drinksVerified: s.drinksVerified || [],
     confirmations: s.confirmations || {}, community: s.community || false,
     /* Fraicheur et auteur des observations : sans eux, le cache servait des
@@ -4427,6 +4439,11 @@ window.fbCreateStore = async function(store) {
     addedBy: user.uid,
     createdAt: serverTimestamp()
   };
+  /* Le type et l'adresse saisis dans le formulaire n'etaient jamais ecrits :
+     la fiche s'ouvrait sans eux le lendemain. Memes bornes que les regles. */
+  if (store.type) data.type = String(store.type).slice(0, 40);
+  if (store.address) data.address = String(store.address).slice(0, 120);
+  if (store.brand) data.brand = String(store.brand).slice(0, 40);
   await setDoc(doc(db, "stores", String(store.id)), data);
 };
 
@@ -4684,11 +4701,25 @@ window.fbSubmitShopClaim = async function(store, infos) {
   if (code) demande.code = code;
   var codeJour = String((infos && infos.codeJour) || "").slice(0, 10);
   if (codeJour) demande.codeJour = codeJour;
+  /* La langue dans laquelle il lit l'app : l'administrateur saura lui
+     repondre (ou se faire aider) — un epicier qui lit le turc ne comprend pas
+     un SMS en francais. Deux lettres, rien d'autre. */
+  var langue = String((infos && infos.langue) || "").slice(0, 2).toLowerCase();
+  if (/^[a-z]{2}$/.test(langue)) demande.langue = langue;
   await setDoc(doc(db, "shopClaims", sid), demande);
   return true;
 };
 /* L'etat de MA demande sur ce magasin. Sert a ne pas proposer deux fois la
    meme chose, et a dire ou en est le dossier au lieu de laisser dans le noir. */
+/* Retirer SA demande : le dossier contient son nom et son telephone, le
+   droit de le reprendre ne se discute pas. Le drapeau public du magasin
+   tombe avec. */
+window.fbRetirerMaDemande = async function(storeId) {
+  var u = auth.currentUser; if (!u) throw new Error("no-user");
+  await deleteDoc(doc(db, "shopClaims", String(storeId)));
+  try { await setDoc(doc(db, "stores", String(storeId)), { claimPending: deleteField() }, { merge: true }); } catch (e) {}
+  return true;
+};
 window.fbMyShopClaim = async function(storeId) {
   try {
     var user = auth.currentUser; if (!user) return null;
@@ -4770,7 +4801,8 @@ window.fbApproveShopClaim = async function(claim) {
      profil personnel de son gerant, tous deux lisibles par n'importe qui. */
   await setDoc(doc(db, "stores", sid), {
     certified: true,
-    certifiedAt: serverTimestamp()
+    certifiedAt: serverTimestamp(),
+    claimPending: deleteField()
   }, { merge: true });
   if (claim.by) {
     /* LE PASS DE LANCEMENT. Un commercant tout juste certifie repart avec le
@@ -4801,7 +4833,11 @@ window.fbApproveShopClaim = async function(claim) {
   }
   await setDoc(doc(db, "shopClaims", sid), {
     status: "approved",
-    decidedAt: serverTimestamp()
+    decidedAt: serverTimestamp(),
+    /* La photo du code a servi : elle montre l'interieur d'un commerce et
+       parfois une main. Elle ne reste pas en base une fois la decision prise
+       — c'est ce que la feuille de demande promet. */
+    preuve: deleteField()
   }, { merge: true });
   try {
     // fbNotifyUser pose le champ "to" — celui que fbLoadMyNotifs interroge et
@@ -4848,8 +4884,10 @@ window.fbRejectShopClaim = async function(claim, reason) {
   await setDoc(doc(db, "shopClaims", sid), {
     status: "rejected",
     reason: String(reason || "").slice(0, 200),
-    decidedAt: serverTimestamp()
+    decidedAt: serverTimestamp(),
+    preuve: deleteField()
   }, { merge: true });
+  try { await setDoc(doc(db, "stores", sid), { claimPending: deleteField() }, { merge: true }); } catch (e) {}
   try {
     if (claim.by) {
       await window.fbNotifyUser(claim.by, {
@@ -4881,7 +4919,8 @@ window.fbRevokeCertification = async function(storeId) {
   await setDoc(doc(db, "stores", sid), {
     certified: false,
     certifiedAt: null,
-    owner: deleteField()
+    owner: deleteField(),
+    claimPending: deleteField()
   }, { merge: true });
   if (ancienGerant) {
     try {
@@ -8035,7 +8074,7 @@ function _showRaw(s){
   if(s==="discover"){try{window._huntsCache=null;}catch(e){}}
   if(s==="profile"){try{majLigneAmis();}catch(e){}try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}try{renderDonCard();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
-  if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}try{renderCompte();}catch(e){}try{peindreVerres();}catch(e){}}
+  if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}try{renderCompte();}catch(e){}try{peindreVerres();}catch(e){}try{renderCommercantRow();}catch(e){}}
   if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderChasseCodes();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{_verifierAides();}catch(e){}try{renderChasse();}catch(e){}    // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
     // le filtre boisson de la carte (sinon la carte rouvrait toujours sur la derniere
     // boisson cherchee, ex. "Red Bull", au lieu de montrer tous les magasins).
@@ -10661,7 +10700,7 @@ function openAddStoreForm(cible,posInitiale){
       '<button id="add-store-cancel" style="padding:12px 16px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Annuler</button>'+
       '<button id="add-store-save" style="flex:1;padding:12px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Cr\u00E9er le magasin</button>'+
     '</div></div>';
-  var types=[["","Sup\u00E9rette"],["","Supermarch\u00E9"],["","Night shop"],["","\u00C9picerie exotique"],["","Station-service"],["","Pharmacie"],["","Boulangerie"],["","Autre"]];
+  var types=[["","Sup\u00E9rette"],["","Supermarch\u00E9"],["","Night shop"],["","\u00C9picerie exotique"],["","\u00C9picerie bio / vrac"],["","Station-service"],["","Pharmacie"],["","Boulangerie"],["","Autre"]];
   var tEl=document.getElementById("add-store-types");
   types.forEach(function(t,i){
     var b=document.createElement("button");
@@ -11295,6 +11334,10 @@ function _distanceSignalement(s){
   return null;
 }
 function _regimeSignalement(s){
+  /* Le gerant certifie connait son rayon d'ou qu'il soit : il fait ses mises
+     a jour le soir, chez lui. La distance ne joue plus que sur les points,
+     dont il n'a que faire. */
+  try{ if(typeof estProprietaire==="function"&&estProprietaire(s))return { ok:true }; }catch(e){}
   var d = _distanceSignalement(s);
   return { ok: !(d != null && d > SIGNAL_PORTEE_M) };
 }
@@ -21163,10 +21206,30 @@ function normaliserHoraires(txt){
   var t=" "+String(txt||"").toLowerCase()
     .normalize("NFD").replace(/[\u0300-\u036f]/g,"")+" ";
   if(/24\s*[\/h]\s*(24|7)|non.?stop/.test(t))return "24/7";
+  /* Les jours dans les langues des gerants de Bruxelles — pas seulement en
+     francais. Une epiciere qui ecrit « Pzt-Cmt 8-20 » ou « ma-za 8-20 » se
+     faisait refuser ses horaires avec un modele... en francais. Les noms
+     entiers d'abord (« cumartesi » avant « cuma », « pazartesi » avant
+     « pazar »), les abreviations ensuite. Les accents ont deja saute. */
   var jours=[["lundi","Mo"],["mardi","Tu"],["mercredi","We"],["jeudi","Th"],
              ["vendredi","Fr"],["samedi","Sa"],["dimanche","Su"],
+             ["monday","Mo"],["tuesday","Tu"],["wednesday","We"],["thursday","Th"],["friday","Fr"],["saturday","Sa"],["sunday","Su"],
+             ["maandag","Mo"],["dinsdag","Tu"],["woensdag","We"],["donderdag","Th"],["vrijdag","Fr"],["zaterdag","Sa"],["zondag","Su"],
+             ["montag","Mo"],["dienstag","Tu"],["mittwoch","We"],["donnerstag","Th"],["freitag","Fr"],["samstag","Sa"],["sonntag","Su"],
+             ["lunes","Mo"],["martes","Tu"],["miercoles","We"],["jueves","Th"],["viernes","Fr"],["sabado","Sa"],["domingo","Su"],
+             ["lunedi","Mo"],["martedi","Tu"],["mercoledi","We"],["giovedi","Th"],["venerdi","Fr"],["sabato","Sa"],["domenica","Su"],
+             ["segunda","Mo"],["terca","Tu"],["quarta","We"],["quinta","Th"],["sexta","Fr"],
+             ["pazartesi","Mo"],["cumartesi","Sa"],["sali","Tu"],["sal\u0131","Tu"],["carsamba","We"],["persembe","Th"],["cuma","Fr"],["pazar","Su"],
+             ["poniedzialek","Mo"],["wtorek","Tu"],["sroda","We"],["czwartek","Th"],["piatek","Fr"],["sobota","Sa"],["niedziela","Su"],
              ["lun","Mo"],["mar","Tu"],["mer","We"],["jeu","Th"],
-             ["ven","Fr"],["sam","Sa"],["dim","Su"]];
+             ["ven","Fr"],["sam","Sa"],["dim","Su"],
+             ["mon","Mo"],["tue","Tu"],["wed","We"],["thu","Th"],["fri","Fr"],["sat","Sa"],["sun","Su"],
+             ["ma","Mo"],["di","Tu"],["wo","We"],["do","Th"],["vr","Fr"],["za","Sa"],["zo","Su"],
+             ["mo","Mo"],["mi","We"],["fr","Fr"],["sa","Sa"],["so","Su"],
+             ["mie","We"],["jue","Th"],["vie","Fr"],["sab","Sa"],["dom","Su"],
+             ["gio","Th"],["seg","Mo"],["ter","Tu"],["qua","We"],["qui","Th"],["sex","Fr"],
+             ["pzt","Mo"],["sal","Tu"],["car","We"],["per","Th"],["cum","Fr"],["cmt","Sa"],["paz","Su"],
+             ["pon","Mo"],["wt","Tu"],["sr","We"],["czw","Th"],["pt","Fr"],["sob","Sa"],["ndz","Su"],["nd","Su"]];
   jours.forEach(function(p){ t=t.replace(new RegExp("\\b"+p[0]+"\\.?","g"),p[1]); });
   // « tous les jours », « 7j/7 », « chaque jour » -> la semaine entiere
   var toute=/tous les jours|chaque jour|7\s*j\s*\/?\s*7|semaine/.test(t);
@@ -21177,6 +21240,15 @@ function normaliserHoraires(txt){
   // « 8h », « 8h30 », « 8 h 30 », « 8:5 » -> HH:MM
   t=t.replace(/\b(\d{1,2})\s*[h:]\s*(\d{1,2})?\b/g,function(_,h,m){
     return ("0"+h).slice(-2)+":"+("0"+(m||"0")).slice(-2);
+  });
+  /* « 8-20 », « 17-3 » : deux nombres sans « h », ce que tapent la plupart
+     des gerants. On ne touche pas a « 08:30-20 » (le 30 n'est pas une heure
+     de debut) : un chiffre ou un deux-points juste avant ou apres, on passe. */
+  t=t.replace(/(\d{1,2})-(\d{1,2})/g,function(m,a,b,pos,tout){
+    var avant=pos>0?tout.charAt(pos-1):" ", apres=tout.charAt(pos+m.length);
+    if(/[\d:]/.test(avant)||/[\d:]/.test(apres))return m;
+    if(Number(a)>24||Number(b)>24)return m;
+    return ("0"+a).slice(-2)+":00-"+("0"+b).slice(-2)+":00";
   });
   t=t.replace(/\s*-\s*/g,"-").replace(/\s*;\s*/g,"; ").replace(/\s+/g," ").trim();
   t=t.replace(/;\s*$/,"");
@@ -21656,6 +21728,7 @@ function renderStoreDetail(){
   };
   try{renderStoreMission();}catch(e){}
   try{renderMerchantCard(s);}catch(e){}
+  try{rendreCoordonnees(s);}catch(e){}
   try{rendreVitrine(s);}catch(e){}
 
   /* Ici, et seulement ici, on recopie le rayon probable dans CE magasin : une
@@ -21730,6 +21803,9 @@ function renderStoreDetail(){
     }
   }
   try{ renderStoreAcces(s, allDrinks.length); }catch(e){}
+  /* Le gerant indique ses prix depuis sa propre liste : un bouton « € » par
+     ligne, qui affiche le prix connu. Les autres passent par la carte. */
+  var _gerant=false; try{ _gerant=estProprietaire(s); }catch(e){}
   _lot.forEach(function(d,_i){
     var confs=s.confirmations[d.id]||0;
     /* MEME REGLE QUE LA LISTE DES MAGASINS, sinon les deux ecrans se
@@ -21756,6 +21832,7 @@ function renderStoreDetail(){
       '<div style="display:flex;gap:6px;flex-shrink:0" onclick="event.stopPropagation()">'+
         '<button aria-label="Marquer en stock" onclick="sdSetStock('+d.id+',true)" style="width:38px;height:38px;border-radius:11px;border:1.5px solid '+(inStock?"#16a34a":"var(--border)")+';background:'+(inStock?"rgba(22,163,74,.14)":"var(--bg2)")+';color:'+(inStock?"#16a34a":"var(--s2)")+';font-size:15px;font-weight:800;cursor:pointer;line-height:1">✓</button>'+
         '<button aria-label="Marquer en rupture" onclick="sdSetStock('+d.id+',false)" style="width:38px;height:38px;border-radius:11px;border:1.5px solid '+(isRupture?"#dc2626":"var(--border)")+';background:'+(isRupture?"rgba(220,38,38,.12)":"var(--bg2)")+';color:'+(isRupture?"#dc2626":"var(--s2)")+';font-size:15px;font-weight:800;cursor:pointer;line-height:1">✕</button>'+
+        (_gerant?'<button aria-label="Indiquer le prix" onclick="quickPrice(\''+attr(String(s.id))+'\','+d.id+')" style="min-width:38px;height:38px;padding:0 8px;border-radius:11px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s2);font-size:11.5px;font-weight:800;cursor:pointer;line-height:1;white-space:nowrap">'+(_prixTxt(s,d.id)||"€")+'</button>':'')+
       '</div>';
     div.innerHTML=
       '<div class="sd-row" onclick="pick(DRINKS.find(function(x){return x.id==='+d.id+'}))">'+
@@ -21786,7 +21863,9 @@ function sdSetStock(did,wantStock){
      personne qui se corrige le fait une fois ; on impose donc un delai entre
      deux changements d'avis sur la meme boisson dans le meme magasin. */
   var cle=sid+":"+did, maintenant=Date.now();
-  if(maintenant-(_dernierStock[cle]||0)<90*1000){
+  /* Le delai de 90 s protege la carte des bascules nerveuses d'un passant ;
+     le gerant qui corrige un ✕ tape par erreur sur SON rayon n'attend pas. */
+  if(maintenant-(_dernierStock[cle]||0)<90*1000&&!estProprietaire(s)){
     toast("Tu viens de te prononcer sur cette boisson \u2014 laisse passer un moment");
     playSound("err"); return;
   }
@@ -21844,6 +21923,7 @@ function chargerMesMagasins(){
     _passOrigine=(c&&c.passOrigine)||null;
     // Une fiche deja ouverte doit reveler ses outils sans qu'on la rouvre.
     try{ if(curStoreDetail&&typeof renderStoreDetail==="function")renderStoreDetail(); }catch(e){}
+    try{ renderCommercantRow(); }catch(e){}
   }).catch(function(){ _mesMagasins={}; _monPass="aucun"; _passOrigine=null; });
 }
 /* MON NIVEAU DE PASS, tel que l'app le croit. Ce n'est qu'un confort
@@ -22156,8 +22236,13 @@ function renderMerchantCard(s){
   if(!mine && !isAdmin){
     /* Un magasin deja certifie au nom de quelqu'un d'autre : proposer de le
        revendiquer envoyait droit dans un refus. */
-    if(claim)claim.style.display=(storeCertifie(s)&&s.owner)?"none":"";
+    if(claim){
+      claim.style.display=(storeCertifie(s)&&s.owner)?"none":"";
+      claim.disabled=false; claim.classList.remove("en-cours");
+      claim.textContent=tr("Je tiens ce magasin");
+    }
     host.innerHTML="";
+    try{ _etatDemandeSurFiche(s); }catch(e){}
     // Le tableau de bord aussi : sans ca, celui du magasin PRECEDENT restait
     // affiche sous la fiche d'un magasin qui ne nous appartient pas.
     var _b=document.getElementById("sd-board"); if(_b)_b.innerHTML="";
@@ -22166,6 +22251,7 @@ function renderMerchantCard(s){
   if(claim)claim.style.display="none";
   try{renderMerchantBoard(s);}catch(e){}
   host.innerHTML=
+    (mine&&!isAdmin?bienvenueGerantHTML(s):"")+
     '<div style="background:linear-gradient(135deg,#221d18,#2f2820);border-radius:16px;padding:12px 14px;color:#f6f1e9;margin-top:6px">'+
       '<div style="display:flex;align-items:center;gap:10px">'+
         '<div style="flex:1;min-width:0">'+
@@ -22226,7 +22312,7 @@ function renderStoreAudience(s){
     function tuile(n,semaine,libelle){
       return '<div class="mb-stat"><div class="mb-stat-n">'+n+'</div>'+
         '<div class="mb-stat-l">'+libelle+'</div>'+
-        '<div class="mb-stat-w">'+(semaine?("+"+semaine+" cette semaine"):"\u2014")+'</div></div>';
+        '<div class="mb-stat-w">'+(semaine?trh("+{n} cette semaine",{n:semaine}):"\u2014")+'</div></div>';
     }
     // Le tableau peut avoir ete repeint entre-temps (la demande arrive vite) :
     // on relit l'hote au lieu de reutiliser une reference peut-etre morte.
@@ -22274,7 +22360,7 @@ function _mbLigne(d,n,action,libelle,ton){
   return '<div class="mb-row">'+
     '<span class="mb-thumb">'+drinkIconHTML(d)+'</span>'+
     '<span class="mb-txt"><span class="mb-name">'+sanitize(d.name)+'</span>'+
-      '<span class="mb-sub">'+n+' personne'+(n>1?'s':'')+' la cherche'+(n>1?'nt':'')+'</span></span>'+
+      '<span class="mb-sub">'+(n>1?trh("{n} personnes la cherchent",{n:n}):trh("{n} personne la cherche",{n:n}))+'</span></span>'+
     (action?'<button class="mb-go'+(ton?" "+ton:"")+'" onclick="'+action+'">'+libelle+'</button>':'')+
   '</div>';
 }
@@ -22337,7 +22423,7 @@ function _peindreBoard(s,hunts,rayon){
 
   if(jamais.length){
     h+='<div class="mb-sec">Tes clients ne savent pas que tu l\'as</div>';
-    h+='<div class="mb-note" style="margin:0 0 8px">'+jamais.length+' boisson'+(jamais.length>1?'s':'')+' de ton rayon n\'ont jamais été confirmées. Tant qu\'elles ne le sont pas, elles n\'apparaissent pas comme sûres dans les recherches.</div>';
+    h+='<div class="mb-note" style="margin:0 0 8px">'+(jamais.length>1?trh("{n} boissons de ton rayon n'ont jamais été confirmées. Tant qu'elles ne le sont pas, elles n'apparaissent pas comme sûres dans les recherches.",{n:jamais.length}):tr("Une boisson de ton rayon n'a jamais été confirmée. Tant qu'elle ne l'est pas, elle n'apparaît pas comme sûre dans les recherches."))+'</div>';
     h+=jamais.slice(0,3).map(function(d){
       return '<div class="mb-row">'+
         '<span class="mb-thumb">'+drinkIconHTML(d)+'</span>'+
@@ -22397,6 +22483,264 @@ function codeDuJour(uid,storeId,jour){
   for(var i=0;i<t.length;i++){h^=t.charCodeAt(i);h=Math.imul(h,16777619)>>>0;}
   return String(h%1000000).padStart(6,"0");
 }
+/* ══ LE COMMERÇANT, VU DE SES RÉGLAGES ═════════════════════════════════════
+   Huit gerants fictifs ont relu le parcours (voir la table des gerants du
+   11/11). Le premier constat etait le meme pour tous : le seul chemin vers le
+   compte commercant etait un bouton discret TOUT EN BAS d'une fiche, et il
+   fallait deja savoir qu'il existait. D'ou cette porte dans les reglages :
+   un guide qui dit AVANT ce qu'il faudra fournir (le numero d'entreprise, le
+   telephone, un papier et un stylo pour le code), et, pour le gerant deja
+   certifie, la liste de ses magasins — le franchise a trois boutiques n'avait
+   aucun endroit ou les retrouver. */
+/* Le magasin, s il est deja charge quelque part (autour de moi, ou sur la
+   carte). _magasinConnu vit dans le module Firebase : on refait la meme
+   recherche ici, cote ecran. */
+function _magasinCharge(id){
+  var sid=String(id), listes=[window.STORES,window._exploreRawList];
+  for(var i=0;i<listes.length;i++){ var l=listes[i]; if(!l)continue;
+    for(var j=0;j<l.length;j++){ var x=l[j]; if(x&&(String(x.id)===sid||String(x.fbId)===sid))return x; } }
+  return null;
+}
+var ICO_BOUTIQUE='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M3 9l1.5-5h15L21 9"/><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/><path d="M5 11v9h14v-9"/><path d="M10 20v-5h4v5"/></svg>';
+var SVG_BOUCLIER='<svg width="15" height="15" viewBox="0 0 24 24"><path fill="#fff" d="M12 2.4 4.4 5.9v6c0 4.6 3.2 8.5 7.6 9.7 4.4-1.2 7.6-5.1 7.6-9.7v-6L12 2.4z"/></svg>';
+function renderCommercantRow(){
+  var g=document.getElementById("commercant-group"); if(!g)return;
+  g.innerHTML="";
+  var ids=Object.keys(_mesMagasins||{});
+  if(ids.length){
+    ids.forEach(function(id){
+      var st=_magasinCharge(id);
+      var ligne=_ligneCompte({icone:ICO_BOUTIQUE,titre:(st&&st.name)||tr("Mon magasin"),
+        sous:tr("Tenu par toi · ouvrir la fiche"),action:function(){ouvrirMonMagasin(id);}});
+      ligne.setAttribute("data-magasin",id);
+      g.appendChild(ligne);
+      /* Le magasin n'est pas forcement charge autour de la position du moment
+         (le gerant regarde depuis chez lui) : on va chercher son nom. */
+      if(!st&&window.fbMagasinComplet){
+        window.fbMagasinComplet(id).then(function(plein){
+          if(!plein)return;
+          if(!(window.STORES||[]).some(function(x){return String(x.fbId||x.id)===String(id);}))(window.STORES=window.STORES||[]).push(plein);
+          var t=ligne.querySelector(".set-title"); if(t&&plein.name)t.textContent=plein.name;
+        }).catch(function(){});
+      }
+    });
+    g.appendChild(_ligneCompte({icone:ICO_BOUTIQUE,titre:tr("Tu tiens un autre magasin ?"),
+      sous:tr("Même chemin : sa fiche, puis « Je tiens ce magasin »"),action:ouvrirGuideCommercant}));
+  }else{
+    g.appendChild(_ligneCompte({icone:ICO_BOUTIQUE,titre:tr("Tu tiens un magasin ?"),
+      sous:tr("Pastille, tableau de bord, vitrine — gratuit"),action:ouvrirGuideCommercant}));
+  }
+}
+function ouvrirMonMagasin(id){
+  var st=_magasinCharge(id);
+  var aller=function(){ try{playSound("pop");}catch(e){} openStoreDetail(String((st&&st.id)||id)); };
+  if(st){aller();return;}
+  if(!window.fbMagasinComplet){toast(tr("Fiche indisponible pour le moment"));return;}
+  window.fbMagasinComplet(id).then(function(plein){
+    if(!plein){toast(tr("Fiche introuvable"));return;}
+    if(!(window.STORES||[]).some(function(x){return String(x.fbId||x.id)===String(id);}))(window.STORES=window.STORES||[]).push(plein);
+    st=plein; aller();
+  }).catch(function(){toast(tr("Fiche indisponible pour le moment"));});
+}
+function _feuilleOuvrir(ov){
+  document.body.appendChild(ov);
+  try{document.body.classList.add("sheet-open");}catch(e){}
+  requestAnimationFrame(function(){ov.classList.add("in");});
+  try{playSound("pop");}catch(e){}
+}
+function _feuilleFermer(id){
+  var ov=document.getElementById(id); if(!ov)return;
+  ov.classList.remove("in");
+  try{document.body.classList.remove("sheet-open");}catch(e){}
+  setTimeout(function(){ if(ov.parentNode)ov.remove(); },240);
+}
+function ouvrirGuideCommercant(){
+  var old=document.getElementById("guide-com-ov"); if(old)old.remove();
+  var ov=document.createElement("div"); ov.id="guide-com-ov"; ov.className="claim-ov";
+  ov.innerHTML=
+    '<div class="claim-card" role="dialog" aria-modal="true" aria-label="Ton magasin sur Magofeed">'+
+      '<div class="claim-grip"></div>'+
+      '<div class="claim-badge">'+SVG_BOUCLIER+'Compte commerçant</div>'+
+      '<div class="claim-title">Ton magasin sur Magofeed</div>'+
+      '<div class="claim-lead">Gratuit, sans engagement. Trois étapes :</div>'+
+      '<ol class="claim-list">'+
+        '<li><b>Trouve ta boutique sur la carte</b> et ouvre sa fiche.</li>'+
+        '<li><b>Tout en bas, « Je tiens ce magasin »</b> : ton numéro d\'entreprise (il est sur tes tickets de caisse), le téléphone de la boutique, et la photo d\'un code écrit à la main, prise dans le magasin.</li>'+
+        '<li><b>Un humain vérifie</b>, en général sous 48 h. Tu es prévenu dans la cloche.</li>'+
+      '</ol>'+
+      '<div class="claim-lead">Ce que ça te donne :</div>'+
+      '<ul class="claim-list">'+
+        '<li><b>La pastille « Tenu par son gérant »</b>, visible par tous.</li>'+
+        '<li><b>Ta fiche à toi</b> : nom, horaires, téléphone, description, photos de ton rayon avec tes prix, une annonce.</li>'+
+        '<li><b>Ton tableau de bord</b> : ce que le quartier cherche et que tu n\'as pas.</li>'+
+      '</ul>'+
+      '<div class="claim-prive">Numéro d\'entreprise, téléphone et photo ne servent qu\'à la vérification : seule l\'équipe Magofeed les voit, rien n\'est publié, et la photo est effacée une fois la décision prise.</div>'+
+      '<button class="claim-send" onclick="guideCommercantCarte(false)">Trouver ma boutique sur la carte</button>'+
+      '<button class="claim-cancel" onclick="guideCommercantCarte(true)">Elle n\'est pas encore sur la carte</button>'+
+      '<button class="claim-cancel" onclick="fermerGuideCommercant()">Plus tard</button>'+
+    '</div>';
+  ov.addEventListener("click",function(e){ if(e.target===ov)fermerGuideCommercant(); });
+  _feuilleOuvrir(ov);
+}
+function fermerGuideCommercant(){ _feuilleFermer("guide-com-ov"); }
+function guideCommercantCarte(ajouter){
+  fermerGuideCommercant();
+  setTimeout(function(){
+    try{ navTo("home"); }catch(e){}
+    try{ openExploreMap({}); }catch(e){ toast(tr("Carte indisponible pour le moment")); return; }
+    if(ajouter)setTimeout(function(){ try{exploreAddStore();}catch(e){} },900);
+  },260);
+}
+/* L'ETAT DE LA DEMANDE, SUR LA FICHE. Apres l'envoi, rien ne changeait : le
+   bouton redisait « Je tiens ce magasin » comme si rien n'etait parti, et le
+   gerant redeposait — ou doutait. Le bouton dit maintenant ou en est le
+   dossier. Une relecture par ouverture de fiche, pour les comptes reels. */
+function _etatDemandeSurFiche(s){
+  var claim=document.getElementById("sd-claim"); if(!claim||!s)return;
+  var u=window._fbUser; if(!u||u.isAnonymous||!window.fbMyShopClaim)return;
+  var sid=String(s.fbId||s.id);
+  window.fbMyShopClaim(sid).then(function(c){
+    if(!c||curStoreDetail!==s)return;
+    if(c.status==="pending"){
+      claim.style.display=""; claim.disabled=true; claim.classList.add("en-cours");
+      claim.textContent=tr("Demande envoyée · en cours de vérification");
+    }else if(c.status==="rejected"){
+      claim.style.display=""; claim.disabled=false; claim.classList.remove("en-cours");
+      claim.textContent=tr("Demande refusée — en redéposer une");
+    }else if(c.status==="approved"&&!(_mesMagasins&&_mesMagasins[sid])){
+      /* Certifie pendant que l'app etait ouverte : l'etat gerant est perime.
+         Une seule relecture par magasin, sinon une fiche approuvee mais
+         absente du compte commercant relirait en boucle. */
+      window._relectureGerant=window._relectureGerant||{};
+      if(window._relectureGerant[sid])return;
+      window._relectureGerant[sid]=1;
+      _mesMagasins=null; chargerMesMagasins();
+    }
+  }).catch(function(){});
+}
+/* LA CARTE DE BIENVENUE, une seule fois par magasin. Un gerant tout juste
+   certifie decouvrait un bandeau sombre, un tableau de bord vide et des
+   boutons au vocabulaire maison (rafale, frigo, pass). Trois gestes, dans
+   l'ordre ou ils comptent pour ses clients. */
+function bienvenueGerantHTML(s){
+  var sid=String((s&&(s.fbId||s.id))||"");
+  try{ if(localStorage.getItem("magoBienvenue:"+sid)==="1")return ""; }catch(e){}
+  return '<div id="sd-bienvenue" class="sd-bienvenue">'+
+    '<div class="sd-bienvenue-t">'+trh("C’est à toi, {nom}.",{nom:sanitize(s.name||"")})+'</div>'+
+    '<div class="sd-bienvenue-s">Trois gestes pour démarrer, dans l\'ordre que tu veux :</div>'+
+    '<ol class="sd-bienvenue-l">'+
+      '<li><b>Confirme ce que tu as en rayon</b> — le ✓ sur chaque boisson. Tes clients ne voient comme sûr que ce qui est confirmé.</li>'+
+      '<li><b>Ajoute une photo de ton rayon</b>, avec un prix : c\'est ce qui donne envie d\'entrer.</li>'+
+      '<li><b>Vérifie ta fiche</b> : nom, horaires, téléphone — « Modifier ma fiche », juste au-dessus.</li>'+
+    '</ol>'+
+    '<button class="ghost-btn" onclick="bienvenueGerantVu(\''+attr(sid)+'\')" style="width:100%;min-height:40px;border-radius:11px;font-size:12.5px">C\'est parti</button>'+
+  '</div>';
+}
+function bienvenueGerantVu(sid){
+  try{ localStorage.setItem("magoBienvenue:"+String(sid),"1"); }catch(e){}
+  var el=document.getElementById("sd-bienvenue"); if(el)el.remove();
+  try{playSound("pop");}catch(e){}
+}
+/* LES COORDONNEES DU COMMERCE, telles que les clients les lisent : un mot du
+   gerant, le telephone, le site ou la page. Seul le gerant certifie (ou
+   l'administrateur) peut les ecrire — la regle Firestore le garantit — donc
+   on peut l'affirmer sous la carte. */
+var SVG_TEL='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg>';
+var SVG_LIEN='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
+function rendreCoordonnees(s){
+  var h=document.getElementById("sd-coord"); if(!h)return;
+  if(!s){h.innerHTML="";return;}
+  var tel=String(s.phone||"").trim(), site=String(s.website||"").trim(), desc=String(s.description||"").trim();
+  if(!tel&&!site&&!desc){h.innerHTML="";return;}
+  var lien=site?(/^https?:\/\//i.test(site)?site:"https://"+site.replace(/^\/+/,"")):"";
+  var siteCourt=site.replace(/^https?:\/\//i,"").replace(/\/$/,"");
+  h.innerHTML='<div class="sd-coord">'+
+    (desc?'<div class="sd-coord-desc">'+sanitize(desc)+'</div>':'')+
+    ((tel||site)?'<div class="sd-coord-liens">'+
+      (tel?'<a class="sd-coord-lien" href="tel:'+attr(tel.replace(/[^+\d]/g,""))+'">'+SVG_TEL+'<span>'+sanitize(tel)+'</span></a>':'')+
+      (site?'<a class="sd-coord-lien" href="'+attr(lien)+'" target="_blank" rel="noopener">'+SVG_LIEN+'<span>'+sanitize(siteCourt)+'</span></a>':'')+
+    '</div>':'')+
+    '<div class="sd-coord-src">'+tr("Renseigné par le gérant")+'</div>'+
+  '</div>';
+}
+/* LA FICHE, MODIFIEE PAR SON GERANT. Avant : un window.prompt() pour les
+   seuls horaires, et un nom faux (import OpenStreetMap, faute de frappe
+   d'un client) impossible a corriger. Une feuille, six champs, les memes
+   bornes que les regles. On n'envoie que ce qui change : une fiche ancienne
+   aux champs longs ne doit pas se faire refuser pour un champ qu'on n'a pas
+   touche. */
+function ouvrirEditionFiche(){
+  var s=curStoreDetail; if(!s)return;
+  if(!estProprietaire(s)&&!isAdmin){toast(tr("Réservé au gérant du magasin"));return;}
+  var old=document.getElementById("fiche-ov"); if(old)old.remove();
+  var ov=document.createElement("div"); ov.id="fiche-ov"; ov.className="claim-ov";
+  function champ(id,label,val,max,ph,type){
+    return '<label class="claim-lab" for="'+id+'">'+label+'</label>'+
+      '<input id="'+id+'" class="claim-in" maxlength="'+max+'" value="'+attr(val||"")+'" placeholder="'+attr(ph||"")+'"'+(type?' type="'+type+'"':'')+'>';
+  }
+  ov.innerHTML='<div class="claim-card" role="dialog" aria-modal="true" aria-label="Modifier ma fiche">'+
+    '<div class="claim-grip"></div>'+
+    '<div class="claim-title">Ma fiche</div>'+
+    '<div class="claim-lead">Ce que tes clients lisent sur Magofeed. Tout peut rester vide, sauf le nom.</div>'+
+    champ("fiche-nom","Nom du magasin",s.name,60,"Night Shop Flagey")+
+    champ("fiche-adresse","Adresse",s.address,120,"Place Flagey 12, 1050 Ixelles")+
+    champ("fiche-tel","Téléphone du magasin",s.phone,30,"02 640 12 34","tel")+
+    champ("fiche-site","Site ou page (Instagram, Facebook…)",s.website,120,"instagram.com/nightshopflagey","url")+
+    champ("fiche-horaires","Horaires",s.hours,120,"Lun-Sam 8h-20h · Dim 9h-13h")+
+    '<div class="claim-honest" style="margin-top:-4px">Écris-les comme ceci : Lun-Sam 8h-20h · Dim 9h-13h — ou 24/7. Le filtre « Ouvert » de la carte s\'appuie dessus.</div>'+
+    '<label class="claim-lab" for="fiche-desc">Un mot sur ton magasin</label>'+
+    '<textarea id="fiche-desc" class="claim-in" rows="3" maxlength="240" placeholder="Boissons du monde, frais toute la nuit, livraison dans le quartier…">'+sanitize(s.description||"")+'</textarea>'+
+    '<button class="claim-send" onclick="enregistrerFiche()">Enregistrer</button>'+
+    '<button class="claim-cancel" onclick="fermerEditionFiche()">Annuler</button>'+
+  '</div>';
+  ov.addEventListener("click",function(e){ if(e.target===ov)fermerEditionFiche(); });
+  _feuilleOuvrir(ov);
+}
+function fermerEditionFiche(){ _feuilleFermer("fiche-ov"); }
+function enregistrerFiche(){
+  var s=curStoreDetail; if(!s)return;
+  var v=function(id){ var e=document.getElementById(id); return e?String(e.value||"").trim():""; };
+  var nom=v("fiche-nom").slice(0,60), adresse=v("fiche-adresse").slice(0,120), tel=v("fiche-tel").slice(0,30),
+      site=v("fiche-site").slice(0,120), horaires=v("fiche-horaires").slice(0,120), desc=v("fiche-desc").slice(0,240);
+  if(!nom){ toast(tr("Le nom ne peut pas être vide")); try{playSound("err");}catch(e){} return; }
+  if(horaires){
+    var norm=normaliserHoraires(horaires);
+    if(!parseOSMHours(norm)){
+      toast(tr("Je n’arrive pas à lire ces horaires — écris-les comme : Lun-Sam 8h-20h · Dim 9h-13h"));
+      try{playSound("err");}catch(e){} return;
+    }
+    horaires=norm;
+  }
+  if(site&&!/^https?:\/\//i.test(site))site="https://"+site.replace(/^\/+/,"");
+  var maj={};
+  if(nom!==String(s.name||""))maj.name=nom;
+  if(adresse!==String(s.address||""))maj.address=adresse;
+  if(tel!==String(s.phone||""))maj.phone=tel;
+  if(site!==String(s.website||""))maj.website=site;
+  if((horaires||null)!==(s.hours||null))maj.hours=horaires||null;
+  if(desc!==String(s.description||""))maj.description=desc;
+  if(!Object.keys(maj).length){ fermerEditionFiche(); toast(tr("Rien à changer")); return; }
+  if(!window.fbSaveStore){ toast(tr("Indisponible hors ligne")); return; }
+  var btn=document.querySelector("#fiche-ov .claim-send"); if(btn){btn.disabled=true;btn.textContent=tr("Enregistrement…");}
+  magoAttendre(window.fbSaveStore(s.fbId||s.id,maj)).then(function(){
+    Object.keys(maj).forEach(function(k){ s[k]=maj[k]; });
+    try{ if(window.fbTouchCache)window.fbTouchCache(); }catch(e){}
+    fermerEditionFiche();
+    try{renderStoreDetail();}catch(e){}
+    try{renderCommercantRow();}catch(e){}
+    toast(tr("Fiche enregistrée")); try{playSound("win");}catch(e){}
+  }).catch(function(e){
+    if(btn){btn.disabled=false;btn.textContent=tr("Enregistrer");}
+    var m=String((e&&(e.code||e.message))||e);
+    toast(/permission/.test(m)?tr("Réservé au gérant du magasin"):tr("Enregistrement impossible — réessaie"));
+    try{playSound("err");}catch(e2){}
+  });
+}
+/* Le prix d'une boisson, tel que le gerant l'a indique, pret a etre affiche
+   dans le bouton « € » de sa liste. */
+function _prixTxt(s,did){
+  try{ var p=getStorePrice(s,did); if(p==null)return ""; return String(Number(p).toFixed(2)).replace(".",",")+" €"; }catch(e){ return ""; }
+}
 function claimPhotoChoisie(input){
   var f=input&&input.files&&input.files[0]; if(!f)return;
   var ap=document.getElementById("claim-photo-apercu");
@@ -22432,28 +22776,22 @@ function claimThisShop(){
         franchement, sans formulaire. */
   var anonyme=!window._fbUser||window._fbUser.isAnonymous;
   var dejaPris=storeCertifie(s)&&!estProprietaire(s)&&!isAdmin;
-  if(anonyme||dejaPris){
-    ov.innerHTML=
-      '<div class="claim-card" role="dialog" aria-modal="true" aria-label="Demander la certification de ce magasin">'+
-        '<div class="claim-grip"></div>'+
-        '<div class="claim-badge">'+
-          '<svg width="15" height="15" viewBox="0 0 24 24"><path fill="#fff" d="M12 2.4 4.4 5.9v6c0 4.6 3.2 8.5 7.6 9.7 4.4-1.2 7.6-5.1 7.6-9.7v-6L12 2.4z"/></svg>'+
-          'Compte commerçant'+
-        '</div>'+
-        '<div class="claim-title">Tu tiens '+sanitize(s.name)+' ?</div>'+
-        (dejaPris
-          ? '<div class="claim-honest">Ce magasin est déjà certifié au nom de son gérant. Si c\'est toi et qu\'il y a une erreur, écris-nous depuis les réglages : on vérifie et on corrige.</div>'+
-            '<button class="claim-cancel" onclick="closeClaim()">Fermer</button>'
-          : '<div class="claim-lead">Le compte commerçant est gratuit. Il faut d\'abord un vrai compte (adresse e-mail et mot de passe) : un magasin reste rattaché à son gérant, pas à un téléphone.</div>'+
-            '<div class="claim-honest">Crée ton compte, et cette fiche se rouvrira toute seule pour la suite : numéro d\'entreprise, téléphone du magasin et photo du code du jour.</div>'+
-            '<button class="claim-send" onclick="claimCreerCompte()">Créer mon compte, puis continuer</button>'+
-            '<button class="claim-cancel" onclick="closeClaim()">Plus tard</button>')+
-      '</div>';
-    ov.addEventListener("click",function(e){ if(e.target===ov)closeClaim(); });
-    document.body.appendChild(ov);
-    try{document.body.classList.add("sheet-open");}catch(e){}
-    requestAnimationFrame(function(){ov.classList.add("in");});
-    try{playSound("pop");}catch(e){}
+  /* Deja certifie par un autre : on le dit AVANT de demander un compte — creer
+     un compte pour apprendre ensuite que la boutique n'est pas a prendre, c'est
+     exactement le genre de detour qui fait desinstaller. */
+  if(dejaPris){ _claimCourtCircuit(s,"pris"); return; }
+  if(anonyme){ _claimCourtCircuit(s,"compte"); return; }
+  /* 3. Une demande est deja en cours sur ce magasin (drapeau public pose a
+        l'envoi). Si c'est la sienne, le formulaire s'ouvre avec son etat ;
+        sinon on le dit avant qu'il ne remplisse quoi que ce soit. */
+  var sidV=String(s.fbId||s.id);
+  if(s.claimPending&&!estProprietaire(s)&&!isAdmin&&window._claimVerifie!==sidV){
+    if(!window.fbMyShopClaim){ _claimCourtCircuit(s,"attente"); return; }
+    window.fbMyShopClaim(sidV).then(function(c){
+      if(curStoreDetail!==s)return;
+      if(c){ window._claimVerifie=sidV; try{ claimThisShop(); }finally{ window._claimVerifie=null; } }
+      else _claimCourtCircuit(s,"attente");
+    }).catch(function(){ _claimCourtCircuit(s,"attente"); });
     return;
   }
   ov.innerHTML=
@@ -22463,7 +22801,7 @@ function claimThisShop(){
         '<svg width="15" height="15" viewBox="0 0 24 24"><path fill="#fff" d="M12 2.4 4.4 5.9v6c0 4.6 3.2 8.5 7.6 9.7 4.4-1.2 7.6-5.1 7.6-9.7v-6L12 2.4z"/></svg>'+
         'Compte commerçant'+
       '</div>'+
-      '<div class="claim-title">Tu tiens '+sanitize(s.name)+' ?</div>'+
+      '<div class="claim-title">'+trh("Tu tiens {nom} ?",{nom:sanitize(s.name)})+'</div>'+
       '<div class="claim-lead">Le compte commerçant est gratuit. Il donne&nbsp;:</div>'+
       '<ul class="claim-list">'+
         '<li><b>Le badge « tenu par son gérant »</b> sur ta boutique, visible par tous sur la carte.</li>'+
@@ -22478,6 +22816,7 @@ function claimThisShop(){
           '<button class="claim-send" onclick="verifierParPaiement()">Vérifier ma boutique — gratuit</button>'+
           '<div class="claim-lab" style="text-align:center;margin:14px 0 4px;opacity:.75">ou demande une vérification à la main</div>'
         : '<div class="claim-honest">Un humain vérifie chaque demande — visite, appel ou photo de ton rayon. C\'est long, et c\'est exactement ce qui fait que ce badge veut dire quelque chose.</div>')+
+      '<div class="claim-prive">Ton numéro d\'entreprise, le téléphone et la photo ne servent qu\'à la vérification : seule l\'équipe Magofeed les voit, rien n\'est publié, et la photo est effacée une fois la décision prise.</div>'+
       '<label class="claim-lab" for="claim-contact">Ton nom et un moyen de te joindre</label>'+
       '<input id="claim-contact" class="claim-in" maxlength="80" autocomplete="name" placeholder="Ahmed Belkacem — 0470 12 34 56">'+
       '<label class="claim-lab" for="claim-role">Ton rôle</label>'+
@@ -22520,9 +22859,55 @@ function claimThisShop(){
       var el=document.createElement("div");
       el.className="claim-etat"+(c.status==="rejected"?" ko":"");
       el.textContent=txt;
+      if(c.status==="pending"){
+        var ret=document.createElement("button"); ret.type="button"; ret.className="claim-cancel";
+        ret.style.cssText="display:block;margin:8px auto 0;padding:4px 0;font-size:12px";
+        ret.textContent=tr("Retirer ma demande");
+        ret.onclick=function(){ retirerMaDemande(String(s.fbId||s.id)); };
+        el.appendChild(ret);
+      }
       card.insertBefore(el,card.querySelector(".claim-lab"));
     }).catch(function(){});
   }
+}
+/* Les trois cas ou la feuille ne montre PAS le formulaire : pas de compte,
+   magasin deja certifie par un autre, demande deja en cours par un autre. */
+function _claimCourtCircuit(s,motif){
+  var old=document.getElementById("claim-ov"); if(old)old.remove();
+  var ov=document.createElement("div"); ov.id="claim-ov"; ov.className="claim-ov";
+  var corps;
+  if(motif==="compte"){
+    corps='<div class="claim-lead">Le compte commerçant est gratuit. Il faut d\'abord un vrai compte (adresse e-mail et mot de passe) : un magasin reste rattaché à son gérant, pas à un téléphone.</div>'+
+      '<div class="claim-honest">Crée ton compte, et cette fiche se rouvrira toute seule pour la suite : numéro d\'entreprise, téléphone du magasin et photo du code du jour.</div>'+
+      '<button class="claim-send" onclick="claimCreerCompte()">Créer mon compte, puis continuer</button>'+
+      '<button class="claim-cancel" onclick="closeClaim()">Plus tard</button>';
+  }else if(motif==="attente"){
+    corps='<div class="claim-honest">Quelqu\'un a déjà demandé ce magasin, et un humain vérifie en ce moment. Si c\'est toi depuis un autre compte, ou si c\'est une erreur, écris-nous depuis les réglages.</div>'+
+      '<button class="claim-cancel" onclick="closeClaim()">Fermer</button>';
+  }else{
+    corps='<div class="claim-honest">Ce magasin est déjà certifié au nom de son gérant. Si c\'est toi et qu\'il y a une erreur, écris-nous depuis les réglages : on vérifie et on corrige.</div>'+
+      '<button class="claim-cancel" onclick="closeClaim()">Fermer</button>';
+  }
+  ov.innerHTML=
+    '<div class="claim-card" role="dialog" aria-modal="true" aria-label="Demander la certification de ce magasin">'+
+      '<div class="claim-grip"></div>'+
+      '<div class="claim-badge">'+SVG_BOUCLIER+'Compte commerçant</div>'+
+      '<div class="claim-title">'+trh("Tu tiens {nom} ?",{nom:sanitize(s.name)})+'</div>'+
+      corps+
+    '</div>';
+  ov.addEventListener("click",function(e){ if(e.target===ov)closeClaim(); });
+  _feuilleOuvrir(ov);
+}
+/* Retirer sa propre demande, depuis la feuille. */
+function retirerMaDemande(sid){
+  if(!confirm(tr("Retirer ta demande ? Tu pourras en redéposer une plus tard.")))return;
+  if(!window.fbRetirerMaDemande){ toast(tr("Indisponible hors ligne")); return; }
+  magoAttendre(window.fbRetirerMaDemande(sid)).then(function(){
+    try{ if(curStoreDetail&&String(curStoreDetail.fbId||curStoreDetail.id)===String(sid))curStoreDetail.claimPending=false; }catch(e){}
+    closeClaim();
+    toast(tr("Demande retirée"));
+    try{ if(curStoreDetail)renderMerchantCard(curStoreDetail); }catch(e){}
+  }).catch(function(){ toast(tr("Retrait impossible")); });
 }
 /* Le compte d'abord, la demande ensuite : on retient le magasin, on ouvre la
    feuille de compte en mode « creer », et authSubmit rouvre la demande des que
@@ -22605,7 +22990,8 @@ function claimSubmit(){
   var _fini=false;
   var _envoi=window.fbSubmitShopClaim(s,{contact:contact,role:role,note:note,
     bce:numeroEntreprise(bce),telephone:telephone,preuve:window._claimPreuve,
-    code:codeDuJour((window._fbUser&&window._fbUser.uid)||"",String(s.fbId||s.id),jour),codeJour:jour});
+    code:codeDuJour((window._fbUser&&window._fbUser.uid)||"",String(s.fbId||s.id),jour),codeJour:jour,
+    langue:(typeof curLang==="string"&&curLang?curLang:"fr")});
   setTimeout(function(){
     if(_fini)return;
     _fini=true;
@@ -22621,6 +23007,14 @@ function claimSubmit(){
     closeClaim();
     try{playSound("win");}catch(e){}
     toast("Demande envoyée — on revient vers toi");
+    /* Le magasin porte un drapeau public « demande en cours » : un employe,
+       un associe ou un concurrent qui tape « Je tiens ce magasin » apres lui
+       l'apprend avant de remplir quoi que ce soit — la demande elle-meme
+       reste illisible pour eux. L'administrateur l'efface a la decision. */
+    try{ s.claimPending=true; if(window.fbSaveStore)window.fbSaveStore(String(s.fbId||s.id),{claimPending:true}).catch(function(){}); }catch(e){}
+    /* La fiche doit le dire aussi : le bouton passe a « en cours de
+       verification » sans attendre une reouverture. */
+    try{ if(curStoreDetail)renderMerchantCard(curStoreDetail); }catch(e){}
     try{pushActivity({key:"claim:"+String(s.fbId||s.id),type:"hunt",
       title:"Demande de certification envoyée",
       body:"Pour "+s.name+". Un humain la vérifie, tu seras prévenu ici même.",ts:Date.now()});}catch(e){}
@@ -31763,6 +32157,7 @@ function renderShopClaims(){
         '</div>'+
         '<div class="cl-line"><b>Contact</b> '+sanitize(r.contact||"—")+'</div>'+
         '<div class="cl-line"><b>Rôle</b> '+sanitize(r.role||"—")+'</div>'+
+        (r.langue&&r.langue!=="fr"?'<div class="cl-line"><b>Langue</b> '+sanitize(String(r.langue).toUpperCase())+' — il lit l\'app dans cette langue, réponds-lui dedans si tu peux</div>':'')+
         (r.note?'<div class="cl-line"><b>Mot</b> '+sanitize(r.note)+'</div>':'')+
         /* LES TROIS PREUVES, pour decider en deux minutes : le numero
            d'entreprise avec le registre public a un clic (l'adresse du point
@@ -31776,7 +32171,7 @@ function renderShopClaims(){
         (r.telephone?'<div class="cl-line"><b>Téléphone du magasin</b> <a href="tel:'+sanitize(String(r.telephone).replace(/[^+\d]/g,""))+'">'+sanitize(r.telephone)+'</a></div>':'')+
         (function(){
           var ok=typeof r.preuve==="string"&&/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+\/=]+$/.test(r.preuve)&&r.preuve.length<=220000;
-          if(!ok)return '<div class="cl-line quiet">Pas de photo du code</div>';
+          if(!ok)return '<div class="cl-line quiet">'+((r.status||"pending")==="pending"?"Pas de photo du code":"Photo du code effacée après la décision")+'</div>';
           var attendu=codeDuJour(r.by,String(r.docId||r.storeId),r.codeJour);
           return '<div class="cl-line"><b>Code attendu</b> <span class="cl-code">'+sanitize(attendu)+'</span>'+
             (r.codeJour?' <span class="quiet">(le '+sanitize(r.codeJour)+')</span>':'')+
@@ -31930,7 +32325,7 @@ function admApproveClaim(sid){
     // jusqu'au prochain rechargement complet.
     try{
       var st=(window.STORES||[]).find(function(x){return String(x.fbId||x.id)===String(sid);});
-      if(st){st.certified=true;}
+      if(st){st.certified=true;st.claimPending=false;}
       majCacheCertif();
       if(window.exploreMap&&typeof exploreLoadStores==="function")exploreLoadStores(true);
     }catch(e){}
@@ -34668,11 +35063,20 @@ window.addEventListener("unhandledrejection",function(e){
   try{console.warn("[Magofeed] promesse rejetée:",(e&&e.reason)||e);}catch(_){}
   try{e.preventDefault();}catch(_){}
 });
+/* LA LANGUE DU TELEPHONE. Une epiciere dont l'iPhone est en turc ouvrait
+   l'app en francais, et devait deviner ou se cache le reglage. Tant qu'elle
+   n'a rien choisi, on prend la langue du systeme si l'app la parle. */
+function langueDuTelephone(){
+  try{
+    var l=String((navigator.languages&&navigator.languages[0])||navigator.language||"fr").slice(0,2).toLowerCase();
+    return (typeof LANGS==="object"&&LANGS&&LANGS[l])?l:"fr";
+  }catch(e){ return "fr"; }
+}
 try{
   var savedMode=localStorage.getItem("magomode");
   var savedLang=localStorage.getItem("magolang");
   setMode(savedMode||"light");
-  setLang(savedLang||"fr");
+  setLang(savedLang||langueDuTelephone());
   initSoundToggle();
   try{peindreVerres();}catch(e){}
   initSettingsPseudo();

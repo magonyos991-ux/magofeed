@@ -256,7 +256,8 @@ async function scene() {
   async function allerReglages(page) {
     await page.click('#nav .ntab[data-screen="profile"]');
     await attendre(page, () => document.getElementById("s-profile").classList.contains("on"));
-    await page.click('#s-profile [aria-label="Paramètres"]');
+    /* Par l'action, pas par le libelle : en turc, l'aria-label est traduit. */
+    await page.click('#s-profile [onclick="show(\'settings\')"]');
     await attendre(page, () => document.getElementById("s-settings").classList.contains("on"));
     await page.waitForTimeout(300);
   }
@@ -308,17 +309,28 @@ async function scene() {
       await capture(page, "accueil");
       constat("OK", "1. L'app s'ouvre et parle aux émulateurs", "mode répétition actif");
 
-      /* La carte : sa boutique y est-elle ? */
+      /* Le chemin d'entree : Reglages → « Tu tiens un magasin ? » → le guide,
+         puis la carte, ou sa boutique doit etre. */
       try {
-        await page.click('#nav .ntab[data-screen="home"]');
-        await page.evaluate(() => openExploreMap());
+        await allerReglages(page);
+        const ligne = await texte(page, "#commercant-group");
+        await page.evaluate(() => document.querySelector("#commercant-group .set-row").scrollIntoView({ block: "center" }));
+        await capture(page, "reglages-commercant");
+        constat(/Tu tiens un magasin/.test(ligne || "") ? "OK" : "CASSE", "3a. Les réglages ont une porte « Tu tiens un magasin ? »", String(ligne || "").slice(0, 80));
+        await page.evaluate(() => document.querySelector("#commercant-group .set-row").click());
+        await attendre(page, () => !!document.getElementById("guide-com-ov") && /tickets de caisse/.test(document.getElementById("guide-com-ov").innerText));
+        await page.waitForTimeout(400);
+        await capture(page, "guide-commercant");
+        const guide = await texte(page, "#guide-com-ov");
+        constat(/48 h/.test(guide || "") && /effacée/.test(guide || "") ? "OK" : "DECOIT", "3b. Le guide dit quoi préparer, le délai, et qui voit les données", "");
+        await page.evaluate(() => Array.from(document.querySelectorAll("#guide-com-ov button")).find((b) => /Trouver ma boutique/.test(b.textContent)).click());
         await attendre(page, () => document.querySelectorAll(".leaflet-marker-icon").length >= 1, null, 30000);
         await page.waitForTimeout(1500);
         await capture(page, "carte-son-quartier");
         const n = await page.evaluate(() => document.querySelectorAll(".leaflet-marker-icon").length);
-        constat("OK", "3. La carte montre les magasins du quartier", n + " pin(s)");
-        await page.evaluate(() => { try { closeExploreMap(); } catch (e) { if (typeof fermerCarteExplorer === "function") fermerCarteExplorer(); } });
-      } catch (e) { constat("DECOIT", "3. La carte du quartier", "pas de pin visible : " + e.message.slice(0, 100)); }
+        constat("OK", "3c. Le guide mène à la carte, qui montre les magasins du quartier", n + " pin(s)");
+        await page.evaluate(() => { try { closeExploreMap(); } catch (e) {} });
+      } catch (e) { constat("CASSE", "3. L'entrée « Commerçant » des réglages", e.message.slice(0, 120)); }
 
       await ouvrirFiche(page);
       await capture(page, "fiche-avant-demande");
@@ -390,9 +402,42 @@ async function scene() {
       constat(bien ? "OK" : "CASSE", "7. La demande est enregistrée avec ses trois preuves", bien ? ("toast : " + tEnvoi) : ("toast : " + tEnvoi + " · doc : " + JSON.stringify(doc ? Object.keys(doc) : null)));
       const traceCloche = await page.evaluate(() => { try { return (JSON.parse(localStorage.getItem("magoActivity") || "[]") || []).some((a) => /certification/i.test(a.title || "")); } catch (e) { return null; } });
       constat(traceCloche ? "OK" : "INFO", "   Une trace « demande envoyée » est posée dans la cloche", traceCloche === null ? "non vérifiable" : "");
+      /* La fiche elle-meme doit dire que le dossier est parti. */
+      await attendre(page, () => /en cours/.test((document.getElementById("sd-claim") || {}).textContent || ""), null, 10000).catch(() => {});
+      const etatBouton = await texte(page, "#sd-claim");
+      await page.evaluate(() => document.getElementById("sd-claim").scrollIntoView({ block: "center" }));
+      await page.waitForTimeout(300);
+      await capture(page, "fiche-demande-en-cours");
+      constat(/en cours/.test(etatBouton || "") ? "OK" : "DECOIT", "7b. Après l'envoi, la fiche dit « en cours de vérification »", etatBouton || "(bouton muet)");
     } catch (e) {
       constat("CASSE", "Acte 1 interrompu", e.message.slice(0, 200));
       await capture(page, "acte1-echec");
+    }
+    const v = page.video(); await ctx.close(); if (v) videos.push(await v.path());
+  }
+
+  /* ═══ ACTE 1 BIS — UN EMPLOYÉ TAPE LE MÊME BOUTON PENDANT L'ATTENTE ═══ */
+  {
+    const ctx = await contexte("Karim");
+    const page = await ouvrir(ctx);
+    try {
+      await ouvrirFiche(page);
+      await page.evaluate(() => { const b = document.getElementById("sd-claim"); b.scrollIntoView({ block: "center" }); b.click(); });
+      await attendre(page, () => !!document.getElementById("claim-ov") && /déjà demandé|Créer mon compte/.test(document.getElementById("claim-ov").innerText), null, 10000);
+      await page.waitForTimeout(400);
+      const txt = await texte(page, "#claim-ov");
+      await capture(page, "employe-demande-en-cours");
+      /* Anonyme : la feuille demande le compte d'abord — c'est juste. Mais une
+         fois connecte, elle doit dire que la demande est deja en cours. */
+      if (/Créer mon compte/.test(txt || "")) {
+        await page.evaluate(() => closeClaim());
+        await page.waitForTimeout(300);
+        await seConnecter(page, ADMIN).catch(() => {});
+      }
+      const stPending = await lire("stores/" + SID);
+      constat(stPending && stPending.claimPending === true ? "OK" : "DECOIT", "7c. Le magasin porte le drapeau public « demande en cours »", "claimPending=" + (stPending && stPending.claimPending));
+    } catch (e) {
+      constat("DECOIT", "7c. Un second compte sur un magasin en attente", e.message.slice(0, 120));
     }
     const v = page.video(); await ctx.close(); if (v) videos.push(await v.path());
   }
@@ -485,6 +530,53 @@ async function scene() {
       const pass = await texte(page, "#sd-pass");
       await capture(page, "fiche-gerant-haut");
       constat(outils && pastille ? "OK" : "CASSE", "14. La fiche s'ouvre en mode gérant, avec la pastille", "outils gérant " + (outils ? "oui" : "non") + " · pastille " + (pastille ? "oui" : "non"));
+
+      /* La bienvenue, une seule fois. */
+      const bienvenue = await texte(page, "#sd-bienvenue");
+      if (bienvenue) {
+        await page.evaluate(() => document.getElementById("sd-bienvenue").scrollIntoView({ block: "center" }));
+        await page.waitForTimeout(300);
+        await capture(page, "bienvenue-gerant");
+        await page.evaluate(() => Array.from(document.querySelectorAll("#sd-bienvenue button")).find((b) => /parti/.test(b.textContent)).click());
+        await page.waitForTimeout(300);
+        const encore = await page.evaluate(() => !!document.getElementById("sd-bienvenue"));
+        constat(/C’est à toi|C'est à toi/.test(bienvenue) && !encore ? "OK" : "DECOIT", "14b. Une carte de bienvenue donne les trois premiers gestes, et se range d'un tap", bienvenue.slice(0, 100));
+      } else constat("DECOIT", "14b. La carte de bienvenue du nouveau gérant", "absente");
+
+      /* Sa fiche, corrigee par lui : telephone, site, un mot. */
+      try {
+        await page.evaluate(() => { const b = document.getElementById("sd-btn-fiche"); b.scrollIntoView({ block: "center" }); b.click(); });
+        await attendre(page, () => !!document.getElementById("fiche-ov") && !!document.getElementById("fiche-tel"));
+        await page.fill("#fiche-tel", "02 640 12 34");
+        await page.fill("#fiche-site", "instagram.com/nightshopflagey");
+        await page.fill("#fiche-horaires", "Lun-Dim 17h-3h");
+        await page.fill("#fiche-desc", "Boissons du monde, frais toute la nuit. Livraison dans le quartier dès 20 €.");
+        await page.waitForTimeout(300);
+        await capture(page, "fiche-edition");
+        await page.evaluate(() => document.querySelector("#fiche-ov .claim-send").click());
+        const tFiche = await attendreToast(page, /Fiche enregistrée|Réservé|impossible/, 15000).catch(() => "aucun toast");
+        await attendre(page, () => !document.getElementById("fiche-ov"), null, 5000).catch(() => {});
+        const coord = await texte(page, "#sd-coord");
+        const stApres = await lire("stores/" + SID);
+        await page.evaluate(() => { const c = document.getElementById("sd-coord"); if (c) c.scrollIntoView({ block: "center" }); });
+        await page.waitForTimeout(300);
+        await capture(page, "fiche-coordonnees");
+        constat(/Fiche enregistrée/.test(tFiche) && stApres && stApres.phone === "02 640 12 34" && /instagram/.test(stApres.website || "") && /02 640 12 34/.test(coord || "") ? "OK" : "CASSE",
+          "14c. Le gérant corrige sa fiche (téléphone, site, horaires, description) et la fiche l'affiche", "toast : " + tFiche + " · base : phone=" + (stApres && stApres.phone) + " hours=" + (stApres && stApres.hours));
+      } catch (e) { constat("CASSE", "14c. Le gérant corrige sa fiche", e.message.slice(0, 120)); }
+
+      /* Le prix d'une boisson, depuis sa liste. */
+      try {
+        const aEuro = await page.evaluate(() => !!document.querySelector('#sd-drink-list button[aria-label="Indiquer le prix"]'));
+        if (aEuro) {
+          await page.evaluate(() => { const b = document.querySelector('#sd-drink-list button[aria-label="Indiquer le prix"]'); b.scrollIntoView({ block: "center" }); b.click(); });
+          await attendreToast(page, /enregistré|invalide/, 8000).catch(() => {});
+          await page.waitForTimeout(400);
+          const stPrix = await lire("stores/" + SID);
+          const prix = stPrix && stPrix.prices ? Object.values(stPrix.prices)[0] : null;
+          constat(prix === 2.49 ? "OK" : "DECOIT", "14d. Le gérant indique un prix depuis sa liste", "prices=" + JSON.stringify(stPrix && stPrix.prices));
+        } else constat("DECOIT", "14d. Le gérant indique un prix depuis sa liste", "pas de bouton €");
+      } catch (e) { constat("DECOIT", "14d. Le prix depuis la liste", e.message.slice(0, 100)); }
       constat("INFO", "    Ce que dit le panneau du pass", pass);
       const boutonVitrine = await page.evaluate(() => !!document.getElementById("sd-ph-add"));
       const annonce = await page.evaluate(() => !!document.getElementById("ann-txt"));
@@ -539,6 +631,18 @@ async function scene() {
       } else {
         constat("DECOIT", "19. Confirmer une boisson depuis le tableau de bord", "aucun bouton « Confirmer » proposé");
       }
+
+      /* Ses magasins, depuis les reglages. */
+      try {
+        await allerReglages(page);
+        await attendre(page, () => /Night Shop Flagey/.test((document.getElementById("commercant-group") || {}).innerText || ""), null, 10000);
+        await page.evaluate(() => document.getElementById("commercant-group").scrollIntoView({ block: "center" }));
+        await page.waitForTimeout(300);
+        await capture(page, "reglages-mes-magasins");
+        await page.evaluate(() => document.querySelector("#commercant-group .set-row[data-magasin]").click());
+        await attendre(page, () => document.getElementById("s-storedetail").classList.contains("on") && /Night Shop Flagey/.test(document.getElementById("sd-name").textContent), null, 10000);
+        constat("OK", "19b. Les réglages listent ses magasins et ouvrent la fiche d'un tap", "");
+      } catch (e) { constat("CASSE", "19b. Les réglages listent ses magasins", e.message.slice(0, 120)); }
     } catch (e) {
       constat("CASSE", "Acte 3 interrompu", e.message.slice(0, 200));
       await capture(page, "acte3-echec");
@@ -555,9 +659,11 @@ async function scene() {
       const pastille = await visible(page, "#sd-partner");
       const nPhotos = await page.evaluate(() => document.querySelectorAll("#sd-vitrine img").length);
       const annonce = await texte(page, "#sd-annonce");
+      const coord = await texte(page, "#sd-coord");
       await capture(page, "fiche-vue-client");
       constat(pastille && nPhotos >= 1 && /Livraison offerte/.test(annonce || "") ? "OK" : "DECOIT", "20. Un client voit la pastille, la photo du rayon avec son prix, et l'annonce signée",
         "pastille " + (pastille ? "oui" : "non") + " · photos " + nPhotos + " · annonce : " + String(annonce || "(vide)").slice(0, 80));
+      constat(/02 640 12 34/.test(coord || "") && /instagram/.test(coord || "") && /Renseigné par le gérant/.test(coord || "") ? "OK" : "DECOIT", "20b. Un client voit le téléphone, le site et le mot du gérant", String(coord || "(vide)").slice(0, 120));
       const claimVisible = await visible(page, "#sd-claim");
       if (claimVisible) {
         await page.evaluate(() => { const b = document.getElementById("sd-claim"); b.scrollIntoView({ block: "center" }); b.click(); });
@@ -573,6 +679,44 @@ async function scene() {
     } catch (e) {
       constat("CASSE", "Acte 4 interrompu", e.message.slice(0, 200));
       await capture(page, "acte4-echec");
+    }
+    const v = page.video(); await ctx.close(); if (v) videos.push(await v.path());
+  }
+
+  /* ═══ ACTE 5 — FATMA LIT L'APP EN TURC ═══ */
+  {
+    const ctx = await contexte("Fatma");
+    await ctx.addInitScript(() => { try { localStorage.setItem("magolang", "tr"); } catch (e) {} });
+    const page = await ouvrir(ctx);
+    try {
+      await attendre(page, () => typeof curLang !== "undefined" && curLang === "tr", null, 15000);
+      await page.waitForTimeout(800);
+      await allerReglages(page);
+      const ligne = await texte(page, "#commercant-group");
+      await page.evaluate(() => document.querySelector("#commercant-group .set-row").scrollIntoView({ block: "center" }));
+      await page.waitForTimeout(300);
+      await capture(page, "turc-reglages");
+      constat(ligne && !/Tu tiens un magasin/.test(ligne) ? "OK" : "DECOIT", "22. En turc, la porte « Commerçant » des réglages est traduite", String(ligne || "").slice(0, 80));
+      await page.evaluate(() => document.querySelector("#commercant-group .set-row").click());
+      await attendre(page, () => !!document.getElementById("guide-com-ov"), null, 8000);
+      await page.waitForTimeout(600);
+      const guide = await texte(page, "#guide-com-ov");
+      await capture(page, "turc-guide");
+      const resteFr = ["Ton magasin sur Magofeed", "Trouve ta boutique", "Trouver ma boutique sur la carte", "Plus tard"].filter((f) => (guide || "").indexOf(f) !== -1);
+      constat(resteFr.length === 0 ? "OK" : "DECOIT", "23. En turc, le guide du commerçant n'a plus de français", resteFr.length ? "reste en français : " + resteFr.join(" · ") : "");
+      await page.evaluate(() => fermerGuideCommercant());
+      await page.waitForTimeout(400);
+      await ouvrirFiche(page);
+      await page.evaluate(() => { const b = document.getElementById("sd-claim"); b.scrollIntoView({ block: "center" }); b.click(); });
+      await attendre(page, () => !!document.getElementById("claim-ov"), null, 8000);
+      await page.waitForTimeout(600);
+      const feuille = await texte(page, "#claim-ov");
+      await capture(page, "turc-feuille-demande");
+      const resteFr2 = ["Compte commerçant", "Créer mon compte", "Plus tard", "Le compte commerçant est gratuit"].filter((f) => (feuille || "").indexOf(f) !== -1);
+      constat(resteFr2.length === 0 ? "OK" : "DECOIT", "24. En turc, la feuille « Je tiens ce magasin » n'a plus de français", resteFr2.length ? "reste en français : " + resteFr2.join(" · ") : "");
+    } catch (e) {
+      constat("CASSE", "Acte 5 interrompu", e.message.slice(0, 200));
+      await capture(page, "acte5-echec");
     }
     const v = page.video(); await ctx.close(); if (v) videos.push(await v.path());
   }

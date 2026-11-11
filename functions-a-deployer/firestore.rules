@@ -893,6 +893,32 @@ service cloud.firestore {
       return !changed().hasAny(['verifiedSource'])
         || request.resource.data.verifiedSource == 'catalogue enseigne (auto)';
     }
+    /* LE GERANT CERTIFIE TIENT SA FICHE. Jusqu'ici seul le CREATEUR d'un
+       magasin pouvait le renommer ; or le gerant d'une boutique importee
+       d'OpenStreetMap ne l'a pas creee, et il lisait un nom faux sans pouvoir
+       le corriger. La propriete validee vit dans merchants/{uid}.stores,
+       ecrite par l'administrateur seul : c'est elle qui ouvre le droit — pas
+       un champ du magasin, que n'importe qui ecrit. Deux lectures, seulement
+       quand un champ protege change (evaluation paresseuse de ||). */
+    function gereLeMagasin(id) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/merchants/$(request.auth.uid))
+        && get(/databases/$(database)/documents/merchants/$(request.auth.uid)).data.stores.hasAny([id]);
+    }
+    /* Les coordonnees publiques d'un commerce : telephone, site, description,
+       adresse, nom. Bornees QUAND ELLES CHANGENT (changed()), jamais sur le
+       document entier : une fiche ancienne portant un champ plus long ne doit
+       pas bloquer une simple confirmation de boisson. Telephone, site et
+       description sont la parole du commerce : seul son gerant (ou l'admin)
+       les ecrit — un visiteur ne glisse pas son propre numero sur la fiche
+       d'un autre. */
+    function coordonneesMagasinValides() {
+      return (!changed().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 30))
+        && (!changed().hasAny(['website']) || (request.resource.data.website is string && request.resource.data.website.size() <= 120))
+        && (!changed().hasAny(['description']) || (request.resource.data.description is string && request.resource.data.description.size() <= 240))
+        && (!changed().hasAny(['address']) || (request.resource.data.address is string && request.resource.data.address.size() <= 120))
+        && (!changed().hasAny(['name']) || (request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60));
+    }
     match /stores/{id} {
       allow read: if true;
       /* drinksVerified rejoint la liste des champs serveur A LA CREATION aussi :
@@ -919,8 +945,15 @@ service cloud.firestore {
             && !changed().hasAny(champsServeurStore())
             && !changed().hasAny(['addedBy','createdAt','community'])
             && sourceHonnete()
+            && coordonneesMagasinValides()
+            && (!changed().hasAny(['phone','website','description']) || gereLeMagasin(id))
             && (resource.data.addedBy == request.auth.uid
-                || !changed().hasAny(['name','brand','lat','lng','emoji','geohash'])));
+                || !changed().hasAny(['name','brand','lat','lng','emoji','geohash'])
+                /* Le gerant certifie corrige le nom, l'enseigne et l'icone ;
+                   il ne DEPLACE pas le pin : une position fausse eloigne
+                   tout le quartier, et ce geste-la reste au createur ou a
+                   l'administrateur. */
+                || (gereLeMagasin(id) && !changed().hasAny(['lat','lng','geohash']))));
       allow delete: if isAdmin();
     }
     /* « Stores » AVEC UNE MAJUSCULE : vestige supprime le 4 septembre 2026.
@@ -975,12 +1008,15 @@ service cloud.firestore {
     function revendicationValide() {
       let d = request.resource.data;
       return d.keys().hasOnly(['storeId', 'storeName', 'by', 'byPseudo', 'contact', 'role', 'note',
-                               'status', 'createdAt', 'bce', 'telephone', 'preuve', 'code', 'codeJour'])
+                               'status', 'createdAt', 'bce', 'telephone', 'preuve', 'code', 'codeJour', 'langue'])
         && (!('bce' in d) || (d.bce is string && d.bce.matches('^[01][0-9]{9}$')
             && (97 - (int(d.bce[0:8]) % 97)) == int(d.bce[8:10])))
         && (!('telephone' in d) || (d.telephone is string && d.telephone.size() <= 30))
         && (!('code' in d) || (d.code is string && d.code.matches('^[0-9]{6}$')))
         && (!('codeJour' in d) || (d.codeJour is string && d.codeJour.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')))
+        /* La langue dans laquelle le demandeur lit l'app (deux lettres) : pour
+           que l'administrateur lui reponde dedans. */
+        && (!('langue' in d) || (d.langue is string && d.langue.matches('^[a-z]{2}$')))
         && (!('preuve' in d) || (d.preuve is string && d.preuve.size() > 0 && d.preuve.size() <= 220000
             && d.preuve.matches('^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$')));
     }

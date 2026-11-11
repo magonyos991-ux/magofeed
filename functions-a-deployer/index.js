@@ -41,6 +41,11 @@ Object.assign(exports, require("./anti-farm"));
       de toi, stock guette. ─────────────────────────────────────────────────*/
 Object.assign(exports, require("./notifications-push"));
 
+/* ── Les alertes du gerant certifie : sa certification sur son telephone
+      ferme, et un client qui signale une rupture chez lui. Aucun secret,
+      aucune dependance. ────────────────────────────────────────────────────*/
+Object.assign(exports, require("./alertes-commercant"));
+
 /* ── Les e-mails de chasse (Brevo). Secret BREVO_API_KEY : deja en place. ──*/
 Object.assign(exports, require("./emails-brevo"));
 
