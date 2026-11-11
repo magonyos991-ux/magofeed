@@ -51,6 +51,7 @@ const BROWSER = {
   indexedDB: "readonly", caches: "readonly", self: "readonly", clients: "readonly",
   setTimeout: "readonly", clearTimeout: "readonly", setInterval: "readonly", clearInterval: "readonly",
   requestAnimationFrame: "readonly", cancelAnimationFrame: "readonly", fetch: "readonly",
+  Request: "readonly", Response: "readonly", Headers: "readonly",
   AbortController: "readonly", Notification: "readonly", CustomEvent: "readonly", Event: "readonly",
   URL: "readonly", URLSearchParams: "readonly", Blob: "readonly", FormData: "readonly",
   FileReader: "readonly", Image: "readonly", Audio: "readonly", DOMParser: "readonly",

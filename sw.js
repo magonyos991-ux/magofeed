@@ -79,6 +79,35 @@ function isLiveOnly(url) {
          url.hostname.indexOf("routing.openstreetmap.de") !== -1;
 }
 
+/* Quelques fichiers de meme origine doivent IGNORER le cache HTTP du
+   navigateur quand on va les chercher. Pourquoi, mesure a l'appui :
+
+   Au deploiement, outils/alleger-site.mjs vide data/textes.js et ecrit la
+   vraie table de traduction dans data/textes.<langue>.js — un fichier par
+   langue, qu'index.html injecte a l'execution (assurerLangue). Ces fichiers
+   ne sont PAS dans APP_SHELL : APP_SHELL ne connait que la coquille vide.
+   Ils arrivent donc ici, en cache d'abord, et au premier passage par le
+   fetch ci-dessous.
+
+   Or ce fetch etait nu, donc en mode de cache « default » : il pouvait etre
+   satisfait par le cache HTTP du navigateur sans toucher au reseau. Et
+   GitHub Pages estampille TOUT en « cache-control: max-age=600 » (mesure en
+   direct sur le site), sans empreinte dans l'URL — un nouveau deploiement
+   reutilise l'URL exacte. Resultat : une requete faite dans les dix minutes
+   suivant un deploiement rendait l'ANCIEN fichier, et la ligne cache.put
+   ci-dessous l'ecrivait dans le cache NEUF, ou il etait resservi jusqu'au
+   deploiement d'apres. Une seule requete dans cette fenetre epinglait
+   l'ancienne traduction pour toute la vie du nouveau deploiement.
+
+   « reload » force le reseau et ignore le cache HTTP. On le reserve aux
+   fichiers qui changent a chaque deploiement sans changer de nom : tout le
+   reste garde le benefice du cache HTTP. La reponse est ensuite rangee sous
+   la requete D'ORIGINE, donc rien ne change pour la lecture. */
+function requeteFraiche(req, url) {
+  if (!/\/data\/textes\.[a-z-]+\.js$/.test(url.pathname)) return req;
+  try { return new Request(req.url, { cache: "reload" }); } catch (e) { return req; }
+}
+
 self.addEventListener("fetch", function(event) {
   var req = event.request;
   if (req.method !== "GET") return;
@@ -122,7 +151,7 @@ self.addEventListener("fetch", function(event) {
   if (url.origin === self.location.origin) {
     event.respondWith(
       caches.match(req).then(function(cached) {
-        return cached || fetch(req).then(function(res) {
+        return cached || fetch(requeteFraiche(req, url)).then(function(res) {
           if (res && res.status === 200) {
             var copy = res.clone();
             caches.open(CACHE_NAME).then(function(cache) { cache.put(req, copy); });
