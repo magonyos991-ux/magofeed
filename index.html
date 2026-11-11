@@ -997,7 +997,7 @@ try{
           <div class="set-txt"><div class="set-title" data-i18n="seeIntro">Revoir l’introduction</div></div>
           <span class="set-chev">›</span>
         </div>
-        <div class="set-row" onclick="chercherMiseAJour()" role="button" tabindex="0" aria-label="Chercher une mise à jour" onkeydown="if(event.key==='Enter'){chercherMiseAJour();}">
+        <div class="set-row" id="ligne-maj" onclick="chercherMiseAJour()" role="button" tabindex="0" aria-label="Chercher une mise à jour" onkeydown="if(event.key==='Enter'){chercherMiseAJour();}">
           <div class="set-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M4 12a8 8 0 0 1 13.7-5.7L20 8M20 4v4h-4M20 12a8 8 0 0 1-13.7 5.7L4 16M4 20v-4h4"/></svg></div>
           <div class="set-txt"><div class="set-title" data-i18n="updateT">Chercher une mise à jour</div><div class="set-sub" data-i18n="updateSub">Si l’app n’a pas la dernière version, elle redémarre dessus</div></div>
           <span class="set-chev">›</span>
@@ -32445,6 +32445,24 @@ function maybePromptIOSInstall(){
   setTimeout(function(){try{if(!isStandaloneMode())showIOSInstallSheet();}catch(e){}},1400);
 }
 function registerServiceWorker(){
+  /* Dans l'app native, ce bouton ne peut RIEN trouver, et son sous-titre
+     (« Si l'app n'a pas la derniere version, elle redemarre dessus ») est donc
+     une promesse fausse affichee a l'ecran. Mesure : sur iOS, WKWebView refuse
+     les service workers sur le schema capacitor:// — la ligne suivante sort
+     immediatement. Sur Android, l'enregistrement est TENTE (https://localhost est
+     un contexte securise) puis echoue : Capacitor 6 n'intercepte que via
+     WebViewClient et n'installe aucun ServiceWorkerClient, donc la requete vers
+     https://localhost/sw.js part sur le vrai reseau ou rien n'ecoute.
+     Dans les deux cas le code de l'app est fige dans le binaire et ne se met a
+     jour que par le magasin. On retire donc la ligne au lieu de mentir.
+     (Capacitor 7 corrige cela de lui-meme avec resolveServiceWorkerRequests :
+     le jour ou tu montes de version, ce masquage pourra sauter.) */
+  try{
+    if(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform()){
+      var ligne=document.getElementById("ligne-maj");
+      if(ligne)ligne.style.display="none";
+    }
+  }catch(e){}
   if(!("serviceWorker" in navigator))return;
   // Cette page était-elle déjà pilotée par un service worker au démarrage ?
   // Si oui, un changement de contrôleur = une VRAIE mise à jour -> on recharge
@@ -32478,13 +32496,19 @@ function registerServiceWorker(){
     toast(_tr("updateLooking"));
     try{sessionStorage.removeItem("mago_sw_reloaded");}catch(e){}
     navigator.serviceWorker.getRegistration().then(function(reg){
-      if(!reg){toast(_tr("updateNone"));return;}
+      /* Pas d'enregistrement : on n'a rien pu verifier. Le dire. */
+      if(!reg){toast(_tr("msgOfflineT"));return;}
       return reg.update().then(function(){
         var w=reg.installing||reg.waiting;
         if(w){toast(_tr("updateFound"));setTimeout(function(){location.reload();},2500);}
         else toast(_tr("updateNone"));
       });
-    }).catch(function(){toast(_tr("updateNone"));});
+      /* La verification a ECHOUE — reseau coupe le plus souvent. Elle affichait
+         « Tu as deja la derniere version » : une confirmation rassurante et
+         fausse, alors que rien n'avait pu etre verifie. On reutilise une phrase
+         deja traduite partout ou updateNone l'est (msgOfflineT, « Tu es hors
+         ligne ») plutot que d'en ajouter une dans onze langues. */
+    }).catch(function(){toast(_tr("msgOfflineT"));});
   };
   /* Un lien de parrainage a pu amener ici : on retient le code et on le
      declare des qu'une identite existe. On ne paie rien maintenant — le
