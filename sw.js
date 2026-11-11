@@ -192,6 +192,32 @@ self.addEventListener("fetch", function(event) {
    La Cloud Function envoie un payload "notification" webpush : le navigateur
    l'affiche même sans handler, mais on gère quand même push + clic pour
    couvrir les payloads "data" et ouvrir directement la fiche de la boisson. */
+/* Ou va le tap sur une notification.
+
+   FCM ne livre JAMAIS le lien sous une cle « url ». Il l'ecrit sous
+   fcmOptions.link, ou sous notification.click_action selon la route d'envoi.
+   Mesure faite dans le SDK que l'app telecharge elle-meme
+   (firebase-messaging.js 10.12.2, fonction propagateFcmOptions) :
+
+       const s = t.fcmOptions?.link ?? t.notification?.click_action
+
+   Cette fonction lisait « n.url » puis « data.data.url » : deux cles qu'aucun
+   envoi ne porte -- les data du serveur valent { type, drinkId, storeId }, pas
+   d'url. Tous les taps retombaient donc sur "./", l'accueil, alors que le
+   serveur prend soin d'envoyer « ...#store=<id> » (notifications-push.js:570).
+   La fonctionnalite etait ecrite des deux cotes ; seule cette lecture manquait.
+
+   Si tu retouches cette liste un jour, garde les deux premieres cles : ce sont
+   les seules que FCM remplit. Les deux dernieres ne sont qu'un filet pour un
+   envoi fait a la main. */
+function destinationDuTap(data, n) {
+  return (data.fcmOptions && data.fcmOptions.link)
+      || (data.notification && data.notification.click_action)
+      || n.url
+      || (data.data && data.data.url)
+      || "./";
+}
+
 self.addEventListener("push", function(event) {
   var data = {};
   try { data = event.data ? event.data.json() : {}; } catch (e) {}
@@ -202,7 +228,7 @@ self.addEventListener("push", function(event) {
       body: n.body || "",
       icon: "icons/icon-192.png",
       badge: "icons/icon-192.png",
-      data: { url: n.url || (data.data && data.data.url) || "./" }
+      data: { url: destinationDuTap(data, n) }
     })
   );
 });

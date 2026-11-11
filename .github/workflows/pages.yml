@@ -110,7 +110,29 @@ jobs:
         run: |
           sed -i "s/magofeed-__BUILD_ID__/magofeed-${GITHUB_SHA::12}/" sw.js
           sed -i "s/build __BUILD_ID__/build ${GITHUB_SHA::7}/" index.html
+          # sed sort en code 0 quand il ne trouve PAS son motif : il ne distingue
+          # pas « remplace » de « rien a remplacer ». Et le grep temoin qui etait
+          # ici cherchait « CACHE_NAME = », present que la substitution ait eu lieu
+          # ou non : il imprimait, il ne bloquait rien.
+          # Ce que ca coutait : le jour ou la ligne 20 de sw.js est retouchee a la
+          # main, le motif ne correspond plus. CE deploiement-la arrive quand meme
+          # (les octets de sw.js ont change, donc le navigateur reinstalle), tout
+          # est vert, y compris sur ton propre telephone. C'est le SUIVANT qui
+          # n'arrive plus : s'il ne touche que index.html, app.css ou data/, sw.js
+          # est identique a l'octet pres, le navigateur ne reinstalle rien, et le
+          # handler cache-d'abord ressert l'ancienne version. Les correctifs
+          # n'atteignent plus personne et le journal reste tout vert.
+          # Donc on verifie, et on arrete le deploiement plutot que de mentir.
+          for f in sw.js index.html; do
+            if grep -q '__BUILD_ID__' "$f"; then
+              echo "::error::$f porte encore __BUILD_ID__ : l'estampillage n'a pas mordu."
+              echo "::error::Verifie que le motif du sed correspond toujours au fichier."
+              grep -n '__BUILD_ID__' "$f"
+              exit 1
+            fi
+          done
           grep -n 'CACHE_NAME =' sw.js
+          grep -n 'build ' index.html | grep -m1 "${GITHUB_SHA::7}"
       # Le site publiait la RACINE ENTIERE du depot. Tout ce qui n'est pas
       # destine au navigateur etait donc servi a une adresse devinable : le
       # plan anti-triche, les notes de strategie, le code d'automatisation n8n,

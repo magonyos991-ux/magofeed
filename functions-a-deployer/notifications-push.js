@@ -40,6 +40,16 @@ const SECOURS_MAX_PERSONNES = 10; // ADAPTE si ton projet est ailleurs
    si l'utilisateur n'a pas de token : on ne casse jamais le flux. */
 const APP_URL = "https://magonyos991-ux.github.io/magofeed/";
 
+/* Le lien profond d'une notification de chasse. La route de l'app est
+   /#drink=(\d+)/ (index.html:26833) : elle n'accepte que des chiffres, et les
+   4455 ids de data/drinks.js comme les ids du catalogue communautaire (des
+   horodatages) en sont. On verifie quand meme, parce qu'un id vide ou exotique
+   produirait un lien mort la ou l'accueil, lui, marche toujours. */
+function lienChasse(drinkId) {
+  const id = String(drinkId || "");
+  return /^[0-9]+$/.test(id) ? APP_URL + "#drink=" + id : APP_URL;
+}
+
 async function pushToUser(uid, title, body, data, link) {
   if (!uid) return;
   try {
@@ -52,7 +62,12 @@ async function pushToUser(uid, title, body, data, link) {
       data: data || {},
       webpush: {
         notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png" },
-        // Le tap ouvre l'app SUR la bonne fiche (ex: #store=ID -> magasin + carte)
+        /* Le tap ouvre l'app SUR la bonne fiche (ex: #store=ID -> magasin + carte).
+           Ce lien ne vaut que si le client le LIT : FCM le livre sous
+           fcmOptions.link, et sw.js le recupere dans destinationDuTap(). Pendant
+           un temps il cherchait une cle « url » que FCM ne remplit jamais, et
+           tous les taps retombaient sur l'accueil -- ce commentaire etait faux.
+           Si tu touches a l'un des deux cotes, verifie l'autre. */
         fcmOptions: { link: link || APP_URL }
       }
     });
@@ -394,7 +409,7 @@ exports.notifyHuntNearby = onDocumentWritten(
         token: t.token,
         notification: { title: "Chasse pres de toi", body: "Quelqu'un cherche « " + name + " ». Si tu la vois en magasin, signale-la et gagne des points." },
         data: { type: "hunt", drinkId: String(after.drinkId || "") },
-        webpush: { fcmOptions: { link: "https://magonyos991-ux.github.io/magofeed/" } }
+        webpush: { fcmOptions: { link: lienChasse(after.drinkId) } }
       });
     });
 
@@ -425,7 +440,7 @@ exports.notifyHuntNearby = onDocumentWritten(
                   + "Tu es la personne la plus proche a pouvoir aider."
           },
           data: { type: "hunt", drinkId: String(after.drinkId || ""), secours: "1" },
-          webpush: { fcmOptions: { link: "https://magonyos991-ux.github.io/magofeed/" } }
+          webpush: { fcmOptions: { link: lienChasse(after.drinkId) } }
         });
       }
       aideLointaine = eligibles.length;
@@ -451,7 +466,7 @@ exports.notifyHuntNearby = onDocumentWritten(
           "Aucun joueur n'est assez pres pour l'instant. Elle reste visible dans "
             + "Decouvrir, et on previendra des que quelqu'un s'approche.",
           { type: "hunt", drinkId: String(after.drinkId || ""), vide: "1" },
-          APP_URL,
+          lienChasse(after.drinkId),
           "huntVide__" + String(after.drinkId || "")
         );
       } catch (e) { console.warn("avis chasse vide:", e && e.message); }
