@@ -34,6 +34,10 @@ jobs:
   construire:
     name: AAB signé pour la Play Console
     runs-on: ubuntu-latest
+    # Uniquement pour attacher l'APK a une release, tout en bas. Les deux
+    # depots d'artefacts n'utilisent pas ce jeton, et rien d'autre ici n'ecrit.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -151,6 +155,69 @@ jobs:
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
+
+      # ── POURQUOI CETTE ETAPE EXISTE ──────────────────────────────────────
+      # Un artefact de la section Artifacts n'est PAS un canal de distribution,
+      # pour trois raisons mesurees le 11/11/2026 :
+      #   - il expire au bout de 30 jours (retention-days ci-dessus) ;
+      #   - GitHub exige une session connectee pour le telecharger, meme sur un
+      #     depot public — un testeur sans compte GitHub ne peut pas l'ouvrir ;
+      #   - ce qu'on telecharge est un .zip a decompresser, pas un .apk a taper.
+      # Une release donne une URL permanente et publique, qui rend un .apk
+      # qu'on ouvre d'un tap :
+      #   https://github.com/<proprio>/magofeed/releases/download/v1.0.N/magofeed-1.0.N.apk
+      #
+      # L'etape ne casse JAMAIS le build : les deux artefacts sont deja deposes
+      # au-dessus, et continue-on-error laisse passer un refus d'ecriture (si le
+      # depot est regle sur un jeton en lecture seule, Settings > Actions >
+      # General > Workflow permissions).
+      - name: Publier l'APK en release (lien permanent et partageable)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="v1.0.${GITHUB_RUN_NUMBER}"
+          NOM="magofeed-1.0.${GITHUB_RUN_NUMBER}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$NOM"
+
+          cat > notes-release.md <<'NOTES'
+          Version Android a installer directement, avant la mise en magasin.
+
+          ### Comment l'installer
+          Telecharge le fichier `.apk` ci-dessous sur ton telephone Android et
+          ouvre-le. Android demandera d'autoriser l'installation depuis cette
+          source : c'est normal pour une app qui ne vient pas encore du Play Store.
+
+          ### Si tu avais deja une version
+          Elle se met a jour par-dessus. Tu ne perds rien.
+
+          ### Important : lie ton compte a Google
+          Dans Reglages, connecte-toi avec Google. Tes points et ta serie vivent
+          sur ton compte, pas sur le telephone : une fois lie, tu les retrouves
+          sur n'importe quel appareil. Si tu restes en compte invite, ils sont
+          attaches a cette installation, et une desinstallation les emporte.
+
+          C'est important pour la suite : le jour ou Magofeed sortira sur le Play
+          Store, la version du magasin ne pourra pas se poser par-dessus celle-ci
+          (Google la signe avec sa propre cle). Il faudra desinstaller puis
+          reinstaller depuis le Play Store — et la, seul un compte lie te rend
+          tes points.
+          NOTES
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # Un re-run retombe sur le meme numero de run, donc le meme tag.
+            gh release upload "$TAG" "$NOM" --clobber
+          else
+            gh release create "$TAG" "$NOM" \
+              --prerelease \
+              --title "Magofeed 1.0.${GITHUB_RUN_NUMBER} (Android, a installer a la main)" \
+              --notes-file notes-release.md
+          fi
+
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${NOM}"
+          echo "::notice::APK telechargeable sans compte GitHub : $URL"
+          echo "Lien permanent a partager : $URL"
 
       - name: Refermer la porte
         if: always()
