@@ -1078,6 +1078,16 @@ await doit('bloque : une description de 300 caracteres, meme par le gerant',
   ()=>assertFails(updateDoc(doc(m,'stores','s3'),{description:'x'.repeat(300)})));
 await doit('bloque : un nom vide, meme par le gerant',
   ()=>assertFails(updateDoc(doc(m,'stores','s3'),{name:''})));
+await env.withSecurityRulesDisabled(async (c)=>{
+  const db=c.firestore();
+  await setDoc(doc(db,'stores','s3'),{certified:true},{merge:true});
+});
+await doit('gerant : il ecrit les horaires de son magasin certifie',
+  ()=>assertSucceeds(updateDoc(doc(m,'stores','s3'),{hours:'Mo-Su 17:00-03:00'})));
+await doit('bloque : un passant reecrit les horaires d un magasin certifie',
+  ()=>assertFails(updateDoc(doc(a,'stores','s3'),{hours:'Mo-Fr 09:00-18:00'})));
+await doit('legitime : les horaires d un magasin NON certifie restent collaboratifs',
+  ()=>assertSucceeds(updateDoc(doc(a,'stores','s1'),{hours:'Mo-Sa 08:00-20:00'})));
 await doit('gerant : une confirmation de boisson passe toujours sur une fiche aux coordonnees longues',
   ()=>assertSucceeds(updateDoc(doc(a,'stores','s3'),{drinks:arrayUnion(9),'confirmations.9':increment(1)})));
 

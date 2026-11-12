@@ -153,6 +153,20 @@ exports.antiFarmRupture = onDocumentCreated(
     });
     if (!auteurs.size) return;
 
+    // 2 ter) LE GÉRANT CERTIFIÉ N'EST PAS UN FRAUDEUR, ET N'EN ACCUSE PERSONNE.
+    //    Il confirme son rayon le soir, deux clients trouvent la référence
+    //    épuisée le lendemain : c'est la vie d'un night shop, pas une
+    //    invention — et la sanction est ineffaçable par dessein. Celui dont la
+    //    fiche privée merchants/{uid} porte ce magasin (écrite par
+    //    l'administrateur seul) sort de la liste des auteurs sanctionnables.
+    //    Et sa propre rupture est une mise à jour du rayon, pas une
+    //    contradiction : elle ne compte pas non plus contre un client honnête.
+    let gerants = new Set();
+    try {
+      const g = await db.collection("merchants").where("stores", "array-contains", String(storeId)).limit(5).get();
+      gerants = new Set(g.docs.map((d) => d.id));
+    } catch (e) { console.warn("anti-farm: lecture merchants impossible:", e && e.message); }
+
     // 2) Combien de personnes DIFFÉRENTES ont signalé la rupture depuis ?
     let ruptures;
     try {
@@ -172,6 +186,7 @@ exports.antiFarmRupture = onDocumentCreated(
       const x = d.data() || {};
       if (!x.by) return;
       if (quand(x) < limite) return;
+      if (gerants.has(String(x.by))) return;   // le gérant met à jour, il ne contredit pas
       contradicteurs.add(String(x.by));
     });
 
@@ -207,18 +222,6 @@ exports.antiFarmRupture = onDocumentCreated(
         if (vraiCompte && ancien) reels.add(u);
       } catch (e) { /* compte introuvable : il ne compte pas */ }
     }
-
-    // 2 ter) LE GÉRANT CERTIFIÉ N'EST PAS UN FRAUDEUR. Il confirme son rayon
-    //    le soir, deux clients trouvent la référence épuisée le lendemain :
-    //    c'est la vie d'un night shop, pas une invention — et la sanction est
-    //    ineffaçable par dessein. Celui dont la fiche privée merchants/{uid}
-    //    porte ce magasin (écrite par l'administrateur seul) sort de la liste
-    //    des auteurs sanctionnables ; ses ruptures restent des mises à jour.
-    let gerants = new Set();
-    try {
-      const g = await db.collection("merchants").where("stores", "array-contains", String(storeId)).limit(5).get();
-      gerants = new Set(g.docs.map((d) => d.id));
-    } catch (e) { console.warn("anti-farm: lecture merchants impossible:", e && e.message); }
 
     // 3) Pour chaque auteur d'annonce : ses propres signalements ne comptent
     //    pas contre lui (corriger sa propre erreur est un bon réflexe, pas

@@ -63,7 +63,7 @@ avant d'aller voir quelqu'un. Il a été écrit après la répétition général
   Téléphone, site et description ne sont écrits que par lui ou par toi.
 
 Déploiement : bouton **Serveur** dans GitHub Actions (« tout »). Les règles
-sont vérifiées par 314 épreuves avant chaque déploiement.
+sont vérifiées par 317 épreuves avant chaque déploiement.
 
 ## Vérifier que tout marche, sans toucher à la production
 

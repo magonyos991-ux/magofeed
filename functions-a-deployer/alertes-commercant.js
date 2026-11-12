@@ -181,24 +181,32 @@ exports.alerteRayon = onDocumentCreated(
     const nomMagasin = await nomDuMagasin(storeId, null);
     const nomBoisson = await nomDeLaBoisson(r.drinkId);
     const quoi = nomBoisson ? "« " + nomBoisson + " »" : "une boisson de ton rayon";
-    const cle = "rayon-" + storeId + "-" + r.type;
+    /* Une trace PAR BOISSON dans la cloche (deux ruptures sur deux boissons
+       font deux lignes), mais un seul silence de POUSSÉE par magasin et par
+       type : le téléphone ne vibre pas douze fois dans la soirée. Le silence
+       vit dans sa propre collection, que personne ne lit côté client. */
+    const cle = "rayon-" + storeId + "-" + r.type + "-" + String(r.drinkId);
+    const cleSilence = "rayon-" + storeId + "-" + r.type;
     const data = { type: r.type === "rupture" ? "ruptureChezToi" : "stockChezToi", storeId: storeId, drinkId: String(r.drinkId) };
     const lien = APP_URL + "#store=" + encodeURIComponent(storeId);
 
     for (const uid of gerants) {
-      /* Le silence entre deux alertes du même type sur le même magasin. */
       let recente = false;
+      const refSilence = db.collection("alertesSilence").doc(uid + "__" + cleSilence);
       try {
-        const prev = await db.collection("userNotifs").doc(uid + "__" + cle).get();
-        const t = prev.exists && prev.data().createdAt && prev.data().createdAt.toMillis ? prev.data().createdAt.toMillis() : 0;
-        recente = t && (Date.now() - t) < SILENCE_H * 3600 * 1000;
+        const prev = await refSilence.get();
+        const t = prev.exists && typeof prev.data().at === "number" ? prev.data().at : 0;
+        recente = !!t && (Date.now() - t) < SILENCE_H * 3600 * 1000;
       } catch (e) { recente = false; }
-      if (recente) continue;
 
       if (r.type === "rupture") {
         const titre = "Un client signale une rupture chez toi";
         const corps = quoi + " serait épuisée à " + nomMagasin + ". Si c'est faux, remets-la en stock d'un ✓ sur ta fiche.";
-        const pousse = await pousser(uid, titre, corps, data, lien);
+        let pousse = false;
+        if (!recente) {
+          pousse = await pousser(uid, titre, corps, data, lien);
+          try { await refSilence.set({ at: Date.now(), uid: uid, storeId: storeId, type: r.type }); } catch (e) {}
+        }
         await tracer(uid, cle, titre, corps, data, pousse);
       } else {
         const titre = "Un client a vu une boisson dans ton rayon";

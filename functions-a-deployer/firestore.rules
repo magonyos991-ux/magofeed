@@ -947,6 +947,12 @@ service cloud.firestore {
             && sourceHonnete()
             && coordonneesMagasinValides()
             && (!changed().hasAny(['phone','website','description']) || gereLeMagasin(id))
+            /* Les horaires restent collaboratifs sur un magasin ordinaire ;
+               sur un magasin CERTIFIE, ils sont la parole de son gerant, et
+               un passant (ou l'import automatique) ne les reecrit plus. */
+            && (!changed().hasAny(['hours'])
+                || !(('certified' in resource.data) && resource.data.certified == true)
+                || gereLeMagasin(id))
             && (resource.data.addedBy == request.auth.uid
                 || !changed().hasAny(['name','brand','lat','lng','emoji','geohash'])
                 /* Le gerant certifie corrige le nom, l'enseigne et l'icone ;
