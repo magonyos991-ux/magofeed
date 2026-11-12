@@ -1009,6 +1009,88 @@ await doit('verre : le reste du profil s ecrit sans toucher la teinte',
 await doit('bloque : naitre directement en Or de Legende',
   ()=>assertFails(setDoc(doc(nv,'users','verre-neuf'),{pseudo:'Neo',verre:'legende'})));
 
+/* ── La revendication d'un magasin porte ses preuves ─────────────────────────
+   Un paiement ne prouve pas qui tient la boutique ; le numero d'entreprise, le
+   telephone du magasin et la photo du code du jour, si. La regle verifie la
+   FORME de chaque preuve (dont la cle mod 97 du numero d'entreprise) et refuse
+   tout champ inconnu. 0477472701 a une cle juste ; 0123456789 non. */
+const PREUVE='data:image/jpeg;base64,'+'A'.repeat(400);
+const PREUVE_TROP='data:image/jpeg;base64,'+'A'.repeat(220001);
+const demandeRev=(extra)=>Object.assign({storeId:'s1',storeName:'Night Ixelles',by:ALICE,byPseudo:'Alice',
+  contact:'Alice 0470 00 00 00',role:'gerante',note:'',status:'pending',createdAt:serverTimestamp(),
+  bce:'0477472701',telephone:'02 123 45 67',preuve:PREUVE,code:'123456',codeJour:'2026-11-01'},extra||{});
+await doit('bloque : un numero d entreprise a la cle fausse',
+  ()=>assertFails(setDoc(doc(a,'shopClaims','s1'),demandeRev({bce:'0123456789'}))));
+await doit('bloque : un numero d entreprise qui n a pas dix chiffres',
+  ()=>assertFails(setDoc(doc(a,'shopClaims','s1'),demandeRev({bce:'477472701'}))));
+await doit('bloque : une photo de preuve trop lourde',
+  ()=>assertFails(setDoc(doc(a,'shopClaims','s1'),demandeRev({preuve:PREUVE_TROP}))));
+await doit('bloque : une « photo » qui n est pas une image',
+  ()=>assertFails(setDoc(doc(a,'shopClaims','s1'),demandeRev({preuve:'data:text/html;base64,PHNjcmlwdD4='}))));
+await doit('bloque : un code qui n a pas six chiffres',
+  ()=>assertFails(setDoc(doc(a,'shopClaims','s1'),demandeRev({code:'12345'}))));
+/* Sur d autres magasins que s1 : une demande deposee ici deviendrait une mise
+   a jour pour l epreuve suivante, qui doit rester une creation. */
+await doit('bloque : une « langue » qui n en est pas une',
+  ()=>assertFails(setDoc(doc(a,'shopClaims','s2'),demandeRev({storeId:'s2',langue:'<script>'}))));
+await doit('revendication : la langue du demandeur voyage avec la demande',
+  ()=>assertSucceeds(setDoc(doc(a,'shopClaims','s2'),demandeRev({storeId:'s2',langue:'tr'}))));
+await doit('bloque : un champ inconnu glisse dans la demande',
+  ()=>assertFails(setDoc(doc(a,'shopClaims','s1'),demandeRev({certified:true}))));
+await doit('revendication : Alice depose avec ses trois preuves',
+  ()=>assertSucceeds(setDoc(doc(a,'shopClaims','s1'),demandeRev())));
+await doit('bloque : Mallory ne lit pas la demande d Alice (ni sa photo)',
+  ()=>assertFails(getDoc(doc(m,'shopClaims','s1'))));
+await doit('revendication : l admin lit la demande et ses preuves',
+  ()=>assertSucceeds(getDoc(doc(ad,'shopClaims','s1'))));
+await doit('bloque : le demandeur ne se certifie pas lui-meme',
+  ()=>assertFails(setDoc(doc(a,'shopClaims','s1'),{status:'approved'},{merge:true})));
+
+/* LA FICHE DU GERANT CERTIFIE. Le gerant d'un magasin qu'il n'a PAS cree
+   (import OpenStreetMap, ajout d'un client) doit pouvoir corriger son nom et
+   renseigner telephone, site et description — et personne d'autre que lui ou
+   l'administrateur ne touche a ces trois champs-la. Le pin, lui, ne bouge pas
+   par ce chemin. Mallory tient s3, cree par quelqu'un d'autre. */
+await env.withSecurityRulesDisabled(async (c)=>{
+  const db=c.firestore();
+  await setDoc(doc(db,'stores','s3'),{name:'Nigth Shop (faute)',brand:'',lat:50.83,lng:4.37,addedBy:'quelquun',
+      drinks:[1],drinksVerified:[],confirmations:{},seenAt:{}});
+  await setDoc(doc(db,'merchants',MALLORY),{stores:['s2','s3'],pass:'complet',passOrigine:'lancement'});
+});
+await doit('gerant : il renomme un magasin qu il n a pas cree',
+  ()=>assertSucceeds(updateDoc(doc(m,'stores','s3'),{name:'Night Shop Flagey'})));
+await doit('gerant : il renseigne telephone, site et description',
+  ()=>assertSucceeds(updateDoc(doc(m,'stores','s3'),
+      {phone:'02 640 12 34',website:'https://nightshopflagey.be',description:'Ouvert tous les soirs jusqu a 3 h.'})));
+await doit('gerant : il corrige l adresse',
+  ()=>assertSucceeds(updateDoc(doc(m,'stores','s3'),{address:'Place Flagey 12, 1050 Ixelles'})));
+await doit('gerant : l admin renseigne un telephone sur n importe quel magasin',
+  ()=>assertSucceeds(updateDoc(doc(ad,'stores','s1'),{phone:'02 000 00 00'})));
+await doit('bloque : un visiteur ecrit le telephone d un magasin',
+  ()=>assertFails(updateDoc(doc(a,'stores','s3'),{phone:'0470 00 00 00'})));
+await doit('bloque : un visiteur ecrit une description sur la fiche d un autre',
+  ()=>assertFails(updateDoc(doc(a,'stores','s3'),{description:'Arnaque, n y allez pas'})));
+await doit('bloque : le gerant renomme un magasin qui n est pas a lui',
+  ()=>assertFails(updateDoc(doc(m,'stores','s1'),{name:'Mon magasin'})));
+await doit('bloque : le gerant deplace le pin de son magasin',
+  ()=>assertFails(updateDoc(doc(m,'stores','s3'),{lat:50.9,lng:4.4})));
+await doit('bloque : une description de 300 caracteres, meme par le gerant',
+  ()=>assertFails(updateDoc(doc(m,'stores','s3'),{description:'x'.repeat(300)})));
+await doit('bloque : un nom vide, meme par le gerant',
+  ()=>assertFails(updateDoc(doc(m,'stores','s3'),{name:''})));
+await env.withSecurityRulesDisabled(async (c)=>{
+  const db=c.firestore();
+  await setDoc(doc(db,'stores','s3'),{certified:true},{merge:true});
+});
+await doit('gerant : il ecrit les horaires de son magasin certifie',
+  ()=>assertSucceeds(updateDoc(doc(m,'stores','s3'),{hours:'Mo-Su 17:00-03:00'})));
+await doit('bloque : un passant reecrit les horaires d un magasin certifie',
+  ()=>assertFails(updateDoc(doc(a,'stores','s3'),{hours:'Mo-Fr 09:00-18:00'})));
+await doit('legitime : les horaires d un magasin NON certifie restent collaboratifs',
+  ()=>assertSucceeds(updateDoc(doc(a,'stores','s1'),{hours:'Mo-Sa 08:00-20:00'})));
+await doit('gerant : une confirmation de boisson passe toujours sur une fiche aux coordonnees longues',
+  ()=>assertSucceeds(updateDoc(doc(a,'stores','s3'),{drinks:arrayUnion(9),'confirmations.9':increment(1)})));
+
 R.forEach(r=>console.log(r[0],'|',r[1]));
 console.log('\n'+(R.length-ko)+'/'+R.length+' conformes');
 await env.cleanup();

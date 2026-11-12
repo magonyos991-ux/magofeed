@@ -15,7 +15,7 @@
 # choisit le moment.
 #
 # LE BANC D'ESSAI GARDE LA PORTE. Les regles ne partent jamais sans que les
-# 291 epreuves soient passees sur l'emulateur Firestore. Une regle cassee, ce
+# 317 epreuves soient passees sur l'emulateur Firestore. Une regle cassee, ce
 # n'est pas un bug d'affichage : c'est une porte ouverte sur les donnees de
 # tout le monde.
 #
@@ -46,13 +46,13 @@ concurrency:
 
 jobs:
   regles:
-    name: 291 épreuves sur l'émulateur Firestore
+    name: 317 épreuves sur l'émulateur Firestore
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: functions-a-deployer/tests-regles/package-lock.json
       # L'emulateur Firestore tourne sur la machine virtuelle Java.
@@ -77,7 +77,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       # On assemble le dossier que Firebase attend : firebase.json a la racine,
       # les regles et les index a cote, et TOUT le code serveur dans functions/.
@@ -92,11 +92,96 @@ jobs:
           cp functions-a-deployer/firestore.indexes.json deploiement/firestore.indexes.json
           cp functions-a-deployer/*.js                 deploiement/functions/
           cp functions-a-deployer/package.json         deploiement/functions/
+          # LE VERROU DE VERSIONS PART AVEC LE PAQUET, ET C'EST TOUT L'INTERET.
+          # firebase.json.modele n'ignore que node_modules, .git, *.log et
+          # tests-regles : package-lock.json est donc bien televerse, et la
+          # construction chez Google l'honore. C'est CETTE ligne qui fige ce qui
+          # tourne en ligne -- le « npm ci » plus bas ne fige que le controle.
+          cp functions-a-deployer/package-lock.json    deploiement/functions/
           # verifier-listes-pseudos.mjs est un outil de verification, pas une
           # fonction : il n'a rien a faire dans le paquet deploye.
           rm -f deploiement/functions/verifier-listes-pseudos.mjs
           echo "Fichiers serveur embarqués :"
           ls -1 deploiement/functions/
+
+      # LE MOTEUR ANNONCE DOIT ETRE CELUI QUI TOURNE -- ET IL DOIT AVOIR UN AVENIR.
+      # Trois controles qui n'existaient nulle part, et dont l'absence a coute
+      # une panne seche : le 31 octobre 2026, Google a decommissionne Node 20 et
+      # plus aucun deploiement n'est passe. Personne n'avait ete prevenu, parce
+      # que personne ne regardait.
+      #  1. engines.node est recopie TEL QUEL par le CLI, qui colle « nodejs »
+      #     devant. ">=22", "22.x" ou "^22" demanderaient « nodejs>=22 », qui
+      #     n'existe pas -- et le message d'erreur du CLI ne dit pas que c'est
+      #     la FORME qui est en cause.
+      #  2. L'etape qui charge index.js doit tourner sur le MEME majeur que
+      #     celui qui servira. Sinon on verifie le paquet sur un moteur et on le
+      #     deploie sur un autre, et rien ne le signale : les deux « 22 » sont
+      #     deux nombres saisis a la main dans deux fichiers differents.
+      #  3. Le refus de deployer sur un runtime mort est une comparaison de
+      #     DATES dans une table du CLI. On lit cette table ICI, avant de
+      #     deployer : un avertissement six mois avant, au lieu d'un echec le
+      #     jour J. Teste : au 1er octobre 2026, ce controle aurait alerte un
+      #     mois avant la panne.
+      # La date n'est PAS ressaisie a la main : elle est lue dans le CLI qui
+      # deploie. Et comme firebase-tools est epingle a la majeure 13, dont la
+      # table s'arrete a nodejs22, la prochaine montee de runtime exigera de
+      # monter le CLI d'abord -- le controle 3 le dira lui-meme.
+      # Le script passe par un fichier dans $RUNNER_TEMP, pas par « node -e »
+      # et pas dans le paquet : rien d'etranger ne traine dans
+      # deploiement/functions/ au moment du deploiement.
+      - name: Vérifier le moteur d'exécution
+        working-directory: deploiement/functions
+        run: |
+          set -e
+          npm install --no-save --no-audit --no-fund \
+            --prefix "$RUNNER_TEMP/cli" firebase-tools@13
+          cat > "$RUNNER_TEMP/verif-moteur.cjs" <<'FIN'
+          const fs = require("fs");
+          const declare = (JSON.parse(fs.readFileSync("package.json", "utf8")).engines || {}).node;
+          const stop = (m) => { console.error("::error::" + m); process.exit(1); };
+          if (!declare) {
+            stop("package.json n'a pas de engines.node : le CLI refuserait de deployer.");
+          }
+          if (!/^[0-9]+$/.test(declare)) {
+            stop("engines.node vaut \"" + declare + "\". Le CLI colle « nodejs » devant cette valeur telle quelle : il faut un majeur nu, par exemple \"22\". Avec \">=22\", \"22.x\" ou \"^22\" il demanderait un runtime « nodejs>=22 », qui n'existe pas.");
+          }
+          const runner = process.versions.node.split(".")[0];
+          if (declare !== runner) {
+            stop("engines.node vaut \"" + declare + "\" mais ce runner tourne sur Node " + runner + ". Le paquet serait verifie sur un moteur et deploye sur un autre. Aligne node-version (serveur.yml) et engines.node (functions-a-deployer/package.json).");
+          }
+          const cli = process.env.RUNNER_TEMP + "/cli/node_modules/firebase-tools";
+          const versionCli = JSON.parse(fs.readFileSync(cli + "/package.json", "utf8")).version;
+          const table = require(cli + "/lib/deploy/functions/runtimes/supported/types.js").RUNTIMES;
+          /* CETTE TABLE EST UN MIROIR LOCAL, ET IL PEUT ETRE PERIME.
+             Mesure : firebase-tools 13.35.1 annonce la fin de nodejs22 au
+             2027-10-31, la 15.34.2 au 2028-10-31 -- un an d'ecart, et c'est la
+             15 qui a raison. Un refus venant d'ici peut donc etre un FAUX
+             positif fabrique par le CLI epingle. D'ou les deux remedes nommes
+             dans chaque message : monter le runtime, ou monter le CLI. */
+          const connus = Object.keys(table).filter((k) => k.startsWith("nodejs"));
+          const info = table["nodejs" + declare];
+          if (!info) {
+            stop("Le CLI Firebase " + versionCli + " ne connait pas nodejs" + declare + ". Connus : " + connus.join(", ") + ". Monte firebase-tools AVANT de monter le runtime : c'est l'outil qui est le plafond, pas Google.");
+          }
+          const aujourdhui = new Date();
+          const miroir = " (date lue dans la table du CLI " + versionCli + ", qui est un miroir LOCAL : verifie la vraie date chez Google avant de bouger le runtime -- si elle est plus lointaine, c'est le CLI qu'il faut monter, pas le moteur)";
+          if (aujourdhui >= new Date(info.decommissionDate)) {
+            stop(info.friendly + " serait DECOMMISSIONNE depuis le " + info.decommissionDate + " : ce CLI refusera de deployer. Deux remedes, dans cet ordre : 1) monter firebase-tools, dont la table est peut-etre perimee ; 2) si la date est confirmee chez Google, monter engines.node ET node-version." + miroir);
+          }
+          if (aujourdhui >= new Date(info.deprecationDate)) {
+            console.log("::warning::" + info.friendly + " est deprecie depuis le " + info.deprecationDate + " et serait decommissionne le " + info.decommissionDate + ". Planifie la montee MAINTENANT, pas le jour de la panne." + miroir);
+          }
+          /* Le CLI epingle est-il devenu le plafond ? S'il ne connait pas le
+             majeur pair suivant, la prochaine montee de runtime sera bloquee
+             par l'outil. Autant le savoir des maintenant qu'au moment ou on
+             cherche a monter sous la pression d'un deploiement impossible. */
+          const suivant = Number(declare) + 2;
+          if (!table["nodejs" + suivant]) {
+            console.log("::warning::Le CLI Firebase " + versionCli + " ne connait pas encore nodejs" + suivant + " (il s'arrete a " + connus[connus.length - 1] + "). C'est LUI qui plafonne la prochaine montee de runtime : monte firebase-tools d'abord, dans un changement separe.");
+          }
+          console.log("Moteur : nodejs" + declare + " | runner Node " + runner + " | CLI " + versionCli + " | deprecie le " + info.deprecationDate + " | decommissionne le " + info.decommissionDate);
+          FIN
+          node "$RUNNER_TEMP/verif-moteur.cjs"
 
       # Chaque fichier charge par index.js doit exister dans le paquet. Sans ce
       # controle, un require oublie ne se decouvre qu'en pleine mise en ligne,
@@ -125,9 +210,26 @@ jobs:
           for f in *.js; do node --check "$f" || exit 1; done
           echo "Syntaxe : tout passe."
 
+      # DEUX FOIS LA MEME INSTALLATION DOIT DONNER LE MEME ARBRE.
+      # C'etait « npm install », qui rejoue la resolution des plages a chaque
+      # deploiement : quatre des six dependances sont des plages ouvertes, donc
+      # deux deploiements a une semaine d'ecart mettaient en ligne des arbres
+      # differents, sans diff, sans commit, sans que personne le voie passer.
+      # C'est comme ca que @google-cloud/firestore est monte tout seul en 9.4 et
+      # a commence a exiger Node >=22 pendant que package.json annonçait 20.
+      #   « npm ci » refuse de deviner : si package.json et package-lock.json ne
+      # s'accordent pas, il ARRETE le deploiement au lieu d'inventer un arbre.
+      #   engine-strict transforme l'avertissement EBADENGINE en erreur. C'est
+      # ce silence-la qu'on paie : npm sort 0 quand une dependance exige un
+      # autre Node, et l'incoherence a vecu des mois sans rien allumer.
       - name: Installer les dépendances des fonctions
         working-directory: deploiement/functions
-        run: npm install --omit=dev --no-audit --no-fund
+        run: |
+          set -e
+          printf 'engine-strict=true\n' > .npmrc
+          npm ci --omit=dev --no-audit --no-fund
+          # Le .npmrc etait pour l'installation du controle, pas pour le paquet.
+          rm -f .npmrc
 
       # LE PAQUET DOIT DEMARRER AVANT D'ETRE ENVOYE.
       # La premiere tentative a echoue ici, sur une version de dependance qui
@@ -185,7 +287,11 @@ jobs:
             *)                           CIBLES="firestore:rules,firestore:indexes,functions" ;;
           esac
           echo "Cibles : $CIBLES"
-          npx --yes firebase-tools@13 deploy \
+          # LE MEME CLI QUE CELUI DONT LE GARDE-FOU A LU LA TABLE DES DATES.
+          # C'etait « npx --yes firebase-tools@13 », une seconde resolution
+          # independante : le controle pouvait lire une table et le deploiement
+          # obeir a une autre. On reutilise le binaire deja installe.
+          "$RUNNER_TEMP/cli/node_modules/.bin/firebase" deploy \
             --only "$CIBLES" \
             --project magofeed-7f621 \
             --non-interactive \

@@ -79,6 +79,35 @@ function isLiveOnly(url) {
          url.hostname.indexOf("routing.openstreetmap.de") !== -1;
 }
 
+/* Quelques fichiers de meme origine doivent IGNORER le cache HTTP du
+   navigateur quand on va les chercher. Pourquoi, mesure a l'appui :
+
+   Au deploiement, outils/alleger-site.mjs vide data/textes.js et ecrit la
+   vraie table de traduction dans data/textes.<langue>.js — un fichier par
+   langue, qu'index.html injecte a l'execution (assurerLangue). Ces fichiers
+   ne sont PAS dans APP_SHELL : APP_SHELL ne connait que la coquille vide.
+   Ils arrivent donc ici, en cache d'abord, et au premier passage par le
+   fetch ci-dessous.
+
+   Or ce fetch etait nu, donc en mode de cache « default » : il pouvait etre
+   satisfait par le cache HTTP du navigateur sans toucher au reseau. Et
+   GitHub Pages estampille TOUT en « cache-control: max-age=600 » (mesure en
+   direct sur le site), sans empreinte dans l'URL — un nouveau deploiement
+   reutilise l'URL exacte. Resultat : une requete faite dans les dix minutes
+   suivant un deploiement rendait l'ANCIEN fichier, et la ligne cache.put
+   ci-dessous l'ecrivait dans le cache NEUF, ou il etait resservi jusqu'au
+   deploiement d'apres. Une seule requete dans cette fenetre epinglait
+   l'ancienne traduction pour toute la vie du nouveau deploiement.
+
+   « reload » force le reseau et ignore le cache HTTP. On le reserve aux
+   fichiers qui changent a chaque deploiement sans changer de nom : tout le
+   reste garde le benefice du cache HTTP. La reponse est ensuite rangee sous
+   la requete D'ORIGINE, donc rien ne change pour la lecture. */
+function requeteFraiche(req, url) {
+  if (!/\/data\/textes\.[a-z-]+\.js$/.test(url.pathname)) return req;
+  try { return new Request(req.url, { cache: "reload" }); } catch (e) { return req; }
+}
+
 self.addEventListener("fetch", function(event) {
   var req = event.request;
   if (req.method !== "GET") return;
@@ -122,7 +151,7 @@ self.addEventListener("fetch", function(event) {
   if (url.origin === self.location.origin) {
     event.respondWith(
       caches.match(req).then(function(cached) {
-        return cached || fetch(req).then(function(res) {
+        return cached || fetch(requeteFraiche(req, url)).then(function(res) {
           if (res && res.status === 200) {
             var copy = res.clone();
             caches.open(CACHE_NAME).then(function(cache) { cache.put(req, copy); });
@@ -192,6 +221,32 @@ self.addEventListener("fetch", function(event) {
    La Cloud Function envoie un payload "notification" webpush : le navigateur
    l'affiche même sans handler, mais on gère quand même push + clic pour
    couvrir les payloads "data" et ouvrir directement la fiche de la boisson. */
+/* Ou va le tap sur une notification.
+
+   FCM ne livre JAMAIS le lien sous une cle « url ». Il l'ecrit sous
+   fcmOptions.link, ou sous notification.click_action selon la route d'envoi.
+   Mesure faite dans le SDK que l'app telecharge elle-meme
+   (firebase-messaging.js 10.12.2, fonction propagateFcmOptions) :
+
+       const s = t.fcmOptions?.link ?? t.notification?.click_action
+
+   Cette fonction lisait « n.url » puis « data.data.url » : deux cles qu'aucun
+   envoi ne porte -- les data du serveur valent { type, drinkId, storeId }, pas
+   d'url. Tous les taps retombaient donc sur "./", l'accueil, alors que le
+   serveur prend soin d'envoyer « ...#store=<id> » (notifications-push.js:570).
+   La fonctionnalite etait ecrite des deux cotes ; seule cette lecture manquait.
+
+   Si tu retouches cette liste un jour, garde les deux premieres cles : ce sont
+   les seules que FCM remplit. Les deux dernieres ne sont qu'un filet pour un
+   envoi fait a la main. */
+function destinationDuTap(data, n) {
+  return (data.fcmOptions && data.fcmOptions.link)
+      || (data.notification && data.notification.click_action)
+      || n.url
+      || (data.data && data.data.url)
+      || "./";
+}
+
 self.addEventListener("push", function(event) {
   var data = {};
   try { data = event.data ? event.data.json() : {}; } catch (e) {}
@@ -202,7 +257,7 @@ self.addEventListener("push", function(event) {
       body: n.body || "",
       icon: "icons/icon-192.png",
       badge: "icons/icon-192.png",
-      data: { url: n.url || (data.data && data.data.url) || "./" }
+      data: { url: destinationDuTap(data, n) }
     })
   );
 });
