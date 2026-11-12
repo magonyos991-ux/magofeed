@@ -17793,13 +17793,12 @@ function initLeafletMap(lat,lng){
   // le doigt (ou la molette) fasse defiler la PAGE vers la liste des magasins en
   // dessous, au lieu de deplacer la carte. L'interaction complete reste dispo via
   // le bouton plein ecran (voir toggleDrinkMapFull, qui les reactive).
-  map.dragging.disable();
-  map.scrollWheelZoom.disable();
   /* A la souris, deplacer l'apercu ne vole aucun geste de defilement (la
      molette, elle, reste a la page) : le glisser reste donc actif sur
      ordinateur. Au doigt, il reste coupe — c'est le defilement de page qui
-     compte (voir ci-dessus). */
-  if(window.matchMedia&&matchMedia("(pointer:fine)").matches)map.dragging.enable();
+     compte (voir ci-dessus). Tout cela, « deux doigts deplacent la carte »
+     compris, est decide par apercuReplie : un seul endroit, trois appelants. */
+  apercuReplie(map);
   /* Toucher l'apercu (hors pin) = l'ouvrir en grand. L'apercu est une
      invitation, pas une impasse : avant, seul le petit ⛶ en haut a droite
      le faisait, et un doigt pose sur la carte ne donnait RIEN. Leaflet
@@ -17809,6 +17808,60 @@ function initLeafletMap(lat,lng){
     var bx=document.getElementById("map-box");
     if(bx&&!bx.classList.contains("map-fullscreen")){try{toggleDrinkMapFull();}catch(e){}}
   });
+  /* ══ UN DOIGT = LA PAGE, DEUX DOIGTS = LA CARTE ═══════════════════════════
+     Le glisser a UN doigt reste coupe, et pour la raison ecrite juste en
+     dessous : au doigt, c'est le defilement de la page vers la liste des
+     magasins qui compte (mesure : 0 -> 100 px de page, 0 m de carte). Mais
+     DEUX doigts ne peuvent pas etre un defilement, et Leaflet sait deja les
+     suivre : son gestionnaire de pincement deplace la vue avec le CENTRE des
+     deux doigts. Mesure au doigt, dans un navigateur : 422 m de deplacement,
+     0 px de defilement, zoom inchange. Le geste existait donc deja. Deux
+     choses le rendaient inutilisable :
+       1) la carte ne savait pas que la main avait pris le relais, donc le
+          recadrage automatique la remettait en place au dessin suivant. Pas
+          toujours : cadrerSiPinsHorsCadre ne recadre que si plus AUCUN pin
+          n'est dans le cadre. Mais des que le deplacement vide le cadre —
+          c'est-a-dire des qu'on explore vraiment — le saut est la : 3139 m
+          mesures. dragstart ne sert a rien ici, Leaflet ne l'emet pas pour un
+          pincement. Deux doigts qui BOUGENT sont le signal honnete, et ils ne
+          peuvent pas etre un debut de defilement ;
+       2) personne ne pouvait le deviner (voir l'indication juste en dessous). */
+  var hoteCarte=map.getContainer();
+  hoteCarte.addEventListener("touchmove",function(ev){
+    if(ev.touches&&ev.touches.length>1)window._mapMainUtilisateur=true;
+  },{passive:true});
+  /* L'INDICATION LA MOINS COUTEUSE EN PLACE : aucune place. Pas un pixel
+     permanent sur un apercu de 208 px deja coiffe par sa bande d'information —
+     elle passe par le bandeau toast, en position fixe, hors du flux, sans
+     pointer-events, et qui traduit tout seul. Elle sort UNE SEULE FOIS PAR
+     APPAREIL, et au seul moment ou elle sert : le doigt vient de glisser sur
+     l'apercu et c'est la PAGE qui a bouge. Le simple appui qui ouvre le plein
+     ecran ne la declenche pas, il ne glisse pas ; et en grand on n'en a pas
+     besoin, un doigt suffit. */
+  var departDoigt=null;
+  hoteCarte.addEventListener("touchstart",function(ev){
+    departDoigt=null;
+    if(!ev.touches||ev.touches.length!==1)return;
+    var bxA=document.getElementById("map-box");
+    if(bxA&&bxA.classList.contains("map-fullscreen"))return;
+    departDoigt={x:ev.touches[0].clientX,y:ev.touches[0].clientY,dit:false};
+  },{passive:true});
+  hoteCarte.addEventListener("touchmove",function(ev){
+    if(!departDoigt||departDoigt.dit||!ev.touches||ev.touches.length!==1)return;
+    var t1=ev.touches[0];
+    if(Math.abs(t1.clientX-departDoigt.x)+Math.abs(t1.clientY-departDoigt.y)<14)return;
+    departDoigt.dit=true;
+    /* Le drapeau en memoire D'ABORD. Si localStorage jette — navigation privee,
+       stockage bloque — la cle ne peut etre ni lue ni ecrite, et sans ce
+       garde-fou l'indication reviendrait a CHAQUE fiche, puisque le conteneur
+       est reconstruit a chaque renderMap. Au pire une fois par session, au lieu
+       d'une fois par appareil. */
+    if(window._deuxDoigtsDit)return;
+    window._deuxDoigtsDit=true;
+    try{ if(localStorage.getItem("magoDeuxDoigtsVu"))return;
+         localStorage.setItem("magoDeuxDoigtsVu","1"); }catch(e){}
+    try{ toast("Deux doigts pour déplacer la carte"); }catch(e){}
+  },{passive:true});
   /* LE SEUL SIGNAL HONNETE QUE L'UTILISATEUR A DEPLACE LA CARTE, C'EST dragstart.
      Pas touchstart : hors plein ecran le glisser est coupe expres (juste
      au-dessus), donc un doigt pose sur la carte est le DEBUT D'UN DEFILEMENT
@@ -18005,6 +18058,44 @@ function populateClusterMarkers(cluster){
   try{if(window.rafraichirLegende)window.rafraichirLegende();}catch(eL){}
   return stores;
 }
+/* ══ LE CONTRAT DE L'APERCU REPLIE, EN UN SEUL ENDROIT ══════════════════════
+   Trois chemins ramenent la carte a sa taille d'apercu, et le troisieme
+   oubliait de recouper les gestes : openDrinkInfoFromMap retire
+   .map-fullscreen a la main, en filet de sortie, sans repasser par la bascule.
+   Mesure au doigt : apres un retour par ce chemin, l'apercu revenu a 208 px
+   gardait dragging ET scrollWheelZoom du plein ecran — donc UN doigt deplacait
+   la carte et la page ne descendait plus vers la liste des magasins, exactement
+   l'inverse de ce que veut initLeafletMap. On ne duplique donc plus ce contrat :
+   un seul endroit decide, les trois l'appellent.
+   Le garde-fou en tete rend l'appel sans danger ou qu'il soit place : si la
+   carte est, elle, en plein ecran, on ne la replie jamais par megarde. */
+function apercuReplie(m){
+  if(!m)return;
+  var bxR=document.getElementById("map-box");
+  if(bxR&&bxR.classList.contains("map-fullscreen"))return;
+  m.dragging.disable();m.scrollWheelZoom.disable();
+  if(m.doubleClickZoom)m.doubleClickZoom.disable();
+  /* touchZoom RESTE ALLUME. C'est lui, et lui seul, qui donne « deux doigts
+     deplacent la carte » sur l'apercu : son gestionnaire de pincement suit le
+     CENTRE des deux doigts, pincement ou pas, et il coupe lui-meme le
+     defilement de page. Il n'etait eteint qu'en REPLIANT, nulle part ailleurs :
+     l'apercu se deplacait donc a deux doigts tant qu'on n'avait pas ouvert le
+     plein ecran, et plus jamais ensuite. Mesure au doigt : 422 m avant le
+     premier plein ecran, 0 m apres. C'est la, mot pour mot, le « je ne peux
+     toujours pas glisser sur la mini carte ». */
+  if(m.touchZoom)m.touchZoom.enable();
+  /* Et le pincement obeit au plancher de l'apercu. Sans cette borne, deux
+     doigts qui s'ecartent emmenent l'apercu sous APERCU_ZOOM_MIN — mesure dans
+     le depot avant ce correctif : zoom 14 -> 10, la ou le cadrage automatique
+     refuse de descendre. Le trou n'est pas creuse ici, il etait deja ouvert
+     puisque touchZoom est allume sur un apercu neuf ; on le ferme en passant.
+     setMinZoom, et non options.minZoom : il ramene aussi une vue DEJA trop
+     basse (mesure 8 -> 11). */
+  m.setMinZoom(APERCU_ZOOM_MIN);
+  // Sur ordinateur, l'apercu replie garde le glisser souris (voir initLeafletMap).
+  if(window.matchMedia&&matchMedia("(pointer:fine)").matches)m.dragging.enable();
+}
+window.apercuReplie=apercuReplie;
 /* Plein ecran carte : la boite passe en fixe pleine fenetre, Leaflet recalcule
    sa taille, le bouton devient une croix. */
 function toggleDrinkMapFull(){
@@ -18049,12 +18140,12 @@ function toggleDrinkMapFull(){
     if(full){
       m.dragging.enable();m.scrollWheelZoom.enable();
       if(m.touchZoom)m.touchZoom.enable();if(m.doubleClickZoom)m.doubleClickZoom.enable();
+      /* Le plein ecran doit pouvoir cadrer large : la borne de l'apercu saute.
+         Mesure : 147 pins repartis sur ~400 km, tous dans le cadre au zoom 12. */
+      m.setMinZoom(0);
       try{ if(window._zoomCtrl)window._zoomCtrl.addTo(m); }catch(eZ){}
     }else{
-      m.dragging.disable();m.scrollWheelZoom.disable();
-      if(m.touchZoom)m.touchZoom.disable();if(m.doubleClickZoom)m.doubleClickZoom.disable();
-      // Sur ordinateur, l'apercu replie garde le glisser souris (voir initLeafletMap).
-      if(window.matchMedia&&matchMedia("(pointer:fine)").matches)m.dragging.enable();
+      apercuReplie(m);
       /* L'itineraire vit en plein ecran (il y est passe tout seul au trace) :
          replier la carte le ferme aussi, sinon sa banniere recouvrait tout
          l'apercu — l'etat « catastrophe » du retour terrain. */
@@ -20228,6 +20319,14 @@ function openDrinkInfoFromMap(){
       _mb.classList.remove("map-fullscreen");
       var _fb=document.getElementById("map-full-btn");
       if(_fb)_fb.textContent="\u26f6";
+      /* On vient de replier la carte SANS passer par toggleDrinkMapFull : les
+         gestes restaient ceux du plein ecran. Mesure au doigt des trois etats :
+         apercu neuf {dragging=false, scrollWheelZoom=false} -> plein ecran
+         {true, true} -> retour PAR ICI {208 px, dragging=TRUE,
+         scrollWheelZoom=TRUE}. Donc un doigt deplacait la carte et la page ne
+         descendait plus vers la liste des magasins. apercuReplie est appele
+         APRES le retrait de la classe, c'est ce que son garde-fou attend. */
+      try{ apercuReplie(window._leafletMap); }catch(eA){}
     }
   }catch(e){}
   try{show("results");}catch(e){}
