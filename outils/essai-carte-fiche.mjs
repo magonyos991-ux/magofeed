@@ -50,7 +50,8 @@ pg.on("pageerror",e=>erreurs.push("ERREUR JS : "+String(e.message).slice(0,140))
 /* Les tuiles OpenStreetMap sortent aussi : on les coupe net plutot que
    d'attendre un reseau qui n'existe pas ici. La geometrie de Leaflet ne
    depend pas des images. */
-await pg.route(/tile\.openstreetmap\.org|basemaps\.cartocdn\.com/,r=>r.abort());
+/* Vignettes OpenFoodFacts comprises : des <img> de l'accueil que l'evenement load attend, et qui peuvent trainer sans rien dire de ce qu'on mesure ici. */
+await pg.route(/tile\.openstreetmap\.org|basemaps\.cartocdn\.com|images\.openfoodfacts\.org/,r=>r.abort());
 await pg.addInitScript(()=>{try{localStorage.setItem("magoOnboard","1");}catch(e){}});
 await pg.goto(`http://127.0.0.1:${port}/index.html`);
 await pg.waitForFunction(()=>window.DRINKS&&DRINKS.length>100,{timeout:40000});
