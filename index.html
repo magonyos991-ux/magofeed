@@ -25812,6 +25812,21 @@ function quickPrice(storeId,drinkId){
   playSound("pop");
   try{if(exploreMap)exploreLoadStores(true);}catch(e){}
 }
+/* « autour de toi » au-dessus de distances a 255 km est faux : apres une
+   recherche, l'en-tete nomme deja le lieu, et la feuille doit dire la meme
+   chose.
+   ET CE TITRE NE SE TRADUISAIT DANS AUCUNE DES DIX LANGUES. Il etait colle bout
+   a bout (nombre + « magasin » + « s » + « autour de toi »), donc la chaine
+   obtenue ne correspondait a aucune cle de data/textes.js — alors que la ligne
+   voisine, juste au-dessus, passe deja par trh(). Le « (s) » entre parentheses
+   est la convention de l'app. */
+function _titreFeuilleExplore(n){
+  var base=trh("{n} magasin(s)",{n:n});
+  if(exploreFilter)return base+" · "+String(exploreFilter.name||"");
+  if(window._explorePlace)return base+" · "+String(window._explorePlace);
+  if(window._exploreFreeMove)return trh("{n} magasin(s) dans cette zone",{n:n});
+  return trh("{n} magasin(s) autour de toi",{n:n});
+}
 function renderExploreSheet(list){
   var el=document.getElementById("explore-sheet-list");if(!el)return;
   var title=document.getElementById("explore-sheet-title");
@@ -25828,7 +25843,7 @@ function renderExploreSheet(list){
   var _inc=(!exploreFilter&&window._exploreChips&&window._exploreChips.open)?(Number(window._exploreInconnus)||0):0;
   if(title)title.textContent=_inc
     ? trh("{n} ouvert(s) · {m} horaire(s) inconnu(s)",{n:arr.length,m:_inc})
-    : (arr.length?(arr.length+" magasin"+(arr.length>1?"s":"")+(exploreFilter?" · "+exploreFilter.name:" autour de toi")):"Aucun magasin ici");
+    : (arr.length?_titreFeuilleExplore(arr.length):tr("Aucun magasin ici"));
   // Prix communautaire : le moins cher connu ressort en vert avec un badge.
   var _did=exploreFilter?exploreFilter.drinkId:null;
   /* Le minimum ne se calcule QUE sur des prix encore vivants. Un releve de
@@ -27312,10 +27327,39 @@ function exploreGoCity(auto){
          chef-lieu, la zone administrative...). Deux lignes « Oujda » a
          l'identique n'aident personne a choisir : on ne garde que la premiere
          de chaque (nom + pays). */
+      /* Plusieurs commerces du MEME nom dans une MEME zone : c'est la reponse,
+         pas une liste de lieux a trier. Jamais pendant la frappe — la carte ne
+         doit pas sauter entre deux lettres. Jamais par-dessus des magasins deja
+         trouves : « les magasins d'abord » est une decision de ce champ, et les
+         effacer serait la contredire. */
+      var _ens=(auto||_mags.length)?null:exploreCadrerEnseigne(rows);
+      if(_ens){
+        exploreAbortCity();   // sinon la recherche Firestore encore en vol repeint ce panneau
+        box.innerHTML="";
+        var _ei=document.getElementById("explore-city-q");if(_ei)_ei.blur();
+        var _ec=document.getElementById("explore-city-clear");if(_ec)_ec.style.display="flex";
+        /* On NE REECRIT PAS le champ : laisse tel quel (« Aldi Paris »), reappuyer
+           sur la loupe refait le meme geste. Y mettre « Aldi » donnerait au geste
+           suivant un resultat different du precedent. */
+        toast(_ens.retire
+          ? trh("{e} · la carte s’y déplace · filtre distance retiré",{e:_ens.nom})
+          : trh("{e} · la carte s’y déplace",{e:_ens.nom}));
+        playSound("pop");
+        return;
+      }
       var _vues={};
       rows=rows.filter(function(r){
         var a=r.address||{};
         var cle=(String(r.display_name||"").split(",")[0].trim().toLowerCase())+"|"+(a.country||"");
+        /* UN COMMERCE N'EST PAS UN DOUBLON D'UN AUTRE COMMERCE DU MEME NOM.
+           Ce dedoublonnage a ete ecrit pour les villes (« Oujda » revient en
+           commune ET en zone administrative). Applique a « Aldi Paris », il
+           fondait les huit Aldi parisiens en UNE ligne : meme nom, meme pays.
+           Mesure sur la vraie reponse Nominatim : 8 lignes, 8 fois la cle
+           « aldi|France », il n'en restait qu'une, « Aldi · Île-de-France ·
+           France » — exactement ce qui etait signale. Pour un commerce, la cle
+           porte donc aussi l'endroit. */
+        if(r.class==="shop"||r.class==="amenity")cle+="|"+Number(r.lat).toFixed(3)+","+Number(r.lon).toFixed(3);
         if(_vues[cle])return false;
         _vues[cle]=1; return true;
       }).slice(0,6);
@@ -27337,6 +27381,10 @@ function exploreGoCity(auto){
         var _pays=_ad.country||String(parts[parts.length-1]||"").trim();
         var _region=_ad.state||_ad.region||_ad.county||"";
         if(_region && _region.toLowerCase().indexOf(main.toLowerCase())!==-1)_region="";
+        /* Ce qui differencie deux commerces de la meme enseigne, c'est la RUE
+           et le quartier — pas la region, identique pour les huit. */
+        if(r.class==="shop"||r.class==="amenity")
+          _region=[_ad.road,_ad.suburb||_ad.city||_ad.town||_ad.village].filter(Boolean).join(", ")||_region;
         var sub=[_region,_pays].filter(Boolean).join(" \u00b7 ");
         if(!sub)sub=parts.slice(1,3).join(",").trim();   // repli si l'adresse est vide
         var row=document.createElement("div");
@@ -27352,7 +27400,13 @@ function exploreGoCity(auto){
           if(inp){inp.value=main;inp.blur();}
           var _c=document.getElementById("explore-city-clear");if(_c)_c.style.display="flex";
           window._explorePlace=main;window._exploreFreeMove=false;
+          /* Un saut a Paris avec « ≤ 3 km » allume vidait tout, pins compris :
+             ce filtre mesure depuis TA position, jamais depuis la carte. */
+          var _leve=exploreLeverDistance(Number(r.lat),Number(r.lon));
           exploreFlyToResult(r);
+          /* Si la carte etait deja la, aucun moveend ne rechargera et la liste
+             resterait vide sous une puce « Distance » pourtant eteinte. */
+          if(_leve){clearTimeout(_exploreTimer);try{exploreLoadStores();}catch(e){}}
           playSound("pop");
         };
         row.onclick=go;
@@ -27397,6 +27451,111 @@ function exploreFlyToResult(r){
     }
   }
   if(isFinite(lat)&&isFinite(lng))exploreMap.setView([lat,lng],14);
+}
+/* LE FILTRE « ≤ N km » MESURE DEPUIS TA POSITION, PAS DEPUIS LA CARTE.
+   On le garde ainsi : c'est la seule distance qui veuille dire quelque chose
+   quand on cherche autour de soi. Mais apres un saut a Paris depuis Bruxelles
+   il ecarte TOUT — les pins aussi, puisque les puces s'appliquent avant que
+   les marqueurs soient construits — et l'ecran annonce « Aucun magasin dans
+   cette zone » au-dessus d'une base chargee. Mesure : Paris zoom 13 depuis
+   Bruxelles, 1200 pins sans le filtre, 0 avec, pour les memes 2 829 magasins.
+   Il est d'autant plus facile a armer qu'un SEUL appui sur la puce suffit : le
+   curseur s'ouvre a 3 km et s'applique aussitot.
+   On le retire donc quand la destination sort de son rayon, et la puce le dit
+   dans la meme image, pour que l'ecran ne mente jamais. */
+function exploreLeverDistance(lat,lng){
+  var km=Number((window._exploreChips||{}).near)||0;
+  if(!km||typeof lat!=="number"||!isFinite(lat))return false;
+  if(typeof userLat!=="number"||!userLat||typeof _distM!=="function")return false;
+  if(_distM(userLat,userLng,lat,lng)<=km*1000)return false;   // la destination reste dans le rayon
+  window._exploreChips.near=0;
+  try{exploreCloseNearBar();}catch(e){}
+  try{renderExploreChips();}catch(e){}
+  return true;
+}
+/* Demi-diagonale de la vue, en km : la mesure MEME dont exploreLoadStores se
+   sert pour decider s'il charge. Un garde-fou exprime en degres ne peut pas
+   proteger un plafond exprime en kilometres — il ne sait rien de la hauteur
+   reelle de la carte a l'ecran. */
+function exploreRayonVueKm(){
+  try{
+    var b=exploreMap.getBounds(),ne=b.getNorthEast(),sw=b.getSouthWest();
+    var cLat=(ne.lat+sw.lat)/2;
+    var dLa=(ne.lat-sw.lat)*111/2;
+    var dLo=(ne.lng-sw.lng)*111*Math.cos(cLat*Math.PI/180)/2;
+    return Math.sqrt(dLa*dLa+dLo*dLo);
+  }catch(e){ return 0; }
+}
+/* « ALDI PARIS » DOIT MONTRER LES ALDI DE PARIS.
+   OpenStreetMap repond deja juste : pour « Aldi Paris » il renvoie huit
+   supermarches Aldi parisiens. L'app en faisait UNE ligne a toucher, qui posait
+   la carte sur un seul d'entre eux — le dedoublonnage « nom + pays », ecrit pour
+   les villes homonymes, les avait fondus en un.
+   Quand la reponse est « plusieurs commerces du MEME nom dans une MEME zone »,
+   ce n'est pas une liste de lieux : c'est la reponse. On cadre la carte sur eux
+   et on allume la puce « Enseigne » QUI EXISTE DEJA — aucun element permanent de
+   plus, et « Toutes les enseignes » reste la sortie, a un geste. L'import
+   automatique de la zone fait le reste. */
+function exploreCadrerEnseigne(rows){
+  if(!exploreMap||!rows||rows.length<2)return null;
+  /* class="shop" seulement. « amenity » couvre aussi les ecoles et les parkings :
+     cadrer trois « Ecole Jules Ferry » et allumer un filtre d'enseigne la-dessus
+     ne rendrait aucun magasin, donc un ecran vide pour rien. */
+  var cmp=rows.filter(function(r){return r.class==="shop"&&r.name;});
+  if(cmp.length<2)return null;
+  // Meme enseigne ? Sans accents ni casse : OpenStreetMap ecrit « ALDI » et « Aldi ».
+  var nom=normTxt(cmp[0].name);
+  if(!nom||!cmp.every(function(r){return normTxt(r.name)===nom;}))return null;
+  var las=cmp.map(function(r){return Number(r.lat);}),lns=cmp.map(function(r){return Number(r.lon);});
+  if(las.concat(lns).some(function(v){return !isFinite(v);}))return null;
+  var s=Math.min.apply(null,las),n=Math.max.apply(null,las);
+  var w=Math.min.apply(null,lns),e=Math.max.apply(null,lns);
+  /* Eparpilles sur plusieurs pays — « Aldi » tout court renvoie Cary, Essen,
+     San Fernando : ce ne sont pas « les Aldi d'ici ». On laisse alors la liste
+     de lieux faire son travail. */
+  if(n-s>0.7||e-w>1.0)return null;
+  var _cAv=exploreMap.getCenter(),_zAv=exploreMap.getZoom();
+  /* animate:false : sans lui le zoom s'anime, moveend devient asynchrone et
+     getBounds est encore sur l'ancienne vue au moment du rechargement. */
+  try{ exploreMap.fitBounds([[s,w],[n,e]],{padding:[50,50],maxZoom:14,animate:false}); }catch(err){ return null; }
+  /* LE CADRE DOIT TENIR DANS LA FENETRE DE CHARGEMENT, SINON L'ECRAN EST VIDE.
+     « maxZoom:14 » ne protege de rien ici : le danger n'est pas de zoomer trop
+     pres, c'est de degringoler trop loin. Mesure : un cadre de 0,69° x 0,99° —
+     que le garde-fou en degres ci-dessus laisse passer — rend un rayon de vue de
+     158 km, donc « Zoome pour voir les magasins » et ZERO pin sous une puce
+     « Aldi » allumee. On resserre donc en kilometres, apres coup. 25 km et non
+     30 : c'est le seuil qu'autoImportZone exige pour aller peupler la zone. Pour
+     les huit Aldi parisiens reels, fitBounds rend zoom 11 et 19,8 km : cette
+     boucle ne s'y declenche meme pas. */
+  for(var i=0;i<4&&exploreRayonVueKm()>25;i++){
+    try{ exploreMap.setZoom(exploreMap.getZoom()+1,{animate:false}); }catch(err){ break; }
+  }
+  if(exploreRayonVueKm()>25){
+    try{ exploreMap.setView(_cAv,_zAv,{animate:false}); }catch(err){}
+    return null;                       // on repose la carte ou elle etait
+  }
+  window._exploreBrand=null;
+  window._exploreBrandQuery=cmp[0].name;        // la puce « Enseigne » affiche « Aldi »
+  /* L'EN-TETE NOMME LE LIEU, LA PUCE NOMME L'ENSEIGNE. Mettre l'enseigne dans
+     _explorePlace ferait lire « 31 magasins · Aldi » juste a cote d'une puce
+     « Aldi », et Paris — la moitie de ce qui a ete tape — disparaitrait de
+     l'ecran. La reponse porte l'information : address.city. */
+  var _a0=cmp[0].address||{};
+  window._explorePlace=_a0.city||_a0.town||_a0.village||_a0.suburb||_a0.state||cmp[0].name;
+  window._exploreFreeMove=false;
+  var retire=exploreLeverDistance((s+n)/2,(w+e)/2);
+  try{renderExploreChips();}catch(err){}
+  /* ON REDESSINE NOUS-MEMES, comme le font deja les trois autres endroits qui
+     touchent _exploreBrandQuery. Compter sur le moveend du fitBounds ne marche
+     pas : son garde anti-micro-deplacement met _bouge=false des que le zoom et
+     le centre n'ont pas change, et il ne compare que le filtre BOISSON, jamais
+     l'enseigne. Mesure : carte deja posee sur le cadre vise, geste rejoue ->
+     0 rechargement, 440 pins inchanges dont 400 non-Aldi, sous une puce
+     « Aldi » allumee. C'est le cas le plus courant : regarder Paris, puis
+     chercher « Aldi Paris ». */
+  clearTimeout(_exploreTimer);
+  try{exploreLoadStores();}catch(err){}
+  return {n:cmp.length,nom:cmp[0].name,retire:retire};
 }
 /* Partage d'une fiche : lien direct #drink=ID (Web Share natif, sinon copie).
    C'est le canal de croissance : chaque trouvaille devient un lien TikTok/WhatsApp. */
