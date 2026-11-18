@@ -10085,8 +10085,21 @@ function ouvrirChoixReco(r){
     }else{
       corps+='<div style="padding:4px 2px 10px;font-size:13.5px;font-weight:600;color:var(--s1);line-height:1.5">Rien d\'assez proche au catalogue pour l\'affirmer.</div>';
     }
-    corps+='<button onclick="fermerChoixReco()" style="width:100%;margin-top:6px;padding:13px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Aucune de celles-là — je scanne le code-barres</button>'+
-      '<button onclick="recoVersProposition()" style="width:100%;margin-top:8px;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">Elle n\'est pas au catalogue ? Propose-la</button>';
+    /* HIERARCHIE ANTI-DOUBLON : quand des candidates existent, la sortie mise
+       en avant est le code-barres (la certitude) — « Propose-la » reste la,
+       mais discret : c'est par ce bouton-la que les doublons rentreraient.
+       Sans candidate, proposer redevient le chemin principal. (L'envoi est de
+       toute facon verrouille en aval : nom+marque identiques a une fiche =
+       refus et ouverture de la fiche, voir submitProposal.) */
+    var _stylePlein='width:100%;margin-top:8px;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;cursor:pointer;font-family:inherit';
+    var _styleDoux='width:100%;margin-top:6px;padding:13px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+    if(cands.length){
+      corps+='<button onclick="fermerChoixReco()" style="'+_stylePlein+';margin-top:6px">Aucune de celles-là — je scanne le code-barres</button>'+
+        '<button onclick="recoVersProposition()" style="'+_styleDoux+';margin-top:8px">Elle n\'est pas au catalogue ? Propose-la</button>';
+    }else{
+      corps+='<button onclick="fermerChoixReco()" style="'+_styleDoux+'">Je scanne le code-barres</button>'+
+        '<button onclick="recoVersProposition()" style="'+_stylePlein+'">Elle n\'est pas au catalogue ? Propose-la</button>';
+    }
   }
   ov.innerHTML='<div onclick="event.stopPropagation()" style="position:absolute;left:0;right:0;bottom:0;max-height:78vh;overflow-y:auto;background:var(--app-bg);border-radius:22px 22px 0 0;padding:18px 20px calc(24px + env(safe-area-inset-bottom,0px))">'+
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'+
@@ -24713,6 +24726,27 @@ function submitProposal(){
     return;
   }
   // \u2500\u2500 Verdicts de l'IA sur la photo \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  /* VERROU ANTI-DOUBLON, AVANT TOUT ENVOI. Si nom+marque, ecrases
+     (minuscules, sans accents ni ponctuation), designent EXACTEMENT une
+     fiche du catalogue, on ne cree RIEN : on ouvre la fiche. La boite
+     \u00ab peut-etre deja la \u00bb SUGGERE pendant la frappe ; ici le texte est le
+     meme au caractere pres, il n'y a plus rien a proposer. C'est le verrou
+     qui empeche le retour des Red Bull en double, quel que soit le chemin
+     d'entree (formulaire, reconnaissance visuelle, photo). */
+  try{
+    var _cle=function(s){return normTxt(String(s||"")).replace(/[^a-z0-9]/g,"");};
+    var _kN=_cle(name),_kB=_cle(brand);
+    var _deja=_kN?(DRINKS||[]).find(function(x){
+      return _cle(x.name)===_kN&&(!_kB||_cle(x.brand)===_kB);
+    }):null;
+    if(_deja){
+      closeProposeForm();
+      pick(_deja);
+      toast("\u00ab "+_deja.name+" \u00bb est d\u00e9j\u00e0 dans Magofeed \u2014 la voici");
+      playSound("pop");
+      return;
+    }
+  }catch(eDeja){}
   // Alcool detecte : envoi refuse, Magofeed reste 100% sans alcool.
   if(window._aiBlockAlcohol){toast("Boisson alcoolis\u00E9e \u2014 Magofeed reste 100% sans alcool");playSound("err");return;}
   var ai=window._aiPropose||null;
