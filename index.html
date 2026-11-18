@@ -7312,7 +7312,16 @@ window.DRINK_MERGES = {
   1785597035598: 16273,         // Red Bull Zero -> fiche native
   1786705203601: 17130,         // Freeway Agrumes -> fiche native
   1786705787961: 10043,         // Capri-Sun Multivitamin -> fiche native
-  1787232848436: 11464          // Dr Pepper Strawberries & Cream -> fiche native
+  1787232848436: 11464,         // Dr Pepper Strawberries & Cream -> fiche native
+  /* Doublons deguises (releve de novembre, cle « sac de mots » : meme nom a
+     l'ordre, la casse et les mots de forme pres). On NE fusionne PAS les
+     paires « pur jus » / « jus » : ce sont deux produits reellement
+     differents en rayon (pur jus vs a base de concentre). */
+  17513: 11207,  // Cacolac Nature -> Cacolac Original (meme boisson, nom OFF)
+  15292: 15291,  // Lima Boisson de Riz Nature -> ... Riz Original (meme produit)
+  16233: 16070,  // Mont Roucous 1,5 L -> Mont Roucous (deux formats d'une meme eau)
+  17646: 17575,  // La Vie Claire Boisson au soja -> ... soja nature (meme produit)
+  17756: 17737   // U Bio soja vanille (double saisie, marque ecrite autrement)
 };
 /* CETTE FONCTION VIT DANS UN SCRIPT ORDINAIRE, ET C'EST LE POINT ENTIER.
    Posee dans le module Firebase, elle n'existait pas encore au moment ou le
@@ -24734,10 +24743,33 @@ function submitProposal(){
      qui empeche le retour des Red Bull en double, quel que soit le chemin
      d'entree (formulaire, reconnaissance visuelle, photo). */
   try{
+    /* Deux cles, de la plus stricte a la plus robuste :
+       1) texte COLLE identique (casse, accents, ponctuation ignores) ;
+       2) MEME SAC DE MOTS \u2014 l'ordre ne compte pas (\u00ab Winter Edition \u00bb =
+          \u00ab Edition Winter \u00bb), les mots de forme ne comptent pas
+          (MOTS_FACULTATIFS : edition, original, saveur\u2026), et les
+          equivalences de saveur sont repliees (canonSaveurs : the glace =
+          icetea\u2026). C'est le cas reel du terrain : l'IA lit la canette dans
+          un autre ordre ou une autre langue que la fiche. */
     var _cle=function(s){return normTxt(String(s||"")).replace(/[^a-z0-9]/g,"");};
-    var _kN=_cle(name),_kB=_cle(brand);
+    var _sac=function(nom,marque){
+      var t=normTxt(String(nom||"")+" "+String(marque||""));
+      try{t=canonSaveurs(t);}catch(eC){}
+      var vus={},res=[];
+      t.split(/[^a-z0-9]+/).forEach(function(w){
+        /* « pur » reste significatif : « pur jus » et « jus » (a base de
+           concentre) sont deux produits DIFFERENTS en rayon — les confondre
+           ferait refuser une fiche legitime. Le reste des mots de forme
+           (edition, original, nature…) ne compte pas. */
+        if(!w||(MOTS_FACULTATIFS[w]&&w!=="pur"&&w!=="pure")||vus[w])return;
+        vus[w]=1;res.push(w);
+      });
+      return res.sort().join(" ");
+    };
+    var _kN=_cle(name),_kB=_cle(brand),_sacP=_sac(name,brand);
     var _deja=_kN?(DRINKS||[]).find(function(x){
-      return _cle(x.name)===_kN&&(!_kB||_cle(x.brand)===_kB);
+      if(_cle(x.name)===_kN&&(!_kB||_cle(x.brand)===_kB))return true;
+      return !!_sacP&&_sac(x.name,x.brand)===_sacP;
     }):null;
     if(_deja){
       closeProposeForm();
