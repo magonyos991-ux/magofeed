@@ -7,7 +7,7 @@
 // MARQUE en capitales grasses sombres (taille adaptee),
 // PARFUM en petites capitales couleur foncee du parfum.
 ART["generique"]=function(d){
-  var c=d.color||'#888888', id=d.id||0;
+  var c=d.color||'#888888', id=d.id||0, gid=graineId(id);
   var forme=(d.formats&&d.formats[0]&&d.formats[0].type)||"";
   var isBottle=forme==="bouteille";
   /* Une brique des que le produit est un jus ou un lait et que le catalogue ne
@@ -93,7 +93,7 @@ ART["generique"]=function(d){
     +(function(){
       var s2='', BX=[96,146,90,150], BY=[112,124,286,272], BR=[7,5,6,4.5];
       for(var q=0;q<4;q++){
-        var jx=((id*17+q*29)%11)-5, jy=((id*23+q*13)%15)-7;
+        var jx=((gid*17+q*29)%11)-5, jy=((gid*23+q*13)%15)-7;
         s2+='<circle cx="'+(BX[q]+jx)+'" cy="'+(BY[q]+jy)+'" r="'+BR[q]+'" fill="'+shade(c,0.32)+'" opacity="0.45"/>';
       }
       return s2;
@@ -123,7 +123,7 @@ ART["generique"]=function(d){
     +(function(){
       var s='', BX=[95,140,152,90,146,112], BY=[105,90,118,268,282,255], BR=[7,4.5,6,5,7,3.5];
       for(var q=0;q<6;q++){
-        var jx=((id*17+q*29)%11)-5, jy=((id*23+q*13)%15)-7;
+        var jx=((gid*17+q*29)%11)-5, jy=((gid*23+q*13)%15)-7;
         s+='<circle cx="'+(BX[q]+jx)+'" cy="'+(BY[q]+jy)+'" r="'+BR[q]+'" fill="'+shade(c,0.3+0.03*(q%3))+'" opacity="0.'+(4+q%2)+'"/>';
       }
       return s;
@@ -163,7 +163,7 @@ ART["generique"]=function(d){
   +(function(){
     var s='';
     for(var q=0;q<5;q++){
-      var bx=92+((id*19+q*37)%56), by=130+((id*11+q*53)%160);
+      var bx=92+((gid*19+q*37)%56), by=130+((gid*11+q*53)%160);
       s+='<circle cx="'+bx+'" cy="'+by+'" r="'+(2+q%3)+'" fill="'+shade(c,0.4)+'" opacity="0.5"/>';
     }
     return s;

@@ -2,7 +2,7 @@
 // ovale blanc cercle d'or au centre avec « Schweppes » en italique, le parfum
 // dessous, et les bulles qui montent (l'eau petillante d'origine).
 ART["schweppes"]=function(d){
-  var c=d.color||'#f1c40f', id=d.id||0;
+  var c=d.color||'#f1c40f', id=d.id||0, gid=graineId(id);
   var fonce=shade(c,-0.55);
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   var fl=String(d.name||'').replace(new RegExp('^\\s*'+String(d.brand||'Schweppes'),'i'),'')
@@ -25,7 +25,7 @@ ART["schweppes"]=function(d){
   // bulles deterministes par d.id
   var bulles='';
   for(var k=0;k<9;k++){
-    var bx=84+((id*17+k*29)%72), by=96+((id*23+k*41)%196), br=1.6+((id+k*5)%4)*0.7;
+    var bx=84+((gid*17+k*29)%72), by=96+((gid*23+k*41)%196), br=1.6+((gid+k*5)%4)*0.7;
     bulles+='<circle cx="'+bx+'" cy="'+by+'" r="'+br.toFixed(1)+'" fill="#fff" opacity="0.30"/>';
   }
   var corps='M77,58 C73,64 72,70 72,78 L72,288 C72,300 75,308 81,314 L83,317 C85,320 89,321 95,321 L145,321 C151,321 155,320 157,317 L159,314 C165,308 168,300 168,288 L168,78 C168,70 167,64 163,58 Z';

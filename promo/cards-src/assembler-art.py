@@ -17,6 +17,22 @@ function shade(hex,f){hex=String(hex||'#888').replace('#','');
  var r=parseInt(hex.substr(0,2),16),g=parseInt(hex.substr(2,2),16),b=parseInt(hex.substr(4,2),16);
  if(f>=0){r+=(255-r)*f;g+=(255-g)*f;b+=(255-b)*f;}else{r*=1+f;g*=1+f;b*=1+f;}
  return '#'+[r,g,b].map(function(x){return Math.round(Math.max(0,Math.min(255,x))).toString(16).padStart(2,'0');}).join('');}
+/* GRAINE NUMERIQUE STABLE A PARTIR D'UN IDENTIFIANT QUELCONQUE.
+   Les motifs decoratifs (bulles, gouttes de fruit, eclaboussure) sont
+   jitteres par « id*17 », ce qui suppose un identifiant NUMERIQUE. Le
+   catalogue n'en a que des nombres — mais le reste de l'application, non. Une
+   decouverte de la communaute porte « disc<alphanum> », et "disc123"*17 vaut
+   NaN : le SVG sortait avec cx="NaN" cy="NaN", le navigateur refusait chaque
+   cercle, et la console criait sur CHAQUE carte de decouverte pendant que la
+   canette s'affichait nue. Un nombre reste lui-meme, au bit pres : AUCUN
+   dessin du catalogue ne bouge d'un pixel. Tout le reste est hache. */
+function graineId(v){
+  if(typeof v==="number"&&isFinite(v))return v;
+  var s=String(v==null?"":v);
+  if(/^-?\d+(\.\d+)?$/.test(s)){var n=Number(s);if(isFinite(n))return n;}
+  var h=0;for(var i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0;
+  return h;
+}
 function artPourBoisson(d){
   if(!d||!d.brand)return null;
   var b=(d.brand||"").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g,"");

@@ -12,6 +12,22 @@ function shade(hex,f){hex=String(hex||'#888').replace('#','');
  var r=parseInt(hex.substr(0,2),16),g=parseInt(hex.substr(2,2),16),b=parseInt(hex.substr(4,2),16);
  if(f>=0){r+=(255-r)*f;g+=(255-g)*f;b+=(255-b)*f;}else{r*=1+f;g*=1+f;b*=1+f;}
  return '#'+[r,g,b].map(function(x){return Math.round(Math.max(0,Math.min(255,x))).toString(16).padStart(2,'0');}).join('');}
+/* GRAINE NUMERIQUE STABLE A PARTIR D'UN IDENTIFIANT QUELCONQUE.
+   Les motifs decoratifs (bulles, gouttes de fruit, eclaboussure) sont
+   jitteres par « id*17 », ce qui suppose un identifiant NUMERIQUE. Le
+   catalogue n'en a que des nombres — mais le reste de l'application, non. Une
+   decouverte de la communaute porte « disc<alphanum> », et "disc123"*17 vaut
+   NaN : le SVG sortait avec cx="NaN" cy="NaN", le navigateur refusait chaque
+   cercle, et la console criait sur CHAQUE carte de decouverte pendant que la
+   canette s'affichait nue. Un nombre reste lui-meme, au bit pres : AUCUN
+   dessin du catalogue ne bouge d'un pixel. Tout le reste est hache. */
+function graineId(v){
+  if(typeof v==="number"&&isFinite(v))return v;
+  var s=String(v==null?"":v);
+  if(/^-?\d+(\.\d+)?$/.test(s)){var n=Number(s);if(isFinite(n))return n;}
+  var h=0;for(var i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0;
+  return h;
+}
 function artPourBoisson(d){
   if(!d||!d.brand)return null;
   var b=(d.brand||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
@@ -631,7 +647,7 @@ ART["fanta"]=function(d){
 // MARQUE en capitales grasses sombres (taille adaptee),
 // PARFUM en petites capitales couleur foncee du parfum.
 ART["generique"]=function(d){
-  var c=d.color||'#888888', id=d.id||0;
+  var c=d.color||'#888888', id=d.id||0, gid=graineId(id);
   var forme=(d.formats&&d.formats[0]&&d.formats[0].type)||"";
   var isBottle=forme==="bouteille";
   /* Une brique des que le produit est un jus ou un lait et que le catalogue ne
@@ -717,7 +733,7 @@ ART["generique"]=function(d){
     +(function(){
       var s2='', BX=[96,146,90,150], BY=[112,124,286,272], BR=[7,5,6,4.5];
       for(var q=0;q<4;q++){
-        var jx=((id*17+q*29)%11)-5, jy=((id*23+q*13)%15)-7;
+        var jx=((gid*17+q*29)%11)-5, jy=((gid*23+q*13)%15)-7;
         s2+='<circle cx="'+(BX[q]+jx)+'" cy="'+(BY[q]+jy)+'" r="'+BR[q]+'" fill="'+shade(c,0.32)+'" opacity="0.45"/>';
       }
       return s2;
@@ -747,7 +763,7 @@ ART["generique"]=function(d){
     +(function(){
       var s='', BX=[95,140,152,90,146,112], BY=[105,90,118,268,282,255], BR=[7,4.5,6,5,7,3.5];
       for(var q=0;q<6;q++){
-        var jx=((id*17+q*29)%11)-5, jy=((id*23+q*13)%15)-7;
+        var jx=((gid*17+q*29)%11)-5, jy=((gid*23+q*13)%15)-7;
         s+='<circle cx="'+(BX[q]+jx)+'" cy="'+(BY[q]+jy)+'" r="'+BR[q]+'" fill="'+shade(c,0.3+0.03*(q%3))+'" opacity="0.'+(4+q%2)+'"/>';
       }
       return s;
@@ -787,7 +803,7 @@ ART["generique"]=function(d){
   +(function(){
     var s='';
     for(var q=0;q<5;q++){
-      var bx=92+((id*19+q*37)%56), by=130+((id*11+q*53)%160);
+      var bx=92+((gid*19+q*37)%56), by=130+((gid*11+q*53)%160);
       s+='<circle cx="'+bx+'" cy="'+by+'" r="'+(2+q%3)+'" fill="'+shade(c,0.4)+'" opacity="0.5"/>';
     }
     return s;
@@ -1605,7 +1621,7 @@ ART["red bull"]=function(d){
 // ovale blanc cercle d'or au centre avec « Schweppes » en italique, le parfum
 // dessous, et les bulles qui montent (l'eau petillante d'origine).
 ART["schweppes"]=function(d){
-  var c=d.color||'#f1c40f', id=d.id||0;
+  var c=d.color||'#f1c40f', id=d.id||0, gid=graineId(id);
   var fonce=shade(c,-0.55);
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   var fl=String(d.name||'').replace(new RegExp('^\\s*'+String(d.brand||'Schweppes'),'i'),'')
@@ -1628,7 +1644,7 @@ ART["schweppes"]=function(d){
   // bulles deterministes par d.id
   var bulles='';
   for(var k=0;k<9;k++){
-    var bx=84+((id*17+k*29)%72), by=96+((id*23+k*41)%196), br=1.6+((id+k*5)%4)*0.7;
+    var bx=84+((gid*17+k*29)%72), by=96+((gid*23+k*41)%196), br=1.6+((gid+k*5)%4)*0.7;
     bulles+='<circle cx="'+bx+'" cy="'+by+'" r="'+br.toFixed(1)+'" fill="#fff" opacity="0.30"/>';
   }
   var corps='M77,58 C73,64 72,70 72,78 L72,288 C72,300 75,308 81,314 L83,317 C85,320 89,321 95,321 L145,321 C151,321 155,320 157,317 L159,314 C165,308 168,300 168,288 L168,78 C168,70 167,64 163,58 Z';
@@ -1785,7 +1801,7 @@ ART["sumol"]=function(d){
 // "TANGO" en enormes capitales blanches penchees par-dessus, le PARFUM en
 // capitales couleur claire du parfum sous le nom. Couvercle aluminium.
 ART["tango"]=function(d){
-  var c=d.color||'#e67e22', id=d.id||0;
+  var c=d.color||'#e67e22', id=d.id||0, gid=graineId(id);
   var lt=shade(c,0.55), dk=shade(c,-0.5);
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   // Parfum = nom sans le prefixe de marque, sans parenthese
@@ -1810,11 +1826,11 @@ ART["tango"]=function(d){
   var flavorTxt= lines.length===1 ? tsp(lines[0],258) : tsp(lines[0],251)+tsp(lines[1],251+fs+3);
   // Eclaboussure : 6 pointes energiques, jitter deterministe par d.id,
   // arcs concaves profonds ; ecrasee en x pour tenir dans la canette
-  var cx=120, cy=170, n=6, rot=((id*37)%21-10)*Math.PI/180;
+  var cx=120, cy=170, n=6, rot=((gid*37)%21-10)*Math.PI/180;
   var RO=[56,49,59,52,57,50], AJ=[0.10,-0.15,0.19,-0.08,0.13,-0.17];
   var pts=[];
   for(var k=0;k<n;k++){
-    var rr=RO[k]+((id*13+k*7)%9)-4;
+    var rr=RO[k]+((gid*13+k*7)%9)-4;
     var ang=-Math.PI/2 + k*2*Math.PI/n + AJ[k] + rot;
     pts.push([cx+rr*Math.cos(ang)*0.8, cy+rr*Math.sin(ang)*1.04, ang]);
   }

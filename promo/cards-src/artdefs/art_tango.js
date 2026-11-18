@@ -3,7 +3,7 @@
 // "TANGO" en enormes capitales blanches penchees par-dessus, le PARFUM en
 // capitales couleur claire du parfum sous le nom. Couvercle aluminium.
 ART["tango"]=function(d){
-  var c=d.color||'#e67e22', id=d.id||0;
+  var c=d.color||'#e67e22', id=d.id||0, gid=graineId(id);
   var lt=shade(c,0.55), dk=shade(c,-0.5);
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   // Parfum = nom sans le prefixe de marque, sans parenthese
@@ -28,11 +28,11 @@ ART["tango"]=function(d){
   var flavorTxt= lines.length===1 ? tsp(lines[0],258) : tsp(lines[0],251)+tsp(lines[1],251+fs+3);
   // Eclaboussure : 6 pointes energiques, jitter deterministe par d.id,
   // arcs concaves profonds ; ecrasee en x pour tenir dans la canette
-  var cx=120, cy=170, n=6, rot=((id*37)%21-10)*Math.PI/180;
+  var cx=120, cy=170, n=6, rot=((gid*37)%21-10)*Math.PI/180;
   var RO=[56,49,59,52,57,50], AJ=[0.10,-0.15,0.19,-0.08,0.13,-0.17];
   var pts=[];
   for(var k=0;k<n;k++){
-    var rr=RO[k]+((id*13+k*7)%9)-4;
+    var rr=RO[k]+((gid*13+k*7)%9)-4;
     var ang=-Math.PI/2 + k*2*Math.PI/n + AJ[k] + rot;
     pts.push([cx+rr*Math.cos(ang)*0.8, cy+rr*Math.sin(ang)*1.04, ang]);
   }

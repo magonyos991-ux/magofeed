@@ -12,8 +12,19 @@ const ctx=await nav.newContext({viewport:{width:390,height:844},
 const pg=await ctx.newPage();
 const erreurs=[];
 pg.on("pageerror",e=>erreurs.push("ERREUR JS : "+String(e.message).slice(0,140)));
+/* CE QU'ON IGNORE, ET POURQUOI — chaque exclusion est un risque de cecite,
+   donc chacune doit se justifier par une MESURE, pas par une impression.
+   Le conteneur n'a pas de reseau sortant pour le navigateur : toute requete
+   vers l'exterieur echoue au niveau transport, et la reponse d'echec ne porte
+   evidemment aucun en-tete CORS — Chromium rapporte alors « blocked by CORS
+   policy » la ou il n'y a qu'une absence de reseau. Verifie a la main :
+   world.openfoodfacts.org repond « access-control-allow-origin: * », donc en
+   production cette erreur n'existe pas. On n'ignore que les hotes EXTERNES :
+   un blocage CORS sur 127.0.0.1 serait un vrai defaut et reste bruyant. */
+const CIBLE=t=>(/^Access to \S+ at '([^']+)'/.exec(t)||[])[1]||"";
+const EXTERIEUR=t=>/blocked by CORS policy/i.test(t)&&!/^https?:\/\/127\.0\.0\.1/.test(CIBLE(t));
 pg.on("console",m=>{ if(m.type()==="error"){const t=m.text();
-  if(!/ERR_CERT|ERR_FAILED|ERR_TOO_MANY|net::|Failed to load resource|firestore|Firebase/i.test(t))
+  if(!/ERR_CERT|ERR_FAILED|ERR_TOO_MANY|net::|Failed to load resource|firestore|Firebase/i.test(t)&&!EXTERIEUR(t))
     erreurs.push("console : "+t.slice(0,140)); }});
 await pg.addInitScript(()=>{try{localStorage.setItem("magoOnboard","1");}catch(e){}});
 await pg.goto(`http://127.0.0.1:${port}/index.html`);
@@ -24,8 +35,21 @@ async function etape(nom,fn){
   try{ const d=await fn(); etapes.push([nom,true,d||""]); }
   catch(e){ etapes.push([nom,false,String(e.message||e).slice(0,110)]); }
 }
+/* COMBIEN DE FICHES LE FICHIER CONTIENT-IL VRAIMENT ? C'est la seule
+   reference honnete. Un nombre ecrit en dur ici se trompe dans les DEUX
+   sens : il criait au loup quand le catalogue grossissait (il exigeait
+   EXACTEMENT 4455 fiches), et il aurait crie encore quand un dedoublonnage
+   legitime en a retire cinq. La question a laquelle on veut repondre est :
+   le fichier du catalogue s'est-il CHARGE EN ENTIER ? On la pose au fichier. */
+const SOURCE=await readFile(join(R,"data/drinks.js"),"utf8");
+const N_FICHIER=(SOURCE.match(/\bid:\s*\d+/g)||[]).length;
 await etape("catalogue charge",async()=>{
-  const n=await pg.evaluate(()=>DRINKS.length); if(n!==4455)throw new Error("fiches="+n); return n+" boissons";});
+  if(N_FICHIER<4000)throw new Error("data/drinks.js n'en contient que "+N_FICHIER+" : le fichier lui-meme a fondu");
+  const n=await pg.evaluate(()=>DRINKS.length);
+  /* Au-dela du fichier viennent les boissons de la communaute (Firestore) :
+     plus, c'est normal ; moins, c'est un chargement incomplet. */
+  if(n<N_FICHIER)throw new Error("chargees="+n+" alors que data/drinks.js en contient "+N_FICHIER);
+  return n+" boissons, dont "+N_FICHIER+" du fichier";});
 await etape("table nutrition chargee",async()=>{
   const n=await pg.evaluate(()=>Object.keys(window.NUTRI||{}).length); if(n<3700)throw new Error("entrees="+n); return n+" entrees";});
 await etape("redirections de fusion",async()=>{

@@ -10675,7 +10675,13 @@ function toggleStorePickerMap(){
   }
 }
 function ensurePickerMap(cb){
-  if(window._pickerMap){setTimeout(function(){window._pickerMap.invalidateSize();cb&&cb();},180);return;}
+  if(window._pickerMap){setTimeout(function(){
+    /* Le panneau a pu se fermer pendant ces 180 ms : _pickerMap vaut alors
+       null, et le rappel travaillerait sur une carte morte. */
+    if(!carteEncoreLa(window._pickerMap))return;
+    try{window._pickerMap.invalidateSize();}catch(e){}
+    cb&&cb();
+  },180);return;}
   function build(){
     var center=[userLat||50.8466,userLng||4.3528];
     window._pickerMap=L.map("store-picker-map",{zoomControl:false,fadeAnimation:false}).setView(center,13);
@@ -10685,7 +10691,11 @@ function ensurePickerMap(cb){
     if(userLat){
       L.circleMarker([userLat,userLng],{radius:7,color:"#fff",weight:2,fillColor:"#2e86c1",fillOpacity:1}).addTo(window._pickerMap);
     }
-    setTimeout(function(){window._pickerMap.invalidateSize();cb&&cb();},180);
+    setTimeout(function(){
+      if(!carteEncoreLa(window._pickerMap))return;
+      try{window._pickerMap.invalidateSize();}catch(e){}
+      cb&&cb();
+    },180);
   }
   ensureLeaflet(build, function(){ try{ toast("Carte indisponible \u2014 v\u00e9rifie ta connexion"); }catch(e){} });
 }
@@ -13538,7 +13548,16 @@ function trackLocalPrice(sid,did,price){
 }
 function sparklineSVG(hist,w,h){
   if(!hist||hist.length<2)return"";
-  var prices=hist.map(function(e){return e.p;});
+  /* UN SEUL PRIX ILLISIBLE SUFFISAIT A CASSER TOUTE LA COURBE.
+     min et max devenaient NaN, et span valait alors 1 — parce que NaN est
+     faux, donc « (max-min)||1 » rendait 1 sans rien signaler. Chaque point se
+     calculait ensuite sur un NaN : le navigateur refusait le trace et criait
+     « <circle> attribute cx: Expected length, NaN ». Mesure sur le jeu de
+     demonstration : 33 erreurs de console pour une seule courbe.
+     On jette donc ce qui n'est pas un nombre, et on se tait s'il n'en reste
+     pas deux — une courbe a un point ne veut rien dire. */
+  var prices=hist.map(function(e){return Number(e&&e.p);}).filter(function(p){return isFinite(p);});
+  if(prices.length<2)return"";
   var min=Math.min.apply(null,prices),max=Math.max.apply(null,prices);
   var span=(max-min)||1;
   var pad=2;
@@ -16465,7 +16484,9 @@ function renderMap(){
   if(mapRenderedFor===productId&&box.querySelector(".leaflet-container")){
     // Carte déjà construite pour cette boisson : si l'écran vient d'apparaître (transition), la taille du conteneur
     // a pu changer pendant qu'il était masqué — Leaflet doit recalculer sa taille sinon la carte reste vide/mal centrée.
-    if(window._leafletMap)setTimeout(function(){window._leafletMap.invalidateSize();},320);
+    /* La verification doit etre DANS le rappel : entre-temps la fiche peut
+       s'etre fermee et window._leafletMap valoir null. */
+    setTimeout(function(){try{if(carteEncoreLa(window._leafletMap))window._leafletMap.invalidateSize();}catch(e){}},320);
     return;
   }
   mapRenderedFor=productId;
@@ -18105,8 +18126,39 @@ function centerMapOnUser(){
   }
 }
 function initLeafletMap(lat,lng){
-  if(!window.L||!document.getElementById("leaflet-map"))return;
-  var map=L.map("leaflet-map",{zoomControl:false,attributionControl:true,zoomAnimation:true,markerZoomAnimation:true,fadeAnimation:false}).setView([lat,lng],13);
+  if(!window.L)return;
+  var hote=document.getElementById("leaflet-map");
+  if(!hote)return;
+  /* ══ DEUX CARTES NE TIENNENT PAS DANS UN SEUL CONTENEUR ══════════════════
+     Mesure : sur quatre chargements, deux se terminaient par
+
+       Uncaught Error: Map container is already initialized.
+
+     et le controle avant mise en ligne refusait de passer. La cause, tracee
+     appel par appel : renderMap demande le regroupement de marqueurs en
+     posant un <script>, et branche le MEME rappel sur son onload, sur son
+     onerror ET sur un delai de garde de six secondes. Ce rappel est protege
+     contre lui-meme, mais pas contre le suivant : ouvrir une boisson puis une
+     AUTRE cree un second rappel, la boite est reconstruite, une carte neuve
+     est posee — et le rappel de la PREMIERE boisson arrive ensuite, sur ce
+     conteneur-la, et redemande une carte. Leaflet refuse, a juste titre.
+
+     Le garde-fou tient ici plutot qu'aux quatre endroits qui appellent :
+     poser une carte sur un conteneur qui en porte deja une n'a aucun sens,
+     d'ou qu'on vienne. Si c'est la notre, il n'y a rien a refaire. Si c'est
+     une inconnue — reference perdue — on la retire avant de reposer, parce
+     qu'un conteneur marque et sans carte vivante bloquerait la carte POUR DE
+     BON : l'utilisateur n'aurait plus jamais de carte sur cette fiche. ───── */
+  if(hote._leaflet_id){
+    var dejaLa=window._leafletMap;
+    var cEstLaNotre=false;
+    try{ cEstLaNotre=!!(dejaLa&&dejaLa.getContainer&&dejaLa.getContainer()===hote); }catch(e){}
+    if(cEstLaNotre)return;
+    try{ if(dejaLa)dejaLa.remove(); }catch(e){}
+    try{ delete hote._leaflet_id; }catch(e){}
+    window._leafletMap=null;
+  }
+  var map=L.map(hote,{zoomControl:false,attributionControl:true,zoomAnimation:true,markerZoomAnimation:true,fadeAnimation:false}).setView([lat,lng],13);
   /* ══ PAS DE ZOOM SANS DEPLACEMENT ══════════════════════════════════════
      Les boutons + et - etaient poses sur l'apercu alors que le glisser y est
      coupe. On pouvait donc zoomer une carte qu'on ne pouvait pas deplacer :
@@ -18287,13 +18339,14 @@ function initLeafletMap(lat,lng){
       /* Le cadre a change : ce qui est visible aussi, donc le comptage. */
       try{if(window.rafraichirLegende)window.rafraichirLegende();}catch(eL){}
     });
-    setTimeout(function(){etalerMarqueurs(map,cluster);},360);
+    setTimeout(function(){if(!carteEncoreLa(map,window._leafletMap))return;try{etalerMarqueurs(map,cluster);}catch(e){}},360);
 
     // Le conteneur peut avoir une taille nulle si la carte est construite pendant que l'écran est encore masqué
     // (transition d'écran en cours) : on force Leaflet à recalculer sa taille avant de centrer/cadrer la vue.
     setTimeout(function(){
-      map.invalidateSize();
-      cadrerSurLesPins(map);
+      /* La carte a pu etre demontee pendant ces 320 ms : voir carteEncoreLa. */
+      if(!carteEncoreLa(map,window._leafletMap))return;
+      try{ map.invalidateSize(); cadrerSurLesPins(map); }catch(e){}
     },320);
 
     // Charge davantage de magasins Firestore quand l'utilisateur déplace/zoome la carte au-delà de la zone déjà chargée
@@ -18453,6 +18506,27 @@ function apercuReplie(m){
   if(window.matchMedia&&matchMedia("(pointer:fine)").matches)m.dragging.enable();
 }
 window.apercuReplie=apercuReplie;
+
+/* ══ UNE CARTE DEJA RETIREE N'EST PLUS UNE CARTE ═════════════════════════
+   Mesure : sur six chargements, un lance « Cannot read properties of
+   undefined (reading '_leaflet_pos') ». La pile remonte a invalidateSize()
+   appele par un setTimeout de 320 ms pose a la construction de la carte. Si
+   l'ecran change avant la fin de ce delai — l'utilisateur ferme la fiche,
+   en ouvre une autre, et map.remove() a deja demonte les panneaux — le
+   rappel touche une carte morte et leve une erreur NON RATTRAPEE. Elle
+   annulait du meme coup le cadrage qui suivait dans le meme rappel.
+   Trois conditions, et les trois comptent : l'objet existe, c'est TOUJOURS
+   la carte en cours (une autre a pu la remplacer), et son conteneur est
+   encore dans la page. ────────────────────────────────────────────────── */
+function carteEncoreLa(m,courante){
+  if(!m||!m._mapPane)return false;
+  /* Deuxieme argument facultatif : la carte que l'appelant croit en cours.
+     Si une AUTRE l'a remplacee entre-temps, la sienne ne vaut plus rien. */
+  if(courante&&courante!==m)return false;
+  var c=null; try{c=m.getContainer();}catch(e){return false;}
+  return !!(c&&c.isConnected);
+}
+window.carteEncoreLa=carteEncoreLa;
 /* Plein ecran carte : la boite passe en fixe pleine fenetre, Leaflet recalcule
    sa taille, le bouton devient une croix. */
 function toggleDrinkMapFull(){
@@ -20551,6 +20625,10 @@ var APERCU_ZOOM_MIN=11;
    dezoome (le greffon, lui, regroupe toujours d'apres les vraies positions). */
 function etalerMarqueurs(map,groupe){
   if(!map||!groupe||!map._loaded||!groupe.getLayers)return;
+  /* _loaded reste VRAI apres map.remove() : ce n'est donc pas un test de vie.
+     L'etalement est declenche par zoomend/moveend et par un rappel differe ;
+     une carte demontee doit etre refusee ici, pas plus loin. */
+  if(!carteEncoreLa(map))return;
   if(map._etalementEnCours)return;
   map._etalementEnCours=true;
   try{
