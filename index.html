@@ -7312,7 +7312,16 @@ window.DRINK_MERGES = {
   1785597035598: 16273,         // Red Bull Zero -> fiche native
   1786705203601: 17130,         // Freeway Agrumes -> fiche native
   1786705787961: 10043,         // Capri-Sun Multivitamin -> fiche native
-  1787232848436: 11464          // Dr Pepper Strawberries & Cream -> fiche native
+  1787232848436: 11464,         // Dr Pepper Strawberries & Cream -> fiche native
+  /* Doublons deguises (releve de novembre, cle « sac de mots » : meme nom a
+     l'ordre, la casse et les mots de forme pres). On NE fusionne PAS les
+     paires « pur jus » / « jus » : ce sont deux produits reellement
+     differents en rayon (pur jus vs a base de concentre). */
+  17513: 11207,  // Cacolac Nature -> Cacolac Original (meme boisson, nom OFF)
+  15292: 15291,  // Lima Boisson de Riz Nature -> ... Riz Original (meme produit)
+  16233: 16070,  // Mont Roucous 1,5 L -> Mont Roucous (deux formats d'une meme eau)
+  17646: 17575,  // La Vie Claire Boisson au soja -> ... soja nature (meme produit)
+  17756: 17737   // U Bio soja vanille (double saisie, marque ecrite autrement)
 };
 /* CETTE FONCTION VIT DANS UN SCRIPT ORDINAIRE, ET C'EST LE POINT ENTIER.
    Posee dans le module Firebase, elle n'existait pas encore au moment ou le
@@ -10085,8 +10094,21 @@ function ouvrirChoixReco(r){
     }else{
       corps+='<div style="padding:4px 2px 10px;font-size:13.5px;font-weight:600;color:var(--s1);line-height:1.5">Rien d\'assez proche au catalogue pour l\'affirmer.</div>';
     }
-    corps+='<button onclick="fermerChoixReco()" style="width:100%;margin-top:6px;padding:13px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Aucune de celles-là — je scanne le code-barres</button>'+
-      '<button onclick="recoVersProposition()" style="width:100%;margin-top:8px;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">Elle n\'est pas au catalogue ? Propose-la</button>';
+    /* HIERARCHIE ANTI-DOUBLON : quand des candidates existent, la sortie mise
+       en avant est le code-barres (la certitude) — « Propose-la » reste la,
+       mais discret : c'est par ce bouton-la que les doublons rentreraient.
+       Sans candidate, proposer redevient le chemin principal. (L'envoi est de
+       toute facon verrouille en aval : nom+marque identiques a une fiche =
+       refus et ouverture de la fiche, voir submitProposal.) */
+    var _stylePlein='width:100%;margin-top:8px;padding:13px;border-radius:14px;border:none;background:var(--s1);color:var(--app-bg);font-size:13px;font-weight:800;cursor:pointer;font-family:inherit';
+    var _styleDoux='width:100%;margin-top:6px;padding:13px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg2);color:var(--s1);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+    if(cands.length){
+      corps+='<button onclick="fermerChoixReco()" style="'+_stylePlein+';margin-top:6px">Aucune de celles-là — je scanne le code-barres</button>'+
+        '<button onclick="recoVersProposition()" style="'+_styleDoux+';margin-top:8px">Elle n\'est pas au catalogue ? Propose-la</button>';
+    }else{
+      corps+='<button onclick="fermerChoixReco()" style="'+_styleDoux+'">Je scanne le code-barres</button>'+
+        '<button onclick="recoVersProposition()" style="'+_stylePlein+'">Elle n\'est pas au catalogue ? Propose-la</button>';
+    }
   }
   ov.innerHTML='<div onclick="event.stopPropagation()" style="position:absolute;left:0;right:0;bottom:0;max-height:78vh;overflow-y:auto;background:var(--app-bg);border-radius:22px 22px 0 0;padding:18px 20px calc(24px + env(safe-area-inset-bottom,0px))">'+
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'+
@@ -18138,26 +18160,42 @@ function initLeafletMap(lat,lng){
      appel par appel : renderMap demande le regroupement de marqueurs en
      posant un <script>, et branche le MEME rappel sur son onload, sur son
      onerror ET sur un delai de garde de six secondes. Ce rappel est protege
-     contre lui-meme, mais pas contre le suivant : ouvrir une boisson puis une
-     AUTRE cree un second rappel, la boite est reconstruite, une carte neuve
-     est posee — et le rappel de la PREMIERE boisson arrive ensuite, sur ce
-     conteneur-la, et redemande une carte. Leaflet refuse, a juste titre.
+     contre lui-meme, mais pas contre le suivant : trois appuis rapides, ou
+     simplement une boisson puis une AUTRE, creent plusieurs rappels en file.
+     La boite est reconstruite, une carte neuve est posee — et le rappel
+     d'avant arrive ensuite, sur ce conteneur-la, et redemande une carte.
 
-     Le garde-fou tient ici plutot qu'aux quatre endroits qui appellent :
-     poser une carte sur un conteneur qui en porte deja une n'a aucun sens,
-     d'ou qu'on vienne. Si c'est la notre, il n'y a rien a refaire. Si c'est
-     une inconnue — reference perdue — on la retire avant de reposer, parce
-     qu'un conteneur marque et sans carte vivante bloquerait la carte POUR DE
-     BON : l'utilisateur n'aurait plus jamais de carte sur cette fiche. ───── */
-  if(hote._leaflet_id){
-    var dejaLa=window._leafletMap;
-    var cEstLaNotre=false;
-    try{ cEstLaNotre=!!(dejaLa&&dejaLa.getContainer&&dejaLa.getContainer()===hote); }catch(e){}
-    if(cEstLaNotre)return;
-    try{ if(dejaLa)dejaLa.remove(); }catch(e){}
-    try{ delete hote._leaflet_id; }catch(e){}
-    window._leafletMap=null;
+     CE GARDE-FOU A ETE ECRIT DEUX FOIS, dans deux discussions en parallele,
+     a partir des memes pannes. Les deux versions sont ici, chacune pour ce
+     qu'elle apporte, parce qu'elles ne couvraient pas le meme cas :
+
+       — la carte en place est la NOTRE, sur ce conteneur : on ne recree pas,
+         on recadre, et on s'arrete. Un appel de plus doit repositionner, pas
+         jeter ;
+       — elle est sur un AUTRE conteneur (renderMap a reconstruit le DOM) : on
+         ARRETE ses animations avant de la retirer. Detruire en pleine
+         animation laissait un « _leaflet_pos undefined » ;
+       — et le cas qu'une verification sur la seule reference ne voit pas : un
+         conteneur qui porte encore la marque de Leaflet alors qu'aucune carte
+         vivante ne le reclame. L.map refuserait, et la fiche resterait sans
+         carte POUR DE BON — l'utilisateur n'en aurait plus jamais sur cette
+         boisson. On enleve la marque et on repose.
+
+     La vie de la carte est jugee par carteEncoreLa : _mapPane present et
+     conteneur encore dans la page. Une carte retiree dont _container pointe
+     toujours sur le meme element ne doit pas passer pour « la notre ». ───── */
+  if(window._leafletMap){
+    var ancienne=window._leafletMap, surCeConteneur=false;
+    try{ surCeConteneur=ancienne.getContainer()===hote; }catch(eC){}
+    if(surCeConteneur&&carteEncoreLa(ancienne)){
+      try{ ancienne.setView([lat,lng],13); }catch(eV){}
+      return;
+    }
+    try{ ancienne.stop(); }catch(eS){}
+    try{ ancienne.remove(); }catch(eR){}
+    window._leafletMap=null;window._leafletCluster=null;
   }
+  if(hote._leaflet_id){ try{ delete hote._leaflet_id; }catch(eM){} }
   var map=L.map(hote,{zoomControl:false,attributionControl:true,zoomAnimation:true,markerZoomAnimation:true,fadeAnimation:false}).setView([lat,lng],13);
   /* ══ PAS DE ZOOM SANS DEPLACEMENT ══════════════════════════════════════
      Les boutons + et - etaient poses sur l'apercu alors que le glisser y est
@@ -24765,6 +24803,11 @@ function analyzeProposePhoto(data){
   }).catch(function(){if(seq===window._aiSeq)_aiStatusHide();});
 }
 function submitProposal(){
+  /* DOUBLE-TAP = DOUBLE FICHE (vu au banc de torture). Deux envois a moins
+     de 1,2 s d'intervalle, c'est un doigt qui rebondit, jamais deux
+     boissons : le second est ignore. Le delai n'est PAS remis a zero a la
+     fermeture du formulaire — meme un appel force juste apres reste bloque. */
+  if(Date.now()-(window._proposeDernier||0)<1200)return;
   var name=((document.getElementById("propose-name")||{}).value||"").trim();
   if(name.length<2){toast("Donne le nom de la boisson");playSound("err");return;}
   if(!proposePhotoData){toast("Ajoute une photo du produit");playSound("err");return;}
@@ -24791,6 +24834,50 @@ function submitProposal(){
     return;
   }
   // \u2500\u2500 Verdicts de l'IA sur la photo \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  /* VERROU ANTI-DOUBLON, AVANT TOUT ENVOI. Si nom+marque, ecrases
+     (minuscules, sans accents ni ponctuation), designent EXACTEMENT une
+     fiche du catalogue, on ne cree RIEN : on ouvre la fiche. La boite
+     \u00ab peut-etre deja la \u00bb SUGGERE pendant la frappe ; ici le texte est le
+     meme au caractere pres, il n'y a plus rien a proposer. C'est le verrou
+     qui empeche le retour des Red Bull en double, quel que soit le chemin
+     d'entree (formulaire, reconnaissance visuelle, photo). */
+  try{
+    /* Deux cles, de la plus stricte a la plus robuste :
+       1) texte COLLE identique (casse, accents, ponctuation ignores) ;
+       2) MEME SAC DE MOTS \u2014 l'ordre ne compte pas (\u00ab Winter Edition \u00bb =
+          \u00ab Edition Winter \u00bb), les mots de forme ne comptent pas
+          (MOTS_FACULTATIFS : edition, original, saveur\u2026), et les
+          equivalences de saveur sont repliees (canonSaveurs : the glace =
+          icetea\u2026). C'est le cas reel du terrain : l'IA lit la canette dans
+          un autre ordre ou une autre langue que la fiche. */
+    var _cle=function(s){return normTxt(String(s||"")).replace(/[^a-z0-9]/g,"");};
+    var _sac=function(nom,marque){
+      var t=normTxt(String(nom||"")+" "+String(marque||""));
+      try{t=canonSaveurs(t);}catch(eC){}
+      var vus={},res=[];
+      t.split(/[^a-z0-9]+/).forEach(function(w){
+        /* « pur » reste significatif : « pur jus » et « jus » (a base de
+           concentre) sont deux produits DIFFERENTS en rayon — les confondre
+           ferait refuser une fiche legitime. Le reste des mots de forme
+           (edition, original, nature…) ne compte pas. */
+        if(!w||(MOTS_FACULTATIFS[w]&&w!=="pur"&&w!=="pure")||vus[w])return;
+        vus[w]=1;res.push(w);
+      });
+      return res.sort().join(" ");
+    };
+    var _kN=_cle(name),_kB=_cle(brand),_sacP=_sac(name,brand);
+    var _deja=_kN?(DRINKS||[]).find(function(x){
+      if(_cle(x.name)===_kN&&(!_kB||_cle(x.brand)===_kB))return true;
+      return !!_sacP&&_sac(x.name,x.brand)===_sacP;
+    }):null;
+    if(_deja){
+      closeProposeForm();
+      pick(_deja);
+      toast("\u00ab "+_deja.name+" \u00bb est d\u00e9j\u00e0 dans Magofeed \u2014 la voici");
+      playSound("pop");
+      return;
+    }
+  }catch(eDeja){}
   // Alcool detecte : envoi refuse, Magofeed reste 100% sans alcool.
   if(window._aiBlockAlcohol){toast("Boisson alcoolis\u00E9e \u2014 Magofeed reste 100% sans alcool");playSound("err");return;}
   var ai=window._aiPropose||null;
@@ -24806,6 +24893,7 @@ function submitProposal(){
   // reconnu (un nom corrige a la main repasse par le vote communautaire).
   var aiAuto=!!(ai&&ai.confidence>=85&&window.fbConfirmAiDrink&&
     name.toLowerCase()===String(ai.name||"").trim().toLowerCase());
+  window._proposeDernier=Date.now();
   var id="m"+Date.now();
   /* L'identite d'une decouverte, c'est son code-barre : c'est comme ca que le
      scanner la retrouve. Une decouverte nee d'une PHOTO recevait un identifiant
