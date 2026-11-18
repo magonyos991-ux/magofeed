@@ -18130,10 +18130,40 @@ function initLeafletMap(lat,lng){
      invitation, pas une impasse : avant, seul le petit ⛶ en haut a droite
      le faisait, et un doigt pose sur la carte ne donnait RIEN. Leaflet
      n'emet pas ce click apres un glisser ni sur un pin : les pins gardent
-     leur role (itineraire), le glisser souris garde le sien. */
-  map.on("click",function(){
+     leur role (itineraire), le glisser souris garde le sien.
+     UNE SEULE EXCEPTION, ajoutee depuis : la bande d'information posee en
+     haut, et une demi-largeur de doigt autour d'elle, n'ouvrent rien. Voir
+     le garde ci-dessous : l'invitation vaut pour la CARTE, pas pour le
+     libelle pose dessus. */
+  map.on("click",function(ev){
     var bx=document.getElementById("map-box");
-    if(bx&&!bx.classList.contains("map-fullscreen")){try{toggleDrinkMapFull();}catch(e){}}
+    if(!bx||bx.classList.contains("map-fullscreen"))return;
+    /* LA BANDE D'INFORMATION N'EST PAS UNE PORTE.
+       « +10 plus loin » est un LIBELLE : il annonce ce que la carte ne montre
+       pas, il ne mene nulle part. Il fait 13 px de haut, et la carte vive
+       reprend a 16 px de son centre : un doigt qui le vise tombe une fois
+       sur trois a cote (mesure : 33 % d'une cible tactile de 44 px), sur
+       l'apercu — qui s'ouvre en grand. « La minimap ouvre en grand quand
+       j'appuie sur le +10 », mot pour mot.
+       La bande arrete deja les appuis qui l'ATTEIGNENT (z-index 900, pas de
+       pointer-events:none) ; ce qui manquait, c'est la marge autour d'elle.
+       On l'ajoute ici, en pixels d'ecran, et pas un pixel visible de plus :
+       la bande garde sa taille, c'est sa zone morte qui atteint les 44 px
+       recommandes. L'elargir en CSS serait plus fragile : la bande defile
+       (overflow-x:auto, app.css:2408), ce qui rogne tout ::before qui
+       depasse, et une bordure transparente se battrait avec le contour
+       visible de la pastille.
+       CE GARDE NE COUVRE QUE LE CLICK DE LA CARTE. Un PIN pose juste a cote
+       du libelle garde son geste a lui (routeFromMarker, qui passe en plein
+       ecran expres pour tracer) : c'est voulu, et c'est le seul chemin qui
+       mene encore au plein ecran depuis cette zone. */
+    var bar=bx.querySelector(".map-barre"), oe=ev&&ev.originalEvent;
+    if(bar&&oe&&typeof oe.clientX==="number"){
+      var r=bar.getBoundingClientRect(), g=12;   /* la moitie d'un doigt */
+      if(oe.clientX>=r.left-g&&oe.clientX<=r.right+g&&
+         oe.clientY>=r.top-g&&oe.clientY<=r.bottom+g)return;
+    }
+    try{toggleDrinkMapFull();}catch(e){}
   });
   /* ══ UN DOIGT = LA PAGE, DEUX DOIGTS = LA CARTE ═══════════════════════════
      Le glisser a UN doigt reste coupe, et pour la raison ecrite juste en

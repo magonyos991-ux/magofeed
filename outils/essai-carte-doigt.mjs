@@ -132,6 +132,35 @@ const etapes = await pg.evaluate(() => {
   ok("un doigt qui bouge n'est PAS la main sur la carte", window._mapMainUtilisateur === false, "_mapMainUtilisateur=" + window._mapMainUtilisateur);
   faux(2);
   ok("DEUX doigts qui bougent = la main sur la carte", window._mapMainUtilisateur === true, "_mapMainUtilisateur=" + window._mapMainUtilisateur);
+
+  /* ══ LA BANDE D'INFORMATION N'EST PAS UNE PORTE ══════════════════════════
+     « La minimap ouvre en grand quand j'appuie sur le +10 » : le libelle est
+     inerte, mais la carte vive reprend a 16 px de son centre, et c'est un
+     bouton « ouvrir en grand » de 360x208. Un doigt qui vise 13 px de haut
+     tombe une fois sur trois a cote. On eprouve la zone morte autour de la
+     bande, pas le libelle lui-meme. */
+  const bx2 = document.getElementById("map-box");
+  if (bx2.classList.contains("map-fullscreen")) window.toggleDrinkMapFull();
+  let bar = bx2.querySelector(".map-barre");
+  if (!bar) {
+    bar = document.createElement("div"); bar.className = "map-barre";
+    bar.style.cssText = "position:absolute;top:8px;left:8px;right:46px;height:29px;z-index:900";
+    bar.textContent = "2 en rayon  +10 plus loin";
+    bx2.appendChild(bar);
+  }
+  const rb = bar.getBoundingClientRect();
+  const clic = (x, y) => {
+    if (document.getElementById("map-box").classList.contains("map-fullscreen")) window.toggleDrinkMapFull();
+    m.fire("click", { originalEvent: { clientX: x, clientY: y } });
+    return document.getElementById("map-box").classList.contains("map-fullscreen");
+  };
+  const cx = rb.left + rb.width / 2;
+  ok("appui SUR la bande : n'ouvre pas", clic(cx, rb.top + rb.height / 2) === false, "centre de la bande");
+  ok("appui a 10 px AU-DESSUS : n'ouvre pas", clic(cx, rb.top - 10) === false, "la marge d'un demi-doigt");
+  ok("appui a 10 px EN DESSOUS : n'ouvre pas", clic(cx, rb.bottom + 10) === false, "la marge d'un demi-doigt");
+  const corps = clic(cx, rb.bottom + 70);
+  ok("appui sur le CORPS de la carte : ouvre toujours", corps === true, "l'apercu reste une invitation");
+  if (document.getElementById("map-box").classList.contains("map-fullscreen")) window.toggleDrinkMapFull();
   return v;
 });
 
