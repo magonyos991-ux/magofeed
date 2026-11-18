@@ -18128,6 +18128,23 @@ function centerMapOnUser(){
 }
 function initLeafletMap(lat,lng){
   if(!window.L||!document.getElementById("leaflet-map"))return;
+  /* REENTRANCE : trois taps rapides sur une boisson = trois renderMap, donc
+     plusieurs rappels ensureLeaflet en file. Le premier initialise la carte.
+     Les suivants, SUR LE MEME conteneur, recadrent et s'arretent la —
+     recreer jetait « Map container is already initialized », et detruire en
+     pleine animation laissait un « _leaflet_pos undefined » (vus tous deux
+     au banc de torture). Conteneur different (renderMap a reconstruit le
+     DOM) : on arrete les animations de l'ancienne carte puis on la retire. */
+  var _elCarte=document.getElementById("leaflet-map");
+  if(window._leafletMap){
+    if(window._leafletMap._container===_elCarte){
+      try{window._leafletMap.setView([lat,lng],13);}catch(eV){}
+      return;
+    }
+    try{window._leafletMap.stop();}catch(eS){}
+    try{window._leafletMap.remove();}catch(eR){}
+    window._leafletMap=null;window._leafletCluster=null;
+  }
   var map=L.map("leaflet-map",{zoomControl:false,attributionControl:true,zoomAnimation:true,markerZoomAnimation:true,fadeAnimation:false}).setView([lat,lng],13);
   /* ══ PAS DE ZOOM SANS DEPLACEMENT ══════════════════════════════════════
      Les boutons + et - etaient poses sur l'apercu alors que le glisser y est
@@ -24709,6 +24726,11 @@ function analyzeProposePhoto(data){
   }).catch(function(){if(seq===window._aiSeq)_aiStatusHide();});
 }
 function submitProposal(){
+  /* DOUBLE-TAP = DOUBLE FICHE (vu au banc de torture). Deux envois a moins
+     de 1,2 s d'intervalle, c'est un doigt qui rebondit, jamais deux
+     boissons : le second est ignore. Le delai n'est PAS remis a zero a la
+     fermeture du formulaire — meme un appel force juste apres reste bloque. */
+  if(Date.now()-(window._proposeDernier||0)<1200)return;
   var name=((document.getElementById("propose-name")||{}).value||"").trim();
   if(name.length<2){toast("Donne le nom de la boisson");playSound("err");return;}
   if(!proposePhotoData){toast("Ajoute une photo du produit");playSound("err");return;}
@@ -24794,6 +24816,7 @@ function submitProposal(){
   // reconnu (un nom corrige a la main repasse par le vote communautaire).
   var aiAuto=!!(ai&&ai.confidence>=85&&window.fbConfirmAiDrink&&
     name.toLowerCase()===String(ai.name||"").trim().toLowerCase());
+  window._proposeDernier=Date.now();
   var id="m"+Date.now();
   /* L'identite d'une decouverte, c'est son code-barre : c'est comme ca que le
      scanner la retrouve. Une decouverte nee d'une PHOTO recevait un identifiant
