@@ -1537,9 +1537,11 @@ try{
       <div id="store-picker-list" style="overflow-y:auto;flex:1"></div>
     </div>
   </div>
-  <div id="img-zoom" role="dialog" aria-modal="true" aria-label="Photo du produit" onclick="closeDrinkZoom()" style="display:none;position:fixed;inset:0;z-index:4000;background:rgba(12,10,8,.94);align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:20px" onclick="closeDrinkZoom()">
+  <div id="img-zoom" role="dialog" aria-modal="true" aria-label="Photo du produit" onclick="closeDrinkZoom()" style="display:none;position:fixed;inset:0;z-index:4000;background:rgba(12,10,8,.94);align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:20px">
     <img id="img-zoom-pic" alt="" style="max-width:92vw;max-height:74vh;object-fit:contain;border-radius:18px;background:#fff">
+    <div id="img-zoom-art" aria-hidden="true" style="display:none;width:min(70vw,300px);height:min(70vw,300px);border-radius:28px;background:#fff;align-items:center;justify-content:center;padding:10%;box-sizing:border-box"></div>
     <div id="img-zoom-name" style="font-size:15px;font-weight:800;color:#fff;text-align:center"></div>
+    <div id="img-zoom-etat" style="display:none;font-size:12.5px;font-weight:500;color:rgba(255,255,255,.72);text-align:center;max-width:300px;line-height:1.4"></div>
     <div id="img-zoom-credit" style="font-size:10.5px;font-weight:500;color:rgba(255,255,255,.55)">Photo : Open Food Facts (CC-BY-SA)</div>
     <div id="img-zoom-close" role="button" tabindex="0" aria-label="Fermer" onkeydown="if(event.key==='Enter'){closeDrinkZoom();}" style="position:absolute;top:18px;right:18px;width:40px;height:40px;border-radius:14px;background:rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;font-size:17px;color:#fff;cursor:pointer">✕</div>
   </div>
@@ -16863,14 +16865,18 @@ function offImageMatches(d,p){
   words.forEach(function(w){if(offWordHit(w,hay))hits++;});
   return hits/words.length>=0.6;
 }
-function fetchVerifiedOFFImage(d){
+function fetchVerifiedOFFImage(d,prioritaire){
   var key=String(d.id);
   if(d.img||imgFetchInFlight[key])return;
   var cached=imgCache[key];
   // Cache permanent pour les photos trouvees ; nouvel essai apres 24h pour les
   // echecs (avant : 30 jours -> un simple timeout privait un appareil de la
-  // photo pendant un mois, y compris des photos communautaires validees apres)
-  if(cached&&(cached.url||Date.now()-(cached.ts||0)<86400000))return;
+  // photo pendant un mois, y compris des photos communautaires validees apres).
+  // Un tap explicite sur la vignette (prioritaire) n'attend pas ces 24 h :
+  // l'utilisateur demande CETTE photo maintenant. Seule exception : une photo
+  // retiree a la main par un administrateur reste retiree.
+  if(cached&&cached.url)return;
+  if(cached&&(prioritaire?cached.manual:(Date.now()-(cached.ts||0)<86400000)))return;
   imgFetchInFlight[key]=true;
   // 1) Si la boisson a un code-barre : la fiche EXACTE du produit d'abord.
   //    C'est la qu'on trouve les fiches canoniques aux belles photos
@@ -16911,19 +16917,22 @@ function fetchVerifiedOFFImage(d){
             imgCache[key]={url:null,ts:Date.now()};
           }
           try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
-          if(userPhoto){refreshDrinkVisual(d);renderTrends();}
+          refreshDrinkVisual(d);
+          if(userPhoto)renderTrends();
         });
       }
       imgCache[key]=best?{url:best.image_front_url||best.image_front_small_url,ts:Date.now()}:{url:null,ts:Date.now()};
       try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){/* quota */}
       delete imgFetchInFlight[key];
+      // Repeint dans tous les cas : la visionneuse ouverte sur cette boisson
+      // doit dire « pas de photo » plutot que « je la cherche » pour toujours.
+      refreshDrinkVisual(d);
       if(best){
-        refreshDrinkVisual(d);
         // Partage communautaire : un admin qui navigue remplit la carte pour tout le monde
         if(isAdmin&&window.fbSaveDrinkImage)window.fbSaveDrinkImage(key,imgCache[key].url);
       }
     })
-    .catch(function(){delete imgFetchInFlight[key];});
+    .catch(function(){delete imgFetchInFlight[key];try{refreshDrinkVisual(d);}catch(e){}});
 }
 /* File de prechargement : les boissons affichees a l'ecran font la queue,
    une recherche toutes les 2.5s max, 40 par session — assez pour remplir
@@ -16962,52 +16971,155 @@ function offFullResURL(url){
    de traverser « voir la fiche » puis un second tap. Et elle se referme d'un
    tap n'importe ou, avec un fondu : ouvrir une photo doit etre aussi leger
    que la regarder. Accepte la boisson en parametre pour etre appelable depuis
-   les listes de recherche, pas seulement depuis la fiche ouverte. */
+   les listes de recherche, pas seulement depuis la fiche ouverte.
+
+   CE QUI NE MARCHAIT « PAS TOUT LE TEMPS » (retour du fondateur, 20/11) :
+   la vignette n'ouvrait la photo que si elle etait DEJA en cache ; sinon le
+   tap filait a la ligne et ouvrait la boisson, sans un mot — le meme geste
+   faisait deux choses selon un cache que personne ne voit. Et quand elle
+   s'ouvrait, on attendait la version haute resolution d'Open Food Facts :
+   un carre blanc pendant deux secondes sur un reseau moyen. Desormais :
+     1. la vignette ouvre TOUJOURS quelque chose en grand : la photo si on
+        l'a, sinon le dessin de la boisson, et la recherche de la vraie photo
+        part tout de suite, en priorite (hors file d'attente) ;
+     2. la version deja affichee dans la vignette se pose IMMEDIATEMENT (elle
+        est dans le cache du navigateur) ; la haute resolution la remplace
+        quand elle est prete, sans clignoter ;
+     3. une photo qui arrive pendant que la visionneuse est ouverte s'y pose
+        d'elle-meme, et les vignettes des listes se mettent a jour aussi. */
 function openDrinkZoom(d){
   d=d||curSel;
   if(!d)return;
-  var url=getCachedDrinkImage(d);
-  if(!url){toast("Photo pas encore disponible pour cette boisson");return;}
   var ov=document.getElementById("img-zoom");
-  var pic=document.getElementById("img-zoom-pic");
-  var full=offFullResURL(url);
-  pic.onerror=function(){
-    // La version haute resolution n'existe pas : repli sur la version standard
-    if(pic.src!==url){pic.onerror=null;pic.src=url;}
-  };
-  pic.src=full;
-  document.getElementById("img-zoom-name").textContent=d.name;
+  if(!ov)return;
+  window._zoomBoisson=d;
+  var nom=document.getElementById("img-zoom-name");
+  if(nom)nom.textContent=d.name;
+  if(!getCachedDrinkImage(d)){
+    /* Recherche PRIORITAIRE, lancee ICI et seulement ici (un geste de
+       l'utilisateur) : jamais depuis le repeint, sinon un echec relancerait
+       une recherche qui echoue, sans fin. */
+    var entree=imgCache[String(d.id)];
+    if(!d.img&&!(entree&&entree.manual)&&navigator.onLine){
+      try{fetchVerifiedOFFImage(d,true);}catch(e){}
+    }
+  }
+  _zoomPeindre(d);
   ov.style.display="flex";
   requestAnimationFrame(function(){ov.classList.add("in");});
   var closeBtn=document.getElementById("img-zoom-close");
   if(closeBtn)closeBtn.focus();
   playSound("pop");
 }
+function _zoomOuvertSur(d){
+  var ov=document.getElementById("img-zoom");
+  return !!(ov&&ov.style.display==="flex"&&window._zoomBoisson&&d&&String(window._zoomBoisson.id)===String(d.id));
+}
+/* Peint la visionneuse pour cette boisson, avec ce qu'on a MAINTENANT. */
+function _zoomPeindre(d){
+  var pic=document.getElementById("img-zoom-pic");
+  var art=document.getElementById("img-zoom-art");
+  var etat=document.getElementById("img-zoom-etat");
+  var credit=document.getElementById("img-zoom-credit");
+  if(!pic)return;
+  var url=getCachedDrinkImage(d);
+  if(!url){_zoomSansPhoto(d);return;}
+  var key=String(d.id);
+  var entree=imgCache[key];
+  pic.onerror=function(){
+    /* L'adresse est morte (fiche OFF supprimee, photo remplacee) : on oublie
+       cette entree pour que la prochaine recherche reparte, et on montre le
+       dessin plutot qu'un carre blanc. Pas de nouvelle recherche d'ici :
+       elle pourrait rendre la meme adresse morte, et tourner en rond. */
+    pic.onerror=null;
+    if(entree&&!entree.manual&&!d.img){
+      delete imgCache[key];
+      try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+    }
+    _zoomSansPhoto(d);
+  };
+  pic.src=url;
+  pic.style.display="block";
+  if(art)art.style.display="none";
+  if(etat){etat.style.display="none";etat.textContent="";}
+  if(credit){
+    var off=/^https:\/\/images\.openfoodfacts\.org\//.test(url);
+    credit.textContent=tr(off?"Photo : Open Food Facts (CC-BY-SA)":"Photo partagée par la communauté");
+    credit.style.display="block";
+  }
+  /* La haute resolution, en arriere-plan : posee seulement quand elle est
+     vraiment chargee, et seulement si on regarde encore cette boisson. */
+  var full=offFullResURL(url);
+  if(full!==url){
+    var hd=new Image();
+    hd.onload=function(){
+      if(!hd.naturalWidth||!_zoomOuvertSur(d))return;
+      pic.onerror=null;
+      pic.src=full;
+    };
+    hd.src=full;
+  }
+}
+function _zoomSansPhoto(d){
+  var pic=document.getElementById("img-zoom-pic");
+  var art=document.getElementById("img-zoom-art");
+  var credit=document.getElementById("img-zoom-credit");
+  if(pic){pic.onerror=null;pic.removeAttribute("src");pic.style.display="none";}
+  if(credit)credit.style.display="none";
+  if(art){
+    var dessin=null;
+    try{ if(window.artPourBoisson)dessin=artPourBoisson(d); }catch(e){}
+    art.innerHTML=dessin||drinkCanSVG(d,15);
+    art.style.background=d.light||"#fff";
+    art.style.display="flex";
+  }
+  _zoomEtat(d);
+}
+/* La ligne sous le nom quand il n'y a pas (encore) de photo : elle dit ce
+   qui se passe, au lieu d'un toast qui disparait. */
+function _zoomEtat(d){
+  var etat=document.getElementById("img-zoom-etat");
+  if(!etat)return;
+  if(getCachedDrinkImage(d)){etat.style.display="none";etat.textContent="";return;}
+  var key=String(d.id);
+  var txt;
+  if(imgFetchInFlight[key])txt=tr("Photo pas encore disponible · je la cherche…");
+  else if(!navigator.onLine)txt=tr("Hors ligne : la photo viendra avec le réseau.");
+  else txt=tr("Pas encore de photo pour cette boisson. Tu peux en ajouter une depuis sa fiche.");
+  etat.textContent=txt;
+  etat.style.display="block";
+}
 function closeDrinkZoom(){
   var ov=document.getElementById("img-zoom");
   if(!ov)return;
   ov.classList.remove("in");
+  window._zoomBoisson=null;
   // On attend la fin du fondu avant de retirer l'overlay, sinon il disparait
   // d'un coup et la fluidite promise n'existe que dans un sens.
   setTimeout(function(){
     ov.style.display="none";
     var pic=document.getElementById("img-zoom-pic");
-    if(pic)pic.src="";
+    if(pic){pic.onerror=null;pic.removeAttribute("src");}
   },230);
 }
-/* Branche la vignette d'une ligne de liste : si une photo existe en cache, le
-   tap sur la VIGNETTE l'ouvre en plein ecran ; le reste de la ligne continue
-   d'ouvrir la boisson. Sans photo, la vignette suit la ligne — un tap qui ne
-   fait rien est pire qu'un tap qui navigue. */
+/* Branche la vignette d'une ligne de liste : le tap sur la VIGNETTE ouvre la
+   boisson en grand (sa photo, ou son dessin en attendant la photo) ; le reste
+   de la ligne continue d'ouvrir la boisson. Avant, sans photo en cache, la
+   vignette suivait la ligne : d'ou « ca marche pas tout le temps ». */
 function bindPhotoTap(row,d){
   try{
     var ph=row&&row.querySelector?row.querySelector(".rphoto"):null;
     if(!ph||!d)return;
+    ph.setAttribute("data-did",String(d.id));
+    ph.setAttribute("role","button");
+    ph.setAttribute("tabindex","0");
+    ph.setAttribute("aria-label","Agrandir la photo");
     ph.onclick=function(e){
-      var url=(typeof getCachedDrinkImage==="function")?getCachedDrinkImage(d):null;
-      if(!url)return;
       e.stopPropagation();
       openDrinkZoom(d);
+    };
+    ph.onkeydown=function(e){
+      if(e.key==="Enter"||e.key===" "){e.preventDefault();e.stopPropagation();openDrinkZoom(d);}
     };
   }catch(e){}
 }
@@ -18101,15 +18213,29 @@ function adminFixPhoto(){
   }).catch(function(){toast("Fiche introuvable (r\u00E9seau ?)");playSound("err");});
 }
 function refreshDrinkVisual(d){
-  // Photo de la fiche ouverte (le visuel des listes se mettra a jour au prochain rendu via le cache)
+  if(!d)return;
+  var url=getCachedDrinkImage(d);
+  // Photo de la fiche ouverte
   if(curSel&&curSel.id===d.id){
     var ph=document.getElementById("res-emoji");
-    if(!ph)return;
-    ph.innerHTML=drinkIconHTML(d);
-    if(getCachedDrinkImage(d)){
-      ph.innerHTML+='<span aria-hidden="true" style="position:absolute;bottom:-4px;right:-4px;width:20px;height:20px;border-radius:8px;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-size:10px"></span>';
+    if(ph){
+      ph.innerHTML=drinkIconHTML(d);
+      if(url){
+        ph.innerHTML+='<span aria-hidden="true" style="position:absolute;bottom:-4px;right:-4px;width:20px;height:20px;border-radius:8px;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-size:10px"></span>';
+      }
     }
   }
+  /* Les vignettes des listes qui montrent cette boisson : elles recevaient la
+     photo « au prochain rendu », c'est-a-dire jamais tant qu'on ne retapait
+     pas la recherche. */
+  if(url){
+    try{
+      var vignettes=document.querySelectorAll('.rphoto[data-did="'+String(d.id).replace(/["\\]/g,"")+'"]');
+      for(var i=0;i<vignettes.length;i++)vignettes[i].innerHTML=drinkIconHTML(d);
+    }catch(e){}
+  }
+  /* La visionneuse ouverte sur cette boisson se met a jour d'elle-meme. */
+  try{ if(typeof _zoomOuvertSur==="function"&&_zoomOuvertSur(d))_zoomPeindre(d); }catch(e){}
 }
 // Photo pleine largeur pour les grandes cartes (dcard) : l'emoji reste toujours en dessous comme repli automatique,
 // la photo (si dispo) le recouvre ; en cas d'echec de chargement elle se retire et l'emoji reapparait naturellement.
@@ -25894,13 +26020,11 @@ function exploreSetHeader(shown,sure){
                 +(typeof sure==="number"?" \u00b7 "+sure+" vue"+(sure>1?"s":"")+" en rayon":"")
                 +" \u00b7 voir la fiche")));
     if(thumb){thumb.style.display="flex";try{if(curSel)thumb.innerHTML=drinkIconHTML(curSel);}catch(e){}
-      /* Tap sur la vignette = la photo, tout de suite. Le reste de la barre
-         continue d'ouvrir la fiche. Sans photo en cache, on laisse le tap
-         suivre son cours vers la fiche plutot que de l'avaler. */
+      /* Tap sur la vignette = la boisson en grand, tout de suite (sa photo,
+         ou son dessin le temps que la photo arrive). Le reste de la barre
+         continue d'ouvrir la fiche. */
       thumb.onclick=function(e){
         if(!curSel)return;
-        var _u=(typeof getCachedDrinkImage==="function")?getCachedDrinkImage(curSel):null;
-        if(!_u)return;
         e.stopPropagation();
         openDrinkZoom(curSel);
       };
