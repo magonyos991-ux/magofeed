@@ -13973,6 +13973,22 @@ function pick(d){
     var starsEl=document.getElementById("res-stars");if(starsEl)starsEl.textContent=noteEnTete(d);
     var favElSkel=document.getElementById("res-fav");if(favElSkel)favElSkel.innerHTML=heartSVG(favorites.indexOf(d.id)!==-1,22);
     var listEl=document.getElementById("store-list");if(listEl)listEl.innerHTML=storeSkeletonHTML();
+    /* ══ LE SUCRE NE DEPEND PAS DE FIREBASE ════════════════════════════════
+       Cette branche attend Firebase avant de dessiner la fiche, et elle a
+       raison pour la LISTE DES MAGASINS — qui vient de Firestore. Mais elle
+       faisait attendre aussi le bloc nutrition, qui ne vient de nulle part :
+       la table NUTRI est chargee avec l'application (3 801 entrees) et
+       nutriHTML ne demande rien a personne — il rend meme un bloc « inconnu »
+       quand il ne sait pas.
+       Mesure dans ce conteneur : pick a 3 126 ms, premier rendu de la fiche a
+       6 015 ms. Presque trois secondes de fiche sans sucre, sans calories et
+       sans cafeine. Et si Firebase ne repond JAMAIS — hors ligne, quota
+       epuise, reseau d'entreprise — l'evenement fbStoresLoaded n'arrive pas
+       et le bloc reste vide pour toujours.
+       Le controle avant mise en ligne echouait a « bloc nutrition absent »
+       quatre fois sur quatre : il avait raison, et pas pour une raison de
+       conteneur. */
+    try{ var nutAtt=document.getElementById("drink-nutri"); if(nutAtt)nutAtt.innerHTML=nutriHTML(d); }catch(eNA){}
     show("results");
     window.addEventListener("fbStoresLoaded", function onReady() {
       window.removeEventListener("fbStoresLoaded", onReady);
@@ -19088,6 +19104,8 @@ window.cadrerSurLesPins=cadrerSurLesPins;
    aucun pin n'est dans le cadre. Un seul pin visible suffit a ne pas bouger,
    et la carte ne saute jamais sous les doigts de quelqu'un qui l'explore. */
 function cadrerSiPinsHorsCadre(map){
+  /* Meme raison : getBounds() demande la position du panneau de la carte. */
+  if(!carteEncoreLa(map))return;
   if(!map||!map._loaded)return;
   if(window._mapMainUtilisateur)return;        /* le doigt a la priorite */
   if(window._mapCadragePilote)return;          /* la bascule plein ecran cadre elle-meme */
@@ -19103,6 +19121,14 @@ function cadrerSiPinsHorsCadre(map){
 window.cadrerSiPinsHorsCadre=cadrerSiPinsHorsCadre;
 function loadStoresForMapViewport(map){
   if(!curSel||!window.fbLoadNearbyStores||window._fbViewportLoading)return;
+  /* TROISIEME RAPPEL DIFFERE QUI PARLAIT A UNE CARTE MORTE, et le plus
+     frequent des trois : il est pose sur moveend avec un amorti de 500 ms, et
+     map.remove() arrive justement en fin de deplacement (on quitte la fiche
+     apres avoir bouge la carte). getCenter() demande alors la position d'un
+     panneau que remove() a supprime. Mesure : trois chargements du controle
+     avant mise en ligne sur trois. Le garde tient ICI et pas au point
+     d'appel, pour couvrir tous les appelants a venir. */
+  if(!carteEncoreLa(map))return;
   var center=map.getCenter();
   var ne=map.getBounds().getNorthEast();
   var radiusKm=haversine(center.lat,center.lng,ne.lat,ne.lng)/1000;
@@ -21011,6 +21037,20 @@ function renderStoreList(){
     var sidAtCall=curSel.id;
     var listElSkel=document.getElementById("store-list");if(listElSkel)listElSkel.innerHTML=storeSkeletonHTML();
     var badgesElSkel=document.getElementById("res-badges");if(badgesElSkel)badgesElSkel.innerHTML='<span class="rbadge">Recherche élargie…</span>';
+    /* ══ LE SUCRE N'ATTEND PAS LE RESEAU ═══════════════════════════════════
+       Le bloc nutrition est rempli plus bas dans cette fonction. Or on sort
+       ICI, des qu'aucun magasin ne porte encore la boisson — c'est-a-dire
+       exactement sur les boissons rares, le coeur meme de Magofeed. La fiche
+       restait donc sans sucre, sans calories et sans cafeine jusqu'a ce que
+       Firestore reponde, et SANS RESEAU elle n'en avait jamais : le bloc
+       restait vide pour toujours.
+       Mesure : 2 200 ms d'attente dans ce conteneur, et le controle avant
+       mise en ligne echouait a « bloc nutrition absent » quatre fois sur
+       quatre. Pourtant la donnee est deja en memoire — la table NUTRI est
+       chargee avec l'application (3 801 entrees) et nutriHTML ne demande
+       rien a personne : il rend meme un bloc « inconnu » quand il ne sait
+       pas. Rien ne justifiait de faire attendre ce qu'on sait deja. */
+    try{ var nutTot=document.getElementById("drink-nutri"); if(nutTot)nutTot.innerHTML=nutriHTML(curSel); }catch(eN){}
     window.fbEnsureStoresForDrink(curSel.id,userLat,userLng).then(function(){
       if(curSel && curSel.id===sidAtCall)renderStoreList();
     });
