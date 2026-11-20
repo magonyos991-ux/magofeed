@@ -172,6 +172,31 @@ await pg.waitForTimeout(700);
 z=await etatZoom();
 verifier("5. un tap sur le nom ouvre la boisson (pas la photo)",!z.ouvert&&z.ecran!=="s-search",JSON.stringify({ouvert:z.ouvert,ecran:z.ecran}));
 
+/* ─── 8. Depuis la CARTE ouverte sur une boisson : la vignette de la barre ──
+   Capture d'ecran du fondateur (20/11, 06:20) : sur la carte « Minute Maid
+   Multivitamines », taper la vignette en haut ne faisait rien, et la photo
+   s'ouvrait toute seule en revenant au detail. La visionneuse s'ouvrait bel
+   et bien — DERRIERE la carte (z-index 4000 contre 4100 pour la carte). */
+await pg.evaluate(()=>{try{closeDrinkZoom();}catch(e){}});
+await pg.evaluate((d)=>{const x=DRINKS.find(q=>String(q.id)===String(d.id));pick(x);},avecPhoto);
+await pg.waitForTimeout(1500);
+const carteDeja=await pg.evaluate(()=>{const h=document.getElementById("explore-map-host");return !!(h&&h.style.display!=="none"&&h.classList.contains("in"));});
+if(!carteDeja){await pg.evaluate(()=>openDrinkMapView());await pg.waitForTimeout(1500);}
+await pg.waitForFunction(()=>{const t=document.getElementById("explore-thumb");return t&&t.style.display==="flex";},{timeout:10000}).catch(()=>{});
+await pg.tap("#explore-thumb");
+await pg.waitForTimeout(400);
+const dessus=await pg.evaluate(()=>{
+  const ov=document.getElementById("img-zoom");
+  const el=document.elementFromPoint(window.innerWidth/2,window.innerHeight/2);
+  return {ouvert:ov.style.display==="flex"&&ov.classList.contains("in"),
+          visible:!!(el&&ov.contains(el)),
+          dessusDe:el?(el.id||el.className||el.tagName):"rien",
+          carte:!!document.querySelector("#explore-map-host.in")};
+});
+verifier("8. depuis la carte, la vignette ouvre la visionneuse",dessus.ouvert&&dessus.carte,JSON.stringify({ouvert:dessus.ouvert,carte:dessus.carte}));
+verifier("8. et elle est DEVANT la carte, pas derriere",dessus.visible,"au centre de l'ecran : "+dessus.dessusDe);
+await pg.screenshot({path:"/tmp/claude-0/-home-user-magofeed/46ee4911-6f1e-5620-8d8a-1645f7faf394/scratchpad/photo-tap-8-carte.png"});
+
 /* ─── 7. La feuille de style tient l'<img> hors du doigt ────────────────── */
 const css=await readFile(join(R,"app.css"),"utf8");
 verifier("7. l'<img> de la vignette ne capte plus le doigt (pas d'apercu natif)",
