@@ -6323,10 +6323,25 @@ window.fbFillEnseignes = async function(sets) {
       else if (b.includes("jumbo")) { ids = sets.jumbo; key = "Jumbo"; }
       if (!ids || !ids.length) continue;
       var nums = ids.map(Number);
+      /* ══ UN CATALOGUE D'ENSEIGNE NE CONSTATE RIEN ═══════════════════════
+         Ce repli ecrivait AUSSI drinksVerified et une provenance inventee,
+         « missions 1-5 (07/2026) ». drinksVerified est lu par
+         storeVerifiedFor, donc par magasinConfirmePour : chaque magasin
+         touche recevait la pastille VERTE et la phrase « quelqu'un l'y a
+         vue », sur tous les magasins de treize enseignes, alors que personne
+         n'etait entre dans aucun. Et ce n'etait pas un bouton a part : le
+         repli part tout seul des que l'erreur du serveur CONTIENT le mot
+         « internal » — c'est-a-dire a la moindre panne, au moindre delai
+         depasse, au moindre demarrage a froid rate de la Cloud Function.
+         La fonction serveur (functions-a-deployer/remplir-enseignes.js) a
+         deja ete corrigee pour exactement ca, et son commentaire affirme que
+         « tous les chemins d'import cote app avaient deja ete corriges ».
+         Celui-ci ne l'etait pas : le commentaire se trompait.
+         Un catalogue d'enseigne dit ce qu'on trouve D'HABITUDE ; il ne
+         constate rien. Il entre donc dans drinks — la voie « possible » — et
+         nulle part ailleurs, exactement comme cote serveur. */
       batch.update(d.ref, {
-        drinks: arrayUnion.apply(null, nums),
-        drinksVerified: arrayUnion.apply(null, nums),
-        verifiedSource: "missions 1-5 (07/2026)"
+        drinks: arrayUnion.apply(null, nums)
       });
       counts[key] = (counts[key] || 0) + 1;
       if (++n >= 150) { await batch.commit(); batch = writeBatch(db); n = 0; }

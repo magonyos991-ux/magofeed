@@ -152,6 +152,29 @@ srcOk("la pastille verte des alternatives ne lit plus la porte large",
   !/st\.dist<=5000&&typeofmagasinALaBoisson/.test(source) &&
   /st\.dist<=5000&&typeofmagasinConfirmePour/.test(source),
   "alternativesHTML consulte magasinConfirmePour");
+/* ══ AUCUN OUTIL DE MASSE NE FABRIQUE DE LA VERIFICATION ═════════════════
+   Le quatrieme mensonge, et le seul qui s'ECRIVAIT dans la base : le repli
+   client de adminFillEnseignes (window.fbFillEnseignes) posait drinksVerified
+   et une provenance inventee, « missions 1-5 (07/2026) », sur tous les
+   magasins de treize enseignes. drinksVerified est lu par storeVerifiedFor,
+   donc par magasinConfirmePour : chaque magasin touche recevait la pastille
+   VERTE alors que personne n'y etait entre. Et le repli part TOUT SEUL des
+   que l'erreur du serveur contient le mot « internal » — a la moindre panne
+   de la Cloud Function.
+   Un seul ecrivain de drinksVerified reste legitime, et il est nomme :
+   fbAssignListToStore, UN magasin a la fois, quand l'administrateur a
+   photographie le rayon sur place. C'est un constat humain.
+   Ce controle lit la source servie, parce qu'on ne peut pas ecrire dans la
+   Firestore de production depuis un essai — et c'est justement le genre de
+   chemin qu'on ne veut jamais executer pour le verifier. */
+srcOk("le remplissage d'enseignes en masse n'ecrit plus de verification",
+  !/drinksVerified:arrayUnion\.apply\(null,nums\),\s*verifiedSource:"missions/.test(source) &&
+  !/verifiedSource:"missions1-5\(07\/2026\)"/.test(source.replace(/\s+/g, "")),
+  "fbFillEnseignes n'ecrit plus que drinks");
+srcOk("un seul ecrivain de drinksVerified subsiste, et c'est le bon",
+  (source.match(/drinksVerified:arrayUnion/g) || []).length === 1 &&
+  /fbAssignListToStore/.test(source),
+  (source.match(/drinksVerified:arrayUnion/g) || []).length + " ecrivain(s) : fbAssignListToStore, un magasin photographie sur place");
 srcOk("le signal de demande ne compte plus une longueur de liste",
   !/logDemand\(curSel,allStores\.length>0\)/.test(source) &&
   /logDemand\(curSel,allStores\.some\(/.test(source),
