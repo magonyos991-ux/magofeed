@@ -21461,7 +21461,18 @@ function renderStoreList(){
        « Au catalogue » quand c'est l'enseigne qui le reference. La nuance est
        portee la ou elle est lue, et le badge separe n'existe plus. */
     var vuParDesGens=confN>0&&!perime;
-    var stLbl=isSure?(vuParDesGens?"En stock":"Au catalogue"):(isNo?"Absente":(perime?"\u00c0 reconfirmer":"\u00c0 v\u00e9rifier"));
+    /* CINQUIEME LIBELLE DU MEME ELEMENT : « Annonce par Pales ».
+       Il suit exactement le precedent raconte juste au-dessus — la nuance est
+       portee par LE MOT, pas par un second badge. Et le nom de la marque est
+       DANS la pastille, pas renvoye a une ligne plus bas : si quelqu'un
+       retire un jour cette ligne pour gagner de la place, la pastille ne doit
+       pas rester en disant « Annonce » sans nommer personne. Le mot et sa
+       source sont inseparables.
+       Aucune couleur nouvelle : l'ambre dit deja « pas verifie », et c'est
+       exactement ce que dit une annonce. stIco reste « ? ». Le libelle est
+       borne a l'ecriture (14 caracteres de marque), donc rien a tronquer ici. */
+    var _decl=(!isSure&&!isNo&&!perime&&window.declarationPour)?window.declarationPour(s,sid):null;
+    var stLbl=isSure?(vuParDesGens?"En stock":"Au catalogue"):(isNo?"Absente":(perime?"\u00c0 reconfirmer":(_decl?trh("Annonc\u00e9 par {m}",{m:_decl.marque}):"\u00c0 v\u00e9rifier")));
     var stIco=isSure?"✓":(isNo?"✕":"?");
     var div=document.createElement("div");div.className="store-card";
     div.style.borderLeft="4px solid "+stCol;
@@ -22387,12 +22398,34 @@ function renderStoreDetail(){
   try{renderMerchantCard(s);}catch(e){}
   try{rendreCoordonnees(s);}catch(e){}
   try{rendreVitrine(s);}catch(e){}
+  /* ICI, ET PAS PLUS BAS. Premiere version : l'appel etait pose a cote de
+     renderStoreAcces, apres la construction de la liste des boissons. Or
+     cette fonction SORT TOT quand le magasin n'a aucune boisson repertoriee
+     (« Aucune boisson repertoriee pour ce magasin ») : le cadre d'annonce
+     n'etait alors jamais efface, et une annonce arretee restait affichee sur
+     la fiche jusqu'au rechargement. Mesure : le controle d'affichage a
+     attrape exactement ca. Pose ici, l'effacement a toujours lieu. */
+  try{ renderAnnonceMarque(s); }catch(eAM){}
 
   /* Ici, et seulement ici, on recopie le rayon probable dans CE magasin : une
      fiche doit lister ce qu'on s'attend a y trouver. Un magasin a la fois,
      pas les quatre mille de la carte. */
   try{ if(window.rayonAppliquer)window.rayonAppliquer(s); }catch(eR){}
   var drinkIds=(s.drinks||[]).map(Number);
+  /* LES BOISSONS ANNONCEES ENTRENT DANS CETTE VARIABLE, ET NULLE PART AILLEURS.
+     drinkIds est LOCAL a cette fonction : la fiche liste donc ce que la marque
+     annonce, sans qu'un seul octet n'atteigne l'objet magasin — donc sans
+     entrer dans s.drinks, donc sans partir dans le cache localStorage par
+     saveStoresCache. C'est la difference entre « la fiche le montre » et
+     « une collab terminee survit 24 a 48 h sur le telephone, affichee sans
+     marque et sans date ». rayonAppliquer, juste au-dessus, n'est pas touche. */
+  try{
+    if(window.idsDeclaresPour){
+      window.idsDeclaresPour(s).forEach(function(id){
+        if(drinkIds.indexOf(Number(id))===-1)drinkIds.push(Number(id));
+      });
+    }
+  }catch(eD){}
   var allDrinks=DRINKS.filter(function(d){return drinkIds.indexOf(d.id)!==-1;});
   renderStoreDetailCats(allDrinks);
   var q=curStoreDetailQuery.toLowerCase();
@@ -22472,13 +22505,19 @@ function renderStoreDetail(){
        Aucune donnee nouvelle : la date est deja lue deux lignes plus bas. */
     var _fr=null; try{ _fr=freshnessInfo(s,d.id); }catch(e){}
     var _vieux=!!(_fr&&_fr.f<=0.4)&&!storeVerifiedFor(s,d.id);
+    /* CINQUIEME ETAT, MEME CLASSE, MEME COULEUR : « Annonce par Pales ». Il
+       ne s'affiche qu'en l'absence de toute confirmation — un constat humain
+       passe toujours devant la parole d'une marque. */
+    var _dl=(confs===0&&window.declarationPour)?window.declarationPour(s,d.id):null;
     var stat=(confs>0&&!_vieux)
       ? '<span class="sd-stat ok">● En stock</span>'
       : (confs<0
         ? '<span class="sd-stat" style="color:#dc2626">● Rupture</span>'
         : (confs>0
           ? '<span class="sd-stat" style="color:var(--txt2)">● À reconfirmer</span>'
-          : '<span class="sd-stat todo">● À confirmer</span>'));
+          : (_dl
+            ? '<span class="sd-stat todo">● '+sanitize(trh("Annonc\u00e9 par {m}",{m:_dl.marque}))+'</span>'
+            : '<span class="sd-stat todo">● À confirmer</span>')));
     var div=document.createElement("div");div.className="store-card";
     div.style.animation="sdRowIn .34s ease both";div.style.animationDelay=(Math.min(_i,9)*0.035)+"s";
     // Maintien du stock en 1 tap (surtout pour le commerçant) : ✓ en stock / ✕ rupture.
@@ -22659,6 +22698,65 @@ function rendreAnnonce(st){
       '</div>';
   }).catch(function(){});
 }
+
+/* ══ L'ETIQUETTE N'EST JAMAIS OPTIONNELLE ══════════════════════════════════
+   Le bloc juste au-dessus, « Annonce du commercant », porte en commentaire la
+   regle qui vaut ici mot pour mot : sans son etiquette, une phrase ecrite par
+   un commercant se lirait comme un constat de l'application. Une annonce de
+   MARQUE est le meme objet — quelqu'un d'exterieur affirme quelque chose — et
+   elle reprend donc le meme cadre pointille, la meme etiquette en capitales,
+   et le meme lien de signalement.
+   Zero pixel quand il n'y a pas d'annonce : hote.innerHTML="" par defaut, et
+   l'hote n'est meme pas cree. Sur les 34 137 magasins, c'est le cas de tous
+   sauf ceux d'une collab en cours. ───────────────────────────────────────── */
+function renderAnnonceMarque(st){
+  var hote=document.getElementById("sd-annonce-marque");
+  if(hote)hote.innerHTML="";
+  if(!st||!window.idsDeclaresPour||!window.declarationPour)return;
+  var ids=[];
+  try{ ids=window.idsDeclaresPour(st)||[]; }catch(e){ ids=[]; }
+  /* Une boisson qu'une personne a DEJA confirmee ici n'a pas besoin de la
+     parole de la marque : le constat humain passe devant. */
+  ids=ids.filter(function(id){
+    try{ return !window.magasinConfirmePour(st,id); }catch(e2){ return true; }
+  });
+  if(!ids.length)return;
+  var d=null;
+  try{ d=window.declarationPour(st,ids[0]); }catch(e3){ d=null; }
+  if(!d)return;
+  if(!hote){
+    /* Hote cree a la demande, juste apres le bloc d'acces : aucun element
+       permanent n'est ajoute au squelette de la page. */
+    var apres=document.getElementById("sd-acces")||document.getElementById("sd-annonce");
+    if(!apres||!apres.parentNode)return;
+    hote=document.createElement("div");
+    hote.id="sd-annonce-marque";
+    apres.parentNode.insertBefore(hote,apres.nextSibling);
+  }
+  var noms=DRINKS.filter(function(x){return ids.indexOf(Number(x.id))!==-1;})
+                 .map(function(x){return x.name;}).slice(0,3);
+  var jusqu="";
+  if(d.au){
+    try{
+      var dt=new Date(d.au);
+      jusqu=trh(" jusqu\u2019au {d}",{d:dt.toLocaleDateString("fr-BE",{day:"numeric",month:"long"})});
+    }catch(e4){ jusqu=""; }
+  }
+  var sid=String(st.fbId||st.id);
+  hote.innerHTML=
+    '<div style="margin:14px 20px 0;padding:11px 13px;border-radius:14px;'+
+    'background:var(--card-bg);border:1.5px dashed var(--bord)">'+
+      '<div class="c3" style="font-size:10.5px;font-weight:700;letter-spacing:.03em;'+
+      'text-transform:uppercase">'+tr("Annonce de marque")+'</div>'+
+      '<div style="font-size:13px;font-weight:600;margin-top:4px;line-height:1.4">'+
+        sanitize(trh("{m} annonce distribuer {b} dans ce quartier{j}. Personne ne l\u2019a encore vue ici.",
+          {m:d.marque,b:noms.join(", "),j:jusqu}))+'</div>'+
+      '<div style="margin-top:6px">'+
+        (window.lienSignaler?lienSignaler("annonce-marque",sid,d.marque,String(st.name||"")):"")+
+      '</div>'+
+    '</div>';
+}
+window.renderAnnonceMarque=renderAnnonceMarque;
 
 /* LE PASS DU COMMERCANT, dans sa propre fiche.
    Trois niveaux, et le texte dit exactement ce que chacun ouvre. On n'y vend
@@ -30344,11 +30442,18 @@ function drinkReponseHTML(stores){
   var horaire=openLabel(s0);
   var etat=sur?tr("En rayon"):tr("Pas encore confirm\u00e9 ici");
   var vert=!!sur;
+  /* LE SUR-TITRE A DEJA POUR SEUL ROLE DE DIRE D'OU VIENT L'AFFIRMATION : il
+     bascule entre « Le plus proche qui l'a » et « Le plus proche qui la
+     reference ». Une annonce de marque est un troisieme etat de cette MEME
+     ligne, et c'est pour ca qu'elle ne coute pas un pixel. Le cadre reste
+     gris, la ligne d'etat dessous continue de dire « Pas encore confirme
+     ici » : rien ne devient vert, seule la provenance est nommee. */
+  var _d0=(!vert&&window.declarationPour)?window.declarationPour(s0,sid):null;
   return '<div style="padding:12px 20px 0">'+
     '<div style="border:1.5px solid '+(vert?"#16a34a":"var(--border)")+';border-radius:18px;padding:14px 15px;'+
       'background:'+(vert?"color-mix(in srgb,#16a34a 8%,transparent)":"var(--bg2)")+'">'+
       '<div style="font-size:10.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:'+(vert?"#16a34a":"var(--s3)")+'">'+
-        (vert?tr("Le plus proche qui l\u2019a"):tr("Le plus proche qui la r\u00e9f\u00e9rence"))+'</div>'+
+        (vert?tr("Le plus proche qui l\u2019a"):(_d0?trh("Annonc\u00e9 par {m}",{m:_d0.marque}):tr("Le plus proche qui la r\u00e9f\u00e9rence")))+'</div>'+
       '<div style="font-size:17px;font-weight:800;letter-spacing:-.01em;color:var(--s1);margin:3px 0 1px">'+
         sanitize(s0.name)+(dist?' \u2014 '+dist:'')+'</div>'+
       '<div style="font-size:12px;color:var(--s2)">'+etat+(horaire?' \u00b7 '+horaire.toLowerCase():'')+'</div>'+
