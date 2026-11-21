@@ -31828,7 +31828,306 @@ function renderOffrirPoints(){
   btn.onkeydown=function(ev){ if(ev.key==="Enter")offrir(); };
   document.getElementById("off-q").onkeydown=function(ev){ if(ev.key==="Enter"){cible=null;chercher();} };
 }
+
+/* ══ DECLARER UNE COLLAB DE MARQUE ═════════════════════════════════════════
+   « au lieu de selectionner chaque magasin un a un et mettre en stock, on
+   doit avoir la possibilite de selectionner d'un coup plusieurs » — et la
+   reponse n'est PAS une selection multiple. Cocher quatre cents magasins a la
+   main reste quatre cents gestes, et chaque geste ecrit dans un magasin.
+   Ici on decrit la collab une fois — une marque, ses boissons, un cercle,
+   deux dates — et UN document est ecrit. Aucun magasin n'est modifie.
+
+   DEUX PIEGES DU GARDE-FOU MAISON, mesures avant d'ecrire ce code :
+     - au niveau « massif » SANS mot impose, il n'y a aucun champ a remplir et
+       le bouton Confirmer part au premier appui. Pour une action qui touche
+       des centaines de magasins, c'est trop peu : on impose donc un mot ;
+     - actionSensible resout FAUX, en silence, si un garde-fou est deja a
+       l'ecran. On n'en enchaine donc jamais deux.
+
+   LE COMPTAGE PASSE PAR LE VRAI RESOLVEUR. On pose la declaration sous une
+   cle temporaire, on reindexe, on compte avec declarationPour, puis on
+   remet la table comme elle etait. Recopier la condition ici aurait cree
+   deux verites qui divergent au premier changement. ─────────────────────── */
+function renderDeclarationsMarque(){
+  var el=document.getElementById("admin-marques");
+  if(!el){
+    var ancre=document.getElementById("admin-list");
+    if(!ancre||!ancre.parentNode)return;
+    el=document.createElement("div");
+    el.id="admin-marques";
+    el.style.marginBottom="18px";
+    ancre.parentNode.insertBefore(el,ancre);
+  }
+  var B=window._marqBrouillon=window._marqBrouillon||{};
+  var M=window.DECLARATIONS||{};
+  var cles=Object.keys(M);
+
+  /* L'ETAT DE LECTURE, parce qu'un refus n'est pas une absence. Le fourre-tout
+     des regles Firestore renvoie permission-denied, et le chargeur l'avale
+     dans un console.warn : sans cette ligne, « aucune annonce » pourrait
+     vouloir dire « on n'a pas eu le droit de regarder ». */
+  var etatLecture = window._declErreur
+    ? '<div style="font-size:11.5px;color:#dc2626;font-weight:700;margin-bottom:8px">'+
+      sanitize("Table non lue : "+window._declErreur+" · aucune annonce ne s’affiche nulle part")+'</div>'
+    : '<div style="font-size:11.5px;color:var(--s3);margin-bottom:8px">'+
+      sanitize("Table lue : "+cles.length+" annonce"+(cles.length>1?"s":"")+
+        (window._declLuA?" · dernière lecture à "+new Date(window._declLuA).toLocaleTimeString("fr-BE",{hour:"2-digit",minute:"2-digit"}):""))+'</div>';
+
+  var ch=function(id,lbl,val,ph,extra){
+    return '<div style="margin-bottom:6px"><div style="font-size:11.5px;color:var(--s2);margin-bottom:3px">'+sanitize(lbl)+'</div>'+
+      '<input id="'+id+'" type="text" autocomplete="off" value="'+attr(String(val==null?"":val))+'" placeholder="'+attr(ph||"")+'" '+
+      (extra||"")+' style="width:100%;padding:11px 12px;border-radius:12px;border:1px solid var(--bd);background:var(--bg3);color:var(--s1);font-size:13.5px;box-sizing:border-box"></div>';
+  };
+  el.innerHTML=
+    '<div style="font-size:12px;color:var(--s2);margin-bottom:6px">'+"Déclaration de marque"+'</div>'+
+    etatLecture+
+    '<div style="font-size:11.5px;color:var(--s2);line-height:1.5;margin-bottom:10px">'+
+      sanitize("Une collab ne modifie aucun magasin. Elle pose une annonce : une marque, ses boissons, une zone, deux dates. L’application dira « Annoncé par » suivi du nom de la marque, et jamais « En stock ».")+'</div>'+
+    ch("marq-m","Marque qui annonce",B.marque,"Pales",'maxlength="14"')+
+    ch("marq-b","Boissons concernées",B.boissons,"identifiants séparés par des virgules")+
+    ch("marq-c","Centre de la zone",B.centre,"latitude, longitude")+
+    '<div id="marq-centre-carte" role="button" tabindex="0" style="padding:9px 12px;border-radius:11px;background:var(--bg3);cursor:pointer;font-size:12.5px;font-weight:700;color:var(--s1);text-align:center;margin-bottom:6px">'+
+      sanitize("Prendre le centre de la carte")+'</div>'+
+    ch("marq-r","Rayon en kilomètres (25 au plus)",B.rayon==null?8:B.rayon,"8",'inputmode="numeric"')+
+    '<div style="display:flex;gap:8px">'+
+      '<div style="flex:1">'+ch("marq-d1","Premier jour",B.du,"2026-12-01")+'</div>'+
+      '<div style="flex:1">'+ch("marq-d2","Dernier jour",B.au,"2026-12-31")+'</div>'+
+    '</div>'+
+    ch("marq-k","Référence du contrat",B.contrat,"Collab Pales — courriel du 18/11/2026",'maxlength="80"')+
+    '<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--s1);margin:4px 0 2px;cursor:pointer">'+
+      '<input id="marq-ens" type="checkbox"'+(B.avecEnseignes?" checked":"")+'> '+sanitize("Inclure aussi les treize enseignes")+'</label>'+
+    '<div style="font-size:11px;color:var(--s3);line-height:1.45;margin-bottom:8px">'+
+      sanitize("Par défaut, seuls les indépendants : une boisson exotique n’est pas au catalogue d’une centrale d’achat.")+'</div>'+
+    '<div id="marq-compter" role="button" tabindex="0" style="padding:12px 14px;border-radius:12px;background:var(--bg3);cursor:pointer;font-size:13.5px;font-weight:700;color:var(--s1);text-align:center">'+
+      sanitize("Compter les magasins concernés")+'</div>'+
+    '<div id="marq-res" style="font-size:12px;color:var(--s2);margin-top:8px;line-height:1.5"></div>'+
+    '<div id="marq-liste" style="margin-top:12px"></div>';
+
+  var res=document.getElementById("marq-res");
+  var lire=function(){
+    B.marque=(document.getElementById("marq-m").value||"").trim();
+    B.boissons=(document.getElementById("marq-b").value||"").trim();
+    B.centre=(document.getElementById("marq-c").value||"").trim();
+    B.rayon=(document.getElementById("marq-r").value||"").trim();
+    B.du=(document.getElementById("marq-d1").value||"").trim();
+    B.au=(document.getElementById("marq-d2").value||"").trim();
+    B.contrat=(document.getElementById("marq-k").value||"").trim();
+    B.avecEnseignes=!!document.getElementById("marq-ens").checked;
+    return B;
+  };
+  ["marq-m","marq-b","marq-c","marq-r","marq-d1","marq-d2","marq-k"].forEach(function(id){
+    var e=document.getElementById(id); if(e)e.addEventListener("input",lire);
+  });
+  var ec=document.getElementById("marq-ens"); if(ec)ec.addEventListener("change",lire);
+
+  var cc=document.getElementById("marq-centre-carte");
+  if(cc)cc.onclick=function(){
+    var m=window.exploreMap||window._leafletMap;
+    var c=null;
+    try{ if(m&&window.carteEncoreLa&&window.carteEncoreLa(m))c=m.getCenter(); }catch(e){}
+    if(!c&&typeof userLat==="number"&&userLat)c={lat:userLat,lng:userLng};
+    if(!c){res.textContent="Aucune carte ouverte et aucune position : écris latitude, longitude.";return;}
+    document.getElementById("marq-c").value=c.lat.toFixed(4)+", "+c.lng.toFixed(4);
+    lire();
+  };
+
+  /* VALIDATION : chaque refus est NOMME. Un « formulaire invalide » ne dit pas
+     quoi corriger, et c'est a ce moment-la qu'on contourne le garde-fou. */
+  function construire(){
+    var b=lire();
+    if(!b.marque)return{err:"Donne le nom de la marque qui annonce."};
+    var ids=String(b.boissons||"").split(/[\s,;]+/).filter(Boolean).map(Number);
+    if(!ids.length)return{err:"Donne au moins un identifiant de boisson."};
+    if(ids.length>12)return{err:"Douze boissons au plus par annonce."};
+    for(var i=0;i<ids.length;i++){
+      if(!isFinite(ids[i]))return{err:"Identifiant illisible : « "+b.boissons+" »."};
+      var d=DRINKS.filter(function(x){return Number(x.id)===ids[i];})[0];
+      if(!d)return{err:"L’identifiant "+ids[i]+" n’existe pas au catalogue."};
+      /* « Pas d'alcool, meme 0.0% » est une regle absolue du projet, et la
+         fonction qui le verifie sert deja de barrage a six autres endroits.
+         Une collab avec une franchise de boissons est exactement le moment ou
+         une reference alcoolisee peut se glisser dans une liste collee. */
+      if(typeof nameLooksAlcoholic==="function"&&nameLooksAlcoholic(d.name,d.brand))
+        return{err:"Refusé : "+d.name+" est une boisson alcoolisée."};
+    }
+    var mc=String(b.centre||"").split(/[,;]/).map(function(x){return parseFloat(x);});
+    if(mc.length<2||!isFinite(mc[0])||!isFinite(mc[1]))
+      return{err:"Donne un centre : prends le centre de la carte, ou écris latitude, longitude."};
+    var r=parseFloat(b.rayon);
+    if(!isFinite(r)||r<=0)return{err:"Donne un rayon en kilomètres."};
+    if(r>25)return{err:"Rayon maximum : 25 km. Une collab se déclare quartier par quartier."};
+    var t1=Date.parse(b.du+"T00:00:00"), t2=Date.parse(b.au+"T23:59:59");
+    if(!isFinite(t1)||!isFinite(t2))return{err:"Donne les deux jours au format 2026-12-01."};
+    if(t2<=t1)return{err:"Le dernier jour doit venir après le premier."};
+    if(t2-t1>120*86400000)return{err:"Une collab dure 120 jours au plus."};
+    if(!b.contrat)return{err:"Donne une référence de contrat : c’est la seule trace de ce que la marque a affirmé."};
+    return{d:{
+      marque:String(b.marque).replace(/[^\p{L}\p{N} .'-]/gu,"").slice(0,14),
+      boissons:ids, lat:mc[0], lng:mc[1], rayonKm:r,
+      sansEnseignes:!b.avecEnseignes, types:null,
+      du:t1, au:t2, contrat:String(b.contrat).slice(0,80),
+      par:(window.monUid||null), creeLe:Date.now(), actif:true, arreteLe:null
+    }};
+  }
+
+  /* Compte en passant par le VRAI resolveur, sous une cle temporaire. */
+  function compter(d){
+    var sauve=window.DECLARATIONS, cle="__essai__";
+    var tmp={}; Object.keys(sauve||{}).forEach(function(k){tmp[k]=sauve[k];});
+    tmp[cle]=d;
+    window.DECLARATIONS=tmp; window.declIndexer();
+    var touches=[], sousEnseigne=0, dejaVus=0;
+    (window.STORES||[]).forEach(function(st){
+      var couvert=false;
+      for(var i=0;i<d.boissons.length&&!couvert;i++)
+        if(window.declarationPour(st,d.boissons[i]))couvert=true;
+      if(!couvert)return;
+      touches.push(st);
+      try{ if(window.chainIdsForStore&&window.chainIdsForStore(st.name,st.brand))sousEnseigne++; }catch(e){}
+      for(var j=0;j<d.boissons.length;j++)
+        if(window.magasinConfirmePour(st,d.boissons[j])){dejaVus++;break;}
+    });
+    window.DECLARATIONS=sauve; window.declIndexer();
+    return {n:touches.length,sousEnseigne:sousEnseigne,dejaVus:dejaVus,
+      charges:(window.STORES||[]).length,
+      exemples:touches.slice(0,3).map(function(x){return x.name;})};
+  }
+
+  var btn=document.getElementById("marq-compter");
+  var pret=null;
+  function lancerComptage(){
+    var btn=document.getElementById("marq-compter");
+    var c=construire();
+    if(c.err){res.textContent=c.err;pret=null;btn.textContent="Compter les magasins concernés";btn.onclick=lancerComptage;return;}
+    var r=compter(c.d);
+    pret=c.d;
+    var noms=DRINKS.filter(function(x){return c.d.boissons.indexOf(Number(x.id))!==-1;})
+                   .map(function(x){return x.name;}).join(", ");
+    res.innerHTML=
+      '<div style="font-weight:700;color:var(--s1)">'+sanitize(noms)+'</div>'+
+      '<div>'+sanitize(r.n+" magasin"+(r.n>1?"s":"")+" concerné"+(r.n>1?"s":"")+
+        " parmi les "+r.charges+" chargés sur cet appareil.")+'</div>'+
+      '<div>'+sanitize((r.n-r.sousEnseigne)+" indépendant"+((r.n-r.sousEnseigne)>1?"s":"")+", "+
+        r.sousEnseigne+" sous enseigne.")+'</div>'+
+      '<div>'+sanitize(r.dejaVus+" a déjà une confirmation humaine. Aucun ne passera en vert.")+'</div>'+
+      (r.exemples.length?'<div style="color:var(--s3)">'+sanitize("Exemples : "+r.exemples.join(", "))+'</div>':'')+
+      '<div style="color:var(--s3)">'+sanitize("Chez un visiteur, le cercle touchera les magasins qu’il a chargés, pas ceux-ci.")+'</div>';
+    btn.textContent="Publier l’annonce ("+r.n+" magasin"+(r.n>1?"s":"")+")";
+    btn.onclick=function(){ publier(pret,r); };
+  }
+  /* TOUT CHANGEMENT DE CHAMP ANNULE LE COMPTAGE.
+     Defaut trouve par le controle : apres un comptage, le bouton devient
+     « Publier l'annonce (412 magasins) » et garde l'objet construit a ce
+     moment-la. Changer ensuite le rayon, les dates ou la marque ne changeait
+     ni le libelle ni l'objet : on aurait publie l'ANCIEN formulaire en
+     croyant publier le nouveau, avec un compte qui ne correspond plus. */
+  function remettreAuComptage(){
+    pret=null;
+    var b=document.getElementById("marq-compter");
+    if(b){ b.textContent="Compter les magasins concernés"; b.onclick=lancerComptage; }
+    if(res)res.innerHTML="";
+  }
+  ["marq-m","marq-b","marq-c","marq-r","marq-d1","marq-d2","marq-k"].forEach(function(id){
+    var e=document.getElementById(id);
+    if(e)e.addEventListener("input",remettreAuComptage);
+  });
+  var ec2=document.getElementById("marq-ens");
+  if(ec2)ec2.addEventListener("change",remettreAuComptage);
+  if(btn)btn.onclick=lancerComptage;
+
+  function publier(d,r){
+    if(!window.fbEcrireDeclaration){res.textContent="Outil indisponible (module hors ligne)";return;}
+    /* Un mot a taper, EXPRES : au niveau « massif » sans mot, le bouton part
+       au premier appui, et cette action touche des centaines de magasins. */
+    actionSensible({
+      titre:"Publier l’annonce "+d.marque,
+      quoi:"Un seul document est écrit. Aucun des magasins n’est modifié. Les magasins concernés afficheront « Annoncé par "+d.marque+" », jamais « En stock » : seule une personne sur place peut mettre un magasin en rayon.",
+      compte:r.n, unite:"magasin", niveau:"massif", mot:"PUBLIER", reversible:true
+    }).then(function(oui){
+      if(!oui)return;
+      var cle=String(d.marque).toLowerCase().replace(/[^a-z0-9]+/g,"-").slice(0,14)+"-"+String(d.creeLe).slice(-6);
+      res.textContent="Publication en cours…";
+      window.fbEcrireDeclaration(cle,d).then(function(){
+        journaliserAction("annonce de marque publiee",{marque:d.marque,compte:r.n,cle:cle});
+        try{playSound("win");}catch(e){}
+        toast("✓ Annonce publiée. "+r.n+" magasin"+(r.n>1?"s":"")+" concerné"+(r.n>1?"s":"")+" sur cet appareil.");
+        window._marqBrouillon={};
+        try{ if(window.curSel)renderStoreList(); }catch(e){}
+        renderDeclarationsMarque();
+      }).catch(function(e){
+        try{playSound("err");}catch(e2){}
+        res.textContent="Échec : "+((e&&(e.code||e.message))||e);
+      });
+    });
+  }
+
+  /* LA LISTE DES ANNONCES : arreter, ou supprimer. Deux gestes distincts. */
+  var liste=document.getElementById("marq-liste");
+  if(!cles.length){
+    liste.innerHTML='<div style="font-size:12px;color:var(--s3)">'+sanitize("Aucune annonce de marque en cours.")+'</div>';
+    return;
+  }
+  liste.innerHTML="";
+  cles.forEach(function(cle){
+    var d=M[cle]||{};
+    var ligne=document.createElement("div");
+    ligne.style.cssText="padding:10px 11px;border-radius:12px;background:var(--bg3);margin-bottom:6px";
+    var quand="";
+    try{
+      quand=" · du "+new Date(d.du).toLocaleDateString("fr-BE",{day:"numeric",month:"long"})+
+            " au "+new Date(d.au).toLocaleDateString("fr-BE",{day:"numeric",month:"long"});
+    }catch(e){}
+    var etat=(d.actif===false)?"arrêtée":"en cours";
+    ligne.innerHTML='<div style="font-size:12.5px;font-weight:700;color:var(--s1)">'+
+        sanitize(String(d.marque||"?")+" · "+((d.boissons||[]).length)+" boisson"+(((d.boissons||[]).length)>1?"s":"")+
+        " · "+(d.rayonKm||0)+" km"+quand+" · "+etat)+'</div>'+
+      (d.contrat?'<div style="font-size:11px;color:var(--s3);margin-top:2px">'+sanitize(d.contrat)+'</div>':'')+
+      '<div style="display:flex;gap:6px;margin-top:7px">'+
+        (d.actif===false?'':'<span data-arreter="'+attr(cle)+'" role="button" tabindex="0" style="padding:7px 11px;border-radius:10px;background:var(--bg2);border:1px solid var(--bd);font-size:11.5px;font-weight:700;cursor:pointer">'+sanitize("Arrêter maintenant")+'</span>')+
+        '<span data-supprimer="'+attr(cle)+'" role="button" tabindex="0" style="padding:7px 11px;border-radius:10px;background:var(--bg2);border:1px solid var(--bd);font-size:11.5px;font-weight:700;color:#dc2626;cursor:pointer">'+sanitize("Supprimer")+'</span>'+
+      '</div>';
+    liste.appendChild(ligne);
+  });
+  liste.querySelectorAll("[data-arreter]").forEach(function(b){
+    b.onclick=function(){
+      var cle=b.getAttribute("data-arreter"), d=M[cle]||{};
+      actionSensible({
+        titre:"Arrêter l’annonce "+(d.marque||"?"),
+        quoi:(d.marque||"La marque")+" ne sera plus annoncée dans cette zone. Aucune confirmation n’est perdue : les magasins où quelqu’un l’a vue restent en rayon. La déclaration et sa référence de contrat restent lisibles ici.",
+        niveau:"massif", mot:"ARRETER", reversible:true
+      }).then(function(oui){
+        if(!oui||!window.fbArreterDeclaration)return;
+        window.fbArreterDeclaration(cle).then(function(){
+          journaliserAction("annonce de marque arretee",{marque:d.marque||"?",cle:cle});
+          toast("✓ Annonce arrêtée.");
+          try{ if(window.curSel)renderStoreList(); }catch(e){}
+          renderDeclarationsMarque();
+        }).catch(function(e){ toast("Échec : "+((e&&(e.code||e.message))||e)); });
+      });
+    };
+  });
+  liste.querySelectorAll("[data-supprimer]").forEach(function(b){
+    b.onclick=function(){
+      var cle=b.getAttribute("data-supprimer"), d=M[cle]||{};
+      actionSensible({
+        titre:"Supprimer la déclaration "+(d.marque||"?"),
+        quoi:"La trace de ce que "+(d.marque||"la marque")+" a annoncé, et jusqu’à quand, disparaît. Garde-la si tu peux avoir à répondre à la marque.",
+        niveau:"irreversible", mot:"SUPPRIMER", reversible:false
+      }).then(function(oui){
+        if(!oui||!window.fbSupprimerDeclaration)return;
+        window.fbSupprimerDeclaration(cle).then(function(){
+          journaliserAction("declaration de marque supprimee",{marque:d.marque||"?",cle:cle});
+          toast("✓ Déclaration supprimée.");
+          renderDeclarationsMarque();
+        }).catch(function(e){ toast("Échec : "+((e&&(e.code||e.message))||e)); });
+      });
+    };
+  });
+}
+window.renderDeclarationsMarque=renderDeclarationsMarque;
+
 function renderAdmin(){
+  try{ renderDeclarationsMarque(); }catch(e){ console.warn("declarations marque:",e); }
   try{ renderOffrirPoints(); }catch(e){}
   try{ renderRejouerSignalements(); }catch(e){}
   try{ renderReparerVisibilite(); }catch(e){}
