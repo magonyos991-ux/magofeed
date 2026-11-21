@@ -2079,6 +2079,7 @@ onAuthStateChanged(auth, async function(user) {
   window.fbLoadDrinkMerges();
   window.fbLoadDrinkNames();
   window.fbLoadDrinkImages();
+  window.fbLoadDeclarations();
   try {
     var snap = await getDoc(userDocRef(user.uid));
     if (snap.exists()) {
@@ -2449,6 +2450,74 @@ window.fbSaveDrinkRename = async function(id, newName, newBrand) {
   await setDoc(doc(db, "meta", "drinkNames"), upd, { merge: true });
   window.DRINK_NAMES[String(id)] = ov;
   window.applyDrinkNames();
+};
+/* ══ LES ANNONCES DE MARQUE ════════════════════════════════════════════════
+   UNE collab = UN document. Pas une ecriture par magasin : zero magasin n'est
+   modifie, et c'est la propriete qui tient toute la conception. Trois
+   consequences, toutes verifiables :
+     - une collab s'arrete en changeant un champ, pas en reparcourant 34 137
+       documents ;
+     - une annonce de marque ne peut PAS ecraser la confirmation d'une
+       personne, puisqu'elle ne touche pas son magasin ;
+     - le cache localStorage des magasins ne peut pas garder le fantome d'une
+       collab terminee, puisqu'elle n'y est jamais entree.
+
+   LE CHEMIN EST DEJA COUVERT PAR LES REGLES. functions-a-deployer/
+   firestore.rules porte deja « match /meta/{id} { allow read: if true;
+   allow write: if isAdmin(); } », et la collection admins est en
+   « allow write: if false ». Donc : aucune ligne de regles a ecrire, et aucun
+   « firebase deploy » a lancer depuis ton PC.
+   ATTENTION, le piege qui va avec : le fourre-tout de fin de fichier refuse
+   tout ce qui n'est pas declare, et il renvoie permission-denied, PAS du
+   vide. Un chargeur qui avale son erreur en silence laisserait donc croire
+   « aucune annonce » alors que la lecture a ete REFUSEE. D'ou _declErreur et
+   _declLuA, lus par l'ecran d'administration. ─────────────────────────────*/
+window.DECLARATIONS = {};
+window._declLuA = null;      /* horodatage de la derniere lecture reussie */
+window._declErreur = null;   /* le message exact du refus, jamais avale */
+window.fbLoadDeclarations = async function() {
+  try {
+    var snap = await getDoc(doc(db, "meta", "declarations"));
+    window.DECLARATIONS = snap.exists() ? (snap.data() || {}) : {};
+    window._declLuA = Date.now();
+    window._declErreur = null;
+  } catch (e) {
+    /* On ne vide PAS ce qu'on avait : une lecture refusee n'est pas une
+       absence d'annonce. Mais on le DIT, pour que l'administration ne
+       raconte pas « aucune annonce » sur un refus. */
+    window._declErreur = String((e && (e.code || e.message)) || e);
+    console.warn("Declarations:", e);
+  }
+  try { if (window.declIndexer) window.declIndexer(); } catch (e2) {}
+  window.dispatchEvent(new CustomEvent("fbDeclarationsLoaded"));
+  return window.DECLARATIONS;
+};
+window.fbEcrireDeclaration = async function(cle, d) {
+  var upd = {};
+  upd[String(cle)] = d;
+  await setDoc(doc(db, "meta", "declarations"), upd, { merge: true });
+  window.DECLARATIONS[String(cle)] = d;
+  try { if (window.declIndexer) window.declIndexer(); } catch (e) {}
+};
+window.fbArreterDeclaration = async function(cle) {
+  /* ARRETER N'EST PAS SUPPRIMER. On pose actif:false et la date d'arret, et
+     on garde tout le reste — la marque, les boissons, la zone, les dates et
+     la reference de contrat. C'est ce qui permet de repondre six mois plus
+     tard a « qu'est-ce que vous avez annonce, et jusqu'a quand ? ». */
+  var upd = {};
+  upd[String(cle)] = { actif: false, arreteLe: Date.now() };
+  await setDoc(doc(db, "meta", "declarations"), upd, { merge: true });
+  var v = window.DECLARATIONS[String(cle)] || {};
+  v.actif = false; v.arreteLe = Date.now();
+  window.DECLARATIONS[String(cle)] = v;
+  try { if (window.declIndexer) window.declIndexer(); } catch (e) {}
+};
+window.fbSupprimerDeclaration = async function(cle) {
+  var upd = {};
+  upd[String(cle)] = deleteField();
+  await setDoc(doc(db, "meta", "declarations"), upd, { merge: true });
+  delete window.DECLARATIONS[String(cle)];
+  try { if (window.declIndexer) window.declIndexer(); } catch (e) {}
 };
 function normalizeStore(data, id, distKm) {
   data.fbId = id;
@@ -18081,6 +18150,111 @@ window.rayonProbableIds=function(s){
   for(var k in _setsRayon[c])out.push(Number(k));
   return out;
 };
+
+/* ══ CE QU'UNE MARQUE ANNONCE, ET QUI L'ANNONCE ════════════════════════════
+   Une annonce de marque est la QUATRIEME raison pour laquelle un magasin peut
+   apparaitre comme « possible ». Elle est resolue A LA LECTURE, comme les 22
+   rayons probables — mais SURTOUT PAS par la meme machinerie, et il faut dire
+   pourquoi, parce que la ressemblance est trompeuse.
+
+   PAS PAR _cleRayon. Les 22 ensembles sont indexes sur du TEXTE (nom, marque,
+   type), et la cle trouvee est MEMORISEE sur l'objet magasin (s._cleRayon)
+   pour toute la duree de la page. Une annonce, elle, est indexee sur une
+   POSITION et deux DATES. Memorisee, elle figerait la fenetre : une collab
+   qui se termine a minuit resterait affichee jusqu'au prochain rechargement
+   de l'application. Date.now() est donc relu A CHAQUE APPEL.
+
+   PAS PAR _setsRayon. Une cle composee (« e:Delhaize|annonce:7,12 ») ferait
+   exploser le nombre d'ensembles en combinaisons : c'est la faute des 785 702
+   identifiants et des 7,2 Mo de memoire, refaite autrement.
+
+   PAS PAR rayonProbableIds. Son contrat est « les 22 ensembles », et deux
+   appelants s'en servent precisement pour dire « ca, ce n'est QUE probable ».
+   Elargir ce contrat en silence changerait leur sens.
+
+   PAS DANS s.drinks, JAMAIS. rayonAppliquer y recopie le rayon, et de la le
+   magasin part dans saveStoresCache : une collab terminee survivrait 24 a
+   48 h dans le localStorage du telephone, affichee sans marque et sans date.
+
+   ET SURTOUT : declarationPour rend un OBJET GELE ou null — jamais un
+   booleen, jamais un nombre. Dans un fichier de 36 000 lignes edite par
+   plusieurs mains, un booleen finit par etre confondu avec « il l'a ». Un
+   objet qui porte le nom de la marque ne peut pas s'afficher sans sa source.
+   Pour la meme raison il n'existe AUCUNE fonction qui rende « les
+   identifiants annonces a ajouter » a un magasin.
+
+   Le cout : un seul index, construit sur le nombre de BOISSONS de la collab
+   (une franchise, c'est deux ou trois references), jamais sur le nombre de
+   magasins. Les ~4 500 autres boissons sortent a la premiere ligne.
+   ────────────────────────────────────────────────────────────────────────── */
+var _declParBoisson={};
+window.declIndexer=function(){
+  _declParBoisson={};
+  var M=window.DECLARATIONS||{};
+  Object.keys(M).forEach(function(cle){
+    var d=M[cle];
+    if(!d||d.actif===false||!d.marque||!(d.boissons||[]).length)return;
+    var g=Object.freeze({
+      cle:cle,
+      marque:String(d.marque).slice(0,14),
+      lat:+d.lat, lng:+d.lng, rayonKm:+d.rayonKm||0,
+      du:+d.du||0, au:+d.au||0,
+      sansEnseignes:d.sansEnseignes!==false,
+      types:(d.types&&d.types.length)?d.types:null
+    });
+    d.boissons.forEach(function(id){
+      var k=Number(id);
+      if(!isFinite(k))return;
+      (_declParBoisson[k]=_declParBoisson[k]||[]).push(g);
+    });
+  });
+};
+window.declarationPour=function(s,did){
+  if(!s||did==null)return null;
+  var L=_declParBoisson[Number(did)];
+  if(!L||!L.length)return null;                 /* les ~4 500 autres sortent ici */
+  if(typeof s.lat!=="number"||typeof s.lng!=="number")return null;
+  var t=Date.now();                             /* relu a chaque appel, jamais memorise */
+  for(var i=0;i<L.length;i++){
+    var d=L[i];
+    if(d.du&&t<d.du)continue;
+    if(d.au&&t>d.au)continue;
+    /* Par defaut une collab ne vise QUE les independants : une boisson
+       exotique n'est pas au catalogue d'une centrale d'achat. Le test se fait
+       sur « pas une enseigne reconnue », et non sur le type de commerce :
+       19 416 magasins ne portent ni type ni nom reconnaissable, et un filtre
+       par type les manquerait tous. */
+    if(d.sansEnseignes){
+      var e=null;
+      try{ e=window.chainIdsForStore?window.chainIdsForStore(s.name,s.brand):null; }catch(eC){ e=null; }
+      if(e)continue;
+    }
+    if(d.types&&d.types.length){
+      var ty="";
+      try{ ty=window.typeDeCommerce?window.typeDeCommerce(s.name,s.brand,s.type)||"":""; }catch(eT){ ty=""; }
+      if(d.types.indexOf(ty)===-1)continue;
+    }
+    if(d.rayonKm>0){
+      var km=0;
+      try{ km=haversine(d.lat,d.lng,s.lat,s.lng)/1000; }catch(eH){ km=Infinity; }
+      if(!(km<=d.rayonKm))continue;
+    }
+    return d;                                   /* l'objet GELE, avec sa marque */
+  }
+  return null;
+};
+/* Les identifiants annonces pour CE magasin. Sert uniquement a remplir une
+   variable LOCALE d'affichage (la liste des boissons d'une fiche magasin) ;
+   le nom dit « declares », jamais « a ajouter ». */
+window.idsDeclaresPour=function(s){
+  if(!s)return [];
+  var out=[];
+  Object.keys(_declParBoisson).forEach(function(k){
+    if(window.declarationPour(s,Number(k)))out.push(Number(k));
+  });
+  return out;
+};
+
 /* PLUS DE VERROU A UN COUP.
    Cette fonction sortait immediatement si elle avait deja travaille sur ce
    magasin (drapeau _rayonApplique). Or s.drinks, ou elle recopie le rayon, est
@@ -30867,7 +31041,14 @@ function magasinALaBoisson(s,did){
   if((s.drinks||[]).some(function(d){return Number(d)===Number(did);}))return true;
   /* Rayon PROBABLE de l'enseigne ou du type de commerce. C'est une piste, pas
      un stock : magasinConfirmePour exige toujours qu'un humain l'ait vue. */
-  return typeof window.rayonProbableContient==="function"&&window.rayonProbableContient(s,did);
+  if(typeof window.rayonProbableContient==="function"&&window.rayonProbableContient(s,did))return true;
+  /* QUATRIEME RAISON : une marque annonce distribuer cette boisson ici. C'est
+     la parole d'une marque, datee et bornee a une zone — une piste de plus,
+     exactement au meme titre que le rayon probable. Elle entre donc ICI, dans
+     la voie « possible », et NULLE PART ailleurs : magasinConfirmePour, juste
+     en dessous, continue d'exiger qu'un humain l'ait vue, et c'est lui qui
+     commande tous les verts de l'application. */
+  return typeof window.declarationPour==="function"&&!!window.declarationPour(s,did);
 }
 window.magasinALaBoisson=magasinALaBoisson;
 function storeVerifiedFor(s,did){
