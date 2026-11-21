@@ -2739,7 +2739,21 @@ window.fbEnsureStoresForDrink = async function(drinkId, lat, lng) {
   var centerLat = lat != null ? lat : DEFAULT_CENTER.lat;
   var centerLng = lng != null ? lng : DEFAULT_CENTER.lng;
   function hasMatch() {
-    return (window.STORES || []).some(function(s) { return window.magasinALaBoisson(s, drinkId); });
+    /* UNE SUPPOSITION NE DOIT PAS ETEINDRE LA RECHERCHE DE FAITS.
+       Cette fonction decide s'il faut elargir la requete a 25 puis 50 km. Elle
+       repondait « on a deja ce qu'il faut » des qu'un magasin PORTAIT la
+       boisson au sens large — rayon probable de l'enseigne compris. Une
+       devinette suffisait donc a empecher l'application d'aller chercher les
+       magasins ou quelqu'un l'a VRAIMENT vue : l'utilisateur recevait une
+       liste de peut-etre, et les vrais restaient hors du telechargement.
+       Le commentaire du cache negatif, juste en dessous, dit d'ailleurs
+       l'intention d'origine mot pour mot : « les nouvelles boissons sans
+       magasin CONFIRME declenchaient l'elargissement ». Le code avait derive.
+       Ce que ca coute : l'elargissement part plus souvent. Il reste borne par
+       _fbExpandedFor (une fois par boisson et par session) et par le cache
+       negatif de 24 h juste en dessous. */
+    var f = window.magasinConfirmePour || window.magasinALaBoisson;
+    return (window.STORES || []).some(function(s) { return f(s, drinkId); });
   }
   if (hasMatch()) return true;
   // Cache negatif 24h : si l'elargissement 25/50km n'a rien donne hier pour
@@ -21059,7 +21073,15 @@ function renderStoreList(){
   /* On enregistre ICI, et pas a l'ouverture de la fiche : a ce point precis,
      l'elargissement Firestore a deja eu lieu, donc "introuvable" veut vraiment
      dire introuvable — et c'est cette ligne-la qui a de la valeur. */
-  logDemand(curSel, allStores.length > 0);
+  /* « INTROUVABLE » DOIT VOULOIR DIRE INTROUVABLE.
+     Le commentaire ci-dessus promet exactement ca. Or allStores est filtre par
+     magasinALaBoisson : un seul rayon PROBABLE dans le quartier — une
+     supposition — faisait enregistrer « trouvee » et eteignait le signal de
+     demande de la boisson. Resultat : « X personnes l'ont cherchee ce
+     mois-ci » ne s'allumait jamais sur les boissons que l'application devine
+     au lieu de les constater, c'est-a-dire precisement celles dont la demande
+     compte le plus. On compte donc les magasins ou un humain l'a vue. */
+  logDemand(curSel, allStores.some(function(s){return magasinConfirmePour(s,curSel.id);}));
   var brandsAvailable=Array.from(new Set(allStores.map(function(s){return s.brand;}).filter(Boolean))).sort();
   if(curBrandFilter&&brandsAvailable.indexOf(curBrandFilter)===-1)curBrandFilter=null;
   var stores=sortedStores(allStores);
@@ -30408,11 +30430,22 @@ function alternativesHTML(d){
   var alt=alternativesDe(d,6);
   if(!alt.length)return "";
   var cartes=alt.map(function(x){
+    /* ══ LE VERT NE S'ALLUME QUE SUR UN CONSTAT HUMAIN ══════════════════════
+       Cette pastille porte #16a34a et les mots « Pres de toi », et le
+       commentaire juste au-dessus dit ce qu'elle promet : « c'est
+       l'information qui decide d'un detour ». Elle s'allumait sur
+       magasinALaBoisson, qui est VRAI des que le rayon PROBABLE de l'enseigne
+       ou du type de commerce contient la boisson — une supposition que
+       personne n'est jamais alle verifier. Quelqu'un traversait donc la ville
+       sur une devinette peinte en vert.
+       Le vert ne veut dire qu'une chose dans toute l'application : un humain
+       l'a vue. C'est magasinConfirmePour qui repond a cette question, et lui
+       seul (il exige drinksVerified ou une confirmation positive). */
     var dispo=false;
     try{
       for(var k=0;k<STORES.length&&!dispo;k++){
         var st=STORES[k];
-        if(typeof st.dist==="number"&&st.dist<=5000&&typeof magasinALaBoisson==="function"&&magasinALaBoisson(st,x.id))dispo=true;
+        if(typeof st.dist==="number"&&st.dist<=5000&&typeof magasinConfirmePour==="function"&&magasinConfirmePour(st,x.id))dispo=true;
       }
     }catch(e){}
     return '<div onclick="pick(DRINKS.filter(function(z){return String(z.id)===\''+String(x.id)+'\';})[0])" '+
