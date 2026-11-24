@@ -228,9 +228,18 @@ async function recalculerScore(uid) {
       ? Math.max(0, Number(d.points) || 0)
       : (Number(d.pointsHerites) || 0);
     const penalite = (sanction === null) ? (Number(d.penalty) || 0) : sanction;
+    /* pointsChasse : les confirmations de codes-barres de la chasse. Sans
+       cette ligne, la colonne existerait et ne compterait pour rien — c'est
+       exactement la panne qu'on vient de corriger, deplacee d'un cran.
+       Et d.pts, l'ancienne colonne morte : on la relit UNE FOIS POUR TOUTES
+       plutot que de migrer les documents. Personne ne perd ce qu'il a gagne,
+       et aucune donnee de production n'est reecrite pour ça. La colonne est
+       desormais declaree dans champsServeur() des regles, donc plus
+       ecrivable depuis un navigateur : c'etait la condition pour la relire. */
     const total = Math.max(0,
       herite + (d.pointsPreuves || 0) + (d.refPoints || 0)
-      + (d.pointsOfferts || 0) - penalite);
+      + (d.pointsOfferts || 0) + (d.pointsChasse || 0) + (Number(d.pts) || 0)
+      - penalite);
     if (!premierPassage && d.points === total && (Number(d.penalty) || 0) === penalite) return;
     const patch = { points: total };
     // On recopie la sanction dans le profil : l'app l'affiche depuis la, et

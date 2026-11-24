@@ -119,10 +119,27 @@ exports.poserCodeChasse = onDocumentWritten(
     /* Les points, maintenant que le lien est vrai. Chacun des confirmants, une
        fois. Un echec ici ne remet pas le lien en cause : le code est pose, et
        c'est lui qui compte. */
+    /* ══ LE CHAMP S'APPELLE pointsChasse, ET PAS pts ══════════════════════
+       Cette boucle ecrivait « pts ». Deux fautes dans un seul mot :
+         1. AUCUN code ne lit « pts ». Le solde affiche vient du champ
+            « points » du document users (index.html : userStats.pts =
+            (typeof d.points === "number") ? d.points : ... — l'objet LOCAL
+            s'appelle pts, le champ Firestore s'appelle points, et c'est ce
+            qui rendait la faute invisible a la relecture) ;
+         2. ecrire « points » directement n'aurait rien arrange : le score est
+            RECALCULE par recalculerScore comme herite + pointsPreuves +
+            refPoints + pointsOfferts - penalite. Toute valeur posee a la main
+            dans « points » est effacee au recalcul suivant.
+       Les cinq points promis a chaque personne qui confirmait un code-barres
+       tombaient donc dans le vide, en silence, pendant que l'ecran annonçait
+       qu'ils etaient gagnes.
+       Un contributeur merite une colonne a lui : pointsChasse entre dans la
+       somme de recalculerScore, et il est declare dans champsServeur() des
+       regles Firestore pour qu'aucun client ne puisse se l'offrir. */
     for (const uid of par) {
       try {
         await db.collection("users").doc(String(uid)).set(
-          { pts: FieldValue.increment(POINTS_PAR_CONFIRMANT) },
+          { pointsChasse: FieldValue.increment(POINTS_PAR_CONFIRMANT) },
           { merge: true }
         );
       } catch (e) { console.warn("chasse : points a", uid, e && e.message); }

@@ -1123,6 +1123,26 @@ await doit('bloque : un passant ne peut pas arreter une annonce',
   ()=>assertFails(setDoc(doc(m,'meta','declarations'),
     {'pales-1':{actif:false}},{merge:true})));
 
+/* ══ pointsChasse : UNE COLONNE DE SCORE EST UNE COLONNE A PROTEGER ══════
+   Les cinq points d'une confirmation de code-barres tombaient dans un champ
+   « pts » que personne ne lit. La colonne s'appelle desormais pointsChasse et
+   elle entre dans la somme de recalculerScore — donc dans le score affiche,
+   donc dans le classement. Si le client pouvait l'ecrire, il suffirait
+   d'ouvrir la console du navigateur pour s'offrir le premier rang. */
+await doit('bloque : Alice ne peut pas s offrir des pointsChasse',
+  ()=>assertFails(updateDoc(doc(a,'users',ALICE),{pointsChasse:9999})));
+await doit('bloque : Mallory ne peut pas offrir des pointsChasse a Alice',
+  ()=>assertFails(updateDoc(doc(m,'users',ALICE),{pointsChasse:9999})));
+await doit('bloque : Alice ne peut pas recreer son profil avec des pointsChasse',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),{pseudo:'Alice',pointsChasse:9999})));
+/* L'ancienne colonne morte entre dans le score pour rendre les points gagnes :
+   elle doit donc etre fermee, sinon on vient d'ouvrir une porte sur le
+   classement en voulant reparer une injustice. */
+await doit('bloque : Alice ne peut pas s offrir des pts (l ancienne colonne)',
+  ()=>assertFails(updateDoc(doc(a,'users',ALICE),{pts:9999})));
+await doit('bloque : Alice ne peut pas recreer son profil avec des pts',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),{pseudo:'Alice',pts:9999})));
+
 R.forEach(r=>console.log(r[0],'|',r[1]));
 console.log('\n'+(R.length-ko)+'/'+R.length+' conformes');
 await env.cleanup();
