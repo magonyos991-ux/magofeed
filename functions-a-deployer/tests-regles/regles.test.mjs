@@ -1091,6 +1091,58 @@ await doit('legitime : les horaires d un magasin NON certifie restent collaborat
 await doit('gerant : une confirmation de boisson passe toujours sur une fiche aux coordonnees longues',
   ()=>assertSucceeds(updateDoc(doc(a,'stores','s3'),{drinks:arrayUnion(9),'confirmations.9':increment(1)})));
 
+/* ══ meta/declarations : LES ANNONCES DE MARQUE ══════════════════════════
+   Une annonce de marque fait dire a l'application « Annonce par Pales » sur
+   des centaines de magasins. Tout tient donc a UNE ligne de regle, et ces
+   trois epreuves disent laquelle :
+
+   1. la table se lit sans compte. Si cette ligne bougeait, le fourre-tout de
+      fin de fichier renverrait permission-denied — et le chargeur avale son
+      erreur dans un console.warn. Personne ne verrait plus aucune annonce, et
+      RIEN ne le dirait. Cette epreuve rend ce silence impossible.
+   2. Mallory ne peut pas ecrire. C'est l'epreuve centrale de toute la
+      fonctionnalite : sans elle, n'importe qui pourrait faire dire a
+      l'application qu'une marque distribue sa boisson dans un quartier.
+   3. l'administrateur peut ecrire. L'inverse du precedent : une regle durcie
+      par erreur ferait echouer l'ecriture en silence (elle est dans un
+      try/catch), et le fondateur croirait avoir publie une collab qui n'existe
+      pas. ───────────────────────────────────────────────────────────────── */
+await doit('legitime : meta/declarations se lit sans compte',
+  ()=>assertSucceeds(getDoc(doc(anon,'meta','declarations'))));
+await doit('bloque : Mallory ne peut pas ecrire une annonce de marque',
+  ()=>assertFails(setDoc(doc(m,'meta','declarations'),
+    {'faux-1':{marque:'Faux',boissons:[1],lat:50.8,lng:4.3,rayonKm:8,actif:true}},{merge:true})));
+await doit('admin : l administrateur publie une annonce de marque',
+  ()=>assertSucceeds(setDoc(doc(ad,"meta","declarations"),
+    {'pales-1':{marque:'Pales',boissons:[1],lat:50.8466,lng:4.3528,rayonKm:8,
+      sansEnseignes:true,du:1,au:2,contrat:'essai',actif:true}},{merge:true})));
+await doit('admin : arreter une annonce ne la supprime pas',
+  ()=>assertSucceeds(setDoc(doc(ad,"meta","declarations"),
+    {'pales-1':{actif:false,arreteLe:3}},{merge:true})));
+await doit('bloque : un passant ne peut pas arreter une annonce',
+  ()=>assertFails(setDoc(doc(m,'meta','declarations'),
+    {'pales-1':{actif:false}},{merge:true})));
+
+/* ══ pointsChasse : UNE COLONNE DE SCORE EST UNE COLONNE A PROTEGER ══════
+   Les cinq points d'une confirmation de code-barres tombaient dans un champ
+   « pts » que personne ne lit. La colonne s'appelle desormais pointsChasse et
+   elle entre dans la somme de recalculerScore — donc dans le score affiche,
+   donc dans le classement. Si le client pouvait l'ecrire, il suffirait
+   d'ouvrir la console du navigateur pour s'offrir le premier rang. */
+await doit('bloque : Alice ne peut pas s offrir des pointsChasse',
+  ()=>assertFails(updateDoc(doc(a,'users',ALICE),{pointsChasse:9999})));
+await doit('bloque : Mallory ne peut pas offrir des pointsChasse a Alice',
+  ()=>assertFails(updateDoc(doc(m,'users',ALICE),{pointsChasse:9999})));
+await doit('bloque : Alice ne peut pas recreer son profil avec des pointsChasse',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),{pseudo:'Alice',pointsChasse:9999})));
+/* L'ancienne colonne morte entre dans le score pour rendre les points gagnes :
+   elle doit donc etre fermee, sinon on vient d'ouvrir une porte sur le
+   classement en voulant reparer une injustice. */
+await doit('bloque : Alice ne peut pas s offrir des pts (l ancienne colonne)',
+  ()=>assertFails(updateDoc(doc(a,'users',ALICE),{pts:9999})));
+await doit('bloque : Alice ne peut pas recreer son profil avec des pts',
+  ()=>assertFails(setDoc(doc(a,'users',ALICE),{pseudo:'Alice',pts:9999})));
+
 R.forEach(r=>console.log(r[0],'|',r[1]));
 console.log('\n'+(R.length-ko)+'/'+R.length+' conformes');
 await env.cleanup();

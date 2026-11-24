@@ -135,6 +135,11 @@ const FONCTIONS_ADMIN = new Set([
   "renderPhotoSuggestions", "promoteDiscovery", "rejectDiscovery",
   "rejectDiscoveryPhoto", "renderFounderDash", "renderDemandAdmin",
   "renderFeedbackAdmin", "renderRejouerSignalements",
+  /* L'outil de declaration de marque : il vit dans #admin-marques, il n'est
+     dessine que par renderAdmin, et son formulaire parle a une seule personne
+     — celle qui signe les collabs. Nomme ici plutot que devine, comme le
+     demande le commentaire ci-dessus. */
+  "renderDeclarationsMarque",
   /* Cas a part, et pour une tout autre raison : generatePseudo tire au sort un
      surnom dans deux listes de mots. Ce ne sont pas des phrases d'interface,
      ce sont des noms de personnes. Traduire « Panthere » ferait qu'un meme
