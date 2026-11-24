@@ -1091,6 +1091,51 @@ await doit('legitime : les horaires d un magasin NON certifie restent collaborat
 await doit('gerant : une confirmation de boisson passe toujours sur une fiche aux coordonnees longues',
   ()=>assertSucceeds(updateDoc(doc(a,'stores','s3'),{drinks:arrayUnion(9),'confirmations.9':increment(1)})));
 
+/* ── Journal des plantages (erreursClient) ──────────────────────────────────
+   L'app y depose une ligne par erreur : type, message et pile tronques,
+   version, ecran, navigateur. Tout le monde peut en AJOUTER une (c'est ce qui
+   fait que le fondateur sait enfin quel plantage, sur quel ecran, avec quelle
+   version), personne ne la relit sauf l'administrateur, personne ne la
+   modifie. Le client borne deja les tailles ; une ligne plus longue vient
+   d'une main, pas de l'app. */
+const ERR_OK={k:'error',m:'TypeError: x is undefined',p:'index.html:36129\nindex.html:35760',
+  v:'1.6.0 build abc1234',e:'s-search',n:'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
+  natif:false,t:serverTimestamp()};
+await doit('legitime : l app depose une ligne de plantage',
+  ()=>assertSucceeds(addDoc(collection(a,'erreursClient'),ERR_OK)));
+await doit('legitime : une promesse rejetee sans pile passe aussi',
+  ()=>assertSucceeds(addDoc(collection(a,'erreursClient'),{...ERR_OK,k:'rejection',p:''})));
+await doit('bloque : sans compte, pas de ligne de plantage',
+  ()=>assertFails(addDoc(collection(anon,'erreursClient'),ERR_OK)));
+await doit('bloque : une ligne de plantage qui porte un uid',
+  ()=>assertFails(addDoc(collection(a,'erreursClient'),{...ERR_OK,uid:ALICE})));
+await doit('bloque : un type de plantage inconnu',
+  ()=>assertFails(addDoc(collection(a,'erreursClient'),{...ERR_OK,k:'spam'})));
+await doit('bloque : un message de plantage de 301 caracteres',
+  ()=>assertFails(addDoc(collection(a,'erreursClient'),{...ERR_OK,m:'x'.repeat(301)})));
+await doit('bloque : une pile de 801 caracteres',
+  ()=>assertFails(addDoc(collection(a,'erreursClient'),{...ERR_OK,p:'x'.repeat(801)})));
+await doit('bloque : une date de plantage posee par le client',
+  ()=>assertFails(addDoc(collection(a,'erreursClient'),{...ERR_OK,t:Timestamp.fromMillis(0)})));
+await doit('bloque : le drapeau natif qui n est pas un booleen',
+  ()=>assertFails(addDoc(collection(a,'erreursClient'),{...ERR_OK,natif:'oui'})));
+await env.withSecurityRulesDisabled(async (c)=>{
+  const db=c.firestore();
+  await setDoc(doc(db,'erreursClient','e1'),{...ERR_OK,t:Timestamp.fromMillis(1)});
+});
+await doit('bloque : Alice relit le journal des plantages',
+  ()=>assertFails(getDocs(collection(a,'erreursClient'))));
+await doit('admin : l administrateur relit le journal des plantages',
+  ()=>assertSucceeds(getDocs(collection(ad,'erreursClient'))));
+await doit('bloque : Alice retouche une ligne de plantage',
+  ()=>assertFails(updateDoc(doc(a,'erreursClient','e1'),{m:'rien a voir'})));
+await doit('bloque : l administrateur non plus ne retouche pas une ligne de plantage',
+  ()=>assertFails(updateDoc(doc(ad,'erreursClient','e1'),{m:'rien a voir'})));
+await doit('bloque : Alice efface une ligne de plantage',
+  ()=>assertFails(deleteDoc(doc(a,'erreursClient','e1'))));
+await doit('admin : l administrateur efface une ligne de plantage',
+  ()=>assertSucceeds(deleteDoc(doc(ad,'erreursClient','e1'))));
+
 /* ══ meta/declarations : LES ANNONCES DE MARQUE ══════════════════════════
    Une annonce de marque fait dire a l'application « Annonce par Pales » sur
    des centaines de magasins. Tout tient donc a UNE ligne de regle, et ces

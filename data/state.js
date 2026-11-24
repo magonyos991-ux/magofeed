@@ -10,6 +10,33 @@
    à tort qu'elles ne sont déclarées nulle part.
    Chargé APRÈS data/drinks.js (recents pointe dans DRINKS) et AVANT index.html.
    ============================================================================ */
+/* ── LIRE UNE CLE JSON SANS QUE L'APP EN MEURE ──────────────────────────
+   Onze lectures ci-dessous faisaient JSON.parse(localStorage.getItem(…)) a
+   nu. Une seule cle qui n'est pas du JSON — « [oops », « undefined », une
+   ecriture coupee par iOS a court d'espace — et le script entier s'arretait
+   ici, avant la premiere fonction : ecran « Un instant… » a chaque lancement,
+   bouton Recharger qui rejoue la meme boucle, et la seule issue etait de
+   desinstaller (points locaux perdus). Rare (l'app n'ecrit que du
+   JSON.stringify), mais definitif.
+   Ici : une valeur illisible est RETIREE (elle ne se reparera pas toute
+   seule), la valeur par defaut prend sa place, et le journal des plantages
+   (window.magoJournal, premier script d'index.html) garde la trace de la cle
+   fautive. Une valeur lisible mais de la mauvaise forme (un objet la ou on
+   attend une liste) est traitee pareil : favorites.indexOf sur un objet
+   tuerait l'app tout autant. */
+function lireJSON(cle,defaut){
+  var brut=null;
+  try{brut=localStorage.getItem(cle);}catch(e){return defaut;}
+  if(brut==null||brut==="")return defaut;
+  var v;
+  try{v=JSON.parse(brut);}catch(e){v=undefined;}
+  var attendListe=Array.isArray(defaut),attendObjet=!attendListe&&defaut!==null&&typeof defaut==="object";
+  var bon=v!=null&&(attendListe?Array.isArray(v):attendObjet?(typeof v==="object"&&!Array.isArray(v)):true);
+  if(bon)return v;
+  try{localStorage.removeItem(cle);}catch(e){}
+  try{if(window.magoJournal)window.magoJournal("boot","localStorage corrompu : "+cle,"");}catch(e){}
+  return defaut;
+}
 var curCat="Tous",curSel=null,recents=[DRINKS[14],DRINKS[22]];
 var accentColor="#1a1714",accentLight="#f0eee9";
 var userLat=null,userLng=null;
@@ -22,12 +49,12 @@ var PROMO_REWARD=50; // points gagnes quand TA decouverte est acceptee au catalo
 var reportTarget=null,curMode="light",curLang="fr";
 var searchDebounce=null;
 var mapRenderedFor=null;
-var storePrices=JSON.parse(localStorage.getItem("magoPrices")||"{}");
+var storePrices=lireJSON("magoPrices",{});
 var curBudget=null;
-var favorites=JSON.parse(localStorage.getItem("magofavs")||"[]");
-var searchHistory=JSON.parse(localStorage.getItem("magosearchhist")||"[]");
-var userRatings=JSON.parse(localStorage.getItem("mago_ratings")||"{}");
-var userRecs=JSON.parse(localStorage.getItem("mago_recs")||"{}");
+var favorites=lireJSON("magofavs",[]);
+var searchHistory=lireJSON("magosearchhist",[]);
+var userRatings=lireJSON("mago_ratings",{});
+var userRecs=lireJSON("mago_recs",{});
 /* DEUX COMPTEURS, ET ILS NE DOIVENT JAMAIS SE MELANGER.
 
    scanCounts       MES scans a moi. Sert au chiffre « Scans » du profil, au
@@ -42,7 +69,7 @@ var userRecs=JSON.parse(localStorage.getItem("mago_recs")||"{}");
    reecrivait le tout dans son stockage local, gravant la confusion chez elle
    pour de bon. Le document stats/scanCounts est lisible sans compte, donc le
    faux chiffre s'affichait meme avant toute connexion. */
-var scanCounts=JSON.parse(localStorage.getItem("magoscans")||"{}");
+var scanCounts=lireJSON("magoscans",{});
 var scanCountsGlobal={};
 var curSort="distance";
 var soundEnabled=localStorage.getItem("magosound")!=="0";
@@ -51,7 +78,7 @@ var searchMode="drinks";
 var curStoreDetail=null;
 var storeDetailReturn="search";
 var contributedStores={};
-var votedDiscoveries=JSON.parse(localStorage.getItem("magoVotedDisc")||"[]");
+var votedDiscoveries=lireJSON("magoVotedDisc",[]);
 var drinkRatingsAgg={};
 var drinkRecsAgg={};
 var curFormat=null;
@@ -60,12 +87,12 @@ var curStoreSearchSort="distance";
 var curStoreDetailQuery="";
 var curStoreDetailCat="Tous";
 var lastBrandsAvailable=[];
-var geocodeCache=JSON.parse(localStorage.getItem("magoGeocodeCache")||"{}");
-var priceHist=JSON.parse(localStorage.getItem("magoPriceHist")||"{}");
+var geocodeCache=lireJSON("magoGeocodeCache",{});
+var priceHist=lireJSON("magoPriceHist",{});
 var leaderboardRows=null;
 var leaderboardLoadedAt=0;
-var userStreak=JSON.parse(localStorage.getItem("magoStreak")||'{"streak":0,"last":"","best":0}');
-var scanHist=JSON.parse(localStorage.getItem("magoScanHist")||"[]");
+var userStreak=lireJSON("magoStreak",{streak:0,last:"",best:0});
+var scanHist=lireJSON("magoScanHist",[]);
 /* REPARATION, UNE SEULE FOIS PAR APPAREIL. Les installations qui ont vecu avec
    le melange gardent les identifiants communautaires dans leur stockage local :
    les effacer ne suffit pas, il faut RECONSTRUIRE le vrai compteur personnel.
