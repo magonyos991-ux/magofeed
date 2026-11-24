@@ -21,7 +21,9 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
    Avant : la moindre exception au demarrage laissait un ecran NOIR muet (le
    splash #1a1714 n'est retire qu'a la fin de l'init), et le seul filet, tout
    en bas du fichier, ecrasait la page par une trace de pile illisible. Ici :
-   un message clair + un bouton Recharger. N'EFFACE RIEN. */
+   un message clair + un bouton Recharger. N'EFFACE RIEN.
+   Il porte aussi le JOURNAL DES PLANTAGES (magoJournal, plus bas) : c'est le
+   seul code deja la quand tout le reste echoue. */
 (function(){
   var SHOWN=false;
   function panel(msg){
@@ -39,15 +41,104 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
     d.querySelector("#mago-retry").onclick=function(){location.reload();};
   }
   window.__magoPanel=panel;
+
+  /* ── JOURNAL DES PLANTAGES ───────────────────────────────────────────────
+     Jusqu'ici rien n'etait enregistre nulle part : un plantage ne vivait que
+     sur l'ecran du telephone, et on ne pouvait pas dire QUEL plantage, sur
+     QUEL ecran, avec QUELLE version. magoJournal(type,msg,pile) construit une
+     ligne ANONYME — type, message tronque a 300, pile reduite aux
+     fichier:ligne et tronquee a 800, version, identifiant d'ecran, navigateur,
+     natif ou pas — et la range dans une file locale (localStorage magoErrFile,
+     10 lignes, dedoublonnee sur message+ecran) pour qu'elle survive au
+     rechargement. Le module Firebase la vide (magoJournalVider) des que
+     l'identite est connue, dans la collection erreursClient (creation seule).
+     Jamais envoye : uid, pseudo, position, contenu tape, photos, e-mail.
+     Plafond : 20 lignes par jour et par appareil (magoErrJour), pour qu'une
+     boucle d'erreur ne remplisse ni le telephone ni la base. */
+  var FILE_MAX=10,JOUR_MAX=20,videT=null;
+  function lireFile(){try{var f=JSON.parse(localStorage.getItem("magoErrFile")||"[]");return Array.isArray(f)?f:[];}catch(e){return [];}}
+  function ecrireFile(f){try{if(f&&f.length)localStorage.setItem("magoErrFile",JSON.stringify(f));else localStorage.removeItem("magoErrFile");}catch(e){}}
+  /* La version lue dans l'ecran Reglages (« 1.6.0 · build abc1234 »), le seul
+     endroit que le deploiement estampille. Vide tant que la page n'est pas
+     construite : le vidage la complete alors. */
+  function version(){
+    try{
+      var sp=document.querySelectorAll(".set-val");
+      for(var i=0;i<sp.length;i++){var t=String(sp[i].textContent||"");if(t.indexOf("build")!==-1)return t.replace(/\s*\u00B7\s*/g," ").trim().slice(0,40);}
+    }catch(e){}
+    return "";
+  }
+  function ecran(){
+    try{var on=document.querySelector(".screen.on");if(on&&on.id)return String(on.id).slice(0,40);}catch(e){}
+    return "boot";
+  }
+  /* Fichiers et numeros de ligne seulement : ni URL complete (elle porterait
+     le hash d'un lien partage), ni message repete, ni variable locale. */
+  function pileCourte(p){
+    var out=[],lignes=String(p||"").split("\n");
+    for(var i=0;i<lignes.length&&out.length<24;i++){
+      var m=/([^\/\\\s(@]+):(\d+)(?::\d+)?\)?\s*$/.exec(lignes[i]);
+      if(m)out.push(m[1]+":"+m[2]);
+    }
+    return out.join("\n").slice(0,800);
+  }
+  function natif(){try{return !!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());}catch(e){return false;}}
+  window.magoJournal=function(type,msg,pile){
+    try{
+      var m=String(msg||"").replace(/\s+/g," ").trim().slice(0,300);
+      /* « Script error. » : un script d'un autre domaine a plante, le
+         navigateur ne dit rien de plus. Une ligne sans contenu n'aide personne. */
+      if(!m||/^Script error\.?$/.test(m))return;
+      var jour=new Date().toISOString().slice(0,10),cpt={j:jour,n:0};
+      try{var c=JSON.parse(localStorage.getItem("magoErrJour")||"null");if(c&&c.j===jour&&typeof c.n==="number")cpt=c;}catch(e){}
+      if(cpt.n>=JOUR_MAX)return;
+      var e=ecran(),f=lireFile();
+      for(var i=0;i<f.length;i++)if(f[i]&&f[i].m===m&&f[i].e===e)return;
+      f.push({k:/^(error|rejection|boot|sw)$/.test(type)?type:"error",m:m,p:pileCourte(pile),v:version(),e:e,
+              n:String(navigator.userAgent||"").slice(0,120),natif:natif()});
+      if(f.length>FILE_MAX)f=f.slice(f.length-FILE_MAX);
+      ecrireFile(f);
+      cpt.n++;try{localStorage.setItem("magoErrJour",JSON.stringify(cpt));}catch(e2){}
+      /* Apres le demarrage, l'envoi suit de pres : on groupe les erreurs d'une
+         meme seconde, puis le module vide la file. */
+      if(typeof window.magoJournalVider==="function"){clearTimeout(videT);videT=setTimeout(function(){try{window.magoJournalVider();}catch(e3){}},1500);}
+    }catch(e4){}
+  };
+  window.magoJournalFile=lireFile;
+  window.magoJournalEcrire=ecrireFile;
+  window.magoJournalVersion=version;
+
   window.addEventListener("error",function(e){
     if(e&&e.target&&e.target!==window)return;
+    try{window.magoJournal("error",e.message||"Erreur",(e.error&&e.error.stack)||((e.filename||"")+":"+(e.lineno||"")));}catch(_){}
     panel((e.message||"Erreur")+"\n"+(e.filename||"")+":"+(e.lineno||"")+"\n"+((e.error&&e.error.stack)||""));
   },true);
+  /* Un rejet de promesse n'est PAS un plantage. Firestore « unavailable »,
+     auth/network-request-failed, n'importe quel appel reseau en sous-sol :
+     tout arrivait ici et recouvrait un accueil qui marchait d'un panneau
+     « L'appli n'a pas reussi a demarrer ». On note, on n'affiche plus rien ;
+     les codes reseau ne sont meme pas notes, ils ne disent rien du code. */
   window.addEventListener("unhandledrejection",function(e){
-    var r=e.reason;panel("Promesse rejetee : "+((r&&(r.message||r.code))||r)+"\n"+((r&&r.stack)||""));
+    var r=e&&e.reason,code=String((r&&r.code)||""),msg=String((r&&r.message)||(typeof r==="string"?r:"")||"");
+    if(!code&&!msg)return;
+    if(/unavailable|network-request-failed|^Script error\.?$/.test(code+" "+msg))return;
+    try{window.magoJournal("rejection","Promesse rejetee : "+(code?code+" ":"")+msg.slice(0,260),r&&r.stack);}catch(_){}
   });
-  setTimeout(function(){if(!window.__MAGO_BOOTED__)panel("Demarrage bloque (20 s sans reponse).");},20000);
-  window.__magoBootOK=function(){window.__MAGO_BOOTED__=true;};
+  /* Le compte a rebours de 20 s partait au PREMIER octet de la page. Sur un
+     reseau lent (120 Ko/s, wifi de magasin, sous-sol), data/drinks.js arrivait
+     a 8-9 s, l'accueil marchait, et a 20 s le panneau recouvrait tout — pour
+     toujours, personne ne le retirait. Il part maintenant a DOMContentLoaded
+     (tout le code est arrive, il ne reste qu'a demarrer), et __magoBootOK le
+     desarme et retire le panneau. Le minuteur de 90 s qui precede ne vise que
+     la page vraiment bloquee avant meme d'avoir recu son code. */
+  function bloque(){if(!window.__MAGO_BOOTED__)panel("Demarrage bloque (20 s sans reponse).");}
+  var armT=setTimeout(bloque,90000);
+  document.addEventListener("DOMContentLoaded",function(){clearTimeout(armT);armT=setTimeout(bloque,20000);});
+  window.__magoBootOK=function(){
+    window.__MAGO_BOOTED__=true;
+    clearTimeout(armT);
+    try{var c=document.getElementById("mago-crash");if(c)c.remove();}catch(e){}
+  };
 })();
 </script>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
@@ -1125,6 +1216,8 @@ try{
       <div id="admin-visibilite" style="margin-bottom:18px"></div>
       <div id="admin-points-rendus" style="margin-bottom:18px"></div>
       <div id="admin-offrir" style="margin-bottom:18px"></div>
+      <!-- Journal des plantages (erreursClient) : ce que l'app a envoye. -->
+      <div id="admin-erreurs" style="margin-bottom:18px"></div>
       <div id="admin-list"></div>
     </div>
     </div>
@@ -2013,6 +2106,73 @@ window.fbDeleteAccount = async function(motDePasse) {
    existe. Cette promesse marque le moment ou l'etat est enfin connu. */
 var _authReadyResolve;
 window._fbAuthReady = new Promise(function(res) { _authReadyResolve = res; });
+
+/* ── VIDAGE DU JOURNAL DES PLANTAGES ──────────────────────────────────────
+   Le premier script de la page (window.magoJournal) range chaque erreur dans
+   une file locale (localStorage magoErrFile). Ici on l'envoie, une ligne par
+   document erreursClient, des que l'identite est connue : l'auth anonyme
+   suffit, les regles n'exigent qu'un compte. Creation seule ; rien d'autre
+   que type, message, pile, version, ecran, navigateur, natif ; l'horodatage
+   est celui du serveur (la regle l'exige). Tant que les regles ne sont pas
+   publiees, l'ecriture est refusee et avalee : la file reste sur place,
+   bornee a 10, et repart au prochain lancement. On passe par window.fbAddDoc
+   (le meme addDoc, expose plus haut) comme le font les signalements : c'est
+   aussi ce qui permet a outils/essai-amorcage.mjs d'observer l'envoi. */
+var _journalEnCours = false;
+window.magoJournalVider = async function() {
+  if (_journalEnCours) return;
+  _journalEnCours = true;
+  try {
+    var file = (window.magoJournalFile && window.magoJournalFile()) || [];
+    if (!file.length) return;
+    if (!auth.currentUser) { try { await ensureAuthed(); } catch (e) {} }
+    if (!auth.currentUser) return;
+    while (file.length) {
+      var d = file[0] || {};
+      var docu = {
+        k: /^(error|rejection|boot|sw)$/.test(String(d.k)) ? String(d.k) : "error",
+        m: String(d.m || "").slice(0, 300),
+        p: String(d.p || "").slice(0, 800),
+        v: String(d.v || (window.magoJournalVersion && window.magoJournalVersion()) || "").slice(0, 40),
+        e: String(d.e || "boot").slice(0, 40),
+        n: String(d.n || "").slice(0, 120),
+        natif: d.natif === true,
+        t: serverTimestamp()
+      };
+      try { await window.fbAddDoc(collection(db, "erreursClient"), docu); }
+      catch (e) {
+        /* Une ligne mal formee est jetee (elle ne passera jamais) ; tout le
+           reste — regles pas encore publiees, hors ligne — garde la file
+           pour un prochain essai. */
+        var code = String((e && (e.code || e.message)) || e);
+        if (!/invalid-argument/.test(code)) break;
+      }
+      file.shift();
+      if (window.magoJournalEcrire) window.magoJournalEcrire(file);
+    }
+  } catch (e) {} finally { _journalEnCours = false; }
+};
+window._fbAuthReady.then(function() { setTimeout(function() { try { window.magoJournalVider(); } catch (e) {} }, 2500); });
+/* Lecture pour l'ecran Administration : les 50 dernieres lignes, regroupees
+   par type+message (combien de fois, sur quels ecrans, avec quelles versions).
+   Un seul champ trie : aucun index composite a creer. */
+window.fbDernieresErreurs = async function() {
+  var snap = await getDocs(query(collection(db, "erreursClient"), orderBy("t", "desc"), limit(50)));
+  var groupes = {}, ordre = [];
+  snap.forEach(function(x) {
+    var v = x.data() || {}, cle = String(v.k || "") + "|" + String(v.m || "");
+    if (!groupes[cle]) {
+      groupes[cle] = { k: String(v.k || ""), m: String(v.m || ""), p: String(v.p || ""), n: 0, versions: {}, ecrans: {}, natif: 0,
+                       t: (v.t && typeof v.t.toMillis === "function") ? v.t.toMillis() : 0 };
+      ordre.push(cle);
+    }
+    var g = groupes[cle]; g.n++;
+    if (v.v) g.versions[String(v.v)] = 1;
+    if (v.e) g.ecrans[String(v.e)] = 1;
+    if (v.natif === true) g.natif++;
+  });
+  return ordre.map(function(c) { return groupes[c]; });
+};
 
 onAuthStateChanged(auth, async function(user) {
   if (_authReadyResolve) { _authReadyResolve(); _authReadyResolve = null; }
@@ -14588,7 +14748,16 @@ function mergeCatalog(rows){
   }
   return added;
 }
+/* Memorise : 15-25 ms par appel (CPU x4), et il etait appele a chaque rendu
+   de liste et du rail des marques. La cle est la taille du catalogue : tout
+   ce qui ajoute ou retire une fiche (mergeCatalog, fusions du serveur) la
+   change. Les renommages de l'admin (fbNamesLoaded) et le catalogue
+   communautaire (fbCatalogLoaded) l'invalident aussi explicitement, parce
+   qu'ils peuvent changer une marque sans changer le nombre de fiches. Les
+   appelants (rail des marques, banniere de recherche) ne font que lire. */
+var _BRAND_GROUPS=null,_BRAND_GROUPS_CLE=-1;
 function getBrandGroups(){
+  if(_BRAND_GROUPS&&_BRAND_GROUPS_CLE===DRINKS.length)return _BRAND_GROUPS;
   /* Regroupement par cle ECRASEE (minuscules, accents, espaces et
      ponctuation retires) : « MayTea » et « May Tea » sont un seul groupe,
      affiche sous la graphie la plus repandue. Le catalogue natif est
@@ -14617,7 +14786,51 @@ function getBrandGroups(){
     if(b.brand==="Autre")return -1;
     return b.drinks.length-a.drinks.length||a.brand.localeCompare(b.brand);
   });
+  _BRAND_GROUPS=groups;_BRAND_GROUPS_CLE=DRINKS.length;
   return groups;
+}
+/* Ce que le serveur change apres coup dans le catalogue (fiches de la
+   communaute, fusions, renommages de l'admin) rend faux ce qui a ete calcule
+   avant : les groupes de marques, les mots de marque, et les formes des fiches
+   renommees. On jette juste ca ; le reste des formes (4 450 fiches, 137 ms)
+   est garde, et ce qui manque se recalcule a la demande comme avant. Sans
+   cette invalidation, le prechauffage ci-dessous — qui tourne AVANT que
+   Firestore reponde — aurait fige les mots de marque sans les marques de la
+   communaute, la ou une premiere recherche tardive les voyait. */
+["fbCatalogLoaded","fbMergesLoaded","fbNamesLoaded"].forEach(function(ev){
+  window.addEventListener(ev,function(){
+    _BRAND_GROUPS=null;_MOTS_MARQUE=null;
+    try{Object.keys(window.DRINK_NAMES||{}).forEach(function(id){delete _FORMES[id];});}catch(e){}
+  });
+});
+/* ── PRECHAUFFAGE DES CACHES DE RECHERCHE ─────────────────────────────────
+   La toute premiere lettre tapee — celle qui fait juger l'app — etait la plus
+   lente : 536 ms contre 225-305 ensuite (CPU x4), parce qu'elle payait seule
+   les formes normalisees des 4 450 fiches (137 ms), les mots de marque et le
+   regroupement par marque. On les calcule une fois le splash parti, dans les
+   temps morts (requestIdleCallback ; sans lui, 1,5 s apres, par minuteur),
+   par tranches de 500 fiches pour ne jamais retenir un geste. Le catalogue
+   natif est deja final a ce moment (le filtre DRINK_MERGES tourne au
+   chargement) ; chaque tranche relit DRINKS, et une fiche arrivee entre deux
+   est simplement traitee a la demande, comme avant. */
+var _prechauffeFait=false;
+function prechaufferRecherche(){
+  if(_prechauffeFait)return;_prechauffeFait=true;
+  var i=0;
+  function plusTard(fn,delai){
+    if(typeof window.requestIdleCallback==="function")window.requestIdleCallback(fn,{timeout:2000});
+    else setTimeout(fn,delai);
+  }
+  function tranche(){
+    try{
+      var liste=window.DRINKS||[],fin=Math.min(i+500,liste.length);
+      for(;i<fin;i++)formesFiche(liste[i]);
+      if(i<liste.length){plusTard(tranche,40);return;}
+      motsDeMarque();
+      getBrandGroups();
+    }catch(e){}
+  }
+  plusTard(tranche,1500);
 }
 /* Logos officiels des grandes marques (service Clearbit, usage nominatif :
    identifier la marque de ses propres produits). Marque absente de la carte
@@ -31525,6 +31738,12 @@ function initSplash(){
     // garde anti-intro) et rien ne la recalculait apres : elle n'apparaissait
     // qu'au premier changement d'onglet. On la reevalue des que le splash part.
     try{renderChasse();}catch(e){}
+    /* L'accueil est visible et vivant : le filet de demarrage n'a plus rien
+       a dire. Sans ca, sur reseau lent, son panneau « L'appli n'a pas reussi
+       a demarrer » recouvrait un accueil qui marchait, a 20 s. */
+    try{window.__magoBootOK();}catch(e){}
+    /* Et la premiere lettre tapee ne paie plus les caches de recherche. */
+    try{prechaufferRecherche();}catch(e){}
   };
   if(typeof window.magoSplashPret==="function")window.magoSplashPret(fermer);
   else setTimeout(fermer,0);
@@ -32126,8 +32345,48 @@ function renderDeclarationsMarque(){
 }
 window.renderDeclarationsMarque=renderDeclarationsMarque;
 
+/* ── DERNIERES ERREURS (journal des plantages) ────────────────────────────
+   Les lignes deposees par magoJournal, regroupees par message : combien de
+   fois, sur quels ecrans, avec quelles versions. C'est ce qui permet enfin de
+   repondre a « ca plante » par « ou, et avec quel build ». Reste en francais,
+   comme tout l'ecran d'administration : une seule personne le lit. */
+function renderDernieresErreurs(){
+  if(!isAdmin)return;
+  var host=document.getElementById("admin-erreurs");if(!host)return;
+  if(!window.fbDernieresErreurs){host.innerHTML="";return;}
+  function carte(corps){return '<div class="cl-card"><div class="cl-name">Derni\u00E8res erreurs</div>'+corps+'</div>';}
+  host.innerHTML=carte('<div class="cl-line">Lecture du journal\u2026</div>');
+  window.fbDernieresErreurs().then(function(rows){
+    if(!rows||!rows.length){
+      host.innerHTML=carte('<div class="cl-line">Aucune erreur enregistr\u00E9e : les lignes appara\u00EEtront au fil des plantages que l\u2019app signale d\u2019elle-m\u00EAme.</div>');
+      return;
+    }
+    var h="";
+    rows.forEach(function(g){
+      var quand="";
+      try{quand=g.t?new Date(g.t).toLocaleString("fr-BE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"";}catch(e){}
+      h+='<div style="padding:8px 0;border-top:1px solid var(--border)">'+
+        '<div style="display:flex;gap:8px;align-items:baseline">'+
+          '<span style="font-size:10.5px;font-weight:800;color:var(--s3);text-transform:uppercase;flex:none">'+sanitize(g.k)+'</span>'+
+          '<span style="flex:1;min-width:0;font-size:12.5px;font-weight:700;color:var(--s1);word-break:break-word">'+sanitize(g.m)+'</span>'+
+          '<span class="cl-line" style="margin:0;flex:none;font-weight:800">'+g.n+'\u00D7</span>'+
+        '</div>'+
+        '<div class="cl-line" style="margin:2px 0 0">'+sanitize(Object.keys(g.ecrans).join(", ")||"\u00E9cran inconnu")+' \u00B7 '+
+          sanitize(Object.keys(g.versions).join(", ")||"version inconnue")+(g.natif?' \u00B7 natif':'')+(quand?' \u00B7 '+sanitize(quand):'')+'</div>'+
+        (g.p?'<pre style="margin:4px 0 0;font-size:10px;color:var(--s3);white-space:pre-wrap;word-break:break-word;max-height:72px;overflow:hidden">'+sanitize(g.p.slice(0,240))+'</pre>':'')+
+      '</div>';
+    });
+    host.innerHTML=carte(h);
+  }).catch(function(e){
+    var c=String((e&&(e.code||e.message))||e);
+    host.innerHTML=carte('<div class="cl-line">'+(c.indexOf("permission")!==-1
+      ?"Publie les nouvelles r\u00E8gles Firestore (erreursClient) pour lire le journal."
+      :"Indisponible pour le moment.")+'</div>');
+  });
+}
 function renderAdmin(){
   try{ renderDeclarationsMarque(); }catch(e){ console.warn("declarations marque:",e); }
+  try{ renderDernieresErreurs(); }catch(e){ console.warn("dernieres erreurs:",e); }
   try{ renderOffrirPoints(); }catch(e){}
   try{ renderRejouerSignalements(); }catch(e){}
   try{ renderReparerVisibilite(); }catch(e){}
@@ -36430,6 +36689,9 @@ document.getElementById("q").addEventListener("blur",function(){var v=document.g
    promesse, un flux asynchrone) ne doit JAMAIS figer toute l'app ni donner
    l'impression qu'elle "redémarre toute seule". On l'attrape, on la note en
    console pour le débogage, et l'app continue de tourner normalement. */
+/* Le journal des plantages (erreursClient) est nourri par le PREMIER script
+   de la page, qui ecoute les memes evenements : rien a ajouter ici, une
+   seconde ligne serait un doublon. */
 window.addEventListener("error",function(e){
   try{console.warn("[Magofeed] erreur interceptée:",(e&&(e.message||(e.error&&e.error.message)))||e);}catch(_){}
 });
@@ -36793,30 +37055,94 @@ try{
      fbEstSoutien n'a personne a regarder. */
   setTimeout(function(){try{donRetour();}catch(e){}},3000);
   enhanceA11y();
-  // Si Firebase ne repond jamais (SDK bloque), l'app tourne quand meme en mode
-  // degrade : on met le filet en veille pour ne pas afficher le panneau a tort.
-  setTimeout(function(){try{window.__magoBootOK();}catch(_e){}},15000);
+  /* L'app a demarre : le filet du premier script n'a plus rien a dire (il
+     attendait fbStoresLoaded ou 15 s, et recouvrait entre-temps un accueil
+     qui marchait), et la serie d'erreurs de demarrage consecutives, qui
+     decide de ce que la recuperation a le droit de jeter, repart de zero. */
+  try{window.__magoBootOK();}catch(_e){}
+  try{localStorage.removeItem("magoBootErreurs");}catch(_e){}
   // Le reset dev de l'onboarding (removeItem magoob/magotuto a chaque ouverture) a ete retire :
   // en production il relançait l'onboarding a chaque visite. Pour le revoir en dev,
   // utiliser le bouton "Revoir l'introduction" dans les parametres (resetOnboarding).
 }catch(e){
   try{console.error("[Magofeed] erreur de démarrage:",e);}catch(_){}
+  /* Au journal d'abord : c'est la seule trace qui survit au rechargement. */
+  try{window.magoJournal&&window.magoJournal("boot",(e&&(e.message||String(e)))||String(e),e&&e.stack);}catch(_){}
   // Plutôt qu'un mur de texte rouge (illisible et effrayant pour un utilisateur),
-  // on affiche un écran doux et on tente UNE récupération automatique : vider le
-  // cache puis recharger. Verrou de session -> jamais de boucle de rechargement.
+  // on affiche un écran doux et on tente UNE récupération automatique.
+  // Verrou de session -> jamais de boucle de rechargement.
   var _triedRecover=false;try{_triedRecover=sessionStorage.getItem("mago_boot_recover")==="1";}catch(_){}
-  document.body.innerHTML='<div style="position:fixed;inset:0;background:#151210;color:#f4f0e9;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px;font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;z-index:99999">'+
-    '<div style="margin-bottom:14px;color:var(--s1);display:flex;justify-content:center">'+icoTarget(44)+'</div>'+
+  /* Erreurs de demarrage CONSECUTIVES (remis a zero des que l'app demarre) :
+     c'est ce compteur qui decide de ce que la recuperation a le droit de
+     jeter. La premiere fois, rien ; la deuxieme, nos caches de code. */
+  var _nbErr=0;try{_nbErr=Number(localStorage.getItem("magoBootErreurs")||0)||0;}catch(_){}
+  _nbErr++;try{localStorage.setItem("magoBootErreurs",String(_nbErr));}catch(_){}
+  /* Le texte de l'erreur reste a l'ecran, en gris : avant, le panneau du
+     premier script etait efface par cet ecran, et il ne restait que « un
+     petit souci » a se mettre sous la dent. */
+  var _diag="";try{_diag=String((e&&(e.stack||e.message))||e).slice(0,600);}catch(_){}
+  var _ico="";try{_ico=icoTarget(44);}catch(_){}
+  document.body.innerHTML='<div style="position:fixed;inset:0;background:#151210;color:#f4f0e9;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px;font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;z-index:99999;overflow:auto">'+
+    '<div style="margin-bottom:14px;color:var(--s1);display:flex;justify-content:center">'+_ico+'</div>'+
     '<div style="font-size:18px;font-weight:800;margin-bottom:8px">Un instant…</div>'+
     '<div style="font-size:14px;color:#9a8f80;max-width:300px;line-height:1.5;margin-bottom:24px">Magofeed a rencontré un petit souci au démarrage. On repart proprement, tes données sont en sécurité.</div>'+
-    '<button id="mago-recover" style="background:#f4f0e9;color:#151210;border:none;border-radius:14px;padding:13px 28px;font-size:15px;font-weight:800;cursor:pointer">Recharger l\'app</button></div>';
+    '<button id="mago-recover" style="background:#f4f0e9;color:#151210;border:none;border-radius:14px;padding:13px 28px;font-size:15px;font-weight:800;cursor:pointer">Recharger l\'app</button>'+
+    /* Deuxieme passage dans la meme session : recharger n'a pas suffi. On
+       offre alors de repartir des donnees locales — sans que ce soit le
+       premier geste propose, parce qu'il coute les points et favoris
+       locaux non synchronises. */
+    (_triedRecover?'<button id="mago-reset" style="margin-top:12px;background:transparent;color:#9a8f80;border:1.5px solid #3a332c;border-radius:14px;padding:11px 22px;font-size:13px;font-weight:700;cursor:pointer">Réinitialiser les données locales</button>':'')+
+    '<pre id="mago-diag" style="margin-top:22px;max-width:320px;text-align:left;white-space:pre-wrap;word-break:break-word;font-size:10px;line-height:1.4;color:#6f675c"></pre></div>';
+  try{document.getElementById("mago-diag").textContent=_diag;}catch(_){}
   var _doRecover=function(){
     try{sessionStorage.setItem("mago_boot_recover","1");}catch(_){}
-    if(window.caches&&caches.keys){
-      caches.keys().then(function(ks){return Promise.all(ks.map(function(k){return caches.delete(k);}));}).catch(function(){}).then(function(){location.reload();});
-    }else{location.reload();}
+    /* Hors ligne, les caches du service worker sont la SEULE copie de l'app :
+       les vider, c'etait la page d'erreur du navigateur (« site inaccessible »)
+       a la place d'une app qui demarrait tres bien avec eux. On recharge, et
+       rien d'autre. */
+    var enLigne=true;try{enLigne=navigator.onLine!==false;}catch(_){}
+    if(!enLigne||!window.caches||!caches.keys){location.reload();return;}
+    var fini=false;function go(){if(fini)return;fini=true;location.reload();}
+    setTimeout(go,4000);
+    /* Premiere erreur : le code en cache est peut-etre simplement perime. On
+       demande au service worker de se mettre a jour, puis on recharge. */
+    if(_nbErr<2){
+      var p=Promise.resolve();
+      try{if(navigator.serviceWorker&&navigator.serviceWorker.getRegistration)p=navigator.serviceWorker.getRegistration().then(function(r){return r&&r.update();});}catch(_){}
+      p.catch(function(){}).then(go);
+      return;
+    }
+    /* Deuxieme erreur consecutive : on jette nos caches de CODE (magofeed-*),
+       jamais les vignettes (magofeed-img-v1 : ~1 Mo a retelecharger, et
+       elles n'ont rien a voir avec un plantage), ni ceux d'un autre site.
+       Et seulement si le serveur REPOND : le navigateur se dit « en ligne »
+       des que le wifi est accroche, meme sans internet derriere (sous-sol,
+       portail captif), et jeter le code sans pouvoir le retelecharger, c'est
+       la page d'erreur du navigateur. La sonde porte une cle unique pour que
+       le service worker ne la serve pas depuis son cache. */
+    var sonde=Promise.resolve(false);
+    try{sonde=fetch("./sw.js?sonde="+Date.now(),{cache:"no-store"}).then(function(r){return !!(r&&r.ok);},function(){return false;});}catch(_){}
+    sonde.then(function(joignable){
+      if(!joignable){go();return;}
+      caches.keys().then(function(ks){
+        return Promise.all(ks.filter(function(k){return k.indexOf("magofeed-")===0&&k!=="magofeed-img-v1";}).map(function(k){return caches.delete(k);}));
+      }).catch(function(){}).then(go);
+    });
   };
   var _rb=document.getElementById("mago-recover");if(_rb)_rb.onclick=_doRecover;
+  var _rz=document.getElementById("mago-reset");if(_rz)_rz.onclick=function(){
+    /* Seulement NOS cles (mago*, mago_*) : jamais firebase:authUser, qui porte
+       la session du compte, ni magoAuth* (le souvenir qu'un vrai compte existe
+       ici, sans lequel l'app risquerait de poser un anonyme a sa place). Le
+       journal des plantages (magoErr*) reste : il raconte justement ce qui
+       vient de se passer. */
+    try{
+      var cles=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("mago")===0&&k.indexOf("magoErr")!==0&&k.indexOf("magoAuth")!==0)cles.push(k);}
+      cles.forEach(function(k){try{localStorage.removeItem(k);}catch(_){}});
+    }catch(_){}
+    try{sessionStorage.removeItem("mago_boot_recover");}catch(_){}
+    location.reload();
+  };
   // Récupération auto UNE seule fois (si pas déjà tentée dans cette session).
   if(!_triedRecover)setTimeout(_doRecover,1300);
 }

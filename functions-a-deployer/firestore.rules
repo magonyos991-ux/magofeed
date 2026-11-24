@@ -1003,6 +1003,34 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    /* ── Journal des plantages de l'app (erreursClient) ───────────────────
+     * Jusqu'ici rien n'etait enregistre nulle part : un plantage ne vivait
+     * que sur l'ecran du telephone, et le fondateur ne pouvait pas dire QUEL
+     * plantage, sur QUEL ecran, avec QUELLE version. L'app depose ici une
+     * ligne par erreur (index.html : window.magoJournal), au plus vingt par
+     * jour et par appareil.
+     * Anonyme par construction : type, message et pile TRONQUES, version,
+     * identifiant d'ecran, navigateur. Ni uid, ni position, ni pseudo, ni
+     * contenu tape. Chacun peut AJOUTER une ligne, seul l'administrateur
+     * relit ; personne ne modifie. Les bornes de taille sont celles que le
+     * client applique deja : une ligne plus longue n'est pas une erreur de
+     * l'app, c'est quelqu'un qui ecrit a la main. */
+    match /erreursClient/{id} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['k','m','p','v','e','n','natif','t'])
+        && request.resource.data.k in ['error','rejection','boot','sw']
+        && request.resource.data.m is string && request.resource.data.m.size() <= 300
+        && request.resource.data.p is string && request.resource.data.p.size() <= 800
+        && request.resource.data.v is string && request.resource.data.v.size() <= 40
+        && request.resource.data.e is string && request.resource.data.e.size() <= 40
+        && request.resource.data.n is string && request.resource.data.n.size() <= 120
+        && request.resource.data.natif is bool
+        && request.resource.data.t == request.time;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
     /* ── Demandes de certification d'un commerçant ────────────────────────
      * Un document par magasin (id = storeId) : deux personnes ne peuvent pas
      * revendiquer la même boutique en parallèle.
