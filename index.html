@@ -31768,40 +31768,75 @@ function renderPointsRendus(){
      curseur, et le bouton propose de reprendre exactement ou il s'est arrete.
      Le relancer ne fait rien de mal : un score deja juste n'est pas reecrit. */
   var rcBtn=document.getElementById("rc-btn"), rcRes=document.getElementById("rc-res");
-  var rcCurseur=null, rcCumul={lus:0,changes:0,rendus:0,baisses:0,erreurs:0,jamaisFiges:0};
+  /* L'ETAT SURVIT AU REDESSIN. renderAdmin est rappele en cascade (chaque
+     pastille de categorie, chaque promotion de decouverte) et reconstruit ce
+     bloc : des variables locales perdaient le curseur de reprise au milieu
+     d'un balayage, et le bouton redevenait « Recalculer » comme si de rien
+     n'etait. */
+  window._rcEtat=window._rcEtat||{curseur:null,enCours:false,
+    cumul:{lus:0,repasses:0,changes:0,rendus:0,baisses:0,erreurs:0,jamaisFiges:0,ptsComptes:0,ptsEnAttente:0}};
+  var E=window._rcEtat;
   function rcLancer(){
     if(!window.fbRecalculerTousLesScores){rcRes.textContent="Outil indisponible (module hors ligne)";return;}
+    /* DEUX LANCEMENTS EN MEME TEMPS DONNENT UN COMPTE FAUX : le bouton reste
+       cliquable pendant l'appel, et deux balayages additionnaient leurs
+       chiffres dans le meme cumul. */
+    if(E.enCours){rcRes.textContent="Un recalcul est d\u00e9j\u00e0 en cours \u2014 attends sa r\u00e9ponse.";return;}
+    /* UN BALAYAGE NEUF REPART DE ZERO. Sans ca, relancer apres « Termine »
+       affichait 338 comptes relus pour 169 comptes : le cumul ne doit vivre
+       que le temps d'un balayage ET de ses reprises, ce que le curseur dit
+       deja exactement. */
+    if(!E.curseur)E.cumul={lus:0,repasses:0,changes:0,rendus:0,baisses:0,erreurs:0,jamaisFiges:0,ptsComptes:0,ptsEnAttente:0};
+    E.enCours=true;
     rcBtn.style.opacity=".5";
-    rcRes.textContent=rcCurseur?"Reprise du recalcul…":"Recalcul en cours…";
-    window.fbRecalculerTousLesScores(rcCurseur).then(function(r){
-      rcBtn.style.opacity="";
-      if(!r){rcRes.textContent="Échec : fonction non déployée";try{playSound("err");}catch(e){}return;}
-      rcCumul.lus+=(r.lus||0); rcCumul.changes+=(r.changes||0);
-      rcCumul.rendus+=(r.rendus||0); rcCumul.baisses+=(r.baisses||0);
-      rcCumul.erreurs+=(r.erreurs||0); rcCumul.jamaisFiges+=(r.jamaisFiges||0);
-      rcCurseur=r.fini?null:(r.curseur||null);
+    rcRes.textContent=E.curseur?"Reprise du recalcul\u2026":"Recalcul en cours\u2026";
+    window.fbRecalculerTousLesScores(E.curseur).then(function(r){
+      E.enCours=false; rcBtn.style.opacity="";
+      if(!r){rcRes.textContent="\u00c9chec : fonction non d\u00e9ploy\u00e9e";try{playSound("err");}catch(e){}return;}
+      var C=E.cumul;
+      C.lus+=(r.lus||0); C.repasses+=(r.repasses||0); C.changes+=(r.changes||0);
+      C.rendus+=(r.rendus||0); C.baisses+=(r.baisses||0); C.erreurs+=(r.erreurs||0);
+      C.jamaisFiges+=(r.jamaisFiges||0);
+      C.ptsComptes+=(r.ptsComptes||0); C.ptsEnAttente+=(r.ptsEnAttente||0);
+      E.curseur=r.fini?null:(r.curseur||null);
       var l=[];
-      l.push(rcCumul.lus+" compte"+(rcCumul.lus>1?"s":"")+" relu"+(rcCumul.lus>1?"s":"")+", "+
-             rcCumul.changes+" score"+(rcCumul.changes>1?"s":"")+" corrigé"+(rcCumul.changes>1?"s":"")+".");
-      if(rcCumul.rendus)l.push(rcCumul.rendus+" point"+(rcCumul.rendus>1?"s":"")+" rendu"+(rcCumul.rendus>1?"s":"")+".");
-      if(rcCumul.baisses)l.push(rcCumul.baisses+" point"+(rcCumul.baisses>1?"s":"")+" retiré"+(rcCumul.baisses>1?"s":"")+" (sanction déjà posée).");
-      if(rcCumul.erreurs)l.push(rcCumul.erreurs+" compte"+(rcCumul.erreurs>1?"s":"")+" en erreur, relance pour "+(rcCumul.erreurs>1?"les":"le")+" reprendre.");
-      /* Les comptes jamais figes sont laisses de cote EXPRES : les recalculer
-         leur ajouterait une deuxieme fois leurs points de preuves. On dit quoi
-         faire, dans l'ordre, plutot que de les gonfler en silence. */
-      if(rcCumul.jamaisFiges)l.push(rcCumul.jamaisFiges+" compte"+(rcCumul.jamaisFiges>1?"s":"")+" jamais fig\u00e9"+(rcCumul.jamaisFiges>1?"s":"")+" : laiss\u00e9"+(rcCumul.jamaisFiges>1?"s":"")+" de c\u00f4t\u00e9 pour ne pas compter leurs points deux fois. Lance « Figer les points existants » puis ce recalcul.");
-      if(rcCurseur){
-        l.push("Interrompu par le délai : il reste des comptes.");
+      l.push(C.repasses+" compte"+(C.repasses>1?"s":"")+" repass\u00e9"+(C.repasses>1?"s":"")+" \u00e0 la formule sur "+
+             C.lus+" lu"+(C.lus>1?"s":"")+", "+C.changes+" score"+(C.changes>1?"s":"")+" corrig\u00e9"+(C.changes>1?"s":"")+".");
+      if(C.rendus)l.push(C.rendus+" point"+(C.rendus>1?"s":"")+" rendu"+(C.rendus>1?"s":"")+".");
+      /* ON NE NOMME PAS LA CAUSE D'UNE BAISSE : le serveur ne rend qu'un
+         nombre. Ecrire « sanction deja posee » etait une cause INVENTEE par
+         l'ecran — une baisse peut aussi venir d'un compteur corrige. */
+      if(C.baisses)l.push(C.baisses+" point"+(C.baisses>1?"s":"")+" retir\u00e9"+(C.baisses>1?"s":"")+" par la formule.");
+      if(C.erreurs)l.push(C.erreurs+" compte"+(C.erreurs>1?"s":"")+" en erreur, relance pour "+(C.erreurs>1?"les":"le")+" reprendre.");
+      /* LES COMPTES JAMAIS FIGES : la LISTE, pas seulement le nombre. Figer
+         est definitif — pointsHerites n'est ecrivable par personne, pas meme
+         par toi — donc tu dois voir ce que tu figes avant de le figer. Un
+         solde aberrant saute alors aux yeux. */
+      if(C.jamaisFiges){
+        var ex=(r.jamaisFigesDetail||[]).slice(0,5)
+          .map(function(x){return x.uid+" ("+x.points+" pts)";}).join(", ");
+        l.push(C.jamaisFiges+" compte"+(C.jamaisFiges>1?"s":"")+" jamais fig\u00e9"+(C.jamaisFiges>1?"s":"")+
+          " : laiss\u00e9"+(C.jamaisFiges>1?"s":"")+" de c\u00f4t\u00e9."+(ex?" Par exemple "+ex+".":"")+
+          " Regarde ces soldes AVANT de lancer \u00ab Figer les soldes de points \u00bb (en bas de cet \u00e9cran) : figer est d\u00e9finitif.");
+      }
+      /* L'ANCIENNE COLONNE MORTE : comptee, jamais payee. */
+      if(C.ptsComptes){
+        l.push(C.ptsComptes+" compte"+(C.ptsComptes>1?"s":"")+" porte"+(C.ptsComptes>1?"nt":"")+
+          " encore "+C.ptsEnAttente+" point"+(C.ptsEnAttente>1?"s":"")+" dans l\u2019ancienne colonne de la chasse. "+
+          "Ils ne sont PAS vers\u00e9s automatiquement : cette colonne a \u00e9t\u00e9 \u00e9crivable depuis un navigateur.");
+      }
+      if(E.curseur){
+        l.push("Interrompu par le d\u00e9lai : il reste des comptes.");
         rcBtn.textContent="Reprendre le recalcul";
       }else{
-        l.push("✓ Terminé.");
+        l.push(C.changes?"\u2713 Termin\u00e9.":"\u2713 Termin\u00e9 \u2014 aucun score n\u2019avait besoin d\u2019\u00eatre corrig\u00e9.");
         rcBtn.textContent="Recalculer tous les scores";
-        try{playSound("win");}catch(e){}
+        if(C.changes){try{playSound("win");}catch(e){}}
       }
       rcRes.textContent=l.join(" ");
     }).catch(function(e){
-      rcBtn.style.opacity="";
-      rcRes.textContent="Échec : "+((e&&(e.code||e.message))||e);
+      E.enCours=false; rcBtn.style.opacity="";
+      rcRes.textContent="\u00c9chec : "+((e&&(e.code||e.message))||e);
       try{playSound("err");}catch(e2){}
     });
   }
@@ -31812,8 +31847,8 @@ function renderPointsRendus(){
          « reversible » — mais il ne doit pas partir sur un doigt qui glisse. */
       actionSensible({
         titre:"Recalculer tous les scores",
-        quoi:"Aucun point n'est inventé : la formule officielle du serveur repasse sur chaque compte. Les scores déjà justes ne sont pas réécrits. C'est ce qui rend les points de la chasse aux codes-barres à ceux qui les ont gagnés.",
-        niveau:"massif", mot:"RECALCULER", reversible:true
+        quoi:"Aucun point n'est inventé : la formule officielle du serveur repasse sur chaque compte DÉJÀ FIGÉ. Les comptes jamais figés sont laissés de côté et listés à la fin. Les scores déjà justes ne sont pas réécrits — mais ceux qui changent changent pour de bon : aucun score d'avant n'est gardé.",
+        niveau:"massif", mot:"RECALCULER", reversible:false
       }).then(function(oui){ if(oui)rcLancer(); });
     };
     rcBtn.onkeydown=function(ev){ if(ev.key==="Enter")rcBtn.onclick(); };

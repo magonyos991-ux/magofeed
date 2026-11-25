@@ -237,14 +237,27 @@ async function recalculerScore(uid) {
     /* pointsChasse : les confirmations de codes-barres de la chasse. Sans
        cette ligne, la colonne existerait et ne compterait pour rien — c'est
        exactement la panne qu'on vient de corriger, deplacee d'un cran.
-       Et d.pts, l'ancienne colonne morte : on la relit UNE FOIS POUR TOUTES
-       plutot que de migrer les documents. Personne ne perd ce qu'il a gagne,
-       et aucune donnee de production n'est reecrite pour ça. La colonne est
-       desormais declaree dans champsServeur() des regles, donc plus
-       ecrivable depuis un navigateur : c'etait la condition pour la relire. */
+
+       ET PAS « pts », L'ANCIENNE COLONNE MORTE. Je l'avais ajoutee ici pour
+       rendre les points deja gagnes sans toucher aux documents. C'etait une
+       faute, et une relecture adverse l'a trouvee : « pts » n'a JAMAIS ete
+       protege par les regles pendant toute la periode ou il se remplissait.
+       Le commentaire de firestore.rules le dit mot pour mot — « inoffensif
+       tant que rien ne le lisait ; une porte ouverte sur le classement des
+       l'instant ou on le lit ». Fermer la porte aujourd'hui empeche les
+       ecritures FUTURES ; additionner la colonne encaisserait tout ce qui y a
+       ete ecrit quand elle etait ouverte, sans plafond et sans moyen de
+       distinguer cinq points gagnes d'un nombre tape dans une console.
+       On ne paie donc pas a l'aveugle. La colonne reste fermee, le recalcul
+       de masse COMPTE ce qu'elle contient et le rapporte, et c'est une
+       personne qui decide — pas une somme.
+
+       Number() sur chaque terme : une chaine « 12 » rendrait toute la somme
+       en texte, et Math.max comparerait des caracteres. Aucune chaine connue
+       en base, mais la ligne doit etre coherente avec elle-meme. */
     const total = Math.max(0,
-      herite + (d.pointsPreuves || 0) + (d.refPoints || 0)
-      + (d.pointsOfferts || 0) + (d.pointsChasse || 0) + (Number(d.pts) || 0)
+      herite + (Number(d.pointsPreuves) || 0) + (Number(d.refPoints) || 0)
+      + (Number(d.pointsOfferts) || 0) + (Number(d.pointsChasse) || 0)
       - penalite);
     bilan.apres = total;
     if (!premierPassage && d.points === total && (Number(d.penalty) || 0) === penalite) return;
@@ -538,8 +551,18 @@ exports.scoreApresSanction = onDocumentUpdated(
   async (event) => {
     const a = event.data.before.data() || {};
     const b = event.data.after.data() || {};
+    /* pointsChasse DOIT figurer ici. Sans lui, crediter une confirmation de
+       code-barres ecrivait bien la colonne, mais RIEN ne recalculait le
+       score : les cinq points existaient en base et n'apparaissaient nulle
+       part jusqu'a ce qu'il arrive autre chose a la personne. C'est la meme
+       panne que celle qu'on repare, deplacee d'un cran de plus.
+       Pas de boucle : recalculerScore n'ecrit que points, penalty et, au
+       premier passage, pointsHerites/pointsPreuves. Son ecriture declenche
+       bien ce gestionnaire, mais les trois champs gardes sont inchanges et il
+       ressort a la ligne suivante. */
     if ((a.penalty || 0) === (b.penalty || 0) &&
-        (a.pointsHerites || 0) === (b.pointsHerites || 0)) return;
+        (a.pointsHerites || 0) === (b.pointsHerites || 0) &&
+        (a.pointsChasse || 0) === (b.pointsChasse || 0)) return;
     await recalculerScore(event.params.uid);
   }
 );
@@ -934,6 +957,8 @@ exports.recalculerTousLesScores = onCall(
     const LIMITE_MS = 450000;
     let curseur = (req.data && req.data.curseur) ? String(req.data.curseur) : null;
     let lus = 0, changes = 0, rendus = 0, baisses = 0, erreurs = 0, jamaisFiges = 0;
+    let ptsEnAttente = 0, ptsComptes = 0;
+    const jamaisFigesDetail = [], ptsDetail = [];
 
     for (;;) {
       let q = db.collection("users").orderBy("__name__").limit(50);
@@ -955,7 +980,21 @@ exports.recalculerTousLesScores = onCall(
            sur tous les comptes dormants d'un seul geste.
            On les COMPTE et on les laisse. Le bouton dit alors quoi faire :
            « Figer les points existants » d'abord, ce recalcul ensuite. */
-        if ((s.data() || {}).pointsHerites === undefined) { jamaisFiges++; continue; }
+        const dd = s.data() || {};
+        /* LA COLONNE MORTE EST COMPTEE, PAS PAYEE. Voir recalculerScore :
+           « pts » a ete ecrivable depuis un navigateur pendant toute la
+           periode ou il se remplissait. On le RAPPORTE pour qu'une personne
+           regarde, et on ne l'additionne nulle part. */
+        const vieux = Number(dd.pts) || 0;
+        if (vieux > 0) { ptsEnAttente += vieux; ptsComptes++; if (ptsDetail.length < 20) ptsDetail.push({ uid: s.id, pts: vieux }); }
+        if (dd.pointsHerites === undefined) {
+          jamaisFiges++;
+          /* On rend AUSSI leur solde : un nombre seul ferait figer a
+             l'aveugle, et figer est irreversible (pointsHerites n'est
+             ecrivable par personne, pas meme l'administrateur). */
+          if (jamaisFigesDetail.length < 20) jamaisFigesDetail.push({ uid: s.id, points: Number(dd.points) || 0 });
+          continue;
+        }
         try {
           const b = await recalculerScore(s.id);
           if (b && b.change) {
@@ -975,7 +1014,9 @@ exports.recalculerTousLesScores = onCall(
       if (page.size < 50) { curseur = null; break; }
       if (Date.now() - depart > LIMITE_MS) break;
     }
-    const res = { lus, changes, rendus, baisses, erreurs, jamaisFiges, curseur, fini: curseur === null };
+    const res = { lus, repasses: lus - jamaisFiges, changes, rendus, baisses, erreurs,
+      jamaisFiges, jamaisFigesDetail, ptsEnAttente, ptsComptes, ptsDetail,
+      curseur, fini: curseur === null };
     console.log("recalculerTousLesScores:", JSON.stringify(res));
     return res;
   }
@@ -996,7 +1037,20 @@ exports.figerPointsExistants = onCall({ region: REGION }, async (req) => {
     page.docs.forEach((s) => {
       const d = s.data() || {};
       if (d.pointsHerites !== undefined) return;         // deja fige
-      lot.set(s.ref, { pointsHerites: Math.max(0, d.points || 0), pointsPreuves: 0 }, { merge: true });
+      /* ON RETIRE LE TERME, ON NE LE JETTE PAS.
+         Avant : pointsHerites = points, pointsPreuves = 0. Dans le cas prevu
+         c'est juste — le solde ecrit par le telephone contient DEJA les
+         preuves, donc remettre le compteur a zero evite de les compter deux
+         fois. Mais sur un document reste bloque entre crediter() et
+         recalculerScore — pointsPreuves pose, points jamais ecrit — figer
+         effaçait la contribution SANS RECOURS : rattraperSignalements ne
+         reprend que les rapports « trop loin » non credites, et celui-la est
+         marque credite.
+         Retirer le terme de la base donne exactement le meme total dans le
+         cas prevu (herite + preuves = points) et rend ses points a celui que
+         l'ancienne version aurait depouille. */
+      lot.set(s.ref, { pointsHerites: Math.max(0,
+        (Number(d.points) || 0) - (Number(d.pointsPreuves) || 0)) }, { merge: true });
       traites++;
     });
     await lot.commit();
