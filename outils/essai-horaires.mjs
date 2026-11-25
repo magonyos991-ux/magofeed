@@ -127,8 +127,11 @@ const puce=await pg.evaluate(()=>{
   };
 });
 
-/* Les applications de magasin embarquent leur propre copie du fichier : sans
-   ce detour, un rafraichissement hebdomadaire ne les atteindrait jamais. */
+/* Les applications de magasin embarquent leur propre copie du fichier. Elle
+   est lue D'ABORD (disque, pas de reseau) ; la copie publiee avec le site
+   n'est qu'un repli si elle manquait, et le rafraichissement hebdomadaire
+   arrive ensuite, en silence, par comparaison des dates (voir
+   outils/essai-firestore-reseau.mjs pour ce rafraichissement). */
 const chemins=await pg.evaluate(()=>{
   if(typeof window._cheminsHoraires!=="function")return{absente:true};
   const web=window._cheminsHoraires();
@@ -183,8 +186,8 @@ if(chemins.absente){
   v("chemins des horaires : joignables", false, "_cheminsHoraires introuvable");
 }else{
   v("web : le chemin relatif, rien de plus", chemins.web.length===1&&chemins.web[0]==="data/horaires-osm-be.json", chemins.web.join(" puis "));
-  v("natif : la copie PUBLIEE d'abord",     chemins.natif.length===2&&/^https:\/\//.test(chemins.natif[0]), chemins.natif.join(" puis "));
-  v("natif : repli sur la copie embarquee", chemins.natif[1]==="data/horaires-osm-be.json", chemins.natif[1]);
+  v("natif : la copie EMBARQUEE d'abord",   chemins.natif.length===2&&chemins.natif[0]==="data/horaires-osm-be.json", chemins.natif.join(" puis "));
+  v("natif : repli sur la copie publiee",   /^https:\/\//.test(chemins.natif[1]||""), chemins.natif[1]);
 }
 
 console.log("\n  L'APPLICATION NE SE CONTREDIT PLUS SUR LES HORAIRES\n");
