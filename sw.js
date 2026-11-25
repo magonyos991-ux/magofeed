@@ -25,6 +25,13 @@ const CACHE_NAME = "magofeed-__BUILD_ID__";
    purge : en balade sur la carte, le stockage grossissait a vie. */
 const IMG_CACHE = "magofeed-img-v1";
 const MAX_IMG = 300;
+/* Cache a part, PERMANENT, pour les bibliotheques servies par un CDN (SDK
+   Firebase 10.12.2, Leaflet 1.9.4, markercluster, Quagga, polices) : leur
+   URL porte deja un numero de version et ne change jamais d'une mise en ligne
+   de Magofeed a l'autre. Elles tombaient dans le cache estampille, efface a
+   chaque activation : ~260 Ko compresses a retelecharger a chaque deploiement
+   (jusqu'a 21 par jour), pour des octets identiques. */
+const LIB_CACHE = "magofeed-lib-v1";
 /* Chemins RELATIFS au scope du service worker : fonctionne aussi bien a la racine
    d'un domaine (Netlify) que dans un sous-dossier (GitHub Pages /magofeed/).
    Les chemins absolus "/index.html" pointaient hors du sous-dossier sur GitHub
@@ -41,6 +48,13 @@ const APP_SHELL = [
   "./data/alias.js",
   "./data/ui.js",
   "./data/i18n.js",
+  /* nutrition.js et drinkart.js sont charges par index.html comme les autres
+     mais manquaient ici : apres une mise a jour, le cache neuf ne les avait
+     pas, et hors ligne l'app perdait le sucre, les calories et les dessins
+     de bouteilles (mesure : « langueTable 0, nutrition absente » apres un
+     cache renouvele sans reseau). */
+  "./data/nutrition.js",
+  "./data/drinkart.js",
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -55,20 +69,84 @@ const APP_ROOT = new URL("./", self.location).pathname;
 self.addEventListener("install", function(event) {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(function(cache) { return cache.addAll(APP_SHELL); })
-      .then(function() { return self.skipWaiting(); })
+      /* cache:"reload" : chaque fichier est pris AU RESEAU, jamais au cache
+         HTTP du navigateur. GitHub Pages sert tout avec max-age=600, a la
+         meme URL d'un deploiement a l'autre : dans les dix minutes qui
+         suivent une mise en ligne, addAll en mode « default » remplissait le
+         cache NEUF avec les fichiers de l'ANCIENNE version (mesure : 7
+         fichiers sur 8 en version A dans le cache B — exactement la boucle
+         « deployer, tester sur le telephone, corriger »). Reserve a
+         l'install : sur le remplissage a chaud (plus bas), ce mode
+         retelechargerait a chaque trou de cache. */
+      .then(function(cache) {
+        return cache.addAll(APP_SHELL.map(function(u) { return new Request(u, { cache: "reload" }); }));
+      })
+      /* Plus de skipWaiting ici. La version neuve reste « en attente » jusqu'a
+         recevoir SKIP_WAITING (ecouteur message ci-dessous), que index.html
+         envoie sur un geste (toast « touche pour redemarrer ») ou quand
+         l'app passe en arriere-plan. Avant, elle prenait la main des
+         l'install et index.html rechargeait la page 4 a 15 s apres
+         l'ouverture, en pleine saisie : recherche tapee, prix, message —
+         perdus, retour a l'accueil. Au tout premier lancement il n'y a pas
+         d'ancienne version : le navigateur active celle-ci sans attendre. */
   );
+});
+
+self.addEventListener("message", function(event) {
+  if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("activate", function(event) {
   event.waitUntil(
     caches.keys()
       .then(function(keys) {
-        return Promise.all(keys.filter(function(k) { return k !== CACHE_NAME && k !== IMG_CACHE; }).map(function(k) { return caches.delete(k); }));
+        /* Seul le cache estampille de l'ancienne version part : les vignettes
+           et les bibliotheques CDN ne dependent pas du code de l'app. */
+        return Promise.all(keys.filter(function(k) { return k !== CACHE_NAME && k !== IMG_CACHE && k !== LIB_CACHE; }).map(function(k) { return caches.delete(k); }));
       })
       .then(function() { return self.clients.claim(); })
   );
 });
+
+/* ── Page de secours : l'app n'est ni en cache ni joignable ──
+   Cas reels : reseau coupe juste apres une mise a jour (cache neuf pas
+   encore rempli), ou la « recuperation automatique » d'index.html qui vide
+   les caches puis recharge, dans un magasin sans reseau. Avant, la promesse
+   rejetait et le navigateur affichait sa propre page « site inaccessible »
+   (chrome-error://), sans rien pour revenir dans l'app. Ici : une phrase, et
+   un lien qui retente.
+
+   La langue : le service worker n'a pas acces a localStorage, mais la page
+   qu'il renvoie, si. Elle lit magolang (la cle de l'app) et choisit sa
+   phrase dans la petite table ci-dessous, copie de data/textes.js — la vraie
+   table n'est pas disponible, puisque c'est precisement le cas ou la
+   coquille de l'app n'est pas en cache. */
+const TEXTES_HORS_LIGNE = {
+  fr: ["Hors ligne, et l’app n’est pas encore en cache. Réessaie avec du réseau.", "Réessayer"],
+  ar: ["أنت غير متصل، والتطبيق ليس في الذاكرة المؤقتة بعد. أعد المحاولة عند توفر الشبكة.", "أعد المحاولة"],
+  de: ["Offline, und die App ist noch nicht im Cache. Versuch es mit Netz noch einmal.", "Erneut versuchen"],
+  en: ["Offline, and the app isn’t cached yet. Try again with a connection.", "Try again"],
+  es: ["Sin conexión, y la app aún no está en caché. Reintenta con red.", "Reintentar"],
+  it: ["Sei offline e l’app non è ancora in cache. Riprova con la rete.", "Riprova"],
+  nl: ["Offline, en de app staat nog niet in de cache. Probeer opnieuw met netwerk.", "Opnieuw proberen"],
+  pl: ["Brak sieci, a aplikacja nie jest jeszcze w pamięci podręcznej. Spróbuj ponownie z siecią.", "Spróbuj ponownie"],
+  pt: ["Sem rede, e a app ainda não está em cache. Tenta de novo com rede.", "Tentar de novo"],
+  tr: ["Çevrimdışısın ve uygulama henüz önbellekte değil. Ağ varken yeniden dene.", "Yeniden dene"],
+  zh: ["当前离线，应用尚未缓存。请在有网络时重试。", "重试"]
+};
+function pageHorsLigne() {
+  var fr = TEXTES_HORS_LIGNE.fr;
+  var html = '<!doctype html><html lang="fr"><head><meta charset="utf-8">'
+    + '<meta name="viewport" content="width=device-width,initial-scale=1"><title>Magofeed</title></head>'
+    + '<body style="margin:0;background:#fbf7f0;color:#1a1714;font:16px/1.5 system-ui,-apple-system,sans-serif">'
+    + '<p id="t" style="padding:40px 24px 8px">' + fr[0] + '</p>'
+    + '<p style="padding:0 24px"><a id="r" href="./" style="color:inherit;font-weight:700">' + fr[1] + '</a></p>'
+    + '<script>try{var T=' + JSON.stringify(TEXTES_HORS_LIGNE) + ',l=localStorage.getItem("magolang");'
+    + 'if(T[l]){document.documentElement.lang=l;if(l==="ar")document.documentElement.dir="rtl";'
+    + 'document.getElementById("t").textContent=T[l][0];document.getElementById("r").textContent=T[l][1];}}catch(e){}</script>'
+    + '</body></html>';
+  return new Response(html, { status: 503, statusText: "Hors ligne", headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+}
 
 function isLiveOnly(url) {
   return url.hostname.indexOf("googleapis.com") !== -1 ||
@@ -120,7 +198,8 @@ self.addEventListener("fetch", function(event) {
      Le cache porte l'empreinte du commit : il contient TOUJOURS une version
      entière et cohérente de l'app (index.html + css + data/), jamais un
      mélange. Une mise en ligne crée un cache neuf ; le service worker
-     l'installe, prend la main, et index.html recharge la page (écouteur
+     l'installe, attend un geste ou la mise en arrière-plan de l'app (message
+     SKIP_WAITING), prend la main, et index.html recharge la page (écouteur
      "controllerchange"). Personne ne reste bloqué sur une vieille version, et
      plus personne n'attend 306 Ko pour voir l'écran d'accueil.
 
@@ -141,6 +220,12 @@ self.addEventListener("fetch", function(event) {
             }
             return res;
           });
+        }).catch(function() {
+          /* Reseau coupe ET rien en cache (ou le cache a ete vide entre la
+             premiere lecture et ici) : une page lisible plutot que l'erreur
+             du navigateur. On retente le cache une fois : un autre onglet a
+             pu finir de l'installer entre-temps. */
+          return caches.match("./index.html").then(function(c) { return c || pageHorsLigne(); });
         })
       );
     }
@@ -158,6 +243,12 @@ self.addEventListener("fetch", function(event) {
           }
           return res;
         });
+      }).catch(function() {
+        /* Hors ligne et absent du cache : une erreur reseau franche, celle
+           que la page recevrait sans service worker (ses fetch ont deja
+           leur catch pour ca). Avant, la promesse rejetait sans rien dire :
+           meme effet, plus une erreur de console par fichier. */
+        return Response.error();
       })
     );
     return;
@@ -168,26 +259,39 @@ self.addEventListener("fetch", function(event) {
      apres chaque ajout, on compte, et au-dela de MAX_IMG on efface les plus
      anciennes entrees. Seules les reponses saines (res.ok, non opaques) sont
      gardees — une reponse opaque est comptee avec plusieurs Mo de marge dans
-     le quota du navigateur. */
+     le quota du navigateur.
+
+     POURQUOI LA REQUETE EST REFAITE EN MODE CORS. Une <img> sans attribut
+     crossorigin envoie une requete no-cors ; la reponse est alors OPAQUE, et
+     la condition ci-dessous la refusait a chaque fois. Mesure : 0 entree
+     dans ce cache apres des dizaines de vignettes vues — le cache existait,
+     il ne rangeait rien. Open Food Facts envoie access-control-allow-origin:
+     *, et une reponse cors peut repondre a une requete no-cors : on demande
+     donc l'image en cors, on la range sous la requete d'origine, et l'<img>
+     la recoit comme avant. Si le CDN cessait d'envoyer l'en-tete, la
+     requete cors echoue et on retombe sur la requete telle quelle (opaque,
+     affichee, pas rangee). Une vignette deja en cache est servie sans
+     retoucher au reseau : l'URL OFF porte son numero de revision, l'image
+     ne change pas. */
   if (url.hostname === "images.openfoodfacts.org") {
     event.respondWith(
       caches.match(req).then(function(cached) {
-        var network = fetch(req).then(function(res) {
+        if (cached) return cached;
+        var reqCors;
+        try { reqCors = new Request(req.url, { mode: "cors", credentials: "omit" }); } catch (e) { reqCors = req; }
+        return fetch(reqCors).catch(function() { return fetch(req); }).then(function(res) {
           if (res && res.ok && res.type !== "opaque") {
             var copy = res.clone();
             caches.open(IMG_CACHE).then(function(cache) {
-              cache.put(req, copy).then(function() {
-                cache.keys().then(function(keys) {
-                  if (keys.length > MAX_IMG) {
-                    keys.slice(0, keys.length - MAX_IMG).forEach(function(k) { cache.delete(k); });
-                  }
-                });
+              return cache.put(req, copy).then(function() { return cache.keys(); }).then(function(keys) {
+                if (keys.length > MAX_IMG) {
+                  keys.slice(0, keys.length - MAX_IMG).forEach(function(k) { cache.delete(k); });
+                }
               });
-            });
+            }).catch(function() {});
           }
           return res;
-        }).catch(function() { return cached; });
-        return cached || network;
+        }).catch(function() { return Response.error(); });
       })
     );
     return;
@@ -206,7 +310,10 @@ self.addEventListener("fetch", function(event) {
         var network = fetch(req).then(function(res) {
           if (res && res.ok && res.type !== "opaque") {
             var copy = res.clone();
-            caches.open(CACHE_NAME).then(function(cache) { cache.put(req, copy); });
+            /* Dans LIB_CACHE, qui survit aux deploiements : une bibliotheque
+               versionnee dans son URL n'a aucune raison de suivre le cycle
+               de vie du code de l'app. */
+            caches.open(LIB_CACHE).then(function(cache) { cache.put(req, copy); });
           }
           return res;
         }).catch(function() { return cached; });
