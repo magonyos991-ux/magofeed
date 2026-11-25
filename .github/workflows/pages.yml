@@ -110,6 +110,24 @@ jobs:
         run: |
           sed -i "s/magofeed-__BUILD_ID__/magofeed-${GITHUB_SHA::12}/" sw.js
           sed -i "s/build __BUILD_ID__/build ${GITHUB_SHA::7}/" index.html
+          # L'EMPREINTE DANS L'URL DE CHAQUE FICHIER DE LA COQUILLE. GitHub Pages
+          # sert tout avec « cache-control: max-age=600 », a la MEME URL d'un
+          # deploiement a l'autre. Dans les dix minutes qui suivent une mise en
+          # ligne, le navigateur avait donc le droit de ressortir l'ANCIEN
+          # drinks.js ou l'ANCIEN app.css de son cache HTTP sans rien demander a
+          # personne — et le service worker neuf les rangeait dans son cache
+          # neuf (mesure : 7 fichiers sur 8 en version A dans le cache B). C'est
+          # exactement la boucle « deployer, tester sur le telephone, corriger ».
+          # Avec ?v=<commit> l'URL change a chaque deploiement : le cache HTTP n'a
+          # jamais rien a proposer pour elle. On estampille les balises
+          # d'index.html ET la liste APP_SHELL de sw.js, pour que les deux parlent
+          # de la MEME URL (sinon le cache ne repondrait plus a la page).
+          # index.html lui-meme et sw.js gardent leur URL (c'est elle que le
+          # navigateur connait) : sw.js la telecharge avec cache:"reload".
+          V="${GITHUB_SHA::12}"
+          sed -i -E "s#(<script src=\"data/[A-Za-z0-9_.-]+\.js)\"#\1?v=${V}\"#g" index.html
+          sed -i -E "s#(<link rel=\"stylesheet\" href=\"app\.css)\"#\1?v=${V}\"#" index.html
+          sed -i -E "s#^(  \"\./(data/[A-Za-z0-9_.-]+\.js|app\.css))\",#\1?v=${V}\",#" sw.js
           # sed sort en code 0 quand il ne trouve PAS son motif : il ne distingue
           # pas « remplace » de « rien a remplacer ». Et le grep temoin qui etait
           # ici cherchait « CACHE_NAME = », present que la substitution ait eu lieu
@@ -133,6 +151,24 @@ jobs:
           done
           grep -n 'CACHE_NAME =' sw.js
           grep -n 'build ' index.html | grep -m1 "${GITHUB_SHA::7}"
+          # Meme verification pour l'empreinte des URL : une balise data/ ou une
+          # entree APP_SHELL restee sans ?v= serait servie depuis le cache HTTP
+          # (l'ancienne version, pendant dix minutes) — sans rien de rouge ici.
+          for f in index.html sw.js; do
+            if ! grep -q "?v=${V}" "$f"; then
+              echo "::error::$f : aucune URL estampillee ?v=${V} — le motif du sed ne correspond plus."
+              exit 1
+            fi
+          done
+          if grep -nE '<script src="data/[A-Za-z0-9_.-]+\.js">' index.html; then
+            echo "::error::index.html : une balise <script src=\"data/…\"> est restee sans ?v=."
+            exit 1
+          fi
+          if grep -nE '^  "\./(data/[A-Za-z0-9_.-]+\.js|app\.css)",' sw.js; then
+            echo "::error::sw.js : une entree APP_SHELL est restee sans ?v=."
+            exit 1
+          fi
+          echo "URL estampillees ?v=${V} : $(grep -c "?v=${V}" index.html) dans index.html, $(grep -c "?v=${V}" sw.js) dans sw.js"
       # Le site publiait la RACINE ENTIERE du depot. Tout ce qui n'est pas
       # destine au navigateur etait donc servi a une adresse devinable : le
       # plan anti-triche, les notes de strategie, le code d'automatisation n8n,

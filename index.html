@@ -34700,15 +34700,124 @@ function registerServiceWorker(){
       location.reload();
     });
   }
+  /* ── UNE NOUVELLE VERSION ATTEND UN GESTE ──
+     sw.js ne prend plus la main des son installation (plus de skipWaiting a
+     l'install) : la version neuve reste « en attente » tant qu'on ne lui
+     envoie pas SKIP_WAITING. Avant, elle prenait la main toute seule et
+     l'ecouteur controllerchange ci-dessus rechargeait la page 4 a 15 s apres
+     l'ouverture — en pleine recherche, en plein prix, en plein message
+     (mesure : « coca » tape, puis retour a l'accueil, champ vide). Avec 178
+     mises en ligne en 66 jours, chaque testeur le subissait presque a chaque
+     ouverture. Desormais : un toast « touche pour redemarrer » ; et sans
+     geste, la bascule se fait quand l'app passe en arriere-plan, donc sans
+     saisie en cours. Le controllerchange existant fait le rechargement. */
+  var MSG_MAJ_PRETE="Nouvelle version prête · touche pour redémarrer";
+  function appliquerMaj(){
+    /* TOUJOURS le worker en attente DU MOMENT, pas celui qu'on a retenu.
+       Avec jusqu'a 21 mises en ligne par jour, une version peut attendre
+       (B) quand la suivante arrive (C) : B devient « redundant », C prend sa
+       place, et un SKIP_WAITING envoye a B partirait dans le vide — pas de
+       bascule, et le toast qu'on vient de toucher n'aurait rien fait. On
+       retombe sur _majPrete seulement s'il est encore vivant (un autre
+       onglet a pu installer sans que notre enregistrement l'ait encore vu).
+       Rien d'applicable (la version se telecharge encore) : on rend false,
+       l'appelant retient l'intention et annoncerMaj basculera a la fin. */
+    var reg=window._swReg;
+    var w=(reg&&reg.waiting)||null;
+    if(!w&&window._majPrete&&window._majPrete.state==="installed")w=window._majPrete;
+    window._majPrete=null;
+    if(!w)return false;
+    window._majVoulue=false;
+    /* Le verrou anti-boucle de controllerchange est leve : ce rechargement
+       est voulu (geste ou arriere-plan), comme dans chercherMiseAJour. */
+    try{sessionStorage.removeItem("mago_sw_reloaded");}catch(e){}
+    try{w.postMessage({type:"SKIP_WAITING"});}catch(e){return false;}
+    return true;
+  }
+  function annoncerMaj(w){
+    window._majPrete=w;
+    /* La personne a demande la mise a jour elle-meme (bouton des Reglages,
+       ou toast touche pendant que la version se telechargeait encore) : pas
+       de toast a toucher, on bascule. Pareil si l'app est DEJA en
+       arriere-plan : le visibilitychange est passe pendant le telechargement
+       (mesure : 5 Mo de coquille, plusieurs secondes sur un mauvais reseau),
+       personne ne tape, et sans ceci la bascule attendrait la prochaine mise
+       en arriere-plan. */
+    if(window._majVoulue||document.visibilityState==="hidden"){appliquerMaj();return;}
+    var t=document.getElementById("toast");
+    if(!t){return;}
+    /* Pas toast() : il efface au bout de 2,5 s, trop court pour un geste
+       qu'on ne guette pas, et .toast est en pointer-events:none (un message
+       qu'on ne touche pas). Pour celui-ci, le doigt compte : on rend la main
+       le temps de l'afficher, 8 s. La traduction passe par la meme table que
+       toast() (le texte francais est la cle, data/textes.js). */
+    var texte=(typeof tr==="function")?tr(MSG_MAJ_PRETE):MSG_MAJ_PRETE;
+    t.textContent=texte;
+    t.classList.add("show");
+    t.style.pointerEvents="auto";
+    t.onclick=function(){
+      /* L'element est partage avec toast() : un autre message a pu le
+         remplacer entre-temps. On ne redemarre que sur le notre. */
+      if(t.textContent!==texte)return;
+      t.onclick=null;t.style.pointerEvents="";t.classList.remove("show");
+      /* Rien d'applicable a l'instant (la version annoncee a ete remplacee
+         par une plus recente qui se telecharge encore) : on retient le
+         geste, annoncerMaj basculera des l'installation finie. */
+      if(!appliquerMaj())window._majVoulue=true;
+      /* Le navigateur n'active la version neuve qu'une fois l'ancienne sans
+         requete en vol (une vignette qui traine sur un mauvais reseau) :
+         le rechargement peut prendre quelques secondes. On le dit. */
+      try{toast(_tr("updateFound"));}catch(e){}
+    };
+    clearTimeout(window._majToastT);
+    window._majToastT=setTimeout(function(){t.classList.remove("show");t.style.pointerEvents="";t.onclick=null;},8000);
+  }
+  function surveillerMaj(reg){
+    function guetter(w){
+      if(!w)return;
+      w.addEventListener("statechange",function(){
+        /* « installed » avec un controleur en place = une version neuve qui
+           attend. Sans controleur (tout premier lancement), elle s'active
+           d'elle-meme : rien a annoncer. */
+        if(w.state==="installed"&&navigator.serviceWorker.controller)annoncerMaj(w);
+        else if(w.state==="redundant"){
+          /* Mort : remplace par une version plus recente (un autre worker
+             est en route, il sera annonce a son tour) ou installation
+             echouee (reseau coupe en plein telechargement). Dans les deux
+             cas on ne garde pas un pointeur vers lui ; et sans remplacant,
+             l'intention de redemarrer n'a plus de cible : une version
+             trouvee des heures plus tard ne doit pas s'appliquer sans
+             toast, en pleine saisie. */
+          if(window._majPrete===w)window._majPrete=null;
+          if(!reg.installing&&!reg.waiting)window._majVoulue=false;
+        }
+      });
+    }
+    /* Une version deja en attente (trouvee a un lancement precedent, jamais
+       appliquee) se propose tout de suite. */
+    if(reg.waiting&&navigator.serviceWorker.controller)annoncerMaj(reg.waiting);
+    guetter(reg.installing);
+    /* updatefound couvre aussi le reg.update() ci-dessous et celui de
+       chercherMiseAJour : c'est le meme enregistrement. */
+    reg.addEventListener("updatefound",function(){guetter(reg.installing);});
+  }
+  document.addEventListener("visibilitychange",function(){
+    if(document.visibilityState==="hidden")appliquerMaj();
+  });
   navigator.serviceWorker.register("sw.js").then(function(reg){
+    window._swReg=reg;
+    surveillerMaj(reg);
     /* Vérifie tout de suite s'il existe une version plus récente en ligne.
        update() renvoie une PROMESSE : le try/catch n'attrapait pas son rejet.
        Sur un réseau qui flanche pendant la seconde de démarrage — un magasin,
        un sous-sol — la vérification échouait, la promesse était rejetée sans
        gestionnaire, et l'écran de plantage « L'appli n'a pas réussi à
        démarrer » recouvrait une app qui marchait très bien. Une mise à jour
-       qu'on ne peut pas vérifier maintenant se vérifiera la prochaine fois. */
-    try{var p=reg.update();if(p&&p.catch)p.catch(function(){});}catch(e){}
+       qu'on ne peut pas vérifier maintenant se vérifiera la prochaine fois.
+       Pas si register() vient DEJA de trouver une version (reg.installing,
+       mesure : Chromium verifie sw.js a chaque register) : la refaire
+       pendant ce telechargement ne trouverait rien de plus. */
+    try{if(!reg.installing){var p=reg.update();if(p&&p.catch)p.catch(function(){});}}catch(e){}
   }).catch(function(e){console.warn("SW registration failed:",e);});
   setTimeout(function(){try{handleDeepLink();}catch(e){}},400);
   /* Bouton « Chercher une mise à jour » (Réglages) : force la vérification du
@@ -34725,8 +34834,33 @@ function registerServiceWorker(){
       if(!reg){toast(_tr("msgOfflineT"));return;}
       return reg.update().then(function(){
         var w=reg.installing||reg.waiting;
-        if(w){toast(_tr("updateFound"));setTimeout(function(){location.reload();},2500);}
-        else toast(_tr("updateNone"));
+        if(!w){toast(_tr("updateNone"));return;}
+        toast(_tr("updateFound"));
+        /* La version neuve n'avance plus toute seule (sw.js attend
+           SKIP_WAITING) : on le lui envoie des qu'elle est installee, et le
+           controllerchange recharge sur la NOUVELLE version. Avant, un
+           rechargement aveugle partait a 2,5 s : sur un reseau lent, les
+           5 Mo de la coquille n'etaient pas encore telecharges, la page
+           repartait sur l'ANCIEN worker, et le toast « redemarrage »
+           mentait. Ici on attend l'installation, quelle que soit sa duree. */
+        window._majVoulue=true;
+        var appliquer=function(){window._majPrete=w;appliquerMaj();};
+        if(w.state==="installed")appliquer();
+        w.addEventListener("statechange",function(){
+          if(w.state==="installed")appliquer();
+          /* Page jamais pilotee (premier lancement : aucun ecouteur
+             controllerchange) : on recharge nous-memes a l'activation. */
+          else if(w.state==="activated"&&!alreadyControlled)location.reload();
+          else if(w.state==="redundant"){
+            /* Remplace par une version plus recente arrivee entre-temps :
+               rien a dire, surveillerMaj l'annonce et _majVoulue la fait
+               basculer. Sans remplacant, l'installation a vraiment echoue
+               (reseau coupe en plein telechargement) : on le dit, le prochain
+               lancement reessaiera. */
+            if(reg.installing||reg.waiting)return;
+            window._majVoulue=false;toast(_tr("msgOfflineT"));
+          }
+        });
       });
       /* La verification a ECHOUE — reseau coupe le plus souvent. Elle affichait
          « Tu as deja la derniere version » : une confirmation rassurante et
