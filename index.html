@@ -1656,7 +1656,7 @@ try{
 <!-- Firebase SDK -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion, arrayRemove, deleteDoc, deleteField, startAt, endAt, startAfter, documentId, getCountFromServer, getDocFromServer, Timestamp, connectFirestoreEmulator } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, initializeFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion, arrayRemove, deleteDoc, deleteField, startAt, endAt, startAfter, documentId, getCountFromServer, getDocFromServer, Timestamp, connectFirestoreEmulator } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, browserPopupRedirectResolver, browserSessionPersistence, setPersistence, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, linkWithPopup, signInWithPopup, signInWithRedirect, linkWithRedirect, getRedirectResult, signInWithCredential, deleteUser, reauthenticateWithPopup, EmailAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, linkWithCredential, signOut, unlink, updatePassword, reauthenticateWithCredential, sendEmailVerification, fetchSignInMethodsForEmail, verifyBeforeUpdateEmail, connectAuthEmulator } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getMessaging, getToken, onMessage, isSupported } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
@@ -1673,7 +1673,24 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+/* TRANSPORT EN LONG POLLING : la fin du « l'appli redemarre toute seule ».
+   Mesure (Chromium, iPhone 13 emule, CPU x4, Firestore reel, 6 lancements) :
+   avec le canal streaming par defaut, la reception des ~3 400 magasins d'une
+   bande de latitude faisait monter le tas JavaScript a 1,1-1,6 Go — 87 % des
+   allocations dans le decoupage des trames du SDK (concatenation puis
+   substring, quadratique dans la taille de chaque reponse). iOS tue alors le
+   processus WebContent, Capacitor recharge, et la personne revoit l'accueil.
+   En long polling, les memes magasins arrivent en reponses HTTP ordinaires :
+   pic 100-108 Mo, residuel 19 Mo, pas plus lent (15-25 s pour 2 009 magasins).
+   Le try/catch couvre le rechargement a chaud : une instance existe deja, on
+   la reprend au lieu de planter le module entier. Si la persistance locale
+   est adoptee un jour, ses options se fusionnent dans ce meme objet. */
+let db;
+try {
+  db = initializeFirestore(app, { experimentalForceLongPolling: true });
+} catch (e) {
+  db = getFirestore(app);
+}
 /* PERSISTANCE DE SESSION — on l'ecrit noir sur blanc au lieu de la subir.
    getAuth() applique aujourd'hui cette meme chaine (IndexedDB, puis
    localStorage, puis sessionStorage) : ce bloc ne "repare" donc rien en soi,
@@ -2309,12 +2326,16 @@ onAuthStateChanged(auth, async function(user) {
     var unread = (myNotifs || []).filter(function(n) { return !n.read; });
     if (unread.length) window.dispatchEvent(new CustomEvent("fbNotifsReady", { detail: unread }));
   } catch (e) { console.warn("Notifs load:", e); }
-  // Présence temps réel : un battement maintenant + toutes les 45 s si visible.
+  /* Présence temps réel : un battement maintenant, puis toutes les 5 min si
+     l'onglet est visible, et au retour au premier plan (juste dessous).
+     Avant : 45 s, soit 80 écritures par heure et par personne pour un seul
+     chiffre du tableau de bord ; la fenêtre « en ligne » de fbCountOnline
+     (6 min) est accordée à ce rythme, le compte reste honnête. */
   try {
     window.fbHeartbeat();
     if (!window._hbTimer) window._hbTimer = setInterval(function() {
       if (document.visibilityState === "visible") window.fbHeartbeat();
-    }, 45000);
+    }, 300000);
     // Retour sur l'app : on bat TOUT DE SUITE, sans attendre le prochain tic.
     if (!window._hbVis) {
       window._hbVis = true;
@@ -2528,6 +2549,7 @@ async function queryNearbyStoresByGeohash(lat, lng, radiusKm) {
   var snaps = await Promise.all(bounds.map(_plageGeohash));
   var out = [], seen = {};
   snaps.forEach(function(snap) {
+    _noterProvenance(snap);
     snap.forEach(function(docSnap) {
       if (seen[docSnap.id]) return;          // les plages peuvent se chevaucher
       seen[docSnap.id] = 1;
@@ -2571,9 +2593,32 @@ function applyMergesToStore(data) {
   }
   return data;
 }
+/* meta/drinkMerges et meta/drinkNames N'EXISTENT PAS encore en production
+   (la lecture REST repond 404) : chaque lancement payait pourtant deux
+   allers-retours pour apprendre qu'il n'y a rien. On memorise l'absence 24 h
+   par appareil ; une sauvegarde admin depuis cet appareil efface la note, et
+   un document cree ailleurs est vu au plus tard le lendemain. Une absence
+   constatee depuis le cache memoire (hors reseau) n'est pas memorisee. */
+var META_ABSENT_KEY = "magoMetaAbsent", META_ABSENT_TTL_MS = 24 * 60 * 60 * 1000;
+function _metaAbsent(nom) {
+  try {
+    var m = JSON.parse(localStorage.getItem(META_ABSENT_KEY) || "{}");
+    return typeof m[nom] === "number" && (Date.now() - m[nom]) < META_ABSENT_TTL_MS;
+  } catch (e) { return false; }
+}
+function _noterMetaAbsent(nom, absent, snap) {
+  if (absent && snap && snap.metadata && snap.metadata.fromCache) return;
+  try {
+    var m = JSON.parse(localStorage.getItem(META_ABSENT_KEY) || "{}");
+    if (absent) m[nom] = Date.now(); else delete m[nom];
+    localStorage.setItem(META_ABSENT_KEY, JSON.stringify(m));
+  } catch (e) {}
+}
 window.fbLoadDrinkMerges = async function() {
   try {
+    if (_metaAbsent("drinkMerges")) return;
     var snap = await getDoc(doc(db, "meta", "drinkMerges"));
+    _noterMetaAbsent("drinkMerges", !snap.exists(), snap);
     if (!snap.exists()) return;
     var m = snap.data() || {};
     Object.keys(m).forEach(function(k){ window.DRINK_MERGES[Number(k)] = Number(m[k]); });
@@ -2586,6 +2631,7 @@ window.fbSaveDrinkMerge = async function(oldId, newId) {
   var upd = {};
   upd[String(oldId)] = Number(newId);
   await setDoc(doc(db, "meta", "drinkMerges"), upd, { merge: true });
+  _noterMetaAbsent("drinkMerges", false);
   window.DRINK_MERGES[Number(oldId)] = Number(newId);
   (window.STORES || []).forEach(applyMergesToStore);
 };
@@ -2606,7 +2652,9 @@ window.applyDrinkNames = function() {
 };
 window.fbLoadDrinkNames = async function() {
   try {
+    if (_metaAbsent("drinkNames")) return;
     var snap = await getDoc(doc(db, "meta", "drinkNames"));
+    _noterMetaAbsent("drinkNames", !snap.exists(), snap);
     if (!snap.exists()) return;
     var m = snap.data() || {};
     Object.keys(m).forEach(function(k){ window.DRINK_NAMES[k] = m[k]; });
@@ -2620,6 +2668,7 @@ window.fbSaveDrinkRename = async function(id, newName, newBrand) {
   var upd = {};
   upd[String(id)] = ov;
   await setDoc(doc(db, "meta", "drinkNames"), upd, { merge: true });
+  _noterMetaAbsent("drinkNames", false);
   window.DRINK_NAMES[String(id)] = ov;
   window.applyDrinkNames();
 };
@@ -2798,6 +2847,16 @@ window.fbTouchCache = function() {
    QueryDocumentSnapshot retient les structures internes du SDK et pese
    plusieurs fois plus. Le vrai remede reste la requete par geohash
    (MAGO_GEOHASH_READY), deja ecrite : il ne manque que la migration. */
+/* D'OU VIENT LA REPONSE ? Hors reseau, le SDK ne rejette pas : il resout
+   depuis son cache memoire, c'est-a-dire VIDE (mesure : fbStoresLoaded a
+   2,9-5 s avec 0 magasin, firestore.googleapis.com coupe). Cette reponse-la
+   n'est pas « zero magasin ici », c'est « je n'ai pas pu demander ». On note
+   la provenance de chaque lot pour que fbLoadNearbyStores fasse la
+   difference : un vrai zero vient du serveur. */
+var _lectureDepuisCache = false;
+function _noterProvenance(snap) {
+  if (snap && snap.metadata && snap.metadata.fromCache) _lectureDepuisCache = true;
+}
 async function queryLatBand(latMin, latMax) {
   var docs = [], cur = null;
   for (var p = 0; p < 20; p++) {
@@ -2805,6 +2864,7 @@ async function queryLatBand(latMin, latMax) {
       ? query(collection(db, "stores"), where("lat", ">=", latMin), where("lat", "<=", latMax), orderBy("lat"), startAfter(cur), limit(2000))
       : query(collection(db, "stores"), where("lat", ">=", latMin), where("lat", "<=", latMax), orderBy("lat"), limit(2000));
     var snap = await getDocs(q);
+    _noterProvenance(snap);
     snap.forEach(function(d) { docs.push({ id: d.id, _d: d.data() }); });
     if (snap.size < 2000) break;
     cur = snap.docs[snap.docs.length - 1];
@@ -2812,6 +2872,7 @@ async function queryLatBand(latMin, latMax) {
   return docs;
 }
 async function queryNearbyStores(lat, lng, radiusKm) {
+  _lectureDepuisCache = false;
   /* Une fois la migration passee et le drapeau leve, on interroge par geohash.
      Si ca echoue (index absent, reseau), on retombe sur la bande de latitude
      plutot que de rendre une carte vide. */
@@ -2942,6 +3003,18 @@ window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
     if (banner && !servedFromCache && !(window.STORES && window.STORES.length)) { banner.style.display = "block"; banner.textContent = tr("Recherche des magasins à proximité…"); }
     var stores = await queryNearbyStores(lat, lng, radiusKm);
     if (mySeq !== window._fbQuerySeq) return stores; // une requête plus récente a pris la main
+    /* UNE REPONSE VIDE N'EST PAS UNE ABSENCE DE DONNEES. Servie par le cache
+       memoire du SDK (reseau coupe, tunnel, sous-sol), elle REMPLACAIT les
+       magasins affiches par rien du tout — « ✓ 0 magasins a proximite »,
+       fiche « Personne ne l'a signalee par ici » — et, entre 24 h et 48 h de
+       cache, elle EFFACAIT le cache local pour le lancement suivant. On la
+       traite comme l'echec reseau qu'elle est : le bloc catch garde STORES et
+       magoNearbyCache, et ressert le cache local s'il en existe un. */
+    if (!stores.length && _lectureDepuisCache) {
+      var videHorsLigne = new Error("reponse vide servie par le cache du SDK : reseau absent");
+      videHorsLigne.code = "magofeed/vide-hors-ligne";
+      throw videHorsLigne;
+    }
     window._fbLastQuery = { lat: lat, lng: lng, radiusKm: radiusKm };
     applyStores(stores, banner, false);
     saveStoresCache(lat, lng, radiusKm, now, stores);
@@ -2954,6 +3027,14 @@ window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
     return stores;
   } catch (e) {
     console.warn("Firebase geo query error:", e);
+    /* Rafraichissement SILENCIEUX qui echoue (cache de 24-48 h deja a
+       l'ecran) : les magasins affiches sont les bons, on les garde tels quels
+       au lieu de les reappliquer — pas de second fbStoresLoaded, pas de
+       repeinture, et surtout aucune liste vide a leur place. */
+    if (servedFromCache && window.STORES && window.STORES.length) {
+      window._fbLoading = false;
+      return window.STORES;
+    }
     if (banner) { banner.textContent = "Mode local (Firebase indisponible)"; banner.style.background = "#b91c1c"; }
     try {
       var cachedFallback = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
@@ -3118,21 +3199,48 @@ window.fbLoadCatalog = async function() {
     var snap = await getDocs(collection(db, "catalog"));
     var rows = [];
     snap.forEach(function(d) { var x = d.data(); x.docId = d.id; rows.push(x); });
+    /* Hors reseau, le SDK resout VIDE depuis son cache memoire, sans erreur.
+       L'ecouteur doit savoir si ce vide vient du serveur (le catalogue est
+       vraiment vide : rien a attendre) ou du cache (on n'a rien demande :
+       le repli IndexedDB catalog:last et le rechargement au retour du
+       reseau restent legitimes). */
+    window._fbCatalogDepuisServeur = !(snap.metadata && snap.metadata.fromCache);
     window.dispatchEvent(new CustomEvent("fbCatalogLoaded", { detail: rows }));
     return rows;
   } catch (e) {
     console.warn("Firestore catalog error:", e);
+    window._fbCatalogDepuisServeur = false;
     window.dispatchEvent(new CustomEvent("fbCatalogLoaded", { detail: [] }));
     return [];
   }
 };
 
-window.fbCheckAdmin = async function() {
+/* LE VERDICT « ADMIN » EST MEMORISE 24 H par appareil et par compte. Il ne
+   decide de rien (firestore.rules fait foi, il montre ou cache un menu), et il
+   ne change presque jamais : le relire a chaque lancement etait une lecture
+   Firestore payee par tout le monde pour rien. Le compte change -> l'entree
+   ne vaut plus ; fbCheckAdmin(true) force une relecture. */
+var ADMIN_MEMO_KEY = "magoAdminMemo", ADMIN_MEMO_TTL_MS = 24 * 60 * 60 * 1000;
+window.fbCheckAdmin = async function(force) {
   try {
     var user = auth.currentUser;
     if (!user) { window.dispatchEvent(new CustomEvent("fbAdminChecked", { detail: false })); return false; }
+    if (!force) {
+      try {
+        var memo = JSON.parse(localStorage.getItem(ADMIN_MEMO_KEY) || "null");
+        if (memo && memo.uid === user.uid && typeof memo.ok === "boolean" && (Date.now() - memo.ts) < ADMIN_MEMO_TTL_MS) {
+          window.dispatchEvent(new CustomEvent("fbAdminChecked", { detail: memo.ok }));
+          return memo.ok;
+        }
+      } catch (e0) { /* memo illisible : on relit */ }
+    }
     var snap = await getDoc(doc(db, "admins", user.uid));
     var ok = snap.exists();
+    /* Un verdict venu du cache memoire (hors reseau) n'est pas un verdict :
+       on ne le grave pas, la prochaine ouverture relira. */
+    if (!(snap.metadata && snap.metadata.fromCache)) {
+      try { localStorage.setItem(ADMIN_MEMO_KEY, JSON.stringify({ uid: user.uid, ok: ok, ts: Date.now() })); } catch (e1) {}
+    }
     window.dispatchEvent(new CustomEvent("fbAdminChecked", { detail: ok }));
     return ok;
   } catch (e) {
@@ -5281,9 +5389,11 @@ window.fbFounderStats = async function() {
 
 /* ── Présence en temps réel (usage RÉEL, chiffres honnêtes) ──
    Chaque app ouverte écrit un "battement de cœur" (presence/{uid}.lastSeen)
-   toutes les ~45 s tant que l'onglet est visible. On compte "en ligne
-   maintenant" = battements de moins de 2 min. Aucune donnée inventée : ces
-   nombres viennent directement des vrais utilisateurs connectés. */
+   toutes les 5 min tant que l'onglet est visible, plus un au retour au
+   premier plan. On compte "en ligne maintenant" = battements de moins de
+   6 min (une fenêtre plus courte que le rythme oublierait des gens présents).
+   Aucune donnée inventée : ces nombres viennent directement des vrais
+   utilisateurs connectés. */
 /* ROBOT OU HUMAIN ? Les liens partages sur Instagram, Facebook et TikTok sont
    visites par les robots d'apercu de ces plateformes, qui executent le
    JavaScript de la page et creent donc de vraies sessions anonymes. Trois
@@ -5428,7 +5538,7 @@ window.fbPresenceAll = async function() {
 };
 window.fbCountOnline = async function() {
   try {
-    var since = Timestamp.fromMillis(Date.now() - 120000); // 2 min
+    var since = Timestamp.fromMillis(Date.now() - 360000); // 6 min : battement toutes les 5 min + marge
     var s = await getCountFromServer(query(collection(db, "presence"), where("lastSeen", ">=", since)));
     return s.data().count;
   } catch (e) { return null; }
@@ -8189,10 +8299,27 @@ document.addEventListener("visibilitychange",function(){
   if(document.visibilityState==="visible")_fgRelocate();
 });
 window.addEventListener("pageshow",function(e){ if(e&&e.persisted)_fgRelocate(); });
+/* Le greffon @capacitor/app (package.json) : sans lui, Capacitor.Plugins.App
+   n'existe pas et ce bloc entier etait lettre morte. Sur Android, le coeur
+   6.2.2 ne traite pas le bouton Retour : AppCompatActivity.onBackPressed
+   terminait l'activite, chaque Retour QUITTAIT l'app. Avec le greffon, c'est
+   nous qui decidons : on recule dans l'app (navBack rend true quand il a
+   recule), sinon on revient a l'accueil, et on ne quitte que depuis l'accueil
+   — le geste que tout le monde attend d'une app. Sur iPhone, appStateChange
+   double visibilitychange sans rien casser. Tout est garde par typeof : en
+   web et en PWA, rien de ceci n'existe et rien ne s'execute. */
 try{
   if(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform()&&
-     Capacitor.Plugins&&Capacitor.Plugins.App){
+     Capacitor.Plugins&&Capacitor.Plugins.App&&typeof Capacitor.Plugins.App.addListener==="function"){
     Capacitor.Plugins.App.addListener("appStateChange",function(st){ if(st&&st.isActive)_fgRelocate(); });
+    Capacitor.Plugins.App.addListener("backButton",function(){
+      try{
+        if(typeof navBack==="function"&&navBack())return;
+        var cur=document.querySelector(".screen.on");
+        if(cur&&cur.id!=="s-home"&&typeof navTo==="function"){navTo("home");return;}
+        if(typeof Capacitor.Plugins.App.exitApp==="function")Capacitor.Plugins.App.exitApp();
+      }catch(e){}
+    });
   }
 }catch(e){}
 
@@ -31291,44 +31418,99 @@ var HORAIRES_OSM=null, _horairesEtat=0;   // 0 rien, 1 en cours, 2 pret, 3 echec
    le jour de la compilation. Un rafraichissement hebdomadaire du depot ne les
    atteindrait donc JAMAIS — elles afficheraient les horaires du jour de
    l'envoi sur les magasins, pendant des mois.
-   En coquille native, on tente donc d'abord la copie publiee avec le site, et
-   on retombe sur la copie embarquee a la moindre erreur. Meme donnee, meme
-   source, aucune devinette ajoutee : le repli garantit qu'une coupure reseau
-   ne degrade rien. Sur le web et en PWA, rien ne change — le chemin relatif
-   EST la copie publiee. */
+   En coquille native, la copie publiee avec le site sert donc a RAFRAICHIR
+   la copie embarquee (voir le bloc suivant : lecture locale d'abord, puis
+   comparaison des dates). Meme donnee, meme source, aucune devinette ajoutee :
+   une coupure reseau ne degrade rien. Sur le web et en PWA, rien ne change —
+   le chemin relatif EST la copie publiee. */
+/* LA COPIE EMBARQUEE D'ABORD, LE RESEAU ENSUITE ET EN SILENCE. La premiere
+   version de ce detour demandait la copie publiee AVANT la copie embarquee :
+   un aller-retour de 2,1 Mo a chaque lancement, jusqu'a 6 s d'attente en 4G
+   faible, pour un fichier qui ne change qu'une fois par semaine — alors que la
+   meme donnee dormait sur le telephone. Desormais la copie embarquee est lue
+   tout de suite (disque, pas de reseau), puis on compare les DATES : le
+   meta.json publie (12 Ko) contre le meta.json embarque et la derniere copie
+   gardee en IndexedDB. Seulement si le site est plus recent, on telecharge le
+   fichier complet, on repeint, et on le garde en IndexedDB pour les lancements
+   suivants. Rien de tout ceci ne s'execute sur le web ni en PWA : la, le
+   chemin relatif EST la copie publiee. */
 var URL_HORAIRES_PUBLIEE="https://magonyos991-ux.github.io/magofeed/data/horaires-osm-be.json";
+var URL_HORAIRES_META_PUBLIEE="https://magonyos991-ux.github.io/magofeed/data/horaires-osm-be.meta.json";
+var CHEMIN_HORAIRES="data/horaires-osm-be.json", CHEMIN_HORAIRES_META="data/horaires-osm-be.meta.json";
+var IDB_HORAIRES_CLE="horaires:osm";
+function _horairesNatif(){ return !!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform()); }
 function _cheminsHoraires(){
-  var natif=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-  return natif?[URL_HORAIRES_PUBLIEE,"data/horaires-osm-be.json"]:["data/horaires-osm-be.json"];
+  /* En natif, la copie publiee reste un REPLI : seulement si la copie
+     embarquee manquait (bundle abime), jamais avant elle. */
+  return _horairesNatif()?[CHEMIN_HORAIRES,URL_HORAIRES_PUBLIEE]:[CHEMIN_HORAIRES];
+}
+function _appliquerHoraires(j){
+  HORAIRES_OSM=j; _horairesEtat=2;
+  /* Les ecrans deja peints affichaient « Ouvert » selon l'heuristique :
+     on les repeint pour qu'ils disent la verite. */
+  try{ if(typeof renderStoreList==="function"&&curSel)renderStoreList(); }catch(e){}
+  try{ if(typeof renderNearby==="function")renderNearby(); }catch(e){}
+  try{ if(window.exploreMap&&typeof exploreLoadStores==="function")exploreLoadStores(true); }catch(e){}
+  try{ if(curStoreDetail&&typeof renderStoreDetail==="function")renderStoreDetail(); }catch(e){}
 }
 function chargerHorairesOSM(){
   if(_horairesEtat)return;
   _horairesEtat=1;
   var chemins=_cheminsHoraires();
   var essayer=function(i){
-    /* Delai maximal sur le chemin RESEAU seulement. Sans lui, une connexion
+    /* Delai maximal sur les chemins RESEAU seulement. Sans lui, une connexion
        qui traine laisserait _horairesEtat a 1 indefiniment, et l'accueil
        afficherait « Horaires en cours de chargement… » pour toujours au lieu
-       de retomber sur la copie embarquee. Le dernier chemin est local : il n'a
-       pas besoin de delai, et lui en imposer un casserait le repli sur un
-       telephone lent. */
+       de retomber sur la copie embarquee. Un chemin local n'a pas besoin de
+       delai, et lui en imposer un casserait la lecture sur un telephone lent. */
     var dernier=(i+1>=chemins.length);
-    var p=dernier?fetch(chemins[i]):fetchWithTimeout(chemins[i],6000);
+    var reseau=/^https?:/i.test(chemins[i]);
+    var p=reseau?fetchWithTimeout(chemins[i],6000):fetch(chemins[i]);
     return p
       .then(function(r){ if(!r.ok)throw 0; return r.json(); })
       .catch(function(e){ if(!dernier)return essayer(i+1); throw e; });
   };
   essayer(0)
     .then(function(j){
-      HORAIRES_OSM=j; _horairesEtat=2;
-      /* Les ecrans deja peints affichaient « Ouvert » selon l'heuristique :
-         on les repeint pour qu'ils disent la verite. */
-      try{ if(typeof renderStoreList==="function"&&curSel)renderStoreList(); }catch(e){}
-      try{ if(typeof renderNearby==="function")renderNearby(); }catch(e){}
-      try{ if(window.exploreMap&&typeof exploreLoadStores==="function")exploreLoadStores(true); }catch(e){}
-      try{ if(curStoreDetail&&typeof renderStoreDetail==="function")renderStoreDetail(); }catch(e){}
+      _appliquerHoraires(j);
+      if(_horairesNatif())_rafraichirHorairesNatif();
     })
     .catch(function(){ _horairesEtat=3; });
+}
+/* Le rafraichissement silencieux de la coquille native. Tout echec est
+   avale : la copie embarquee reste a l'ecran, c'est exactement le repli voulu. */
+var _horairesRafraichi=false;
+function _rafraichirHorairesNatif(){
+  if(_horairesRafraichi)return;
+  _horairesRafraichi=true;
+  var lireJson=function(p){ return p.then(function(r){ if(!r||!r.ok)throw 0; return r.json(); }); };
+  var dateDe=function(meta){ return (meta&&typeof meta.date==="string")?meta.date:""; };
+  var dateLocale="";
+  lireJson(fetch(CHEMIN_HORAIRES_META)).catch(function(){ return null; })
+    .then(function(metaLocal){
+      dateLocale=dateDe(metaLocal);
+      return new Promise(function(res){
+        if(typeof idbGet!=="function"){res(null);return;}
+        try{ idbGet(IDB_HORAIRES_CLE,res); }catch(e){ res(null); }
+      });
+    })
+    .then(function(garde){
+      /* Une copie gardee lors d'un lancement precedent, plus recente que le
+         bundle : on la prend tout de suite, avant meme de parler au reseau. */
+      var dateGardee=(garde&&garde.data&&typeof garde.date==="string")?garde.date:"";
+      if(dateGardee&&dateGardee>dateLocale)_appliquerHoraires(garde.data);
+      var connue=dateGardee>dateLocale?dateGardee:dateLocale;
+      return lireJson(fetchWithTimeout(URL_HORAIRES_META_PUBLIEE,6000)).then(function(metaPub){
+        var datePub=dateDe(metaPub);
+        if(!datePub||datePub<=connue)return;   // le site n'a rien de plus recent
+        return lireJson(fetchWithTimeout(URL_HORAIRES_PUBLIEE,30000)).then(function(j){
+          if(!j||typeof j!=="object")return;
+          _appliquerHoraires(j);
+          try{ if(typeof idbSet==="function")idbSet(IDB_HORAIRES_CLE,{date:datePub,data:j}); }catch(e){}
+        });
+      });
+    })
+    .catch(function(){ /* silencieux : la copie embarquee reste */ });
 }
 /* L'identifiant OpenStreetMap d'un magasin : champ osm, champ osmId, ou
    identifiant « o12345 ».
@@ -31683,6 +31865,15 @@ function obCablerComptes(){
   var inp=document.getElementById("ob-pseudo");
   var err=document.getElementById("ob-err");
   var des=document.getElementById("ob-des");
+  /* En coquille native (Capacitor), la connexion Google est impossible : la
+     fenetre part dans Safari et revient vide, puis le SDK refuse le schema
+     capacitor:// a la redirection (voir signInGoogle). On ne montre pas un
+     bouton qui echoue a coup sur : le compte Magofeed par e-mail, deja cable
+     juste dessous, est LE chemin. Le web et la PWA ne changent pas. */
+  if(g&&window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform()){
+    g.style.display="none";
+    if(m)m.style.marginTop="0";
+  }
   /* Le champ arrivait vide avec un minimum de deux lettres : un mur pour
      entrer dans l'application, alors qu'un pseudo presentable est deja tire au
      hasard ailleurs dans le code. On le propose, et le de en relance un autre.
@@ -34324,6 +34515,19 @@ var ICO_SORTIE='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stro
 var ICO_PERSONNE='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>';
 
 function signInGoogle(){
+  /* En coquille native, la fenetre Google ne peut pas s'ouvrir : WKWebView
+     envoie la fenetre dans Safari et rend nil (auth/popup-blocked), puis la
+     redirection est refusee parce que capacitor:// n'est pas un domaine
+     autorise — « Domaine non autorisé dans Firebase » a chaque essai, et la
+     personne restait en invite. Plutot qu'un echec garanti, on ouvre le compte
+     Magofeed par e-mail (deja cable), connexion si une adresse est connue. */
+  if(pushNatif()){
+    var adresseConnue="";
+    try{adresseConnue=localStorage.getItem("magoAuthEmail")||"";}catch(e){}
+    toast(tr("Dans l'app, connecte-toi avec ton e-mail et un mot de passe"));
+    openAuthSheet(adresseConnue?"in":"up",adresseConnue);
+    return;
+  }
   if(!window.fbSignInWithGoogle){toast(tr("Connexion indisponible pour le moment"));return;}
   var m=(window.fbMesMethodes?window.fbMesMethodes():null)||{};
   toast(m.connecte&&!m.google?tr("Liaison à Google…"):tr("Connexion à Google…"));
@@ -37244,7 +37448,12 @@ try{
   // Catalogue vivant : fusion des boissons promues par la communaute
   window.addEventListener("fbCatalogLoaded", function(e) {
     var rows=e.detail||[];
-    communityCatalogLoaded=true;
+    /* « Charge » seulement si on a VRAIMENT lu quelque chose : des fiches, ou
+       un zero venu du serveur. Un tableau vide servi par le cache memoire du
+       SDK (hors reseau) posait ce drapeau et bloquait du meme coup le repli
+       IndexedDB catalog:last ET le rechargement au retour du reseau : les
+       boissons de la communaute disparaissaient jusqu'au prochain lancement. */
+    if(rows.length||window._fbCatalogDepuisServeur===true)communityCatalogLoaded=true;
     var n=mergeCatalog(rows);
     // Les fiches communautaires viennent d'etre ajoutees a DRINKS : on (re)applique
     // les renommages admin (meta/drinkNames), sinon un nom corrige sur une fiche
