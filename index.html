@@ -1757,6 +1757,18 @@ window.fbFigerPoints = async function() {
   var r = await f({});
   return (r && r.data) || null;
 };
+/* RECALCULER TOUS LES SCORES. Le serveur ne recalcule le score d'une personne
+   que quand quelque chose lui arrive. Le jour ou la FORMULE change — et elle
+   vient de changer, les points de la chasse aux codes-barres y entrent enfin —
+   les scores de ceux qui ne contribuent pas ce jour-la restent sur l'ancienne
+   valeur. Cette fonction les reprend tous.
+   Elle rend un curseur quand le delai l'a interrompue : on la relance avec,
+   et elle repart ou elle s'etait arretee. */
+window.fbRecalculerTousLesScores = async function(curseur) {
+  var f = httpsCallable(getFunctions(app, "europe-west1"), "recalculerTousLesScores", { timeout: 540000 });
+  var r = await f(curseur ? { curseur: String(curseur) } : {});
+  return (r && r.data) || null;
+};
 window.fbMonCodeParrain = async function() {
   await ensureAuthed();
   var f = httpsCallable(getFunctions(app, "europe-west1"), "monCodeParrain");
@@ -31737,9 +31749,75 @@ function renderPointsRendus(){
   var el=document.getElementById("admin-points-rendus");
   if(!el)return;
   el.innerHTML='<div id="pr-btn" role="button" tabindex="0" style="padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;font-size:13.5px;font-weight:700;color:var(--s1)">Rendre les points refusés pour « trop loin »</div>'+
-    '<div id="pr-res" style="font-size:12px;color:var(--s2);margin-top:8px"></div>';
+    '<div id="pr-res" style="font-size:12px;color:var(--s2);margin-top:8px"></div>'+
+    /* MEME SUJET, MEME BLOC : rendre a chacun ce qu'il a gagne. Celui-ci ne
+       verse rien de neuf — il refait passer la formule officielle sur tous les
+       comptes, ce que le serveur ne fait sinon qu'au coup par coup. */
+    '<div id="rc-btn" role="button" tabindex="0" style="padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;font-size:13.5px;font-weight:700;color:var(--s1);margin-top:8px">Recalculer tous les scores</div>'+
+    '<div id="rc-res" style="font-size:12px;color:var(--s2);margin-top:8px;line-height:1.5"></div>';
   var btn=document.getElementById("pr-btn"), res=document.getElementById("pr-res");
   var aRendre=null;
+
+  /* ══ RECALCULER TOUS LES SCORES ══════════════════════════════════════════
+     Il ne verse AUCUN point neuf : il refait passer la formule officielle du
+     serveur sur chaque compte. Le serveur ne la repasse sinon qu'au coup par
+     coup, quand il arrive quelque chose a quelqu'un — donc le jour ou la
+     formule change, les scores de ceux qui ne contribuent pas ce jour-la
+     restent sur l'ancienne valeur.
+     Il peut etre interrompu par le delai de la fonction : il rend alors un
+     curseur, et le bouton propose de reprendre exactement ou il s'est arrete.
+     Le relancer ne fait rien de mal : un score deja juste n'est pas reecrit. */
+  var rcBtn=document.getElementById("rc-btn"), rcRes=document.getElementById("rc-res");
+  var rcCurseur=null, rcCumul={lus:0,changes:0,rendus:0,baisses:0,erreurs:0,jamaisFiges:0};
+  function rcLancer(){
+    if(!window.fbRecalculerTousLesScores){rcRes.textContent="Outil indisponible (module hors ligne)";return;}
+    rcBtn.style.opacity=".5";
+    rcRes.textContent=rcCurseur?"Reprise du recalcul…":"Recalcul en cours…";
+    window.fbRecalculerTousLesScores(rcCurseur).then(function(r){
+      rcBtn.style.opacity="";
+      if(!r){rcRes.textContent="Échec : fonction non déployée";try{playSound("err");}catch(e){}return;}
+      rcCumul.lus+=(r.lus||0); rcCumul.changes+=(r.changes||0);
+      rcCumul.rendus+=(r.rendus||0); rcCumul.baisses+=(r.baisses||0);
+      rcCumul.erreurs+=(r.erreurs||0); rcCumul.jamaisFiges+=(r.jamaisFiges||0);
+      rcCurseur=r.fini?null:(r.curseur||null);
+      var l=[];
+      l.push(rcCumul.lus+" compte"+(rcCumul.lus>1?"s":"")+" relu"+(rcCumul.lus>1?"s":"")+", "+
+             rcCumul.changes+" score"+(rcCumul.changes>1?"s":"")+" corrigé"+(rcCumul.changes>1?"s":"")+".");
+      if(rcCumul.rendus)l.push(rcCumul.rendus+" point"+(rcCumul.rendus>1?"s":"")+" rendu"+(rcCumul.rendus>1?"s":"")+".");
+      if(rcCumul.baisses)l.push(rcCumul.baisses+" point"+(rcCumul.baisses>1?"s":"")+" retiré"+(rcCumul.baisses>1?"s":"")+" (sanction déjà posée).");
+      if(rcCumul.erreurs)l.push(rcCumul.erreurs+" compte"+(rcCumul.erreurs>1?"s":"")+" en erreur, relance pour "+(rcCumul.erreurs>1?"les":"le")+" reprendre.");
+      /* Les comptes jamais figes sont laisses de cote EXPRES : les recalculer
+         leur ajouterait une deuxieme fois leurs points de preuves. On dit quoi
+         faire, dans l'ordre, plutot que de les gonfler en silence. */
+      if(rcCumul.jamaisFiges)l.push(rcCumul.jamaisFiges+" compte"+(rcCumul.jamaisFiges>1?"s":"")+" jamais fig\u00e9"+(rcCumul.jamaisFiges>1?"s":"")+" : laiss\u00e9"+(rcCumul.jamaisFiges>1?"s":"")+" de c\u00f4t\u00e9 pour ne pas compter leurs points deux fois. Lance « Figer les points existants » puis ce recalcul.");
+      if(rcCurseur){
+        l.push("Interrompu par le délai : il reste des comptes.");
+        rcBtn.textContent="Reprendre le recalcul";
+      }else{
+        l.push("✓ Terminé.");
+        rcBtn.textContent="Recalculer tous les scores";
+        try{playSound("win");}catch(e){}
+      }
+      rcRes.textContent=l.join(" ");
+    }).catch(function(e){
+      rcBtn.style.opacity="";
+      rcRes.textContent="Échec : "+((e&&(e.code||e.message))||e);
+      try{playSound("err");}catch(e2){}
+    });
+  }
+  if(rcBtn){
+    rcBtn.onclick=function(){
+      /* Il touche potentiellement TOUS les comptes : il passe donc par le
+         garde-fou, avec un mot a taper. Il ne detruit rien — d'ou
+         « reversible » — mais il ne doit pas partir sur un doigt qui glisse. */
+      actionSensible({
+        titre:"Recalculer tous les scores",
+        quoi:"Aucun point n'est inventé : la formule officielle du serveur repasse sur chaque compte. Les scores déjà justes ne sont pas réécrits. C'est ce qui rend les points de la chasse aux codes-barres à ceux qui les ont gagnés.",
+        niveau:"massif", mot:"RECALCULER", reversible:true
+      }).then(function(oui){ if(oui)rcLancer(); });
+    };
+    rcBtn.onkeydown=function(ev){ if(ev.key==="Enter")rcBtn.onclick(); };
+  }
   function lancer(){
     if(!window.fbRattraperSignalements){res.textContent="Outil indisponible (module hors ligne)";return;}
     var appliquer=aRendre>0;

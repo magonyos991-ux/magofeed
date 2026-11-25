@@ -201,9 +201,14 @@ async function sanctionReelle(uid, tx) {
     return null;
   }
 }
+/* Rend { avant, apres, change } pour que l'appelant puisse DIRE ce qui s'est
+   passe. Les onze appels existants font « await recalculerScore(x) » sans lire
+   la valeur : la leur rendre ne change rien pour eux, et ça evite au recalcul
+   de masse de recopier la formule du total — deux formules divergent toujours. */
 async function recalculerScore(uid) {
-  if (!uid) return;
+  if (!uid) return { avant: 0, apres: 0, change: false };
   const ref = db.doc(`users/${uid}`);
+  const bilan = { avant: 0, apres: 0, change: false };
   await db.runTransaction(async (tx) => {
     /* Les LECTURES d'abord, ecritures ensuite : Firestore l'impose. La requete
        sur `penalties` en fait partie — l'Admin SDK accepte tx.get(query). */
@@ -211,6 +216,7 @@ async function recalculerScore(uid) {
     const snap = await tx.get(ref);
     if (!snap.exists) return;
     const d = snap.data() || {};
+    bilan.avant = Number(d.points) || 0;
     /* GARDE — L'ORDRE DES ETAPES N'A PLUS D'IMPORTANCE.
        pointsHerites vaut le solde d'avant la bascule, pose par
        figerPointsExistants. Tant qu'il est absent, « d.pointsHerites || 0 »
@@ -240,6 +246,7 @@ async function recalculerScore(uid) {
       herite + (d.pointsPreuves || 0) + (d.refPoints || 0)
       + (d.pointsOfferts || 0) + (d.pointsChasse || 0) + (Number(d.pts) || 0)
       - penalite);
+    bilan.apres = total;
     if (!premierPassage && d.points === total && (Number(d.penalty) || 0) === penalite) return;
     const patch = { points: total };
     // On recopie la sanction dans le profil : l'app l'affiche depuis la, et
@@ -250,7 +257,9 @@ async function recalculerScore(uid) {
       patch.pointsPreuves = d.pointsPreuves || 0;
     }
     tx.set(ref, patch, { merge: true });
+    bilan.change = true;
   });
+  return bilan;
 }
 
 /* Anti-rejeu : la meme personne, le meme magasin, la meme boisson, le meme
@@ -888,6 +897,90 @@ exports.offrirPoints = onCall({ region: REGION }, async (req) => {
 /* Bascule : fige le solde actuel de chacun pour que PERSONNE ne perde ses
    points quand le serveur reprend la main. A lancer UNE fois, avant de
    durcir les regles. Reservee a l'admin. */
+/* ══ RECALCULER TOUS LES SCORES, UNE FOIS ══════════════════════════════════
+   POURQUOI CETTE FONCTION EXISTE. recalculerScore ne tourne que pour UNE
+   personne, et seulement quand quelque chose lui arrive : une contribution,
+   une sanction, un parrainage, un don de points. C'est le bon comportement au
+   quotidien — mais le jour ou la FORMULE change, les scores de tous ceux qui
+   ne contribuent pas ce jour-la restent sur l'ancienne valeur.
+   C'est arrive : les cinq points par confirmation de code-barres de la chasse
+   etaient verses dans une colonne « pts » que personne ne lisait. La colonne
+   entre desormais dans la somme, mais chaque score ne se corrige qu'au
+   prochain evenement de la personne. Quelqu'un qui ne revient pas garde un
+   score injustement bas.
+
+   CE QU'ELLE NE FAIT PAS, ET C'EST VOULU. Elle n'invente aucun point : elle
+   appelle recalculerScore, c'est-a-dire EXACTEMENT la meme formule que le
+   reste du serveur. Recopier la somme ici aurait cree deux verites qui
+   divergent au premier changement — la faute meme qu'on repare.
+   Elle n'ecrit rien quand rien ne change : recalculerScore sort sans toucher
+   au document si le total est deja juste.
+
+   REPRISE. Firestore coupe une fonction appelable au bout du delai imparti.
+   Elle rend donc un curseur : s'il n'est pas null, relance avec lui et elle
+   repart ou elle s'etait arretee. Aucun passage ne refait de mal a ce qui est
+   deja juste, donc la relancer deux fois ne coute que des lectures. ─────── */
+exports.recalculerTousLesScores = onCall(
+  { region: REGION, timeoutSeconds: 540, memory: "512MiB" },
+  async (req) => {
+    const uid = req.auth && req.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi.");
+    const moi = await db.doc(`admins/${uid}`).get();
+    if (!moi.exists) throw new HttpsError("permission-denied", "Reserve a l'administrateur.");
+
+    const depart = Date.now();
+    /* On s'arrete AVANT le couperet, pour rendre un curseur plutot que de
+       mourir en silence au milieu d'un lot. */
+    const LIMITE_MS = 450000;
+    let curseur = (req.data && req.data.curseur) ? String(req.data.curseur) : null;
+    let lus = 0, changes = 0, rendus = 0, baisses = 0, erreurs = 0, jamaisFiges = 0;
+
+    for (;;) {
+      let q = db.collection("users").orderBy("__name__").limit(50);
+      if (curseur) q = q.startAfter(curseur);
+      const page = await q.get();
+      if (page.empty) { curseur = null; break; }
+      for (const s of page.docs) {
+        lus++;
+        /* ══ ON NE TOUCHE PAS A UN COMPTE JAMAIS FIGE ══════════════════════
+           recalculerScore contient une branche « premier passage » : quand
+           pointsHerites est absent, elle prend le solde ACTUEL comme base
+           heritee, puis y ajoute pointsPreuves, refPoints et pointsOfferts.
+           Or figerPointsExistants, l'outil prevu pour ca, fige lui aussi le
+           solde actuel mais remet pointsPreuves A ZERO — precisement parce
+           que ces points sont DEJA dans le solde.
+           Passer la fonction de masse sur un compte jamais fige lui ajouterait
+           donc une deuxieme fois ses points de preuves. Un score gonfle est un
+           mensonge au meme titre qu'un score rabote, et celui-la serait pose
+           sur tous les comptes dormants d'un seul geste.
+           On les COMPTE et on les laisse. Le bouton dit alors quoi faire :
+           « Figer les points existants » d'abord, ce recalcul ensuite. */
+        if ((s.data() || {}).pointsHerites === undefined) { jamaisFiges++; continue; }
+        try {
+          const b = await recalculerScore(s.id);
+          if (b && b.change) {
+            changes++;
+            const ecart = (b.apres || 0) - (b.avant || 0);
+            if (ecart > 0) rendus += ecart;
+            else if (ecart < 0) baisses += -ecart;
+          }
+        } catch (e) {
+          /* Un compte qui echoue n'arrete pas les autres : on le compte et on
+             continue. Le relancer plus tard le reprendra. */
+          erreurs++;
+          console.warn("recalculerTousLesScores :", s.id, e && e.message);
+        }
+      }
+      curseur = page.docs[page.docs.length - 1].id;
+      if (page.size < 50) { curseur = null; break; }
+      if (Date.now() - depart > LIMITE_MS) break;
+    }
+    const res = { lus, changes, rendus, baisses, erreurs, jamaisFiges, curseur, fini: curseur === null };
+    console.log("recalculerTousLesScores:", JSON.stringify(res));
+    return res;
+  }
+);
+
 exports.figerPointsExistants = onCall({ region: REGION }, async (req) => {
   const uid = req.auth && req.auth.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi.");
