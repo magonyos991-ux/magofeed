@@ -194,6 +194,25 @@ function neuf() { delete req.cache[req.resolve(join(LAB, "outils-admin.js"))]; r
      /require\("\.\/notif-admin"\)/.test(await readFile(join(F, "index.js"), "utf8")), "");
 }
 
+/* ── 3bis. L'ENVELOPPE CLIENT, CONTROLEE POUR CE QU'ELLE EST ───────────────
+   AVEU UTILE : la partie navigateur ci-dessous REMPLACE fbTesterAlerteAdmin
+   par une doublure — il n'y a pas de Firebase dans un essai. Elle ne prouve
+   donc RIEN sur la vraie enveloppe, et elle est passee a 37/37 alors que
+   celle-ci appelait un « fns » inexistant. C'est ESLint qui l'a attrape, pas
+   ce fichier. On controle donc ici ce qu'un essai peut encore controler :
+   que l'enveloppe se procure bien son acces aux fonctions, dans la region du
+   deploiement, comme les quinze autres appels du fichier. */
+{
+  const h = await readFile(join(R, "index.html"), "utf8");
+  const d = h.indexOf("window.fbTesterAlerteAdmin");
+  const bloc = d === -1 ? "" : h.slice(d, d + 700);
+  ok("fbTesterAlerteAdmin existe cote client", d !== -1, "");
+  ok("elle se procure getFunctions au lieu d'un « fns » suppose",
+     /var fns = getFunctions\(app, "europe-west1"\)/.test(bloc),
+     "l'essai navigateur la remplace : il ne peut pas voir cet oubli");
+  ok("elle appelle bien testerAlerteAdmin", /httpsCallable\(fns, "testerAlerteAdmin"/.test(bloc), "");
+}
+
 /* ── 4. LE PANNEAU, DANS UNE VRAIE PAGE ─────────────────────────────────────
    On appelle le VRAI renderAlertes, avec le VRAI enchainement test puis
    rafraichissement du journal. C'est ce qui attrape le defaut que la premiere
