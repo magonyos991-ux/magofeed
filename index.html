@@ -2795,6 +2795,7 @@ window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
   } catch (e) {
     console.warn("Firebase geo query error:", e);
     if (banner) { banner.textContent = "Mode local (Firebase indisponible)"; banner.style.background = "#b91c1c"; }
+    window._fbDernierEchec = Date.now(); // le tirer-pour-rafraichir lit ce temoin pour ne pas mentir
     try {
       var cachedFallback = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
       if (cachedFallback && cachedFallback.v !== CACHE_DATA_V) cachedFallback = null;
@@ -6709,8 +6710,9 @@ window.fbSearchUsers = async function(prefix) {
       });
     });
     rows.sort(function(a, b) { return String(a.pseudo || "").localeCompare(String(b.pseudo || ""), "fr"); });
+    if (!rows.length && snaps.every(function(sn){ return sn === null; })) return null; // toutes les requetes ont echoue : panne, pas absence
     return rows.slice(0, 12);
-  } catch (e) { console.warn("User search error:", e); return []; }
+  } catch (e) { console.warn("User search error:", e); return null; }
 };
 
 window.fbMarkDiscoveryPhoto = async function(discId) {
@@ -8207,8 +8209,15 @@ function show(s){
     }else if(TAB_SCREENS.indexOf(s)!==-1){
       navStack=[]; // racine : la pile repart de zero
     }else{
-      navStack.push(curId);
-      try{history.pushState({mago:navStack.length},"");_navPousses++;}catch(e){}
+      /* Double-tap pendant la transition : l'ecran sortant garde « on »
+         140 ms, la meme etape s'empilait deux fois et un geste retour
+         etait ensuite avale sans rien faire (audit personas). */
+      var _paire=curId+">"+s;
+      if(!(window._navPairePrec===_paire&&Date.now()-(window._navPaireT||0)<450)){
+        navStack.push(curId);
+        try{history.pushState({mago:navStack.length},"");_navPousses++;}catch(e){}
+      }
+      window._navPairePrec=_paire;window._navPaireT=Date.now();
     }
   }
   _showRaw(s);
@@ -8295,7 +8304,7 @@ function _showRaw(s){
   }
   try{moveNavPill(true);}catch(e){}
   try{showCoach(s);}catch(e){}
-  if(s==="search"){try{renderList();}catch(e){}setTimeout(function(){var q=document.getElementById("q");if(q)q.focus();},transitioning?260:120);}
+  if(s==="search"){try{renderList();}catch(e){}setTimeout(function(){var q=document.getElementById("q");if(q&&document.querySelector("#s-search.on"))q.focus();},transitioning?260:120);}
   if(s==="discover"){renderDiscoveries();try{renderChasse();}catch(e){}}
   if(s==="scan"){
     // Camera coupee en quittant l'onglet, et aucun resultat en cours : on
@@ -8306,7 +8315,13 @@ function _showRaw(s){
   }
   if(s==="profile"){renderLeaderboard();refreshLeaderboard();renderStreak();}
   if(s==="admin")renderAdmin();
-  if(s==="scan"){if(!scanActive)resetScanUI();renderScanHistory();}
+  if(s==="scan"){
+    /* Ce second bloc effacait TOUJOURS le resultat quand la camera etait
+       coupee — il annulait la preservation voulue par le premier bloc
+       (audit personas : la fiche du code lu disparaissait au retour). */
+    try{var _srr=document.getElementById("scan-result");if(!scanActive&&!(_srr&&_srr.innerHTML))resetScanUI();}catch(e){}
+    renderScanHistory();
+  }
 }
 
 /* ================================
@@ -8577,9 +8592,16 @@ function doConfirm(btn,sid,did,val){
    sans prix. Les deux chemins ecrivent exactement la meme chose. */
 function enregistrerStock(sid,did,price){
   var s=STORES.find(function(x){return x.id===sid||x.id===String(sid);});if(!s)return;
-  if(!s.confirmations[did])s.confirmations[did]=0;
-  s.confirmations[did]++;
-  _noterObservation(s,did,true);
+  /* LE VERROU D'ABORD. Il vivait apres les ecritures : un double-tap sur OK
+     gonflait le compteur et doublait l'historique de prix, PUIS affichait
+     « Deja confirme » (audit personas). Corriger un PRIX le meme jour reste
+     permis — c'est une information fraiche — mais sans re-confirmation. */
+  var _dejaConf=!awardOnce("conf:"+sid+":"+did,24);
+  if(!_dejaConf){
+    if(!s.confirmations[did])s.confirmations[did]=0;
+    s.confirmations[did]++;
+    _noterObservation(s,did,true);
+  }
   // Meme fourchette que fbSavePrice : un prix hors de la, on ne l'enregistre pas.
   if(price>=0.20&&price<=25){
     if(!storePrices[sid])storePrices[sid]={};
@@ -8591,11 +8613,15 @@ function enregistrerStock(sid,did,price){
     trackLocalPrice(sid,did,price);
     if(!s.priceHistory)s.priceHistory={};
     if(!s.priceHistory[did])s.priceHistory[did]=[];
-    s.priceHistory[did].push({p:price,t:Date.now()});
-    // Prix partagé avec toute la communauté (pas juste ce navigateur)
-    if(window.fbSavePrice)window.fbSavePrice(s.fbId||sid,did,price);
+    // Un meme prix re-saisi dans la minute = rebond de doigt, pas un releve.
+    var _hp=s.priceHistory[did],_der=_hp[_hp.length-1];
+    if(!(_der&&_der.p===price&&Date.now()-_der.t<60000)){
+      _hp.push({p:price,t:Date.now()});
+      // Prix partagé avec toute la communauté (pas juste ce navigateur)
+      if(window.fbSavePrice)window.fbSavePrice(s.fbId||sid,did,price);
+    }
   }
-  if(!awardOnce("conf:"+sid+":"+did,24)){toast("D\u00e9j\u00e0 confirm\u00e9 aujourd'hui");renderStoreList();return;}
+  if(_dejaConf){toast(price?"Prix mis à jour — déjà confirmé aujourd'hui":"Déjà confirmé aujourd'hui");renderStoreList();return;}
   if(window.fbAddReport)try{window.fbAddReport(s.fbId||sid,did,"stock",{note:_provenance("fiche",s)});}catch(e){} // la preuve pour le serveur
   /* Un « je l'ai vue » hors des 500 m vaut UN point, pas trois : le serveur
      paie le plein tarif a ce qui est verifiable, et un point a ce qui est
@@ -8609,7 +8635,7 @@ function enregistrerStock(sid,did,price){
   if(window.fbConfirmStock) window.fbConfirmStock(sid, did, 1);
   if(window.fbTouchCache)window.fbTouchCache();
   playSound("pop");updateProfileStats();
-  toast((price?"\u2713 "+price.toFixed(2)+"\u20ac "+tr("enregistré"):"\u2713 "+tr("Stock confirmé"))+mentionPoints(_gS));
+  toast(((price>=0.20&&price<=25)?"\u2713 "+price.toFixed(2)+"\u20ac "+tr("enregistré"):"\u2713 "+tr("Stock confirmé"))+mentionPoints(_gS));
   try{maybeRewardHuntHelp(did,s);}catch(e){}
   renderStoreList();
 }
@@ -9873,7 +9899,16 @@ function startScan(){
   setScanState("live");
   var video=document.getElementById("scan-video"),hint=document.getElementById("scan-hint"),btn=document.getElementById("scan-btn");
   if(scanActive)return;
+  /* DOUBLE-TAP SUR « ACTIVER LA CAMERA » (audit personas) : scanActive n'est
+     pose qu'a la RESOLUTION de getUserMedia — deux taps rapides ouvraient
+     deux flux camera, et le premier, ecrase sans reference, restait allume
+     (LED active apres fermeture : la cause classique du crash iPhone que
+     stopScan documente). Garde posee AVANT l'async, liberee dans then et
+     catch. */
+  if(window._scanOuverture)return;
+  window._scanOuverture=true;
   if(!navigator.mediaDevices){
+    window._scanOuverture=false; // sinon le scanner restait muet a jamais (audit personas)
     hint.textContent=tr("✕ Caméra non disponible");
     setScanState("idle");toast(_tr("camUnavailable"));
     try{var _row=document.getElementById("scan-manual-row");if(_row&&_row.style.display!=="flex")toggleManualCode();}catch(e){}
@@ -9881,6 +9916,10 @@ function startScan(){
   }
   navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
     .then(function(stream){
+      window._scanOuverture=false;
+      // Ceinture : si un flux precedent survit malgre le garde, on l'arrete
+      // avant de perdre sa reference — jamais de camera fantome.
+      try{if(window._scanStream&&window._scanStream!==stream)window._scanStream.getTracks().forEach(function(t){t.stop();});}catch(eF){}
       video.srcObject=stream;scanActive=true;
       window._scanStream=stream;window._torchOn=false;
       // Flash : on n'affiche le bouton QUE si l'appareil le supporte réellement
@@ -9953,7 +9992,8 @@ function startScan(){
           var det=new window.BarcodeDetector({formats:pris});
           window._scanNatif=true;
           var occupe=false;
-          window._boucleNative=setInterval(function(){
+          try{clearInterval(window._boucleNative);}catch(eB){}
+      window._boucleNative=setInterval(function(){
             if(!scanActive||occupe)return;
             if(!video.videoWidth)return;            // la camera n'a pas encore d'image
             occupe=true;
@@ -10044,6 +10084,7 @@ function startScan(){
         });
       }
     }).catch(function(){
+      window._scanOuverture=false;
       hint.textContent=tr("✕ Accès caméra refusé");
       // Pas de camera : on revient a la carte et on ouvre la saisie manuelle
       // plutot que de laisser un cadre noir sans issue.
@@ -10283,7 +10324,7 @@ function toggleManualCode(){
 var SCAN_VOTES_MIN=3;
 function submitManualCode(code){
   code=String(code||"").replace(/\D/g,"");
-  if(!validGTIN(code)){toast("Code-barre invalide (8 à 13 chiffres)");playSound("err");return;}
+  if(!validGTIN(code)){toast("Code invalide — un code-barres fait 8, 12, 13 ou 14 chiffres");playSound("err");return;}
   var row=document.getElementById("scan-manual-row");if(row)row.style.display="none";
   /* Un code tape a la main ne souffre d'aucune incertitude de lecture : on
      pre-charge tout ce qu'il faut pour que l'appel suivant conclue. */
@@ -11047,7 +11088,14 @@ function saveNewStore(){
     alert("Le magasin n'a PAS pu \u00EAtre enregistr\u00E9 dans la base.\n\nRaison : "+((e&&(e.code||e.message))||"inconnue")+"\n\nV\u00E9rifie ta connexion et r\u00E9essaie \u2014 rien n'a \u00E9t\u00E9 perdu, le formulaire est encore l\u00E0.");
   };
   if(window.fbCreateStore){
-    window.fbCreateStore(s).then(finishOk).catch(finishFail);
+    /* GARDE-TEMPS 12 s : hors reseau, l'ecriture Firestore ne repond NI
+       succes NI echec — le bouton restait sur « Enregistrement… » a vie
+       (audit personas ; claimSubmit a le meme garde pour la meme raison). */
+    var _finiC=false;
+    var _okC=function(){if(_finiC)return;_finiC=true;finishOk();};
+    var _koC=function(e){if(_finiC)return;_finiC=true;finishFail(e);};
+    window.fbCreateStore(s).then(_okC).catch(_koC);
+    setTimeout(function(){_koC(new Error("délai dépassé — le réseau ne répond pas"));},12000);
   }else{
     finishFail(new Error("connexion \u00E0 la base indisponible"));
   }
@@ -11187,6 +11235,9 @@ function renderPriceAfterTag(s,did,ctx){
   document.getElementById("scan-price-ok").onclick=function(){
     var v=parseFloat((document.getElementById("scan-price-input")||{}).value);
     if(!v||v<=0){renderWhereFound(null);return;}
+    /* Meme fourchette que partout (0,20-25) : avant, 999 s'affichait,
+       creditait des points, puis etait jete en silence par le serveur. */
+    if(!(v>=0.20&&v<=25)){toast("Prix hors limites (0,20 à 25 euros)");try{playSound("err");}catch(e){}return;}
     var sid=String(s.id);
     if(!storePrices[sid])storePrices[sid]={};
     storePrices[sid][did]=v;
@@ -12574,7 +12625,7 @@ function onBarcodeDetected(r){
   if(found){
     res.className="scan-result found";
     var hasPhoto=!!getCachedDrinkImage(found);
-    res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="width:40px;height:40px;flex-shrink:0;font-size:28px;border-radius:10px;overflow:hidden">'+drinkIconHTML(found)+'</div><div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:700;color:#166534">'+found.name+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">\u2713 D\u00E9j\u00E0 au catalogue Magofeed</div></div></div>'+
+    res.innerHTML='<div style="display:flex;align-items:center;gap:12px"><div style="width:40px;height:40px;flex-shrink:0;font-size:28px;border-radius:10px;overflow:hidden">'+drinkIconHTML(found)+'</div><div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:700;color:#166534">'+sanitize(desechapper(found.name))+'</div><div style="font-size:12px;color:#16a34a;margin-top:2px">\u2713 D\u00E9j\u00E0 au catalogue Magofeed</div></div></div>'+
       '<div id="scan-photo-suggest" role="button" tabindex="0" style="margin-top:10px;padding:9px 12px;border-radius:12px;border:1.5px dashed rgba(22,163,74,.4);font-size:12px;font-weight:700;color:#166534;cursor:pointer;text-align:center">'+
       (hasPhoto?"La photo est mauvaise ? Propose la tienne":"Pas encore de photo \u2014 prends-la en photo !")+'</div>';
     var sps=document.getElementById("scan-photo-suggest");
@@ -15905,7 +15956,7 @@ function renderTrends(){
          l'illustration, tronque, pour ne rien apprendre. Une carte propre vaut
          mieux qu'une carte qui dit deux fois la meme chose. */
       drinkCardPhotoHTML(d)+'</div>'+
-      '<div class="dcard-info"><div class="dcard-name">'+d.name+'</div>'+
+      '<div class="dcard-info"><div class="dcard-name">'+sanitize(desechapper(d.name))+'</div>'+
       '<div class="dcard-bottom"><span class="dcard-cat">'+d.cat+'</span></div></div>';
     div.onclick=function(){pick(d);};
     a11yCard(div,d.name+", "+d.brand);
@@ -15934,7 +15985,7 @@ function renderRecents(){
   recents.forEach(function(d){
     var div=document.createElement("div");div.className="ritem";
     div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
-      '<div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.cat+' · '+d.brand+starSuffix(d)+'</div></div>'+
+      '<div style="flex:1"><div class="rname">'+sanitize(desechapper(d.name))+'</div><div class="rsub">'+d.cat+' · '+sanitize(desechapper(d.brand||""))+starSuffix(d)+'</div></div>'+
       '<span class="c3" style="font-size:18px">›</span>';
     div.onclick=function(){pick(d);};el.appendChild(div);
     bindPhotoTap(div,d);
@@ -16397,7 +16448,7 @@ function renderSearchDefault(el){
     var div=document.createElement("div");div.className="ritem";
     var rank=i<3?'<span style="flex-shrink:0;width:20px;text-align:center;font-size:13px;font-weight:800;color:var(--s3)">'+(i+1)+'</span>':'<span style="flex-shrink:0;width:20px"></span>';
     div.innerHTML=rank+'<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
-      '<div style="flex:1;min-width:0"><div class="rname">'+d.name+'</div><div class="rsub">'+d.brand+' · '+d.cat+starSuffix(d)+'</div></div>'+
+      '<div style="flex:1;min-width:0"><div class="rname">'+sanitize(desechapper(d.name))+'</div><div class="rsub">'+sanitize(desechapper(d.brand||""))+' · '+d.cat+starSuffix(d)+'</div></div>'+
       '<span class="rfav" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();toggleFav('+d.id+',this);}" style="display:flex;align-items:center;padding:6px 4px;cursor:pointer">'+heartSVG(isFav,20)+'</span>';
     div.onclick=function(){pick(d);};a11yCard(div,d.name+", "+d.brand);el.appendChild(div);
     bindPhotoTap(div,d);
@@ -16503,7 +16554,7 @@ function renderList(){
     var isFav=favorites.indexOf(d.id)!==-1;
     var div=document.createElement("div");div.className="ritem";
     div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
-      '<div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.brand+' · '+d.cat+starSuffix(d)+'</div></div>'+
+      '<div style="flex:1"><div class="rname">'+sanitize(desechapper(d.name))+'</div><div class="rsub">'+sanitize(desechapper(d.brand||""))+' · '+d.cat+starSuffix(d)+'</div></div>'+
       '<span class="rfav" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();toggleFav('+d.id+',this);}" style="display:flex;align-items:center;padding:6px 4px;cursor:pointer">'+heartSVG(isFav,20)+'</span>';
     div.onclick=function(){pick(d);};a11yCard(div,d.name+", "+d.brand);el.appendChild(div);
     bindPhotoTap(div,d);
@@ -19059,7 +19110,12 @@ function routeFromMarker(storeId){
   showDrinkRouteBanner(box,s,null,null);
   // 2) Puis on remplace par le VRAI chemin pieton des que l'API OSM repond.
   var url="https://routing.openstreetmap.de/routed-foot/route/v1/foot/"+userLng+","+userLat+";"+s.lng+","+s.lat+"?overview=full&geometries=geojson";
-  fetch(url).then(function(r){return r.json();}).then(function(d){
+  /* Jeton : des taps repetes empilaient des requetes, et une reponse tres
+     tardive repeignait la carte apres coup. Et garde-temps : un reseau qui
+     PEND laissait « Calcul du chemin… » a vie (audit personas). */
+  var _seqR=(window._routeSeq=(window._routeSeq||0)+1);
+  (typeof fetchWithTimeout==="function"?fetchWithTimeout(url,12000):fetch(url)).then(function(r){return r.json();}).then(function(d){
+    if(_seqR!==window._routeSeq)return;
     if(!window._drinkRouteLayer||!d.routes||!d.routes[0])return; // itineraire ferme entre-temps
     var rt=d.routes[0];
     var coords=rt.geometry.coordinates.map(function(c){return [c[1],c[0]];});
@@ -19148,7 +19204,7 @@ function navUpdatePosition(lat,lng){
       window._navLastReroute=now;
       var sub2=document.getElementById("nav-sub");if(sub2)sub2.textContent=tr("Recalcul de l'itinéraire…");
       var url="https://routing.openstreetmap.de/routed-foot/route/v1/foot/"+lng+","+lat+";"+s.lng+","+s.lat+"?overview=full&geometries=geojson";
-      fetch(url).then(function(r){return r.json();}).then(function(d){
+      (typeof fetchWithTimeout==="function"?fetchWithTimeout(url,12000):fetch(url)).then(function(r){return r.json();}).then(function(d){
         if(!window._navStore||window._navStore.id!==s.id||!d.routes||!d.routes[0])return;
         var coords=d.routes[0].geometry.coordinates.map(function(c){return [c[1],c[0]];});
         window._navRouteCoords=coords;
@@ -20216,8 +20272,14 @@ function magasinProcheAvec(did){
       var dLa=(userLat-st.lat)*111000,dLo=(userLng-st.lng)*111000*Math.cos(st.lat*Math.PI/180);
       dist=Math.sqrt(dLa*dLa+dLo*dLo);
     }
-    if(dist!==null&&dist>10000)return;
-    if(!best||(dist!==null&&(best.dist===null||dist<best.dist)))best={store:st,dist:dist};
+    /* Sans position connue (GPS refuse), dist=null passait le filtre : un
+       magasin a 300 km devenait « pres de toi » (audit personas). Sans
+       distance, pas d'alerte « pres de toi ». Et le rayon est celui que la
+       personne a regle (« Ta zone »), pas 10 km codes en dur. */
+    if(dist===null)return;
+    var _ray=1000*Math.max(1,Math.min(50,Math.round(Number(window.magoHuntRadius)||10)));
+    if(dist>_ray)return;
+    if(!best||dist<best.dist)best={store:st,dist:dist};
   });
   return best;
 }
@@ -22563,7 +22625,7 @@ function renderStoreDetail(){
     div.innerHTML=
       '<div class="sd-row" onclick="pick(DRINKS.find(function(x){return x.id==='+d.id+'}))">'+
         '<div class="store-ico" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
-        '<div class="sd-txt"><div class="store-name">'+d.name+'</div><div class="store-meta">'+d.cat+starSuffix(d)+stat+(vuParTexte(s,d.id)?'<span style="color:var(--txt2)"> · '+vuParTexte(s,d.id)+'</span>':'')+'</div></div>'+
+        '<div class="sd-txt"><div class="store-name">'+sanitize(desechapper(d.name))+'</div><div class="store-meta">'+d.cat+starSuffix(d)+stat+(vuParTexte(s,d.id)?'<span style="color:var(--txt2)"> · '+vuParTexte(s,d.id)+'</span>':'')+'</div></div>'+
         toggles+
       '</div>';
     listEl.appendChild(div);
@@ -23550,7 +23612,10 @@ function enregistrerFiche(){
   if(!Object.keys(maj).length){ fermerEditionFiche(); toast(tr("Rien à changer")); return; }
   if(!window.fbSaveStore){ toast(tr("Indisponible hors ligne")); return; }
   var btn=document.querySelector("#fiche-ov .claim-send"); if(btn){btn.disabled=true;btn.textContent=tr("Enregistrement…");}
-  magoAttendre(window.fbSaveStore(s.fbId||s.id,maj)).then(function(){
+  magoAttendre(Promise.race([
+    window.fbSaveStore(s.fbId||s.id,maj),
+    new Promise(function(_,rej){setTimeout(function(){rej(new Error("délai dépassé — le réseau ne répond pas"));},12000);})
+  ])).then(function(){
     Object.keys(maj).forEach(function(k){ s[k]=maj[k]; });
     try{ if(window.fbTouchCache)window.fbTouchCache(); }catch(e){}
     fermerEditionFiche();
@@ -24252,6 +24317,13 @@ function addDiscovery(name,brand,barcode,cat){
     playSound("err");
     return;
   }
+  /* INVARIANT nomPropre, ICI AUSSI. submitProposal l'applique deja ; ce
+     chemin-ci (scan OpenFoodFacts, « ce n'est pas le bon nom », saisie
+     manuelle) stockait le nom BRUT — chevrons compris — que l'artwork SVG
+     de certaines marques reinjectait tel quel (XSS stocke, prouve par
+     l'audit personas). Toute decouverte nait propre, quel que soit son
+     chemin d'entree ; l'echappement a aussi ete ajoute cote artwork. */
+  name=nomPropre(name);brand=nomPropre(brand||"");
   /* ON RETROUVE SA PROPRE FICHE, MEME SI LE CODE EST ECRIT AUTREMENT.
      La comparaison se faisait sur le texte brut : 0078000033489 et
      078000033489 — la meme canette, a un zero de tete pres — donnaient deux
@@ -25176,7 +25248,7 @@ function proposePhotoChosen(input){
     if(hint)hint.style.display="none";
     playSound("pop");
     analyzeProposePhoto(data);
-  });
+  },function(){toast("Photo illisible — reprends-la ou choisis-en une autre");try{playSound("err");}catch(e){}});
   input.value="";
 }
 /* ── Reconnaissance IA de la photo proposée ──────────────────────────────────
@@ -25379,6 +25451,20 @@ function submitProposal(){
       closeProposeForm();
       pick(_deja);
       toast("\u00ab "+_deja.name+" \u00bb est d\u00e9j\u00e0 dans Magofeed \u2014 la voici");
+      playSound("pop");
+      return;
+    }
+    /* Meme verrou contre les DECOUVERTES en attente : re-proposer le meme
+       nom creait une seconde candidate jumelle au vote (audit personas). */
+    var _dejaDisc=(window.DISCOVERIES||[]).find(function(x){
+      if(!x||!x.name)return false;
+      if(_cle(x.name)===_kN&&(!_kB||_cle(x.brand||"")===_kB))return true;
+      return !!_sacP&&_sac(x.name,x.brand)===_sacP;
+    });
+    if(_dejaDisc){
+      closeProposeForm();
+      toast("« "+_dejaDisc.name+" » est déjà proposée — elle attend des votes dans Découvertes");
+      show("discover");
       playSound("pop");
       return;
     }
@@ -26818,7 +26904,7 @@ function openExploreMap(opts){
     initExploreSheetDrag();
     setExploreSheet("min",true);
   }
-  host.style.display="flex";
+  clearTimeout(window._exploreFermeT);host.style.display="flex";
   requestAnimationFrame(function(){requestAnimationFrame(function(){
     host.classList.add("in");
     /* Hauteur reelle de l'en-tete (retour + titre + ville + filtres + encoche) :
@@ -26980,8 +27066,11 @@ function closeExploreMap(){
   var host=document.getElementById("explore-map-host");
   if(!host)return;
   host.classList.remove("in");
-  setTimeout(function(){
+  clearTimeout(window._exploreFermeT);
+  window._exploreFermeT=setTimeout(function(){
     host.style.display="none";
+    /* Rouvrir pendant ces 280 ms ne doit plus se faire masquer par ce
+       minuteur : openExploreMap l'annule (audit personas). */
     /* Carte fermee = memoire rendue. Avant, la carte gardait TOUTES ses
        tuiles (filtrees au GPU) et des milliers de marqueurs en memoire pour
        toute la session — c'est le genre de poids qui fait tuer l'app par
@@ -27216,8 +27305,16 @@ function executerActionPin(cle,s){
   }
   if(cle==="rupture"){ poser(-1); return; }
   if(cle==="prix"){
-    // en stock ET le prix : la goutte de prix vaut confirmation
-    poser(1);
+    /* en stock ET le prix : la goutte de prix vaut confirmation — par le
+       chemin DIRECT. poser(1) fabriquait la barre de prix dans un div
+       detache : personne ne pouvait appuyer sur OK, la confirmation promise
+       n'etait jamais enregistree (audit personas — la regression exacte que
+       la branche « stock » avait deja corrigee). */
+    try{
+      if(awardFree("conf:"+String(s.fbId||s.id)+":"+did,24)){
+        enregistrerStock(String(s.fbId||s.id),did,null);
+      }
+    }catch(e){}
     setTimeout(function(){ try{quickPrice(s.id,did);}catch(e){} },260);
   }
 }
@@ -28448,7 +28545,7 @@ function handleDeepLink(){
   var m=(location.hash||"").match(/#drink=(\d+)/);
   if(m){
     if(_deepLinkSealed())return;
-    var wanted=Number(m[1]);
+    var wanted=window._fusionVers?window._fusionVers(Number(m[1])):Number(m[1]); // fiche fusionnee -> fiche gardee
     /* Une boisson vient soit du catalogue local (data/drinks.js, deja en
        memoire au premier passage), soit du catalogue COMMUNAUTAIRE, qui
        n'entre dans DRINKS qu'au retour de Firestore (evenement
@@ -29704,7 +29801,7 @@ function showRouteToStore(lat,lng,store,sansCompter){
   }
   toast("Calcul du chemin\u2026");
   var url="https://routing.openstreetmap.de/routed-foot/route/v1/foot/"+userLng+","+userLat+";"+lng+","+lat+"?overview=full&geometries=geojson";
-  fetch(url).then(function(r){return r.json();}).then(function(d){
+  (typeof fetchWithTimeout==="function"?fetchWithTimeout(url,12000):fetch(url)).then(function(r){return r.json();}).then(function(d){
     if(!d.routes||!d.routes[0])throw new Error("pas de route");
     var rt=d.routes[0];
     var _tries=0;
@@ -30972,7 +31069,7 @@ function _cheminsHoraires(){
   return natif?[URL_HORAIRES_PUBLIEE,"data/horaires-osm-be.json"]:["data/horaires-osm-be.json"];
 }
 function chargerHorairesOSM(){
-  if(_horairesEtat)return;
+  if(_horairesEtat===1||_horairesEtat===2)return; // echec (3) : on a le droit de retenter
   _horairesEtat=1;
   var chemins=_cheminsHoraires();
   var essayer=function(i){
@@ -30983,7 +31080,11 @@ function chargerHorairesOSM(){
        pas besoin de delai, et lui en imposer un casserait le repli sur un
        telephone lent. */
     var dernier=(i+1>=chemins.length);
-    var p=dernier?fetch(chemins[i]):fetchWithTimeout(chemins[i],6000);
+    /* Le « dernier chemin » n'est local QU'EN coquille native : sur le web
+       c'est le reseau, et un fetch nu qui pend laissait « Horaires en cours
+       de chargement… » pour toute la session (audit personas). 12 s large
+       pour un telephone lent, mais une fin garantie. */
+    var p=fetchWithTimeout(chemins[i],dernier?12000:6000);
     return p
       .then(function(r){ if(!r.ok)throw 0; return r.json(); })
       .catch(function(e){ if(!dernier)return essayer(i+1); throw e; });
@@ -31256,7 +31357,8 @@ function initPullToRefresh(){
         renderTrends();renderRecents();
         if(curSel)renderStoreList();
         ind.style.height="0";
-        toast("Actualisé !");playSound("win");
+        if(window._fbDernierEchec&&Date.now()-window._fbDernierEchec<5000){toast("Hors ligne — données locales affichées");playSound("err");}
+        else{toast("Actualisé !");playSound("win");}
         if(icon)icon.textContent="↓";
       });
     } else {
@@ -35303,6 +35405,7 @@ function amisChercher(){
       if(AMIS.q!==q)return;                       // la frappe a continue
       AMIS.cherche=false;
       var me=msgMe();
+      if(rows===null){AMIS.res=[];try{toast("Recherche impossible — vérifie ta connexion");}catch(e){}renderAmis();return;}
       AMIS.res=(rows||[]).filter(function(u){return String(u.uid||u.id||"")!==me;});
       (AMIS.res||[]).forEach(function(u){ try{msgRetenirUser(String(u.uid||u.id||""),u);}catch(e){} });
       renderAmis();
@@ -36124,7 +36227,21 @@ function msgEnvoyerTexte(){
   var t=ta.value.trim();if(!t)return;
   ta.value="";ta.style.height="auto";var sb=document.getElementById("th-send");if(sb)sb.disabled=true;
   try{var _p=document.getElementById("th-emo");if(_p&&_p.classList.contains("on"))msgEmojiBascule();}catch(e){}
-  msgEnvoyer({type:"text",text:t}).then(function(ok){if(!ok&&ta&&!ta.value){ta.value=t;if(sb)sb.disabled=false;}});
+  msgEnvoyer({type:"text",text:t}).then(function(ok){
+    if(ok)return;
+    /* ECHEC : rendre son texte a la personne. Le chemin d'erreur passe par
+       renderThreadFoot, qui RECONSTRUIT le composeur : le `ta` capture
+       ci-dessus est alors un noeud detache, et ecrire dedans perdait le
+       message (audit personas, reseau coupe). On ecrit dans le champ
+       ACTUEL ; les rendus suivants le gardent (brouillon releve au rendu). */
+    var ta2=document.getElementById("th-in")||ta;
+    if(ta2&&!String(ta2.value||"").trim()){
+      ta2.value=t;
+      try{ta2.style.height="auto";ta2.style.height=Math.min(120,ta2.scrollHeight)+"px";}catch(e){}
+    }
+    var sb2=document.getElementById("th-send")||sb;
+    if(sb2)sb2.disabled=false;
+  });
 }
 /* Envoi commun a tous les types : cree la conversation au premier message,
    puis laisse le module faire le lot. La demande n'est creee QUE quand on
@@ -36136,7 +36253,17 @@ function msgEnvoyer(msg){
   MSG.sending=true;
   var cid=MSG.cid;
   var prep=MSG.conv?Promise.resolve({ok:true,cid:cid,conv:MSG.conv}):window.fbOuvrirConversation(MSG.other);
-  return prep.then(function(r){
+  /* GARDE-TEMPS 12 s — meme lecon que claimSubmit : hors reseau, une
+     ecriture Firestore ne repond NI succes NI echec. Sans lui, MSG.sending
+     restait leve a vie — envois suivants jetes en silence, composeur
+     desactive a chaque rendu, seul un redemarrage debloquait (audit
+     personas). Si le vrai envoi aboutit apres coup, sending est deja
+     redescendu et l'ecoute du fil resynchronise l'affichage. */
+  var _garde=new Promise(function(res){setTimeout(res,12000);}).then(function(){
+    if(!MSG.sending)return null;
+    MSG.sending=false;msgErreurToast("offline");renderThreadFoot();return false;
+  });
+  var _envoi=prep.then(function(r){
     if(!r||!r.ok)return r;
     if(r.conv&&(!MSG.conv||MSG.conv.cid!==r.conv.cid))MSG.conv=r.conv;
     return window.fbEnvoyerMessage(cid,msg);
@@ -36157,6 +36284,7 @@ function msgEnvoyer(msg){
     if(!MSG.unsub&&msgEcranOn("thread"))threadReprendre();else renderThreadFoot();
     return true;
   }).catch(function(){MSG.sending=false;msgErreurToast("unknown");renderThreadFoot();return false;});
+  return Promise.race([_envoi,_garde]).then(function(v){return v===null?_envoi:v;});
 }
 /* ── Envoyer une carte a quelqu'un sans ouvrir son fil ────────────────
    msgEnvoyer() parle au fil ouvert : il lit MSG.cid, MSG.other, MSG.conv. Or
@@ -36602,6 +36730,10 @@ function renderUserSearchList(){
       var cur=((document.getElementById("q")||{}).value||"").trim();
       if(cur!==q||searchMode!=="users")return;
       el.innerHTML="";
+      if(rows===null){
+        el.innerHTML='<div style="text-align:center;padding:30px;font-size:13px;color:var(--s3)">Recherche impossible — vérifie ta connexion<br><span style="font-size:11.5px">Réessaie dans un instant</span></div>';
+        return;
+      }
       if(!rows.length){
         el.innerHTML='<div style="text-align:center;padding:30px;font-size:13px;color:var(--s3)">Aucun joueur \u00AB '+sanitize(q)+' \u00BB<br><span style="font-size:11.5px">La recherche commence par le d\u00E9but du pseudo</span></div>';
         return;
@@ -36636,8 +36768,9 @@ function renderUserSearchList(){
     });
   },350);
 }
-function renderSearchHistory(){if(searchMode==="stores")return;var el=document.getElementById("search-list");var q=document.getElementById("q");if(!el||!q||q.value.length>0||!searchHistory.length)return;el.innerHTML='<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px">Récents</div>';searchHistory.forEach(function(h){var div=document.createElement("div");div.style.cssText="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer";div.innerHTML='<div style="width:34px;height:34px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--s3)"></div><span style="flex:1;font-size:14px;font-weight:500;color:var(--s1)">'+h+'</span><span style="font-size:12px;color:var(--txt2);padding:4px" onclick="event.stopPropagation();removeHistory(\''+h+'\')">✕</span>';div.onclick=function(){document.getElementById("q").value=h;renderList();};el.appendChild(div);});}
-function removeHistory(term){searchHistory=searchHistory.filter(function(h){return h!==term;});localStorage.setItem("magosearchhist",JSON.stringify(searchHistory));renderSearchHistory();}
+/* renderSearchHistory/removeHistory (version brute, jamais appelee) supprimees :
+   elles reinjectaient le terme tape sans echappement (innerHTML + onclick).
+   Le rendu VIVANT de l'historique vit dans renderList, avec sanitize(). */
 
 /* ================================
    BINDINGS
