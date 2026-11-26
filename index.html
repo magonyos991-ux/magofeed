@@ -5699,6 +5699,23 @@ window.fbRepositionMyHunts = async function(lat, lng, watches) {
    de poussees parties, courriel de secours ou non. Ecrit par le serveur seul.
    C'est la reponse a « est-ce que l'evenement a seulement eu lieu ? », question
    qu'aucune notification manquante ne permettait de trancher. */
+/* LE TEST DE BOUT EN BOUT. Le journal dit ce qui s'est passe APRES coup. Il
+   ne repond pas a « est-ce que ca marche maintenant ? », et il n'y avait aucun
+   moyen de le savoir sans qu'un inconnu cree un compte.
+
+   SURTOUT : ouvrir l'app soi-meme sur son PC ne peut PAS declencher l'alerte
+   « nouvel utilisateur ». Elle ne part qu'a la CREATION du document de profil,
+   et une session deja connectee n'en cree aucun. Le test evident etait donc un
+   test faux, et il a fait croire pendant des mois a une panne. */
+window.fbTesterAlerteAdmin = async function() {
+  /* getFunctions a chaque appel, comme les quinze autres appels du fichier :
+     il n'existe pas de « fns » partage, et la region doit etre celle du
+     deploiement. ESLint a attrape l'oubli avant la mise en ligne. */
+  var fns = getFunctions(app, "europe-west1");
+  var call = httpsCallable(fns, "testerAlerteAdmin", { timeout: 60000 });
+  var r = await call({});
+  return (r && r.data) || {};
+};
 window.fbLireAlertesAdmin = async function(n) {
   try {
     var snap = await getDocs(query(collection(db, "alertesAdmin"),
@@ -5710,7 +5727,8 @@ window.fbLireAlertesAdmin = async function(n) {
         at: (x.at && x.at.toMillis) ? x.at.toMillis() : null,
         poussees: Number(x.pousseesEnvoyees) || 0,
         jetons: Number(x.jetonsTrouves) || 0,
-        courriel: x.courrielEnvoye === true
+        courriel: x.courrielEnvoye === true,
+        echecs: Array.isArray(x.echecs) ? x.echecs.map(String).slice(0, 3) : []
       };
     });
   } catch (e) { return { erreur: String((e && (e.code || e.message)) || e) }; }
@@ -33402,40 +33420,132 @@ function renderAlertes(){
     var list=document.getElementById("admin-list");
     if(list&&list.parentNode)list.parentNode.appendChild(host);
   }
-  host.innerHTML='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:18px 0 10px">'+
-    'Journal des alertes</div><div class="c2" style="font-size:12px">Lecture…</div>';
+  /* LE PANNEAU DE TEST EST UN ENFANT SEPARE DE LA LISTE. La lecture du journal
+     est asynchrone et remplace son innerHTML : si le bouton vivait dedans, il
+     disparaissait a chaque rafraichissement, juste apres avoir ete clique. */
+  host.innerHTML=
+    '<div style="font-size:13px;font-weight:800;color:var(--s1);margin:18px 0 10px">Journal des alertes</div>'+
+    '<div id="alertes-test" style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:14px;margin-bottom:10px">'+
+      '<div style="font-size:13px;font-weight:700;color:var(--s1)">Tester la chaine d\'alerte</div>'+
+      '<div style="font-size:11.5px;color:var(--s2);margin:2px 0 10px;line-height:1.5">'+
+        'Envoie une vraie alerte par le meme chemin que « Nouvel utilisateur », et affiche '+
+        'les chiffres bruts du serveur.<br><br>'+
+        '<b>A savoir avant de douter de l\'app :</b> ouvrir Magofeed toi-meme sur ton PC ne peut '+
+        'PAS declencher l\'alerte « nouvel utilisateur ». Elle ne part qu\'a la creation d\'un '+
+        'profil, et une session deja connectee n\'en cree aucun. Pour un vrai test d\'arrivee, '+
+        'il faut une fenetre de navigation privee.</div>'+
+      '<button id="alertes-test-go" type="button" style="width:100%;padding:11px;border-radius:12px;border:1.5px solid var(--border);background:var(--app-bg);color:var(--s1);font-weight:800;font-size:12.5px;cursor:pointer;touch-action:manipulation">Envoyer une alerte de test</button>'+
+      '<div id="alertes-test-out" style="display:none;margin-top:10px;padding:12px 14px;border-radius:12px;font-size:12px;line-height:1.5;word-break:break-word"></div>'+
+    '</div>'+
+    '<div id="alertes-liste" class="c2" style="font-size:12px">Lecture\u2026</div>';
+
+  var bt=document.getElementById("alertes-test-go");
+  if(bt)bt.onclick=function(){
+    var out=document.getElementById("alertes-test-out");
+    if(!window.fbTesterAlerteAdmin){toast("Recharge la page");playSound("err");return;}
+    bt.disabled=true; bt.textContent="Envoi en cours\u2026";
+    window.fbTesterAlerteAdmin().then(function(r){
+      bt.disabled=false; bt.textContent="Envoyer une alerte de test";
+      /* LES CINQ CAUSES, DANS L'ORDRE, ET UNE SEULE AFFICHEE : celle qui bloque.
+         Chacune demande une reparation differente — ne pas les distinguer, c'est
+         ce qui faisait tourner en rond. */
+      var bon=false, txt;
+      if(!r.admins){
+        txt="Ton compte n\'est pas dans la liste des administrateurs cote serveur. Aucune alerte ne peut partir, pour personne.";
+      }else if(r.poussees>0){
+        bon=true;
+        txt="La poussee est partie ("+r.poussees+"). Ton telephone doit sonner dans quelques secondes. "+
+            "Si rien n\'arrive, le blocage est dans les reglages de notification de l\'appareil, pas dans l\'app. "+
+            "L\'e-mail de secours ne part pas dans ce cas : on ne sonne jamais deux fois.";
+      }else if(!r.jetons){
+        txt="Aucun appareil enregistre ("+r.admins+" administrateur"+(r.admins>1?"s":"")+", 0 jeton). "+
+            "Va dans Reglages puis « Notifications » et autorise-les. Sur iPhone, l\'app doit d\'abord etre sur l\'ecran d\'accueil.";
+      }else if(r.echecs&&r.echecs.length){
+        txt="Google a refuse l\'envoi. Code exact : "+r.echecs.join(" / ")+". "+
+            "« registration-token-not-registered » = jeton mort, reactive les notifications. Tout autre code = reglage a corriger dans la console Firebase.";
+      }else{
+        txt="Jeton trouve mais aucune poussee partie, et aucun code d\'erreur rendu. Envoie-moi cette capture.";
+      }
+      if(r.courriel){
+        txt+=" E-mail de secours envoye"+(r.adresseSecours?(" a "+r.adresseSecours):"")+" : regarde aussi les indesirables.";
+      }else if(!r.poussees&&!r.adresseSecours){
+        txt+=" Aucun secours possible : ton compte administrateur n\'a pas d\'adresse e-mail dans Firebase Auth.";
+      }else if(!r.poussees){
+        txt+=" Le secours par e-mail n\'est pas parti non plus : cle Brevo absente ou refusee.";
+      }
+      if(out){
+        out.style.display="block";
+        out.style.background=bon?"rgba(21,128,61,.10)":"rgba(180,83,9,.10)";
+        out.style.border="1px solid "+(bon?"rgba(21,128,61,.3)":"rgba(180,83,9,.3)");
+        out.style.color=bon?"#15803d":"#b45309";
+        out.style.fontWeight="600";
+        out.textContent=txt;
+      }
+      playSound(bon?"win":"err");
+      /* ON NE RAPPELLE PAS renderAlertes() ICI : il reconstruit tout le
+         panneau, donc il effacerait le verdict a l'instant meme ou on vient de
+         l'ecrire. On ne rafraichit que la liste, ou la ligne du test va
+         apparaitre. */
+      try{ window._rafraichirListeAlertes(); }catch(e){}
+    }).catch(function(e){
+      bt.disabled=false; bt.textContent="Envoyer une alerte de test";
+      playSound("err");
+      var c=String((e&&(e.code||e.message))||e);
+      if(out){
+        out.style.display="block";
+        out.style.background="rgba(180,83,9,.10)";
+        out.style.border="1px solid rgba(180,83,9,.3)";
+        out.style.color="#b45309"; out.style.fontWeight="600";
+        out.textContent=/not-found|unimplemented/.test(c)
+          ? "La fonction testerAlerteAdmin n\'est pas encore deployee. Deploie notif-admin.js."
+          : "Echec : "+c.slice(0,120);
+      }
+    });
+  };
+
+  window._rafraichirListeAlertes();
+}
+window._rafraichirListeAlertes=function(){
+  /* Le garde reste ici, et pas seulement dans renderAlertes : cette fonction
+     est devenue appelable toute seule, et elle lit alertesAdmin. */
+  if(!isAdmin)return;
   if(!window.fbLireAlertesAdmin)return;
   window.fbLireAlertesAdmin(20).then(function(rows){
-    var t='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:18px 0 10px">Journal des alertes</div>';
+    var box=document.getElementById("alertes-liste");
+    if(!box)return;
     if(!rows||rows.erreur){
-      host.innerHTML=t+'<div class="c2" style="font-size:12px">Lecture impossible'+
+      box.innerHTML='<div class="c2" style="font-size:12px">Lecture impossible'+
         (rows&&rows.erreur?' ('+sanitize(rows.erreur)+')':'')+'</div>';
       return;
     }
     if(!rows.length){
-      host.innerHTML=t+'<div class="c2" style="font-size:12px;line-height:1.5">'+
-        'Aucune alerte enregistrée. Le journal ne retient que les événements '+
+      box.innerHTML='<div class="c2" style="font-size:12px;line-height:1.5">'+
+        'Aucune alerte enregistr\u00E9e. Le journal ne retient que les \u00E9v\u00E9nements '+
         'survenus depuis sa mise en place.</div>';
       return;
     }
-    t+='<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;overflow:hidden">';
+    var t='<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;overflow:hidden">';
     rows.forEach(function(a,i){
       var etat,coul;
-      if(a.poussees>0){ etat="notification envoyée"; coul="var(--s2)"; }
-      else if(a.jetons>0){ etat="envoi refusé par Google"; coul="#b45309"; }
-      else { etat="aucun appareil enregistré"; coul="#b42318"; }
-      if(a.courriel)etat+=" · e-mail de secours envoyé";
+      if(a.poussees>0){ etat="notification envoy\u00E9e"; coul="var(--s2)"; }
+      else if(a.jetons>0){ etat="envoi refus\u00E9 par Google"; coul="#b45309"; }
+      else { etat="aucun appareil enregistr\u00E9"; coul="#b42318"; }
+      if(a.courriel)etat+=" \u00B7 e-mail de secours envoy\u00E9";
+      /* LE CODE D'ERREUR, PAS SEULEMENT « refuse ». Un jeton mort se reactive en
+         deux gestes ; une cle VAPID fausse demande d'ouvrir la console Firebase.
+         Ce n'est pas la meme journee de travail. */
+      if(a.echecs&&a.echecs.length)etat+=" \u00B7 "+a.echecs.join(" / ");
       t+='<div style="padding:12px 14px'+(i?';border-top:1px solid var(--border)':'')+'">'+
         '<div style="font-size:12.5px;font-weight:700;color:var(--s1)">'+sanitize(a.titre)+'</div>'+
         (a.corps?'<div class="c2" style="font-size:11.5px;margin-top:2px;line-height:1.4">'+sanitize(a.corps)+'</div>':'')+
-        '<div style="font-size:11px;margin-top:4px;color:'+coul+';font-weight:600">'+etat+'</div>'+
+        '<div style="font-size:11px;margin-top:4px;color:'+coul+';font-weight:600">'+sanitize(etat)+'</div>'+
         (a.at?'<div class="c3" style="font-size:10.5px;margin-top:2px">'+sanitize(new Date(a.at).toLocaleString("fr-BE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}))+'</div>':'')+
       '</div>';
     });
-    host.innerHTML=t+'</div>';
+    box.innerHTML=t+'</div>';
   }).catch(function(e){
-    host.innerHTML='<div style="font-size:13px;font-weight:800;color:var(--s1);margin:18px 0 10px">Journal des alertes</div>'+
-      '<div class="c2" style="font-size:12px">Lecture impossible</div>';
+    var box=document.getElementById("alertes-liste");
+    if(box)box.innerHTML='<div class="c2" style="font-size:12px">Lecture impossible</div>';
     console.warn("alertes:",e);
   });
 }

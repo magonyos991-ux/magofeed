@@ -36,6 +36,25 @@ function corpsDe(nom) {
 }
 const drinksSrc = readFileSync("data/drinks.js", "utf8").replace(/^\/\*[\s\S]*?\*\//, "");
 
+/* MEME PRINCIPE QUE corpsDe, POUR LES TABLES. mergeCatalog s'appuie sur des
+   listes de mots declarees au niveau du fichier. Les recopier ici les aurait
+   figees : le jour ou quelqu'un enrichit la liste dans l'app, l'essai aurait
+   continue a valider l'ancienne. On les lit donc dans index.html, comme le
+   reste. */
+function declDe(nom) {
+  const re = new RegExp("^(?:var|const|let)\\s+" + nom + "\\s*=", "m");
+  const m = re.exec(src);
+  if (!m) throw new Error("table " + nom + " introuvable dans " + fichier);
+  let i = m.index + m[0].length, prof = 0;
+  for (; i < src.length; i++) {
+    const c = src[i];
+    if (c === "{" || c === "[" || c === "(") prof++;
+    else if (c === "}" || c === "]" || c === ")") prof--;
+    else if (c === ";" && prof === 0) return src.slice(m.index, i + 1);
+  }
+  throw new Error("fin de " + nom + " introuvable");
+}
+
 /* Le decor minimal dont mergeCatalog a besoin : on ne remplace que ce qui
    touche a l'ecran, jamais la logique qu'on teste. */
 const code = `
@@ -47,6 +66,13 @@ const code = `
   ` + corpsDe("nomPropre") + `
   ` + corpsDe("indexCode") + `
   ` + corpsDe("porteCode") + `
+  ` + /* mergeCatalog a appris a ramener une marque collee ou doublee a la forme
+          propre : sans cette ligne, le decor de l'essai n'a pas la fonction et
+          TOUT ce fichier plantait au lieu de controler quoi que ce soit. */
+      corpsDe("_marquesNatives") + corpsDe("_grapheCommunautaire") +
+      corpsDe("_motsDeRecette") + corpsDe("_garderAncienNom") + `
+  ` + ["_CLE_COULEUR", "_MOTS_SANS_RECETTE", "_UNITES_SEULES", "_MOTS_PAS_IDENTIFIANTS",
+       "_MOTS_DE_CATEGORIE", "_GOUTS_VOCAB", "_GOUTS_FICHE"].map(declDe).join("\n  ") + `
   var VALID_CATS = ["Soda","Energy","Ice Tea","Jus","Eau","Sport","Exotique","Lacté","Café","Snacks","Autre"];
   var CAT_DEFAULTS = { "Autre": { emoji:"", color:"#c69a57", light:"#faf3e8" } };
   function classifyDrink(){ return "Autre"; }
@@ -57,7 +83,39 @@ const code = `
   ` + corpsDe("mergeCatalog") + `
   return { DRINKS: DRINKS, mergeCatalog: mergeCatalog, codeNu: codeNu, indexCode: indexCode };
 `;
-const M = new Function(code)();
+/* ══ LE DECOR SE REPARE TOUT SEUL ══════════════════════════════════════════
+   Ce fichier a passe des semaines a planter au lieu de controler quoi que ce
+   soit : mergeCatalog avait appris a appeler quatre nouvelles fonctions et
+   sept tables de mots, personne ne les avait ajoutees au decor, et l'erreur
+   ressemblait a une pile d'appels illisible plutot qu'a un defaut.
+
+   On arrete de lister a la main. Tant qu'il manque un nom, on le cherche dans
+   index.html — fonction ou table — on l'ajoute devant, et on recommence. Si
+   le nom n'y est pas, on le dit en une phrase au lieu de mourir. */
+let code_ = code, ajouts = [], M;
+for (let tour = 0; ; tour++) {
+  try { M = new Function(code_)(); break; }
+  catch (e) {
+    const nom = /^(\w+) is not defined$/.exec(String(e && e.message) || "")?.[1];
+    if (!nom || tour > 40) {
+      console.error("\nLe decor de l'essai ne se construit pas : " + (e && e.message));
+      if (ajouts.length) console.error("Deja ajoute automatiquement : " + ajouts.join(", "));
+      console.error("Si le nom existe dans index.html mais n'est ni une fonction ni une");
+      console.error("table « var NOM = ... ; », il faut l'ajouter a la main au decor.");
+      process.exit(1);
+    }
+    let morceau = null;
+    try { morceau = corpsDe(nom); } catch (_) {
+      try { morceau = declDe(nom); } catch (__) {
+        console.error("\n« " + nom + " » est utilise par mergeCatalog mais introuvable dans " + fichier + ".");
+        process.exit(1);
+      }
+    }
+    code_ = morceau + "\n" + code_;
+    ajouts.push(nom);
+  }
+}
+if (ajouts.length) console.log("decor complete automatiquement : " + ajouts.join(", "));
 
 const etapes = [];
 const dit = (nom, ok, note) => etapes.push([!!ok, nom, note || ""]);

@@ -54,6 +54,13 @@ if (!getApps().length) initializeApp();
 const db = getFirestore();
 const REGION = "europe-west1";
 const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
+/* BREVO_API_KEY : ce fichier envoie SEPT alertes a l'administrateur via
+   sendToAdmins, dont « Alcool ecarte » — celle qui compte le plus. Le secours
+   par courriel de sendToAdmins lit process.env.BREVO_API_KEY, et un secret
+   n'arrive dans process.env que si la fonction qui s'en sert le DECLARE.
+   Sans cette ligne, les sept alertes n'avaient AUCUN secours : jeton push
+   absent ou refuse, et l'alerte disparaissait sans un mot. */
+const BREVO_API_KEY = defineSecret("BREVO_API_KEY");
 
 const VALID_CATS = ["Soda", "Ice Tea", "Energy", "Sport", "Jus", "Eau", "Exotique", "Autre"];
 
@@ -116,7 +123,8 @@ async function idLibre() {
 }
 
 exports.aiCatalogDiscovery = onDocumentCreated(
-  { document: "discoveries/{id}", region: REGION, secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 120 },
+  { document: "discoveries/{id}", region: REGION,
+    secrets: [ANTHROPIC_API_KEY, BREVO_API_KEY], timeoutSeconds: 120 },
   async (event) => {
     const snap = event.data;
     if (!snap) return;
