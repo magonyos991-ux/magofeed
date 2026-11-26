@@ -21,6 +21,12 @@ const { onDocumentWritten } = require("firebase-functions/v2/firestore");
    echoue, c'est-a-dire le seul jour ou il sert. */
 const { defineSecret } = require("firebase-functions/params");
 const BREVO_API_KEY = defineSecret("BREVO_API_KEY");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { getApps, initializeApp } = require("firebase-admin/app");
+const { getFirestore } = require("firebase-admin/firestore");
+const { getAuth } = require("firebase-admin/auth");
+if (!getApps().length) initializeApp();
+const db = getFirestore();
 const { sendToAdmins } = require("./outils-admin");
 
 /* RECONNAITRE UN PSEUDO TIRE AU SORT. Le generateur de l'app compose
@@ -79,5 +85,66 @@ exports.notifyAdminNewUser = onDocumentWritten(
       await sendToAdmins("Un nouveau a choisi son nom",
         avant + " s'appelle maintenant " + apres);
     }
+  }
+);
+
+/* ══ TESTER LA CHAINE D'ALERTE, SEUL ═══════════════════════════════════════
+   « Quand quelqu'un ouvre l'app via le lien, je ne recois rien. » Pour le
+   verifier, il fallait jusqu'ici qu'un inconnu cree un compte : impossible a
+   provoquer, donc impossible a corriger. Et le test evident — ouvrir l'app
+   soi-meme sur son PC — ne peut PAS marcher : notifyAdminNewUser ne part qu'a
+   la CREATION du document, et une session deja connectee n'en cree aucun.
+   On a donc passe des mois a tester une chose qui ne pouvait pas sonner.
+
+   Cette fonction envoie une vraie alerte, par le meme chemin exactement, et
+   rend les chiffres bruts : combien d'administrateurs, combien de jetons,
+   combien de poussees parties, le secours a-t-il ecrit, et le code d'erreur
+   exact de Google s'il y en a un. Un seul geste, une reponse sans ambiguite.
+
+   Elle N'INVENTE RIEN : si la poussee part vraiment, le telephone sonne
+   vraiment. Si elle ne part pas, l'ecran dit laquelle des cinq causes bloque. */
+exports.testerAlerteAdmin = onCall(
+  { region: REGION, secrets: [BREVO_API_KEY] },
+  async (req) => {
+    const uid = req.auth && req.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi.");
+    const moi = await db.doc(`admins/${uid}`).get();
+    if (!moi.exists) throw new HttpsError("permission-denied", "Reserve a l'administrateur.");
+
+    /* L'ETAT AVANT L'ENVOI. sendToAdmins ne dit pas combien d'administrateurs
+       existent — seulement combien avaient un jeton. Or « 0 jeton » et
+       « 0 administrateur » demandent deux reparations differentes. */
+    let nbAdmins = 0, nbJetons = 0;
+    let jaiUnJeton = false;
+    try {
+      const admins = await db.collection("admins").get();
+      nbAdmins = admins.size;
+      for (const a of admins.docs) {
+        const t = await db.collection("pushTokens").doc(a.id).get();
+        const tok = t.exists ? (t.data() || {}).token : null;
+        if (tok) { nbJetons++; if (a.id === uid) jaiUnJeton = true; }
+      }
+    } catch (e) { /* on envoie quand meme : le resultat reel vaut mieux qu'un compte */ }
+
+    /* L'ADRESSE DU SECOURS. Le secours lit l'e-mail du compte Firebase Auth,
+       pas le profil. Un administrateur sans adresse la-bas n'a aucun secours
+       possible, et rien ne le disait. On la rend a l'interesse lui-meme, qui
+       la connait deja — nulle part ailleurs. */
+    let adresseSecours = "";
+    try { const u = await getAuth().getUser(uid); adresseSecours = String((u && u.email) || ""); }
+    catch (e) {}
+
+    const r = await sendToAdmins("Test d'alerte Magofeed",
+      "Si tu lis ceci, la chaine d'alerte fonctionne de bout en bout.");
+
+    return {
+      admins: nbAdmins,
+      jetons: nbJetons,
+      jaiUnJeton: jaiUnJeton,
+      adresseSecours: adresseSecours,
+      poussees: (r && r.parties) || 0,
+      courriel: !!(r && r.courriel),
+      echecs: (r && r.echecs) || []
+    };
   }
 );
