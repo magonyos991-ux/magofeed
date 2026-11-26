@@ -17167,22 +17167,14 @@ function renderMap(){
      (markercluster) est un BONUS : s'il n'arrive pas, la carte doit quand meme
      s'afficher — avant, son onload manquant bloquait toute la carte. */
   ensureLeaflet(function(){
-    if(window.L&&window.L.markerClusterGroup){ initLeafletMap(lat,lng); return; }
-    if(!document.getElementById("leaflet-cluster-css")){
-      var lc=document.createElement("link");
-      lc.id="leaflet-cluster-css"; lc.rel="stylesheet";
-      lc.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css";
-      lc.integrity="sha512-fYyZwU1wU0QWB4Yutd/Pvhy5J1oWAwFXun1pt+Bps04WSe4Aq6tyHlT4+MHSJhD8JlLfgLuC4CbCnX5KHSjyCg=="; lc.crossOrigin="anonymous";
-      document.head.appendChild(lc);
-    }
-    var done=false;
-    var go=function(){ if(done)return; done=true; initLeafletMap(lat,lng); };
-    var sc=document.createElement("script");
-    sc.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js";
-    sc.integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg=="; sc.crossOrigin="anonymous";
-    sc.onload=go; sc.onerror=go;          // sans regroupement, mais avec une carte
-    document.head.appendChild(sc);
-    setTimeout(go,6000);                  // et jamais d'attente infinie
+    /* Et c'est LE MEME chargeur que la carte Explorer, pas une copie : la fiche
+       posait ici sa propre balise markercluster pendant que la carte Explorer
+       (ouverte 60 ms plus tard par pick) posait la sienne. Deux executions du
+       greffon, deux classes L.MarkerClusterGroup, et une carte Explorer sur
+       deux figee a un seul pin. ensureCluster tient l'etat et la file
+       d'attente ; il rappelle toujours, avec ou sans regroupement, et jamais
+       apres une attente infinie (voir sa definition). */
+    ensureCluster(function(){ initLeafletMap(lat,lng); });
   }, function(){
     try{ toast("Carte indisponible \u2014 v\u00e9rifie ta connexion"); }catch(e){}
   });
@@ -18626,7 +18618,13 @@ window.rayonProbableForStore=function(name,brand,type){
 var _setsRayon={};
 window.rayonProbableCle=function(s){
   if(!s)return "";
-  if(s._cleRayon!==undefined)return s._cleRayon;
+  /* La cle memorisee ne vaut que si l'ENSEMBLE qu'elle nomme existe dans
+     cette page. Les 300 magasins de l'instantane hors ligne (stores:last)
+     arrivent avec leur _cleRayon persistee d'une session precedente, mais
+     _setsRayon est vide au demarrage : faire confiance a la cle seule
+     repondait « non » a chaque magasin, et les « probables » disparaissaient
+     hors ligne. Une cle vide ("" : aucun rayon) reste fiable telle quelle. */
+  if(s._cleRayon!==undefined&&(s._cleRayon===""||_setsRayon[s._cleRayon]))return s._cleRayon;
   var r=null;
   try{ r=window.rayonProbableForStore(s.name,s.brand,s.type); }catch(e){ r=null; }
   var cle=r&&r.ids&&r.ids.length?((r.parType?"t:":"e:")+r.key+(r.petit?":p":"")):"";
@@ -21444,10 +21442,37 @@ function ensureLeaflet(onReady, onFail){
 
    Ce chargeur rappelle TOUJOURS, meme si le CDN ne repond pas : dans ce cas on
    retombe sur une carte sans regroupement, ce qui etait le comportement
-   d'avant. Une carte sans regroupement vaut mieux que pas de carte. */
+   d'avant. Une carte sans regroupement vaut mieux que pas de carte.
+
+   ══ UN SEUL CHARGEUR, UNE SEULE BALISE — LA CARTE « BLOQUEE A 1 PIN » ═══════
+   Ouvrir une boisson construit deux cartes a 60 ms d'ecart : l'apercu de la
+   fiche et la carte Explorer. Chacune posait SA balise <script> markercluster,
+   sans etat partage : le greffon s'executait deux fois (~200 ms d'ecart) et
+   redefinissait L.MarkerClusterGroup. Si exploreLayer naissait entre les deux
+   executions, son constructeur n'etait plus la classe en vigueur et le groupe
+   restait fige a UN marqueur sous « 720 magasins vendent » — mesure : 14
+   ouvertures sur 30 (4 sur 6 sur le banc du contradicteur).
+   Meme recette que ensureLeaflet : un etat (loading / ready / failed), une
+   file d'attente (_clusterWaiters) et UNE balise identifiee. Un second appel
+   pendant le chargement s'inscrit et attend ; il ne pose jamais de seconde
+   balise. Une balise qui a expire sans repondre (requete suspendue) reste en
+   place et le prochain appel s'y raccroche : si elle arrive enfin, le greffon
+   ne s'execute qu'une fois. Seule une balise en ERREUR est retiree, pour
+   qu'un retour du reseau puisse retenter. */
 function ensureCluster(onDone){
   if(!window.L){ onDone&&onDone(); return; }
-  if(window.L.markerClusterGroup){ onDone&&onDone(); return; }
+  if(window.L.markerClusterGroup){ window._clusterState="ready"; onDone&&onDone(); return; }
+  window._clusterWaiters=window._clusterWaiters||[];
+  window._clusterWaiters.push(onDone);
+  if(window._clusterState==="loading")return;
+  window._clusterState="loading";
+  var fini=false;
+  function finish(){
+    if(fini)return; fini=true;
+    window._clusterState=(window.L&&window.L.markerClusterGroup)?"ready":"failed";
+    var list=window._clusterWaiters||[]; window._clusterWaiters=[];
+    list.forEach(function(w){ try{ w&&w(); }catch(e){} });
+  }
   if(!document.getElementById("leaflet-cluster-css")){
     var lc=document.createElement("link");
     lc.id="leaflet-cluster-css"; lc.rel="stylesheet";
@@ -21455,13 +21480,21 @@ function ensureCluster(onDone){
     lc.integrity="sha512-fYyZwU1wU0QWB4Yutd/Pvhy5J1oWAwFXun1pt+Bps04WSe4Aq6tyHlT4+MHSJhD8JlLfgLuC4CbCnX5KHSjyCg=="; lc.crossOrigin="anonymous";
     document.head.appendChild(lc);
   }
-  var fini=false, go=function(){ if(fini)return; fini=true; onDone&&onDone(); };
-  var sc=document.createElement("script");
-  sc.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js";
-  sc.integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg=="; sc.crossOrigin="anonymous";
-  sc.onload=go; sc.onerror=go;
-  document.head.appendChild(sc);
-  setTimeout(go,6000);   // jamais d'attente infinie
+  var sc=document.getElementById("leaflet-cluster-js");
+  if(sc){
+    /* Un essai precedent a expire sans reponse : on se raccroche a sa balise
+       au lieu d'en poser une seconde (deux executions = carte a 1 pin). */
+    sc.addEventListener("load",finish); sc.addEventListener("error",finish);
+  }else{
+    sc=document.createElement("script");
+    sc.id="leaflet-cluster-js";
+    sc.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js";
+    sc.integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg=="; sc.crossOrigin="anonymous";
+    sc.onload=finish;
+    sc.onerror=function(){ try{ sc.remove(); }catch(e){} finish(); };
+    document.head.appendChild(sc);
+  }
+  setTimeout(finish,6000);   // jamais d'attente infinie
 }
 
 /* ── RAYON DE REGROUPEMENT, PALIER PAR PALIER ─────────────────────────────
@@ -21487,10 +21520,23 @@ function ensureCluster(onDone){
 /* ZOOM_DETAIL : le zoom a partir duquel la carte arrete de compter et se met
    a MONTRER. En dessous, on regroupe et la bulle annonce le vrai nombre ;
    a partir de la, plus une seule bulle — chaque magasin a son point, et deux
-   magasins au meme endroit s'ecartent en rosace (voir etalerMarqueurs). La
-   carte s'ouvre au zoom 13/14 : au premier coup d'oeil on voit donc des
-   magasins, pas des « 2 ». */
-var ZOOM_DETAIL=13;
+   magasins au meme endroit s'ecartent en rosace (voir etalerMarqueurs).
+   ══ 16, PAS 13 ═══════════════════════════════════════════════════════════
+   A 13 (« au premier coup d'oeil on voit des magasins, pas des 2 »), la
+   carte Explorer dessinait 1 096 marqueurs DOM d'un coup sur une ville :
+   2,4 a 5,7 s de gel au zoom 13 (iPhone 13 emule, CPU x4), 0,4 s par
+   micro-glissement au zoom 14, et le depot notait lui-meme que ce motif
+   « faisait chauffer puis crasher les iPhone ». Au zoom 13 un ecran de
+   390 px couvre 5 km : on ne lit pas des magasins, on lit une ville. Les
+   bulles y annoncent le VRAI nombre (le greffon ne perd personne), et le
+   rayon de regroupement est deja etroit a 14-15 (42 puis 30 px), donc les
+   magasins isoles ont leur point propre bien avant le zoom 16. Mesure (meme
+   banc, CPU x4, 1 200 magasins, avec etalerMarqueurs corrige) : taches
+   longues du zoom 13 de 1,9-2,6 s a 0,16-0,29 s (40 bulles au lieu de 1 096
+   marqueurs DOM), glissement de 80 px au zoom 14 de 0,33 s a aucune tache
+   longue. La carte Explorer s'ouvre au zoom 17 sur une boisson : rien n'y
+   change. */
+var ZOOM_DETAIL=16;
 /* ══ JUSQU'OU L'APERCU A LE DROIT DE DEZOOMER ══════════════════════════════
    Calcul, a la latitude de Bruxelles : un pixel vaut 98 770 m au zoom 0, donc
    48,2 m au zoom 11. La boite fait 362 x 150 px, dont environ 330 x 82 px
@@ -21515,7 +21561,41 @@ var APERCU_ZOOM_MIN=11;
    Le rayon est calcule EN PIXELS puis reprojete, donc l'ecart reste lisible au
    doigt a tous les zooms, et les positions d'origine sont restaurees des qu'on
    dezoome (le greffon, lui, regroupe toujours d'apres les vraies positions). */
+/* ══ UN SEUL ETALEMENT PAR GESTE, ET PLUS DE CYCLES removeLayer/addLayer ════
+   Mesure (iPhone 13 emule, CPU x4, 1 200 magasins) : un seul cran de zoom
+   declenchait TROIS etalements (zoomend, puis la peinture apres addLayers,
+   puis le rappel differe) de 714 / 1 208 / 2 758 ms, et un glissement de
+   80 px au zoom 14 coutait 387-467 ms sans rien recharger. Deux causes :
+     - chaque appelant etalait tout de suite ; on coalesce desormais dans une
+       trame d'animation par carte (le dernier appel du geste gagne), et les
+       appelants n'ont rien a changer ;
+     - chaque setLatLng faisait partir « move », que le greffon transforme en
+       _moveChild = removeLayer + addLayer (2 174 cycles par zoom, 80-85 % du
+       gel). Le greffon possede un drapeau pour ses PROPRES deplacements,
+       _ignoreMove : on le leve pendant la rosace. Le regroupement continue de
+       se faire sur les vraies positions (il ne les a jamais vues bouger), et
+       c'est exactement ce qu'on veut : l'etalement est un habillage.
+   Resultat mesure (CPU x4, 1 200 magasins, avec le seuil 16) : taches longues
+   du zoom 13 de 1,9-2,6 s a 0,16-0,29 s, glissement de 80 px au zoom 14 de
+   334 ms a aucune tache longue, _moveChild de 2 174 a 0 par cran de zoom. */
 function etalerMarqueurs(map,groupe){
+  if(!map||!groupe)return;
+  try{ if(map._etalerRaf)cancelAnimationFrame(map._etalerRaf); }catch(e){}
+  map._etalerRaf=requestAnimationFrame(function(){
+    map._etalerRaf=null;
+    try{ etalerMarqueursMaintenant(map,groupe); }catch(e){}
+  });
+}
+/* Le seuil d'etalement est celui ou le GROUPE arrete de regrouper : en
+   dessous, les magasins superposes sont dans une bulle, il n'y a rien a
+   ecarter ; au-dessus, ils sont tous dessines et c'est la qu'il faut les
+   separer. La carte Explorer coupe a ZOOM_DETAIL ; l'apercu d'une fiche ne
+   regroupe jamais (disableClusteringAtZoom:0) et s'etale donc a tout zoom. */
+function seuilEtalement(groupe){
+  var o=groupe&&groupe.options;
+  return (o&&typeof o.disableClusteringAtZoom==="number")?o.disableClusteringAtZoom:ZOOM_DETAIL;
+}
+function etalerMarqueursMaintenant(map,groupe){
   if(!map||!groupe||!map._loaded||!groupe.getLayers)return;
   /* _loaded reste VRAI apres map.remove() : ce n'est donc pas un test de vie.
      L'etalement est declenche par zoomend/moveend et par un rappel differe ;
@@ -21523,6 +21603,8 @@ function etalerMarqueurs(map,groupe){
   if(!carteEncoreLa(map))return;
   if(map._etalementEnCours)return;
   map._etalementEnCours=true;
+  var ignoreAvant=groupe._ignoreMove;
+  groupe._ignoreMove=true;
   try{
     var fils=map._eventailFils;
     if(!fils){fils=map._eventailFils=L.layerGroup().addTo(map);}
@@ -21530,8 +21612,9 @@ function etalerMarqueurs(map,groupe){
     var tous=groupe.getLayers(),i,m;
     for(i=0;i<tous.length;i++){m=tous[i];if(!m._llOrig&&m.getLatLng)m._llOrig=m.getLatLng();}
     var z=map.getZoom();
-    if(z<ZOOM_DETAIL){
-      for(i=0;i<tous.length;i++){m=tous[i];if(m._llOrig&&m.setLatLng)m.setLatLng(m._llOrig);}
+    if(z<seuilEtalement(groupe)){
+      // Repli de la rosace au dezoom : chacun retrouve sa vraie position.
+      for(i=0;i<tous.length;i++){m=tous[i];if(m._llOrig&&m.setLatLng&&!m._llOrig.equals(m.getLatLng()))m.setLatLng(m._llOrig);}
       return;
     }
     /* On ne calcule que ce qui est a l'ecran (marge de 30 %) : projeter des
@@ -21571,7 +21654,7 @@ function etalerMarqueurs(map,groupe){
       paquets.push(g);
     }
     paquets.forEach(function(g){
-      if(g.length<2){ if(vus[g[0]]._llOrig)vus[g[0]].setLatLng(vus[g[0]]._llOrig); return; }
+      if(g.length<2){ var seul=vus[g[0]]; if(seul._llOrig&&!seul._llOrig.equals(seul.getLatLng()))seul.setLatLng(seul._llOrig); return; }
       var sx=0,sy=0;
       g.forEach(function(ix){sx+=pts[ix].x;sy+=pts[ix].y;});
       var bx=sx/g.length, by=sy/g.length;
@@ -21594,7 +21677,7 @@ function etalerMarqueurs(map,groupe){
       }
     });
   }catch(e){}
-  finally{map._etalementEnCours=false;}
+  finally{map._etalementEnCours=false;groupe._ignoreMove=ignoreAvant;}
 }
 
 function rayonRegroupement(zoom){
@@ -25289,14 +25372,59 @@ var AUTO_OSM=true;
 var _autoOsmBusy=false;
 var _autoOsmSeen=(function(){try{return JSON.parse(localStorage.getItem("magoAutoOsmSeen")||"{}");}catch(e){return {};}})();
 var _autoOsmEchec={};
+var AUTO_OSM_SEMAINE=7*24*3600*1000;
+/* ══ UNE REPONSE MARQUE TOUTE LA BOITE INTERROGEE, PAS UNE CELLULE ═════════
+   La memoire « zone deja vue » etait une cellule de 0,01° (~1 km) autour du
+   centre, alors que la requete couvre une boite de 5 km. Glisser la carte de
+   1 km posait donc une NOUVELLE question a Overpass sur une zone a 80 % deja
+   lue : mesure, 1 requete par cellule nouvelle, 5 sur une rafale de 5
+   glissements. On note desormais toutes les cellules de 0,01° entierement
+   couvertes par la boite (une vingtaine), au meme format que l'ancienne cle
+   (« lat,lng » arrondis a deux decimales), donc les entrees deja ecrites
+   restent valables. Les entrees de plus d'une semaine sont purgees au
+   passage, pour que la cle localStorage ne grossisse pas a vie. */
+function autoOsmMarquerBoite(lat,lng,dLat,dLng,ts){
+  var i0=Math.ceil((lat-dLat+0.005)*100-1e-6), i1=Math.floor((lat+dLat-0.005)*100+1e-6);
+  var j0=Math.ceil((lng-dLng+0.005)*100-1e-6), j1=Math.floor((lng+dLng-0.005)*100+1e-6);
+  for(var i=i0;i<=i1;i++)for(var j=j0;j<=j1;j++)_autoOsmSeen[(i/100).toFixed(2)+","+(j/100).toFixed(2)]=ts;
+  _autoOsmSeen[lat.toFixed(2)+","+lng.toFixed(2)]=ts;
+  for(var k in _autoOsmSeen){ if(!(ts-_autoOsmSeen[k]<AUTO_OSM_SEMAINE))delete _autoOsmSeen[k]; }
+  try{localStorage.setItem("magoAutoOsmSeen",JSON.stringify(_autoOsmSeen));}catch(e){}
+}
+/* ══ DEUX SECONDES D'IMMOBILITE AVANT D'INTERROGER OVERPASS ════════════════
+   L'appel partait a CHAQUE moveend : un panoramique en trois coups de pouce,
+   c'etait trois chances de lancer une requete de 45 s vers un service
+   partage. On attend que la carte soit immobile deux secondes ; movestart
+   annule le compte a rebours. La carte Explorer est le seul appelant. */
+var _autoOsmTimer=null;
+function autoOsmAnnuler(){ if(_autoOsmTimer){clearTimeout(_autoOsmTimer);_autoOsmTimer=null;} }
+function autoOsmPlanifier(map){
+  autoOsmAnnuler();
+  if(!AUTO_OSM||!map)return;
+  _autoOsmTimer=setTimeout(function(){
+    _autoOsmTimer=null;
+    try{
+      if(!carteEncoreLa(map))return;
+      /* La carte a ete refermee pendant l'attente : la zone qu'on regardait
+         n'interesse plus personne. */
+      var h=document.getElementById("explore-map-host");
+      if(h&&!h.classList.contains("in"))return;
+      var c=map.getCenter(); autoOsmForArea(c.lat,c.lng,map.getZoom());
+    }catch(e){}
+  },2000);
+}
 function autoOsmForArea(lat,lng,zoom){
   try{
     if(!AUTO_OSM||_autoOsmBusy)return;
     if(typeof lat!=="number"||!lat)return;
-    if(zoom!=null&&zoom<12)return;                 // évite les bbox trop larges (pas de requête "monde")
+    /* Zoom 14 au moins : en dessous, l'ecran montre deja plus que la boite de
+       5 km interrogee, et chaque cran de dezoom relancait une requete pour
+       une zone qu'on ne regarde pas en detail. autoImportZone (zones a moins
+       de 8 magasins) continue de couvrir le reste. */
+    if(zoom!=null&&zoom<14)return;
     var key=lat.toFixed(2)+","+lng.toFixed(2);     // ~1 km
     var now=Date.now();
-    if(_autoOsmSeen[key]&&(now-_autoOsmSeen[key])<7*24*3600*1000)return; // 1×/semaine/zone
+    if(_autoOsmSeen[key]&&(now-_autoOsmSeen[key])<AUTO_OSM_SEMAINE)return; // 1×/semaine/zone
     /* La zone n'est notee qu'a la REPONSE (voir plus bas), plus avant la
        requete : un echec d'Overpass ne doit pas rendre une zone « vide » pour
        une semaine. Entre deux echecs, on laisse dix minutes. */
@@ -25308,8 +25436,7 @@ function autoOsmForArea(lat,lng,zoom){
     fetchWithTimeout("https://overpass-api.de/api/interpreter?data="+encodeURIComponent(q),45000)
       .then(function(r){return r.json();})
       .then(function(data){
-        _autoOsmSeen[key]=Date.now();
-        try{localStorage.setItem("magoAutoOsmSeen",JSON.stringify(_autoOsmSeen));}catch(e){}
+        autoOsmMarquerBoite(lat,lng,dLat,dLng,Date.now());
         var els=(data&&data.elements)||[];
         var found=els.map(function(e){
           var la=e.lat!=null?e.lat:(e.center&&e.center.lat);
@@ -25337,12 +25464,24 @@ function autoOsmForArea(lat,lng,zoom){
         if(!news.length){_autoOsmBusy=false;return;}
         var persist=window.fbImportStores?window.fbImportStores(news,function(){}):Promise.resolve(0);
         persist.then(function(){
+          /* La carte Explorer ne lit pas STORES : elle repeint
+             window._exploreRawList, la liste de sa derniere requete. Les
+             nouveaux y entrent aussi, et exploreLoadStores(true) repeint cette
+             liste sans retourner a Firestore — avant, l'appel sans argument
+             relancait toute la requete de zone pour montrer dix magasins de
+             plus. Le meme objet sert aux deux listes : _stripAutoDrinks les
+             traite de la meme facon (identifiant « o… »), et une confirmation
+             posee sur l'un vaut pour l'autre. */
+          var raw=window._exploreRawList;
           news.forEach(function(c){
-            if(!(STORES||[]).some(function(s){return String(s.id)===c.id;})){
-              STORES.push({id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,brand:c.brand||"",type:c.type||"",drinks:(c.drinks||[]).slice(),drinksVerified:(c.drinksVerified||[]).slice(),verifiedSource:c.verifiedSource||null,confirmations:{}});
+            var entry=(STORES||[]).filter(function(s){return String(s.id)===c.id;})[0];
+            if(!entry){
+              entry={id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,brand:c.brand||"",type:c.type||"",drinks:(c.drinks||[]).slice(),drinksVerified:(c.drinksVerified||[]).slice(),verifiedSource:c.verifiedSource||null,confirmations:{}};
+              STORES.push(entry);
             }
+            if(raw&&!raw.some(function(s){return String(s.fbId||s.id)===c.id;}))raw.push(entry);
           });
-          try{if(typeof exploreLoadStores==="function")exploreLoadStores();}catch(e){}
+          try{if(typeof exploreLoadStores==="function")exploreLoadStores(true);}catch(e){}
           _autoOsmBusy=false;
         }).catch(function(e){console.warn("autoOsm persist",e);_autoOsmBusy=false;});
       })
@@ -27335,11 +27474,12 @@ function openExploreMap(opts){
                zoomer dans le vide : c'est ce que fait spiderfyOnMaxZoom, qui
                etait desactive. Chaque magasin redevient donc atteignable au
                doigt, meme empile sur un autre. */
-            /* Plus AUCUNE bulle de comptage des le zoom de detail : « 2 »
-               n'apprend rien a qui regarde sa rue, il veut voir les deux
-               magasins. Ce reglage cachait autrefois les magasins superposes ;
-               etalerMarqueurs les ecarte desormais en rosace a chaque zoom,
-               donc couper le regroupement ne perd plus personne. */
+            /* Plus AUCUNE bulle de comptage des le zoom de detail (16, voir
+               ZOOM_DETAIL : a 13, mille marqueurs DOM gelaient l'ecran 2 a
+               6 s) : « 2 » n'apprend rien a qui regarde sa rue, il veut voir
+               les deux magasins. Ce reglage cachait autrefois les magasins
+               superposes ; etalerMarqueurs les ecarte desormais en rosace a
+               chaque zoom, donc couper le regroupement ne perd plus personne. */
             disableClusteringAtZoom:ZOOM_DETAIL,
             spiderfyOnMaxZoom:true,
             /* Un pin fait 30 px de large : l'ecartement par defaut collait les
@@ -27354,7 +27494,7 @@ function openExploreMap(opts){
       exploreLayer.addTo(exploreMap);
       /* Si la carte bouge, le geste n'a plus de sens : la carte va se
          redessiner et detruire le marqueur sous le doigt. On referme avant. */
-      exploreMap.on("movestart zoomstart",function(){ try{fermerMenuPin();}catch(e){} });
+      exploreMap.on("movestart zoomstart",function(){ try{fermerMenuPin();}catch(e){} try{autoOsmAnnuler();}catch(e){} });
       exploreMap.on("moveend zoomend",function(){
         try{etalerMarqueurs(exploreMap,exploreLayer);}catch(e){}
         try{renderInStockArrows();}catch(e){}
@@ -27377,7 +27517,9 @@ function openExploreMap(opts){
           }
         }catch(e){}
         if(_bouge)_exploreTimer=setTimeout(function(){exploreLoadStores();},350);
-        try{var _c=exploreMap.getCenter();autoOsmForArea(_c.lat,_c.lng,exploreMap.getZoom());}catch(e){}
+        /* Overpass seulement apres deux secondes d'immobilite (voir
+           autoOsmPlanifier) : l'appel direct partait a chaque coup de pouce. */
+        try{autoOsmPlanifier(exploreMap);}catch(e){}
       });
       exploreMap.on("click",exploreHideCard);
       // Panoramique a la main : le lieu cherche n'est plus ce qu'on regarde, et
@@ -27396,7 +27538,9 @@ function openExploreMap(opts){
     else exploreMap.setView([typeof userLat==="number"&&userLat?userLat:50.8466,typeof userLng==="number"&&userLng?userLng:4.3528],14);
     try{appliquerRepere();}catch(e){}
     setTimeout(function(){try{exploreMap.invalidateSize();}catch(e){}exploreLoadStores();
-      try{var _cc=exploreMap.getCenter();autoOsmForArea(_cc.lat,_cc.lng,exploreMap.getZoom());}catch(e){}
+      // Meme compte a rebours qu'au moveend : l'ouverture n'a pas a interroger
+      // Overpass avant que la carte soit posee et immobile.
+      try{autoOsmPlanifier(exploreMap);}catch(e){}
       try{appliquerRepere();}catch(e){}
     },120);
   }
