@@ -11,7 +11,9 @@
 */
 import { readFileSync } from "node:fs";
 
-const fichier = process.argv[2] || "index.html";
+/* MAGO_RACINE : pour essayer une copie de travail (worktree) sans toucher au
+   script ; sinon le fichier du dossier courant. */
+const fichier = process.argv[2] || (process.env.MAGO_RACINE ? process.env.MAGO_RACINE + "/index.html" : "index.html");
 const src = readFileSync(fichier, "utf8");
 
 function extraire(depart, finInclus) {
@@ -68,6 +70,99 @@ dit("la projection n'embarque pas les assortiments",
   dit("les rayons des deux fiches sont additionnes",
       (aldi.drinks || []).indexOf(7) !== -1 && (aldi.drinks || []).indexOf(9) !== -1);
   dit("un ALDI a un kilometre reste un magasin distinct", r.some((x) => x.id === "z"));
+}
+
+/* ── Overpass : une requete par zone IMMOBILE, pas par coup de pouce ──────
+   Mesure de l'audit : autoOsmForArea partait a CHAQUE moveend de la carte
+   Explorer, avec une memoire « zone vue » d'une cellule de 0,01° (~1 km)
+   pour une boite interrogee de 5 km : 1 requete par cellule nouvelle, 5 sur
+   une rafale de 5 glissements ; et exploreLoadStores() relancait toute la
+   requete Firestore pour montrer les nouveaux. Depuis : zoom 14 au moins,
+   deux secondes d'immobilite, toute la boite marquee a la reponse, nouveaux
+   pousses dans _exploreRawList puis exploreLoadStores(true).
+   On fait tourner LE CODE DU FICHIER (de « var AUTO_OSM » a la fin de
+   autoOsmForArea), avec des doublures pour ce qui sort du perimetre :
+   reseau, Firestore, carte, localStorage. */
+{
+  const a = src.indexOf("var AUTO_OSM=true;");
+  const b = src.indexOf("\nfunction openAvatarPicker(){", a);
+  if (a === -1 || b === -1) throw new Error("bloc autoOsm introuvable dans " + fichier);
+  const bloc = src.slice(a, b);
+  const doublures = `
+    var window = globalThis;
+    var journal = { fetchs: [], charges: [], ls: {} };
+    var localStorage = { getItem: function (k) { return journal.ls[k] == null ? null : journal.ls[k]; },
+                         setItem: function (k, v) { journal.ls[k] = String(v); } };
+    var hoteOuvert = true;
+    var document = { getElementById: function () { return { classList: { contains: function () { return hoteOuvert; } } }; } };
+    var OSM_SHOP_TYPES = "supermarket|convenience";
+    var STORES = [];
+    var reponse = { elements: [] };
+    function fetchWithTimeout(url) { journal.fetchs.push(url); return Promise.resolve({ json: function () { return Promise.resolve(reponse); } }); }
+    function guessStoreCat() { return null; }
+    function chainIdsFor() { return null; }
+    function brandIds() { return []; }
+    var M4_CATS = {};
+    function packDrinkIds() { return [1, 2]; }
+    function osmShopEmoji() { return ""; }
+    function memeMagasinOsm() { return false; }
+    function normTxt(s) { return String(s || "").toLowerCase(); }
+    function fuzzyIncludes() { return false; }
+    function carteEncoreLa() { return true; }
+    function exploreLoadStores(useCache) { journal.charges.push(useCache === true); }
+    window.fbImportStores = function () { return Promise.resolve(0); };
+  `;
+  const o = new Function(doublures + bloc + `
+    return { autoOsmForArea: autoOsmForArea, autoOsmPlanifier: autoOsmPlanifier, autoOsmAnnuler: autoOsmAnnuler,
+             journal: journal, STORES: STORES, window: window, vus: function () { return _autoOsmSeen; },
+             repondre: function (r) { reponse = r; }, hote: function (v) { hoteOuvert = v; } };`)();
+  const attendre = (ms) => new Promise((r) => setTimeout(r, ms));
+  const carte = (lat, lng, z) => ({ getCenter: () => ({ lat: lat, lng: lng }), getZoom: () => z });
+
+  o.autoOsmForArea(50.85, 4.35, 13);
+  dit("zoom 13 : pas de requete Overpass (zone plus large que la boite)", o.journal.fetchs.length === 0);
+
+  o.window._exploreRawList = [];
+  o.repondre({ elements: [{ type: "node", id: 777, lat: 50.851, lon: 4.351, tags: { shop: "convenience", name: "Night Shop Essai" } }] });
+  o.autoOsmForArea(50.85, 4.35, 14);
+  dit("zoom 14 : une requete part", o.journal.fetchs.length === 1);
+  await attendre(30);
+  dit("le nouveau magasin entre dans STORES", o.STORES.some((s) => s.id === "o777"));
+  dit("et dans la liste que la carte Explorer repeint (_exploreRawList)", o.window._exploreRawList.some((s) => s.id === "o777"));
+  dit("la carte est repeinte depuis sa liste, sans retourner a Firestore (exploreLoadStores(true))",
+      o.journal.charges.length === 1 && o.journal.charges[0] === true);
+  const vues = Object.keys(o.vus());
+  dit("toute la boite interrogee est marquee « vue », pas une seule cellule", vues.length >= 15);
+  dit("la memoire est ecrite au meme format qu'avant (lat,lng a deux decimales)",
+      vues.every((k) => /^-?\d+\.\d\d,-?\d+\.\d\d$/.test(k)) && !!o.journal.ls.magoAutoOsmSeen);
+
+  o.autoOsmForArea(50.86, 4.36, 14);
+  dit("un glissement d'un kilometre dans la meme boite ne redemande rien", o.journal.fetchs.length === 1);
+  o.vus()["0.00,0.00"] = Date.now() - 8 * 24 * 3600 * 1000;      /* une zone vue il y a huit jours */
+  o.autoOsmForArea(50.90, 4.35, 14);
+  dit("une zone a cinq kilometres, elle, est interrogee", o.journal.fetchs.length === 2);
+  await attendre(30);
+  dit("les zones vues depuis plus d'une semaine sont purgees de la memoire", !("0.00,0.00" in o.vus()));
+
+  /* Le compte a rebours : trois coups de pouce en 300 ms = une seule requete,
+     deux secondes apres le dernier ; un movestart (autoOsmAnnuler) l'annule ;
+     une carte refermee pendant l'attente ne demande rien. */
+  const avant = o.journal.fetchs.length;
+  o.autoOsmPlanifier(carte(50.95, 4.35, 15)); await attendre(150);
+  o.autoOsmPlanifier(carte(50.95, 4.35, 15)); await attendre(150);
+  o.autoOsmPlanifier(carte(50.95, 4.35, 15));
+  await attendre(1500);
+  dit("1,5 s apres le dernier geste : toujours rien", o.journal.fetchs.length === avant);
+  await attendre(800);
+  dit("2 s d'immobilite : une seule requete pour trois gestes", o.journal.fetchs.length === avant + 1);
+  await attendre(30);
+  o.autoOsmPlanifier(carte(51.00, 4.35, 15)); await attendre(500); o.autoOsmAnnuler();
+  await attendre(2200);
+  dit("un geste qui reprend (movestart) annule le compte a rebours", o.journal.fetchs.length === avant + 1);
+  o.hote(false);
+  o.autoOsmPlanifier(carte(51.00, 4.35, 15)); await attendre(2300);
+  dit("une carte refermee pendant l'attente n'interroge pas Overpass", o.journal.fetchs.length === avant + 1);
+  o.hote(true);
 }
 
 /* ── Paris, sans boisson ciblee ─────────────────────────────────────────── */
