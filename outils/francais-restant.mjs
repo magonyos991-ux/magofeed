@@ -140,6 +140,12 @@ const FONCTIONS_ADMIN = new Set([
      — celle qui signe les collabs. Nomme ici plutot que devine, comme le
      demande le commentaire ci-dessus. */
   "renderDeclarationsMarque",
+  /* Les deux outils « rendre a chacun ce qu'il a gagne » : rattrapage des
+     signalements refuses a tort, et recalcul de tous les scores. Ils vivent
+     dans #admin-points-rendus, ils ne sont dessines que par renderAdmin, et
+     leurs phrases s'adressent a une seule personne. Nommes ici plutot que
+     devines, comme le demande le commentaire ci-dessus. */
+  "renderPointsRendus",
   /* Cas a part, et pour une tout autre raison : generatePseudo tire au sort un
      surnom dans deux listes de mots. Ce ne sont pas des phrases d'interface,
      ce sont des noms de personnes. Traduire « Panthere » ferait qu'un meme
