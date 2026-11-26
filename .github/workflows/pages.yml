@@ -184,6 +184,35 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+      # ══════════════════════════════════════════════════════════════════════
+      # SI CETTE ETAPE ECHOUE : NE PAS APPUYER SUR « RE-RUN ». JAMAIS.
+      # ----------------------------------------------------------------------
+      # Observe le 26/11/2026, deux fois de suite, et compris seulement apres
+      # avoir aggrave le probleme :
+      #
+      #   Tentative 1 : « Upload site » reussit (6 713 514 octets, artefact
+      #   github-pages finalise a 05:55:06,077) puis deploy-pages interroge
+      #   l'API a 05:55:06,370 — 293 millisecondes plus tard — et repond
+      #   « Found 0 artifact(s) ». L'artefact existe ; l'API ne l'a pas encore
+      #   propage. Rien a corriger ici, c'est une course chez GitHub.
+      #
+      #   Relance des jobs en echec : le job « deploy » contient l'etape
+      #   d'envoi, donc la relance televerse un SECOND artefact du meme nom.
+      #   deploy-pages repond alors « Multiple artifacts named github-pages
+      #   were unexpectedly found. Artifact count is 2 » et echoue encore.
+      #   L'execution est desormais IRREPARABLE : chaque relance en ajoute un.
+      #
+      # LA SEULE ISSUE : lancer une execution NEUVE — onglet Actions, « Deploy
+      # to GitHub Pages », bouton « Run workflow » sur main (ou un nouveau
+      # commit). Une execution neuve a son propre espace d'artefacts.
+      #
+      # ET LE COUT DE L'IGNORER : le site reste sur sa version precedente sans
+      # que rien ne le dise. Le 25/11, un deploiement a echoue ainsi et tout le
+      # travail de la journee est reste dans main sans atteindre personne. Si
+      # un correctif « ne marche pas » chez les gens, verifier D'ABORD ici que
+      # la derniere execution est verte, et comparer l'empreinte « build » que
+      # sert le site a celle du dernier commit.
+      # ══════════════════════════════════════════════════════════════════════
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
