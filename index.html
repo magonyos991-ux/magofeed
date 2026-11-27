@@ -16832,7 +16832,7 @@ function _lignesListe(f,debut,fin){
     var isFav=favorites.indexOf(d.id)!==-1;
     var div=document.createElement("div");div.className="ritem";
     div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
-      '<div style="flex:1"><div class="rname">'+d.name+'</div><div class="rsub">'+d.brand+' · '+d.cat+starSuffix(d)+'</div></div>'+
+      '<div style="flex:1"><div class="rname">'+sanitize(desechapper(d.name))+'</div><div class="rsub">'+sanitize(desechapper(d.brand||""))+' · '+d.cat+starSuffix(d)+'</div></div>'+
       '<span class="rfav" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();toggleFav('+d.id+',this);}" style="display:flex;align-items:center;padding:6px 4px;cursor:pointer">'+heartSVG(isFav,20)+'</span>';
     div.onclick=function(){pick(d);};a11yCard(div,d.name+", "+d.brand);frag.appendChild(div);
     bindPhotoTap(div,d);
@@ -17073,44 +17073,8 @@ function renderList(){
     fzHdr.textContent=tr("R\u00E9sultats proches de \u00AB {q} \u00BB").replace("{q}",q);
     el.appendChild(fzHdr);
   }
-<<<<<<< HEAD
   el.appendChild(_lignesListe(f,0,_listLimit));
   el.appendChild(_queueListe(f,matchingDiscoveries));
-=======
-  f.slice(0,_listLimit).forEach(function(d){
-    queueImageFetch(d);
-    var isFav=favorites.indexOf(d.id)!==-1;
-    var div=document.createElement("div");div.className="ritem";
-    div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
-      '<div style="flex:1"><div class="rname">'+sanitize(desechapper(d.name))+'</div><div class="rsub">'+sanitize(desechapper(d.brand||""))+' · '+d.cat+starSuffix(d)+'</div></div>'+
-      '<span class="rfav" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();toggleFav('+d.id+',this);}" style="display:flex;align-items:center;padding:6px 4px;cursor:pointer">'+heartSVG(isFav,20)+'</span>';
-    div.onclick=function(){pick(d);};a11yCard(div,d.name+", "+d.brand);el.appendChild(div);
-    bindPhotoTap(div,d);
-  });
-  if(f.length>_listLimit){
-    var moreBtn=document.createElement("div");moreBtn.className="ritem";
-    moreBtn.style.cssText="justify-content:center;text-align:center;font-weight:700;color:var(--s1);cursor:pointer";
-    moreBtn.innerHTML='<div style="flex:1;text-align:center">Voir plus ('+(f.length-_listLimit)+')</div>';
-    moreBtn.onclick=function(){_listLimit+=200;renderList();};
-    a11yCard(moreBtn,"Voir plus de boissons");
-    el.appendChild(moreBtn);
-  }
-  if(matchingDiscoveries.length){
-    var hdr=document.createElement("div");
-    hdr.style.cssText="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin:"+(f.length?"16px":"0")+" 0 10px";
-    hdr.textContent=tr("Suggestions de la communauté");
-    el.appendChild(hdr);
-    matchingDiscoveries.forEach(function(d){
-      var div=document.createElement("div");div.className="ritem";
-      div.innerHTML='<div class="rphoto" style="background:var(--bg2)">'+discGlyph(22)+'</div>'+
-        '<div style="flex:1"><div class="rname">'+sanitize(d.name)+'</div><div class="rsub">Pas encore au catalogue · ★ '+(d.votes||0)+' vote'+(d.votes>1?"s":"")+'</div></div>'+
-        '<span class="c3" style="font-size:18px">›</span>';
-      div.onclick=function(){show("discover");};
-      a11yCard(div,d.name+", suggestion de la communaut\u00E9");
-      el.appendChild(div);
-    });
-  }
->>>>>>> origin/main
 }
 // Catalogue d'enseignes : évite d'afficher d'un coup tous les magasins (trop de place), on parcourt par enseigne d'abord.
 function renderStoreBrandCatalog(el){
@@ -31935,16 +31899,13 @@ function chargerHorairesOSM(){
        de retomber sur la copie embarquee. Un chemin local n'a pas besoin de
        delai, et lui en imposer un casserait la lecture sur un telephone lent. */
     var dernier=(i+1>=chemins.length);
-<<<<<<< HEAD
-    var reseau=/^https?:/i.test(chemins[i]);
-    var p=reseau?fetchWithTimeout(chemins[i],6000):fetch(chemins[i]);
-=======
-    /* Le « dernier chemin » n'est local QU'EN coquille native : sur le web
-       c'est le reseau, et un fetch nu qui pend laissait « Horaires en cours
-       de chargement… » pour toute la session (audit personas). 12 s large
-       pour un telephone lent, mais une fin garantie. */
-    var p=fetchWithTimeout(chemins[i],dernier?12000:6000);
->>>>>>> origin/main
+    /* Un delai PARTOUT (audit personas : sur le web le dernier chemin est le
+       reseau, et un fetch nu qui pend laissait « Horaires en cours de
+       chargement… » pour toute la session) : 6 s, 12 s pour le dernier chemin
+       reseau, et 20 s pour la copie EMBARQUEE de la coquille native, qu'un
+       telephone lent ne doit pas voir expirer mais qui doit finir. */
+    var reseau=/^https?:/i.test(chemins[i])||!_horairesNatif();
+    var p=fetchWithTimeout(chemins[i],reseau?(dernier?12000:6000):20000);
     return p
       .then(function(r){ if(!r.ok)throw 0; return r.json(); })
       .catch(function(e){ if(!dernier)return essayer(i+1); throw e; });
@@ -37860,14 +37821,9 @@ function renderUserSearchList(){
     });
   },350);
 }
-<<<<<<< HEAD
-function renderSearchHistory(){if(searchMode==="stores")return;var el=document.getElementById("search-list");var q=document.getElementById("q");if(!el||!q||q.value.length>0||!searchHistory.length)return;el.innerHTML='<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px">Récents</div>';searchHistory.forEach(function(h){var div=document.createElement("div");div.style.cssText="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer";div.innerHTML='<div style="width:34px;height:34px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--s3)"></div><span style="flex:1;font-size:14px;font-weight:500;color:var(--s1)">'+h+'</span><span style="font-size:12px;color:var(--txt2);padding:4px" onclick="event.stopPropagation();removeHistory(\''+h+'\')">✕</span>';div.onclick=function(){document.getElementById("q").value=h;renderList();};el.appendChild(div);});}
-function removeHistory(term){searchHistory=searchHistory.filter(function(h){return h!==term;});ecrire("magosearchhist",searchHistory);renderSearchHistory();}
-=======
 /* renderSearchHistory/removeHistory (version brute, jamais appelee) supprimees :
    elles reinjectaient le terme tape sans echappement (innerHTML + onclick).
    Le rendu VIVANT de l'historique vit dans renderList, avec sanitize(). */
->>>>>>> origin/main
 
 /* ================================
    BINDINGS
