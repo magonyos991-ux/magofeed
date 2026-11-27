@@ -34,6 +34,11 @@ await pg.addInitScript(()=>{try{localStorage.setItem("magoOnboard","1");}catch(e
 await pg.goto(`http://127.0.0.1:${port}/index.html`);
 await pg.waitForFunction(()=>window.DRINKS&&DRINKS.length>100&&typeof window.openLabel==="function",{timeout:40000});
 await pg.evaluate(()=>{try{document.getElementById("onboarding")?.remove();}catch(e){}});
+/* On attend que Firebase ait livre (ou renonce a) ses magasins AVANT de poser
+   les deux magasins d'essai : sinon pick() reste sur son squelette jusqu'a
+   fbStoresLoaded, qui remplace alors STORES par les vrais magasins, et la
+   scene mesure la latence du reseau au lieu de l'etiquette vocale. */
+await pg.waitForFunction(()=>!!window._fbReady||!window._fbLoading,{timeout:45000}).catch(()=>{});
 
 const r=await pg.evaluate(async()=>{
   /* Mardi 11 h : un magasin « Mo-Sa 08:00-20:00 » est ouvert, sans la moindre
