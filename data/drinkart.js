@@ -262,7 +262,7 @@ ART["calpico"]=function(d){
   // marque en haut, teinte foncee du parfum
   +'<text x="120" y="157" text-anchor="middle" font-size="21" font-weight="800" fill="'+dk+'" textLength="74" lengthAdjust="spacingAndGlyphs">CALPICO</text>'
   // parfum en dessous, en petit
-  +'<text x="120" y="177" text-anchor="middle" font-size="'+ffs+'" font-weight="700" fill="'+dk+'"'+tfit+'>'+fl+'</text>'
+  +'<text x="120" y="177" text-anchor="middle" font-size="'+ffs+'" font-weight="700" fill="'+dk+'"'+tfit+'>'+String(fl).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</text>'
   +(isSoda
     ? '<rect x="94" y="182" width="52" height="15" rx="7.5" fill="'+dk+'"/>'
      +'<text x="120" y="193.5" text-anchor="middle" font-size="10" font-weight="800" fill="#fff" letter-spacing="1.6">SODA</text>'
@@ -1121,7 +1121,7 @@ ART["mogu mogu"]=function(d){
   +'<text x="120" y="'+my2+'" text-anchor="middle" font-size="'+mfs+'" font-weight="800" fill="'+dk+'" stroke="'+dk+'" stroke-width="2" paint-order="stroke" stroke-linejoin="round" letter-spacing="1.5">MOGU</text>'
   // le parfum, sur pastille foncee
   +'<rect x="68" y="'+py+'" width="104" height="19" rx="9.5" fill="'+dk+'"/>'
-  +'<text x="120" y="'+pty+'" text-anchor="middle" font-size="'+pfs+'" font-weight="700" fill="#fff"'+fit+'>'+fl+'</text>'
+  +'<text x="120" y="'+pty+'" text-anchor="middle" font-size="'+pfs+'" font-weight="700" fill="#fff"'+fit+'>'+String(fl).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</text>'
   // reflet vertical clair a gauche (au-dessus et en dessous de l etiquette)
   +'<rect x="68" y="'+(132+t)+'" width="10" height="'+(ly-138-t)+'" rx="5" fill="#fff" opacity="0.5"/>'
   +'<rect x="68" y="'+(ly+lh+6)+'" width="10" height="'+(316-ly-lh-6)+'" rx="5" fill="#fff" opacity="0.4"/>'
@@ -1538,7 +1538,7 @@ ART["ramune"]=function(d){
   +'<text x="120" y="263.5" text-anchor="middle" font-size="13" font-weight="800" fill="#fff" textLength="46" lengthAdjust="spacingAndGlyphs" stroke="'+shade(c,-0.4)+'" stroke-width="2.4" paint-order="stroke" stroke-linejoin="round">RAMUNE</text>'
   // parfum en dessous, en petit, sur pastille blanche
   +'<rect x="87" y="289" width="66" height="16" rx="8" fill="#fff" opacity="0.93"/>'
-  +'<text x="120" y="300.5" text-anchor="middle" font-size="'+ffs+'" font-weight="700" fill="'+dk+'"'+tfit+'>'+fl+'</text>'
+  +'<text x="120" y="300.5" text-anchor="middle" font-size="'+ffs+'" font-weight="700" fill="'+dk+'"'+tfit+'>'+String(fl).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</text>'
   // reflet vertical clair a gauche
   +'<rect x="91.5" y="168" width="7" height="140" rx="3.5" fill="#fff" opacity="0.5"/>'
   +'<path d="M100,72 Q95,86 99,102" stroke="#fff" stroke-width="4" fill="none" opacity="0.55" stroke-linecap="round"/>'

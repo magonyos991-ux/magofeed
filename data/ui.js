@@ -459,6 +459,9 @@ function toast(msg){
      Le texte francais sert de cle : voir data/textes.js. */
   t.textContent=(typeof tr==="function")?tr(msg):msg;
   t.classList.add("show");
-  setTimeout(function(){t.classList.remove("show");},2500);
+  /* Deux toasts rapproches : le minuteur du premier coupait le second au
+     bout d'une demi-seconde (audit personas). Un seul minuteur a la fois. */
+  clearTimeout(t._mino);
+  t._mino=setTimeout(function(){t.classList.remove("show");},2500);
 }
 

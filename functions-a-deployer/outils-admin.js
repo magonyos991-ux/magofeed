@@ -85,6 +85,7 @@ async function sendToAdmins(title, body) {
 
   let jetons = 0, parties = 0;
   const sansJeton = [];
+  const echecs = [];
   try {
     const admins = await db.collection("admins").get();
     if (!admins.empty) {
@@ -100,12 +101,21 @@ async function sendToAdmins(title, body) {
           });
           parties++;
         } catch (e) {
-          /* Un jeton refuse par Google est efface : sans ca, la liste se remplit
-             de jetons morts et chaque envoi echoue un peu plus. C'est aussi
-             pourquoi le secours par courriel existe — cet effacement est
-             silencieux, et sans lui on ne saurait jamais que le canal est mort. */
+          /* TOUT REFUS OUVRE LE SECOURS, pas seulement le jeton mort. Avant,
+             seul « registration-token-not-registered » entrait dans la liste
+             du secours : un refus d'un autre genre — mauvaise cle VAPID,
+             compte de service sans droit, panne passagere chez Google — ne
+             produisait NI poussee NI courriel. Zero alerte, et une trace qui
+             disait « envoi refuse » sans que personne la lise. Or c'est
+             exactement le jour ou le secours doit servir.
+
+             L'EFFACEMENT DU JETON, lui, reste reserve au jeton mort : effacer
+             sur une panne passagere obligerait la personne a tout reactiver a
+             la main pour une erreur qui se serait reglee seule. */
+          const code = String((e && e.code) || (e && e.message) || e);
+          echecs.push(code.slice(0, 80));
+          sansJeton.push(a.id);
           if (e && e.code === "messaging/registration-token-not-registered") {
-            sansJeton.push(a.id);
             try { await db.collection("pushTokens").doc(a.id).delete(); } catch (_) {}
           } else {
             console.warn("push admin:", e && e.message);
@@ -127,10 +137,15 @@ async function sendToAdmins(title, body) {
 
   if (trace) {
     try {
-      await trace.update({ pousseesEnvoyees: parties, jetonsTrouves: jetons, courrielEnvoye: courriel });
+      await trace.update({ pousseesEnvoyees: parties, jetonsTrouves: jetons, courrielEnvoye: courriel,
+                           /* LE CODE D'ERREUR EXACT. « Envoi refuse » ne dit pas quoi reparer :
+                              un jeton mort se reactive en deux gestes, une cle VAPID fausse
+                              demande d'aller dans la console Firebase. Ce n'est pas la meme
+                              journee de travail, et c'etait invisible. */
+                           echecs: echecs.slice(0, 5) });
     } catch (e) { /* la trace vaut mieux qu'aucune trace, meme incomplete */ }
   }
-  return { parties: parties, jetons: jetons, courriel: courriel };
+  return { parties: parties, jetons: jetons, courriel: courriel, echecs: echecs.slice(0, 5) };
 }
 
 /* Une push a UNE personne. Copiee de notifications-push.js, qui ne l'exporte

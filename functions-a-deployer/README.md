@@ -261,3 +261,28 @@ npm test             # doit afficher : 122/122 conformes
 
 Il attaque une base jetable sur ta machine. Rien ne part en ligne. S'il
 n'affiche pas `122/122`, ne déploie pas.
+
+## Deployer la chaine d'alerte admin (26/11/2026)
+
+Trois fichiers, trois fonctions. Ne touche a rien d'autre.
+
+Ce qui change :
+- `catalogue-ia.js` declare enfin BREVO_API_KEY : ses sept alertes — dont
+  « Alcool ecarte » — avaient un secours par courriel muet depuis toujours ;
+- `outils-admin.js` : TOUT refus de Google ouvre le secours, plus seulement le
+  jeton mort, et le code d'erreur exact est trace ;
+- `notif-admin.js` : nouvelle fonction `testerAlerteAdmin`, qui envoie une
+  vraie alerte par le meme chemin et rend les chiffres bruts.
+
+```powershell
+cd C:\Users\ilias\magofeed-functions\functions; $b="https://raw.githubusercontent.com/magonyos991-ux/magofeed/main/functions-a-deployer/"; foreach ($f in @("outils-admin.js","notif-admin.js","catalogue-ia.js")) { Invoke-WebRequest -UseBasicParsing -Uri ($b+$f) -OutFile $f; Write-Host "ok $f" }; cd ..; firebase deploy --only functions:notifyAdminNewUser,functions:testerAlerteAdmin,functions:aiCatalogDiscovery
+```
+
+Ensuite, dans l'app : Administration, tout en bas, « Journal des alertes »,
+puis le bouton « Envoyer une alerte de test ».
+
+**A savoir, et c'est la cause de mois de doute :** ouvrir Magofeed soi-meme
+sur son PC ne peut PAS declencher l'alerte « nouvel utilisateur ». Elle ne
+part qu'a la CREATION du document de profil, et une session deja connectee
+n'en cree aucun. Pour eprouver une vraie arrivee, il faut une fenetre de
+navigation privee.
