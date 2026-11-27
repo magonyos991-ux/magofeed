@@ -1648,6 +1648,7 @@ try{
     <div id="img-zoom-name" style="font-size:15px;font-weight:800;color:#fff;text-align:center"></div>
     <div id="img-zoom-etat" style="display:none;font-size:12.5px;font-weight:500;color:rgba(255,255,255,.72);text-align:center;max-width:300px;line-height:1.4"></div>
     <div id="img-zoom-credit" style="font-size:10.5px;font-weight:500;color:rgba(255,255,255,.55)">Photo : Open Food Facts (CC-BY-SA)</div>
+    <div id="img-zoom-hd" role="button" tabindex="0" style="display:none;align-items:center;gap:6px;padding:8px 14px;border-radius:999px;background:rgba(255,255,255,.14);color:#fff;font-size:12px;font-weight:700;cursor:pointer">Voir en haute résolution</div>
     <div id="img-zoom-close" role="button" tabindex="0" aria-label="Fermer" onkeydown="if(event.key==='Enter'){closeDrinkZoom();}" style="position:absolute;top:18px;right:18px;width:40px;height:40px;border-radius:14px;background:rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;font-size:17px;color:#fff;cursor:pointer">✕</div>
   </div>
   <div class="toast" id="toast"></div>
@@ -8535,7 +8536,10 @@ function _showRaw(s){
   if(s==="discover"){try{window._huntsCache=null;}catch(e){}}
   if(s==="profile"){try{majLigneAmis();}catch(e){}try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}try{renderDonCard();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
-  if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}try{renderCompte();}catch(e){}try{peindreVerres();}catch(e){}try{renderCommercantRow();}catch(e){}}
+  /* La ligne Notifications se rafraîchit ICI, à l'ouverture de l'écran (et au
+     retour au premier plan) : avant, un setInterval de 1,5 s tournait à vie
+     pour une ligne invisible la plupart du temps. */
+  if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}try{renderCompte();}catch(e){}try{peindreVerres();}catch(e){}try{renderCommercantRow();}catch(e){}try{refreshNotifState();}catch(e){}}
   if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderChasseCodes();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{_verifierAides();}catch(e){}try{renderChasse();}catch(e){}    // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
     // le filtre boisson de la carte (sinon la carte rouvrait toujours sur la derniere
     // boisson cherchee, ex. "Red Bull", au lieu de montrer tous les magasins).
@@ -8905,7 +8909,7 @@ function enregistrerStock(sid,did,price){
   if(price>=0.20&&price<=25){
     if(!storePrices[sid])storePrices[sid]={};
     storePrices[sid][did]=price;
-    localStorage.setItem("magoPrices",JSON.stringify(storePrices));
+    ecrire("magoPrices",storePrices);
     if(!s.prices)s.prices={};
     s.prices[did]=price;
     // Historique de prix : releve horodate garde en local et reflete sur le magasin en memoire
@@ -11511,7 +11515,7 @@ function renderPriceAfterTag(s,did,ctx){
     var sid=String(s.id);
     if(!storePrices[sid])storePrices[sid]={};
     storePrices[sid][did]=v;
-    try{localStorage.setItem("magoPrices",JSON.stringify(storePrices));}catch(e){}
+    ecrire("magoPrices",storePrices);
     if(!s.prices)s.prices={};
     s.prices[did]=v;
     trackLocalPrice(sid,did,v);
@@ -16135,7 +16139,7 @@ function renderWantedDrink(){
   var img=getCachedDrinkImage(d);
   host.innerHTML='<div id="wanted-inner" role="button" tabindex="0" style="background:var(--bg2);border:1.5px solid #f0b840;border-radius:18px;padding:14px 16px;cursor:pointer;position:relative;overflow:hidden">'+
     '<div style="display:flex;align-items:center;gap:12px">'+
-      '<div style="width:46px;height:46px;border-radius:12px;overflow:hidden;background:'+d.light+';display:flex;align-items:center;justify-content:center;flex-shrink:0">'+(img?'<img src="'+img+'" alt="" style="width:100%;height:100%;object-fit:cover">':drinkIconHTML(d))+'</div>'+
+      '<div style="width:46px;height:46px;border-radius:12px;overflow:hidden;background:'+d.light+';display:flex;align-items:center;justify-content:center;flex-shrink:0">'+(img?'<img src="'+offTaille(img,200)+'" alt=""'+imgOFF(img)+' style="width:100%;height:100%;object-fit:cover">':drinkIconHTML(d))+'</div>'+
       '<div style="flex:1;min-width:0">'+
         '<div style="font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#e67e22">Boisson recherchée</div>'+
         '<div style="font-size:15px;font-weight:800;color:var(--s1);line-height:1.15">'+sanitize(d.name)+'</div>'+
@@ -16172,7 +16176,7 @@ function renderTopRail(){
     tile.setAttribute("aria-label",d.name);
     tile.style.cssText="flex:none;width:104px;border-radius:16px;overflow:hidden;background:var(--bg2);border:1px solid var(--border);cursor:pointer;box-shadow:0 3px 10px rgba(12,10,8,.06)";
     tile.innerHTML='<div style="height:64px;background:'+d.light+';display:flex;align-items:center;justify-content:center;overflow:hidden">'+
-        (img?'<img src="'+img+'" alt="" style="width:100%;height:100%;object-fit:cover">':drinkCanSVG(d))+
+        (img?'<img src="'+offTaille(img,200)+'" alt=""'+imgOFF(img)+' style="width:100%;height:100%;object-fit:cover">':drinkCanSVG(d))+
       '</div>'+
       '<div style="padding:7px 9px 9px">'+
         '<div style="font-size:11px;font-weight:700;color:var(--s1);line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+d.name+'</div>'+
@@ -16841,7 +16845,7 @@ function renderSearchDefault(el){
       t.setAttribute("role","button");t.setAttribute("tabindex","0");t.setAttribute("aria-label",d.name);
       t.style.cssText="flex:none;width:86px;cursor:pointer;-webkit-tap-highlight-color:transparent";
       t.innerHTML='<div style="width:86px;height:86px;border-radius:18px;overflow:hidden;background:'+d.light+';display:flex;align-items:center;justify-content:center">'+
-          (img?'<img src="'+img+'" alt="" style="width:100%;height:100%;object-fit:cover">':drinkIconHTML(d))+
+          (img?'<img src="'+offTaille(img,200)+'" alt=""'+imgOFF(img)+' style="width:100%;height:100%;object-fit:cover">':drinkIconHTML(d))+
         '</div>'+
         '<div style="margin-top:6px;font-size:11px;font-weight:700;color:var(--s1);line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-align:center">'+sanitize(d.name)+'</div>';
       t.onclick=function(){pick(d);};
@@ -17360,6 +17364,133 @@ function drinkCanSVG(d,emojiSize){
     '<rect x="13" y="14" width="5" height="60" rx="2.5" fill="rgba(255,255,255,.28)"/>'+
   '</svg>';
 }
+/* ══ VIGNETTES OPEN FOOD FACTS : LES BONS ATTRIBUTS, À UN SEUL ENDROIT ═══════
+   crossorigin="anonymous" : sans lui, l'<img> envoie une requête no-cors et la
+   réponse est OPAQUE — le service worker ne peut ni la lire ni la ranger (le
+   cache magofeed-img-v1 restait vide par construction, donc aucune photo déjà
+   vue ne survivait hors ligne). OFF renvoie access-control-allow-origin: *,
+   la requête CORS passe. JAMAIS sur une data: ni sur une photo communautaire :
+   le navigateur n'y gagnerait rien, et une origine qui ne répond pas CORS
+   ferait échouer l'image.
+   loading="lazy" decoding="async" : une recherche créait 110 à 164 <img> d'un
+   coup, les vignettes visibles attendaient derrière cent invisibles ; avec
+   lazy, une vingtaine partent. fetchpriority="high" sur les 8 premières d'une
+   même salve : les lignes sous le doigt d'abord. */
+function estUrlOFF(url){return typeof url==="string"&&url.indexOf("https://images.openfoodfacts.org/")===0;}
+/* OFF publie chaque photo en .100, .200, .400 et .full (vérifié sur 78 URL du
+   catalogue : la .200 existe pour toutes, 3 fois moins d'octets que la .400).
+   Une vignette de 48 px (144 px physiques) n'a pas besoin de 400 px ; la
+   fiche (72 px) non plus. Toute autre URL ressort telle quelle. */
+function offTaille(url,n){
+  if(!estUrlOFF(url))return url;
+  return url.replace(/\.(100|200|400)\.jpg(\?|$)/,"."+n+".jpg$2");
+}
+var _imgRangSalve=0;
+function imgOFF(url){
+  /* Compteur de salve remis à zéro par micro-tâche : « 8 premières » veut dire
+     8 premières d'un même rendu synchrone (renderList, renderTrends…), sans que
+     ces fonctions aient à le savoir. */
+  if(_imgRangSalve===0)Promise.resolve().then(function(){_imgRangSalve=0;});
+  var rang=_imgRangSalve++;
+  var a=' loading="lazy" decoding="async"';
+  if(rang<8)a+=' fetchpriority="high"';
+  if(estUrlOFF(url))a=' crossorigin="anonymous"'+a;
+  return a;
+}
+/* ══ ÉCRIRE DANS localStorage SANS PERDRE EN SILENCE ═════════════════════════
+   Neuf écritures (favoris, notes, avis, prix, votes, scans, historique,
+   géocodage) étaient des setItem nus : au quota atteint, l'exception remontait,
+   la suite de la fonction (renderFavs, le son, le toast) n'était jamais
+   exécutée, et la donnée ne vivait plus qu'en mémoire — perdue au prochain
+   lancement, sans un mot. Le quota EST atteint en production (voir le cache
+   magasins) : sur iPhone, ~2,5 M de caractères pour toute l'origine.
+   Ici : on écrit ; au quota, on fait de la place dans le seul stock qu'on sait
+   reconstruire (le cache photo : OFF et Firestore le regarnissent), on
+   réessaie ; si vraiment rien ne passe, on le DIT. */
+function _quotaDepasse(e){
+  return !!(e&&(e.name==="QuotaExceededError"||e.name==="NS_ERROR_DOM_QUOTA_REACHED"||e.code===22||e.code===1014));
+}
+var _stockagePleinDit=0;
+function ecrire(cle,val){
+  var s=typeof val==="string"?val:JSON.stringify(val);
+  try{localStorage.setItem(cle,s);return true;}
+  catch(e){if(!_quotaDepasse(e))return false;}
+  for(var i=0;i<16&&purgerImgCache();i++){
+    try{localStorage.setItem(cle,s);return true;}catch(e2){}
+  }
+  /* Un seul avertissement par minute : une rafale de prix refusés ne doit pas
+     devenir une rafale de toasts. */
+  if(Date.now()-_stockagePleinDit>60000){
+    _stockagePleinDit=Date.now();
+    try{toast("Stockage plein : ce changement n'a pas pu être enregistré");}catch(e3){}
+  }
+  return false;
+}
+/* Les photos communautaires (data:, jusqu'à 250 Ko l'une) restent en mémoire
+   pour la session mais ne sont plus sérialisées : 6 à 12 d'entre elles
+   suffisaient à remplir le quota iOS, et chaque écriture du cache coûtait
+   60 à 200 ms de gel. Au prochain lancement, l'entrée est simplement absente :
+   fetchVerifiedOFFImage la redemande à fbLoadDrinkPhoto, comme pour une
+   boisson jamais vue. IndexedDB prendra le relais plus tard (plan C3). */
+function serialiserImgCache(){
+  var leger={};
+  Object.keys(imgCache).forEach(function(k){
+    var e=imgCache[k];
+    if(!e)return;
+    if(typeof e.url==="string"&&e.url.slice(0,5)==="data:")return;
+    leger[k]=e;
+  });
+  return JSON.stringify(leger);
+}
+/* Une étape de purge : d'abord les échecs mémorisés (url:null — ils se
+   retentent de toute façon après 24 h), puis la moitié la plus ancienne. Le
+   cache réduit est réécrit tout de suite : c'est cette réécriture qui libère
+   la place. Rend false quand il n'y a plus rien à retirer. Les photos data:
+   ne comptent pas : elles ne sont pas dans le stockage, les retirer ne
+   libérerait rien. */
+function purgerImgCache(){
+  var cles=Object.keys(imgCache).filter(function(k){
+    var e=imgCache[k];return !(e&&typeof e.url==="string"&&e.url.slice(0,5)==="data:");
+  });
+  if(!cles.length){
+    var restait=null;
+    try{restait=localStorage.getItem(IMG_CACHE_KEY);localStorage.removeItem(IMG_CACHE_KEY);}catch(e){}
+    return !!restait;
+  }
+  var nulles=cles.filter(function(k){var e=imgCache[k];return !e||!e.url;});
+  var aRetirer=nulles.length?nulles:cles.sort(function(a,b){return (imgCache[a].ts||0)-(imgCache[b].ts||0);}).slice(0,Math.ceil(cles.length/2));
+  aRetirer.forEach(function(k){delete imgCache[k];});
+  try{localStorage.setItem(IMG_CACHE_KEY,serialiserImgCache());}
+  catch(e){try{localStorage.removeItem(IMG_CACHE_KEY);}catch(e2){}}
+  return true;
+}
+/* UNE écriture du cache photo, 1,5 s après la dernière modification — au lieu
+   d'une réécriture complète par photo trouvée (jusqu'à 40 par session, une
+   toutes les 2,5 s, sous le doigt pendant le défilement). L'écriture en attente
+   part quand la page se cache ou se ferme : rien n'est perdu si iOS tue
+   l'onglet en arrière-plan. */
+var _imgCacheMinuteur=null;
+function sauverImgCache(){
+  if(_imgCacheMinuteur)clearTimeout(_imgCacheMinuteur);
+  _imgCacheMinuteur=setTimeout(_imgCacheEcrireMaintenant,1500);
+}
+function _imgCacheEcrireMaintenant(){
+  if(_imgCacheMinuteur){clearTimeout(_imgCacheMinuteur);_imgCacheMinuteur=null;}
+  try{localStorage.setItem(IMG_CACHE_KEY,serialiserImgCache());}
+  catch(e){if(_quotaDepasse(e))purgerImgCache();}
+}
+function _imgCacheVider(){if(_imgCacheMinuteur)_imgCacheEcrireMaintenant();}
+window.addEventListener("pagehide",_imgCacheVider);
+document.addEventListener("visibilitychange",function(){
+  if(document.visibilityState==="hidden"){_imgCacheVider();return;}
+  /* Retour au premier plan sur les Réglages : la permission de notification a
+     pu changer dans les réglages du téléphone pendant l'absence. C'est le seul
+     cas que le minuteur de 1,5 s (retiré) couvrait et que l'ouverture de
+     l'écran ne couvre pas. */
+  try{var s=document.getElementById("s-settings");if(s&&s.classList.contains("on"))refreshNotifState();}catch(e){}
+});
+/* Exposés pour le module Firebase (script séparé) et les autres caches. */
+window.ecrire=ecrire;window.sauverImgCache=sauverImgCache;
 function getCachedDrinkImage(d){
   if(d.img)return d.img;
   var e=imgCache[String(d.id)];
@@ -17389,7 +17520,7 @@ function drinkIconHTML(d){
     ?'<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:6%;box-sizing:border-box">'+artFond+'</span>'
     :'<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">'+drinkCanSVG(d,15)+'</span>';
   return '<span style="position:relative;display:block;width:100%;height:100%;border-radius:inherit;overflow:hidden">'+fond+
-    '<img src="'+url+'" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent;padding:7%;box-sizing:border-box;border-radius:inherit" '+
+    '<img src="'+offTaille(url,200)+'" alt=""'+imgOFF(url)+' style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent;padding:7%;box-sizing:border-box;border-radius:inherit" '+
     'onload="if(!this.naturalWidth)this.remove();else this.style.background=\'#fff\'" onerror="this.remove()">'+
     '</span>';
 }
@@ -17521,13 +17652,13 @@ function fetchVerifiedOFFImage(d,prioritaire){
           }else{
             imgCache[key]={url:null,ts:Date.now()};
           }
-          try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+          sauverImgCache();
           refreshDrinkVisual(d);
           if(userPhoto)renderTrends();
         });
       }
       imgCache[key]=best?{url:best.image_front_url||best.image_front_small_url,ts:Date.now()}:{url:null,ts:Date.now()};
-      try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){/* quota */}
+      sauverImgCache();
       delete imgFetchInFlight[key];
       // Repeint dans tous les cas : la visionneuse ouverte sur cette boisson
       // doit dire « pas de photo » plutot que « je la cherche » pour toujours.
@@ -17628,7 +17759,7 @@ function _zoomPeindre(d){
   var credit=document.getElementById("img-zoom-credit");
   if(!pic)return;
   var url=getCachedDrinkImage(d);
-  if(!url){_zoomSansPhoto(d);return;}
+  if(!url){_zoomHdCacher();_zoomSansPhoto(d);return;}
   var key=String(d.id);
   var entree=imgCache[key];
   pic.onerror=function(){
@@ -17639,8 +17770,11 @@ function _zoomPeindre(d){
     pic.onerror=null;
     if(entree&&!entree.manual&&!d.img){
       delete imgCache[key];
-      try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+      sauverImgCache();
     }
+    /* Plus de photo : plus de bouton « haute résolution » pour une adresse
+       morte. */
+    _zoomHdCacher();
     _zoomSansPhoto(d);
   };
   pic.src=url;
@@ -17652,18 +17786,45 @@ function _zoomPeindre(d){
     credit.textContent=tr(off?"Photo : Open Food Facts (CC-BY-SA)":"Photo partagée par la communauté");
     credit.style.display="block";
   }
-  /* La haute resolution, en arriere-plan : posee seulement quand elle est
-     vraiment chargee, et seulement si on regarde encore cette boisson. */
+  /* La haute résolution (.full : 300 à 740 Ko, 2 000 px pour un écran de
+     390) ne part plus toute seule : la .400 suffit à regarder la photo, et sur
+     un réseau de rayon la .full arrivait deux secondes plus tard, pour rien,
+     à chaque ouverture. Un bouton la demande. */
+  _zoomHdProposer(d,url);
+}
+function _zoomHdBouton(){return document.getElementById("img-zoom-hd");}
+function _zoomHdCacher(){var b=_zoomHdBouton();if(b)b.style.display="none";}
+function _zoomHdProposer(d,url){
+  var b=_zoomHdBouton();if(!b)return;
+  if(offFullResURL(url)===url){b.style.display="none";return;}
+  b.textContent=tr("Voir en haute résolution");
+  b.style.display="inline-flex";
+  /* Le tap sur le bouton ne doit pas fermer la visionneuse (l'overlay se
+     ferme d'un tap n'importe où). */
+  b.onclick=function(e){e.stopPropagation();_zoomHdCharger(d,url);};
+  b.onkeydown=function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();e.stopPropagation();_zoomHdCharger(d,url);}};
+}
+function _zoomHdCharger(d,url){
+  var b=_zoomHdBouton(),pic=document.getElementById("img-zoom-pic");
   var full=offFullResURL(url);
-  if(full!==url){
-    var hd=new Image();
-    hd.onload=function(){
-      if(!hd.naturalWidth||!_zoomOuvertSur(d))return;
-      pic.onerror=null;
-      pic.src=full;
-    };
-    hd.src=full;
-  }
+  if(b)b.textContent=tr("Haute résolution…");
+  var hd=new Image();
+  /* crossOrigin AVANT src : la requête part en CORS, donc le service worker
+     peut ranger la réponse (voir imgOFF). Posée seulement quand elle est
+     vraiment chargée, et seulement si on regarde encore cette boisson. */
+  hd.crossOrigin="anonymous";
+  hd.onload=function(){
+    if(!hd.naturalWidth||!_zoomOuvertSur(d)||!pic)return;
+    pic.onerror=null;
+    pic.src=full;
+    if(b)b.style.display="none";
+  };
+  hd.onerror=function(){
+    if(!b||!_zoomOuvertSur(d))return;
+    b.textContent=tr("Haute résolution indisponible");
+    setTimeout(function(){if(_zoomOuvertSur(d))b.style.display="none";},1800);
+  };
+  hd.src=full;
 }
 function _zoomSansPhoto(d){
   var pic=document.getElementById("img-zoom-pic");
@@ -18039,7 +18200,7 @@ function adminRemoveDrink(){
   var idx=DRINKS.findIndex(function(x){return x.id===d.id;});
   if(idx!==-1)DRINKS.splice(idx,1);
   delete imgCache[String(d.id)];
-  try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+  sauverImgCache();
   if(window.fbRemoveCatalogDrink)window.fbRemoveCatalogDrink(d.id).catch(function(e){console.warn(e);toast("Suppression distante \u00E9chou\u00E9e");});
   playSound("pop");
   toast("\u00AB "+d.name+" \u00BB retir\u00E9e du catalogue");
@@ -18891,7 +19052,7 @@ function adminFixPhoto(){
   var key=String(d.id);
   if(/^x$/i.test(input)){
     imgCache[key]={url:null,ts:Date.now(),manual:true};
-    try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+    sauverImgCache();
     refreshDrinkVisual(d);
     toast("Photo retir\u00E9e (canette stylis\u00E9e) \u2014 sur cet appareil");
     return;
@@ -18902,7 +19063,7 @@ function adminFixPhoto(){
       playSound("err");return;
     }
     imgCache[key]={url:url,ts:Date.now(),manual:true};
-    try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+    sauverImgCache();
     refreshDrinkVisual(d);
     renderTrends();
     if(window.fbSaveDrinkImage)window.fbSaveDrinkImage(key,url);
@@ -18965,7 +19126,9 @@ function drinkCardPhotoHTML(d){
     return '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">'+drinkCanSVG(d,16)+'</div>';
   }
   var canLayer='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:1">'+drinkCanSVG(d,16)+'</div>';
-  return canLayer+'<img src="'+url+'" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#fff;padding:10px;box-sizing:border-box;z-index:2" onerror="this.remove()">';
+  /* Grande carte : on garde la .400 (la .200 serait floue sur 3 pixels
+     physiques par pixel CSS), mais avec les mêmes attributs que les vignettes. */
+  return canLayer+'<img src="'+url+'" alt=""'+imgOFF(url)+' style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#fff;padding:10px;box-sizing:border-box;z-index:2" onerror="this.remove()">';
 }
 function centerMapOnUser(){
   if(!window._leafletMap)return;
@@ -22819,7 +22982,7 @@ function resolveStoreAddress(s){
       var full=[street,city].filter(Boolean).join(", ");
       if(!full)return;
       geocodeCache[key]=full;
-      localStorage.setItem("magoGeocodeCache",JSON.stringify(geocodeCache));
+      ecrire("magoGeocodeCache",geocodeCache);
       s.address=full;
       if(curStoreDetail===s){
         var subEl=document.getElementById("sd-sub");
@@ -22847,7 +23010,7 @@ function reverseGeocodeAddr(lat,lng,cb){
       var street=(a.house_number?a.house_number+" ":"")+(a.road||a.street||a.pedestrian||"");
       var city=a.city||a.town||a.village||a.municipality||"";
       var full=[street,city].filter(Boolean).join(", ");
-      if(full){geocodeCache[key]=full;try{localStorage.setItem("magoGeocodeCache",JSON.stringify(geocodeCache));}catch(e){}}
+      if(full){geocodeCache[key]=full;ecrire("magoGeocodeCache",geocodeCache);}
       cb&&cb(full||"");
     }).catch(function(){if(!done){done=true;clearTimeout(to);cb&&cb("");}});
 }
@@ -24683,7 +24846,7 @@ function hasVotedDiscovery(id){return votedDiscoveries.indexOf(String(id))!==-1;
 function markVotedDiscovery(id){
   if(hasVotedDiscovery(id))return;
   votedDiscoveries.push(String(id));
-  localStorage.setItem("magoVotedDisc",JSON.stringify(votedDiscoveries));
+  ecrire("magoVotedDisc",votedDiscoveries);
 }
 /* Apres l'ajout d'une decouverte scannee : proposer la photo tout de suite.
    La photo part chez l'admin (discoveryPhotos) et suivra la boisson si elle
@@ -24909,7 +25072,7 @@ function drinkPhotoBtn(){
       var save=window.fbApplyDrinkPhoto?window.fbApplyDrinkPhoto(d.id,data):Promise.reject(new Error("hors-ligne"));
       save.then(function(){
         imgCache[key]={url:data,ts:Date.now(),community:true};
-        try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+        sauverImgCache();
         refreshDrinkVisual(d);
         try{renderTrends();}catch(e){}
         try{renderResults();}catch(e){}
@@ -26118,7 +26281,7 @@ function submitProposal(){
       try{mergeCatalog([res.entry]);}catch(e){console.warn(e);}
       if(photoData){
         imgCache[String(res.entry.id)]={url:photoData,ts:Date.now(),community:true,manual:true};
-        try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+        sauverImgCache();
         var dr=DRINKS.find(function(x){return String(x.id)===String(res.entry.id);});
         if(dr){try{refreshDrinkVisual(dr);}catch(e){}}
       }
@@ -27071,7 +27234,7 @@ function quickPrice(storeId,drinkId){
   if(!v||v<=0||v>50){toast("Prix invalide");return;}
   if(!storePrices[storeId])storePrices[storeId]={};
   storePrices[storeId][drinkId]=v;
-  try{localStorage.setItem("magoPrices",JSON.stringify(storePrices));}catch(e){}
+  ecrire("magoPrices",storePrices);
   if(s){if(!s.prices)s.prices={};s.prices[drinkId]=v;}
   try{if(typeof trackLocalPrice==="function")trackLocalPrice(storeId,drinkId,v);}catch(e){}
   /* ══ « PRIX ENREGISTRE » ALORS QU'IL NE QUITTAIT PAS LE TELEPHONE ═══════
@@ -29422,7 +29585,6 @@ function wipeTestHunts(){
     }
   });
 }
-setInterval(function(){var el=document.getElementById("notif-state");if(el)refreshNotifState();},1500);
 function showOnboarding(){
   if(localStorage.getItem("magoOnboard")==="1")return;
   // Visiteur arrivé par un lien partagé (#drink=/#store=) : il vient voir OÙ
@@ -29983,7 +30145,7 @@ function _offImageParCode(code){
     var p=data&&data.status===1&&data.product;
     var url=(p&&(p.image_front_small_url||p.image_front_url))||null;
     imgCache[k]={url:url,ts:Date.now()};
-    try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(err){}
+    sauverImgCache();
     return url;
   }).catch(function(){return null;});
 }
@@ -30435,7 +30597,7 @@ function showRouteToStore(lat,lng,store,sansCompter){
 /* ================================
    SCAN COUNTS & RATINGS
 ================================ */
-function incrementScan(id){scanCounts[id]=(scanCounts[id]||0)+1;localStorage.setItem("magoscans",JSON.stringify(scanCounts));if(!isAdmin&&window.fbIncrementScanCount)window.fbIncrementScanCount(id);}
+function incrementScan(id){scanCounts[id]=(scanCounts[id]||0)+1;ecrire("magoscans",scanCounts);if(!isAdmin&&window.fbIncrementScanCount)window.fbIncrementScanCount(id);}
 function renderTopScanned(){
   var el=document.getElementById("top-scanned");if(!el)return;
   var sorted=DRINKS.slice().sort(function(a,b){return(scanCountsGlobal[b.id]||0)-(scanCountsGlobal[a.id]||0);}).slice(0,5);
@@ -30575,7 +30737,7 @@ function setRating(val){
   if(!curSel)return;
   var prev=userRatings[curSel.id];
   if(prev===val){toast("★ D\u00e9j\u00e0 not\u00e9 "+val+"/5");playSound("pop");return;}
-  userRatings[curSel.id]=val;localStorage.setItem("mago_ratings",JSON.stringify(userRatings));
+  userRatings[curSel.id]=val;ecrire("mago_ratings",userRatings);
   var agg=drinkRatingsAgg[curSel.id]||{sum:0,count:0};
   if(prev){agg.sum+=val-prev;} // re-note : on REMPLACE, on n'empile pas
   else{agg.sum+=val;agg.count+=1;}
@@ -30781,7 +30943,7 @@ function setRec(val){
   if(!curSel)return;
   var prev=userRecs[curSel.id];
   if(prev===val){toast(val==="yes"?"D\u00e9j\u00e0 recommand\u00e9e par toi":"Avis d\u00e9j\u00e0 enregistr\u00e9");playSound("pop");return;}
-  userRecs[curSel.id]=val;localStorage.setItem("mago_recs",JSON.stringify(userRecs));
+  userRecs[curSel.id]=val;ecrire("mago_recs",userRecs);
   /* PLUS DE POINTS POUR UN AVIS. Payer une opinion, c'est financer la
      fabrication d'un faux classement : avec le plafond de 60 points par jour
      et 3 points par signalement, un rayon entier scanne puis recommande
@@ -34596,7 +34758,7 @@ function renderPhotoSuggestions(){
         var did=String(r.drinkId);
         if(window.fbApplyDrinkPhoto)window.fbApplyDrinkPhoto(did,r.data).catch(function(e){console.warn(e);});
         imgCache[did]={url:r.data,ts:Date.now(),community:true,manual:true};
-        try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+        sauverImgCache();
         var dr=DRINKS.find(function(x){return Number(x.id)===Number(r.drinkId);});
         if(dr)refreshDrinkVisual(dr);
         renderTrends();
@@ -35506,7 +35668,7 @@ function enhanceA11y(){
 function toggleFav(id,el){
   var idx=favorites.indexOf(id);var adding=(idx===-1);
   if(adding){favorites.push(id);if(el)el.innerHTML=heartSVG(true,el.className==="dcard-fav"?18:20);}else{favorites.splice(idx,1);if(el)el.innerHTML=heartSVG(false,el.className==="dcard-fav"?18:20);}
-  localStorage.setItem("magofavs",JSON.stringify(favorites));renderFavs();playSound("pop");
+  ecrire("magofavs",favorites);renderFavs();playSound("pop");
   if(el){el.style.animation="none";void el.offsetWidth;el.style.animation="heartPop .35s cubic-bezier(.34,1.56,.64,1)";}
   // Favori = veille automatique : on te previent (push) quand cette boisson est
   // signalee pres de toi. Reutilise l'infra notifyWatchers deja deployee.
@@ -35538,7 +35700,7 @@ function renderFavs(){
 /* ================================
    SEARCH HISTORY
 ================================ */
-function addToHistory(term){if(!term||term.length<2)return;searchHistory=searchHistory.filter(function(h){return h!==term;});searchHistory.unshift(term);searchHistory=searchHistory.slice(0,5);localStorage.setItem("magosearchhist",JSON.stringify(searchHistory));}
+function addToHistory(term){if(!term||term.length<2)return;searchHistory=searchHistory.filter(function(h){return h!==term;});searchHistory.unshift(term);searchHistory=searchHistory.slice(0,5);ecrire("magosearchhist",searchHistory);}
 /* Recherche de joueurs : carte avec avatar, points, et ses boissons
    preferees en miniatures cliquables — tap sur son Fanta Citron et
    l'app t'emmene droit sur la fiche de la boisson. */
@@ -37415,7 +37577,7 @@ function renderUserSearchList(){
   },350);
 }
 function renderSearchHistory(){if(searchMode==="stores")return;var el=document.getElementById("search-list");var q=document.getElementById("q");if(!el||!q||q.value.length>0||!searchHistory.length)return;el.innerHTML='<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin-bottom:10px">Récents</div>';searchHistory.forEach(function(h){var div=document.createElement("div");div.style.cssText="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer";div.innerHTML='<div style="width:34px;height:34px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--s3)"></div><span style="flex:1;font-size:14px;font-weight:500;color:var(--s1)">'+h+'</span><span style="font-size:12px;color:var(--txt2);padding:4px" onclick="event.stopPropagation();removeHistory(\''+h+'\')">✕</span>';div.onclick=function(){document.getElementById("q").value=h;renderList();};el.appendChild(div);});}
-function removeHistory(term){searchHistory=searchHistory.filter(function(h){return h!==term;});localStorage.setItem("magosearchhist",JSON.stringify(searchHistory));renderSearchHistory();}
+function removeHistory(term){searchHistory=searchHistory.filter(function(h){return h!==term;});ecrire("magosearchhist",searchHistory);renderSearchHistory();}
 
 /* ================================
    BINDINGS
@@ -37691,7 +37853,7 @@ try{
       if(!imgCache[k]||!imgCache[k].url){imgCache[k]={url:url,ts:Date.now()};applied++;}
     });
     if(applied){
-      try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(err){}
+      sauverImgCache();
       /* Le lot de photos communautaires vient d'arriver : on REPEINT la
          vitrine, on ne la retire pas. La selection du jour ne depend plus du
          cache d'images (voir _aPhotoFiche) : la remettre a zero ici ferait
