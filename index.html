@@ -21951,6 +21951,31 @@ function exploreClusterIcon(cluster){
   });
 }
 
+/* ── LA CARTE NE TOMBE PLUS EN « TAS DE PINS » ─────────────────────────────
+   Vu sur iPhone, Paris au zoom ville : 1200 pins individuels empiles. Cause
+   reproduite au banc : quand le greffon de regroupement ne se charge pas a
+   temps (6 s, reseau qui hoquette), la carte se construit avec une couche
+   SANS regroupement — et la gardait toute la session. Desormais, avant
+   chaque rendu : si le greffon est arrive depuis, on remplace la couche ;
+   sinon on retente son chargement (au plus une fois toutes les 20 s) ; et
+   en attendant, le rendu regroupe lui-meme par grille (voir exploreLoadStores). */
+function _assurerRegroupement(){
+  if(!exploreMap||!exploreLayer)return;
+  if(exploreLayer.getVisibleParent)return; // deja une couche regroupee
+  if(window.L&&L.markerClusterGroup&&window._creerCoucheExplore){
+    try{exploreMap.removeLayer(exploreLayer);}catch(e){}
+    exploreLayer=window._creerCoucheExplore();
+    exploreLayer.addTo(exploreMap);
+    return;
+  }
+  if(window._clusterState!=="loading"&&Date.now()-(window._clusterRetenteT||0)>20000){
+    window._clusterRetenteT=Date.now();
+    window._clusterState=null;
+    try{ensureCluster(function(){
+      if(window.L&&L.markerClusterGroup&&exploreMap){try{exploreLoadStores(true);}catch(e){}}
+    });}catch(e){}
+  }
+}
 /* Nouvel essai apres un echec : on repart de zero. */
 function retryLeaflet(){
   window._leafletState=null;
@@ -27724,7 +27749,10 @@ function openExploreMap(opts){
       exploreFond=fondMago();exploreFond.addTo(exploreMap);
       /* Regroupement si le greffon est la, sinon simple couche : la carte
          s'affiche dans les deux cas. */
-      exploreLayer=(window.L&&L.markerClusterGroup)
+      /* Fabrique de la couche : appelee a la construction, ET plus tard si
+         le greffon de regroupement arrive en retard (voir
+         _assurerRegroupement). */
+      window._creerCoucheExplore=function(){ return (window.L&&L.markerClusterGroup)
         ? L.markerClusterGroup({
             chunkedLoading:true,          // ajout par paquets : l'interface ne gele pas
             // Voir rayonRegroupement() : large de loin, etroit dans la rue.
@@ -27759,7 +27787,8 @@ function openExploreMap(opts){
             showCoverageOnHover:false,
             iconCreateFunction:exploreClusterIcon
           })
-        : L.layerGroup();
+        : L.layerGroup(); };
+      exploreLayer=window._creerCoucheExplore();
       exploreLayer.addTo(exploreMap);
       /* Si la carte bouge, le geste n'a plus de sens : la carte va se
          redessiner et detruire le marqueur sous le doigt. On referme avant. */
@@ -28426,6 +28455,7 @@ function exploreLoadStores(useCache){
         return typeof s.lat==="number" && typeof s.lng==="number" && _cadre.contains([s.lat,s.lng]);
       });
     }catch(eB){}
+    _assurerRegroupement();
     exploreLayer.clearLayers();
     var shown=0;
     /* Le plafond de 400 etait un pansement : il evitait le blocage en JETANT
@@ -28474,6 +28504,33 @@ function exploreLoadStores(useCache){
        sont visuellement identiques (les bulles absorbent), et quand le
        plafond mord, le bandeau du bas le DIT au lieu de faire semblant
        (jamais de coupe silencieuse). */
+    /* Sans greffon (pas encore arrive, ou injoignable), on ne pose JAMAIS
+       des centaines de pins les uns sur les autres : on regroupe par grille
+       au meme rayon que le greffon (rayonRegroupement). Une case qui
+       contient plusieurs magasins devient une bulle avec le VRAI nombre ;
+       la toucher zoome dessus. Au zoom de detail, comme le greffon, on
+       montre chaque magasin. */
+    var _bullesGrille=[];
+    if(!exploreLayer.getVisibleParent){
+      try{
+        var _zg=exploreMap.getZoom();
+        if(_zg<ZOOM_DETAIL){
+          /* x1,5 : le greffon regroupe dans un RAYON autour d'un centre, une
+             case de grille de la meme taille serait deux fois plus dense. */
+          var _cellule=Math.round(1.5*(rayonRegroupement(_zg)||40)),_grille={},_ordreG=[];
+          _pourCarte.forEach(function(s){
+            if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
+            var _p=exploreMap.project([s.lat,s.lng],_zg);
+            var _k=Math.floor(_p.x/_cellule)+":"+Math.floor(_p.y/_cellule);
+            if(!_grille[_k]){_grille[_k]=[];_ordreG.push(_k);}
+            _grille[_k].push(s);
+          });
+          var _seuls=[];
+          _ordreG.forEach(function(k){var g=_grille[k];if(g.length===1)_seuls.push(g[0]);else _bullesGrille.push(g);});
+          _pourCarte=_seuls;
+        }
+      }catch(eG){_bullesGrille=[];}
+    }
     var _tronque=_pourCarte.length>1200;
     _pourCarte.slice(0,1200).forEach(function(s){
       if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
@@ -28559,13 +28616,24 @@ function exploreLoadStores(useCache){
     /* addLayers (au pluriel) : le greffon calcule les groupes UNE fois pour
        tout le lot. Ajouter les marqueurs un par un le forcerait a tout
        recalculer a chaque ajout — c'est le piege classique. */
+    _bullesGrille.forEach(function(g){
+      var la=0,ln=0;g.forEach(function(s){la+=s.lat;ln+=s.lng;});
+      var mkB=L.marker([la/g.length,ln/g.length],{icon:exploreClusterIcon({getChildCount:function(){return g.length;}}),zIndexOffset:700});
+      mkB.on("click",function(){
+        try{exploreMap.fitBounds(L.latLngBounds(g.map(function(s){return [s.lat,s.lng];})).pad(0.2),{maxZoom:ZOOM_DETAIL});}catch(eF){}
+      });
+      _lot.push(mkB);
+    });
     if(exploreLayer.addLayers)exploreLayer.addLayers(_lot);
     else _lot.forEach(function(m){exploreLayer.addLayer(m);});
     // Les marqueurs viennent de changer : on refait la rosace tout de suite,
     // sinon deux magasins superposes resteraient l'un sur l'autre jusqu'au
     // prochain geste de l'utilisateur.
     try{etalerMarqueurs(exploreMap,exploreLayer);}catch(eE){}
-    try{renderExploreChips();exploreSetHeader(exploreFilter?withDrink:shown,_sureCount);}catch(eHdr){}
+    /* L'en-tete annoncait le nombre DESSINE (« 1200 magasins dans cette
+       zone ») pendant que la feuille du bas comptait le vrai total (1760) :
+       deux chiffres pour la meme zone. On annonce le vrai total partout. */
+    try{renderExploreChips();exploreSetHeader(exploreFilter?withDrink:list.length,_sureCount);}catch(eHdr){}
     try{renderExploreSheet(exploreFilter?list.filter(function(s){return s._hasDrink;}):list);}catch(eSheet){console.warn("exploreSheet:",eSheet);}
     try{renderInStockArrows();}catch(eArr){}
     if(status){
@@ -28597,9 +28665,12 @@ function exploreLoadStores(useCache){
           status.textContent=trh("Personne ne vend {b} par ici",{b:exploreFilter.name})+" \u00B7 "+_suite;
         }
       }else{
-        status.textContent=shown
-          ?(_tronque?trh("Les {n} magasins les plus proches · zoome pour les autres",{n:shown})
-                    :(shown+" magasin"+(shown>1?"s":"")+" ici"))
+        /* Le vrai total de la zone, toujours (les bulles portent le reste).
+           Quand le plafond de dessin mord, on le dit sans changer le chiffre. */
+        var _nZone=list.length;
+        status.textContent=_nZone
+          ?(_tronque?trh("{n} magasins ici · zoome pour tous les voir",{n:_nZone})
+                    :(_nZone+" magasin"+(_nZone>1?"s":"")+" ici"))
           :exploreStatutHonnete(true);
       }
     }
