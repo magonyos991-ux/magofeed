@@ -95,9 +95,25 @@ async function sendToAdmins(title, body) {
         if (!token) { sansJeton.push(a.id); continue; }
         jetons++;
         try {
+          /* LA MEME FORME QUE LES POUSSEES QUI ARRIVENT VRAIMENT.
+             Ce message n'avait PAS de champ « notification » de premier niveau :
+             seulement webpush.notification. Or le service worker de l'app lit
+             « data.notification || data.data » (sw.js), et sortait sans rien
+             afficher quand les deux manquaient. FCM repondait « envoye », le
+             telephone ne montrait rien, et le journal affichait « notification
+             envoyee » en toute bonne foi. C'etait la seule famille d'alertes
+             construite ainsi, et la seule que le fondateur ne recevait jamais.
+             On s'aligne donc mot pour mot sur prevenir() et pushToUser(), qui
+             arrivent : titre et corps en premier niveau, et un lien pour que
+             le tap ouvre l'app au lieu de ne rien faire. */
           await getMessaging().send({
-            token,
-            webpush: { notification: { title: title, body: body, icon: "icons/icon-192.png" } }
+            token: token,
+            notification: { title: title, body: body },
+            data: { type: "admin" },
+            webpush: {
+              notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png" },
+              fcmOptions: { link: "https://magonyos991-ux.github.io/magofeed/" }
+            }
           });
           parties++;
         } catch (e) {

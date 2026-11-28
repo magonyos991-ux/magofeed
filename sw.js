@@ -250,11 +250,26 @@ function destinationDuTap(data, n) {
 self.addEventListener("push", function(event) {
   var data = {};
   try { data = event.data ? event.data.json() : {}; } catch (e) {}
+  /* ON REGARDE AUSSI DANS webpush.notification. Les alertes d'administration
+     etaient envoyees sans « notification » de premier niveau : le titre vivait
+     sous webpush.notification, qu'on ne lisait nulle part. */
+  var w = (data.webpush && data.webpush.notification) || {};
   var n = data.notification || data.data || {};
-  if (!n.title && !n.body) return; // payload notification natif : déjà affiché par le navigateur
+  if (!n.title && !n.body) n = w;
+
+  /* NE JAMAIS SORTIR SANS RIEN AFFICHER. L'ancienne ligne etait
+       if (!n.title && !n.body) return;  // deja affiche par le navigateur
+     et son commentaire etait FAUX : aucun navigateur n'affiche un message
+     poussé tout seul, c'est toujours le service worker qui doit le faire.
+     Une poussee qui n'affiche rien est une « poussee silencieuse » : Safari
+     sur iPhone et Chrome la comptent comme un abus et finissent par retirer
+     l'abonnement — donc plus aucune notification, et plus rien pour le dire.
+     Mieux vaut une notification sobre qu'un silence qui casse le canal. */
+  var titre = n.title || w.title || "Magofeed";
+  var corps = n.body || w.body || "";
   event.waitUntil(
-    self.registration.showNotification(n.title || "Magofeed", {
-      body: n.body || "",
+    self.registration.showNotification(titre, {
+      body: corps,
       icon: "icons/icon-192.png",
       badge: "icons/icon-192.png",
       data: { url: destinationDuTap(data, n) }
