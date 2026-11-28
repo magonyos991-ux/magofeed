@@ -962,6 +962,25 @@ service cloud.firestore {
             && !changed().hasAny(['addedBy','createdAt','community'])
             && sourceHonnete()
             && coordonneesMagasinValides()
+            /* LE RAYON D'UN MAGASIN NE SE VIDE PAS DEPUIS UN TELEPHONE.
+               Aucun geste d'utilisateur ne retire une boisson de drinks :
+               confirmer, scanner, importer ne font qu'AJOUTER (arrayUnion).
+               Seule la purge de l'administrateur retire — et elle n'etait
+               protegee que par l'interface : n'importe quel compte pouvait,
+               depuis la console du navigateur, appeler la fonction et vider
+               le rayon de tous les Lidl, Aldi et Match de la base. Un compte
+               ordinaire peut donc toujours ajouter, jamais retirer. Un ancien
+               document dont drinks n'est pas une liste n'est pas bloque.
+               Lu par get() et non par resource.data.drinks : un magasin cree
+               par l'import d'exploration n'a PAS de champ drinks (on n'ecrit
+               pas une liste vide), et lire un champ absent est une ERREUR en
+               regles Firestore — donc un refus. Le premier signalement sur
+               chacun de ces magasins etait rejete, avec « verifie ta
+               connexion » a l'ecran. */
+            && (!changed().hasAny(['drinks'])
+                || !(resource.data.get('drinks', null) is list)
+                || (request.resource.data.get('drinks', null) is list
+                    && request.resource.data.drinks.hasAll(resource.data.drinks)))
             && (!changed().hasAny(['phone','website','description']) || gereLeMagasin(id))
             /* Les horaires restent collaboratifs sur un magasin ordinaire ;
                sur un magasin CERTIFIE, ils sont la parole de son gerant, et
@@ -999,6 +1018,34 @@ service cloud.firestore {
         && request.resource.data.n is string
         && request.resource.data.n.size() <= 80
         && request.resource.data.ok is bool;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    /* ── Journal des plantages de l'app (erreursClient) ───────────────────
+     * Jusqu'ici rien n'etait enregistre nulle part : un plantage ne vivait
+     * que sur l'ecran du telephone, et le fondateur ne pouvait pas dire QUEL
+     * plantage, sur QUEL ecran, avec QUELLE version. L'app depose ici une
+     * ligne par erreur (index.html : window.magoJournal), au plus vingt par
+     * jour et par appareil.
+     * Anonyme par construction : type, message et pile TRONQUES, version,
+     * identifiant d'ecran, navigateur. Ni uid, ni position, ni pseudo, ni
+     * contenu tape. Chacun peut AJOUTER une ligne, seul l'administrateur
+     * relit ; personne ne modifie. Les bornes de taille sont celles que le
+     * client applique deja : une ligne plus longue n'est pas une erreur de
+     * l'app, c'est quelqu'un qui ecrit a la main. */
+    match /erreursClient/{id} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['k','m','p','v','e','n','natif','t'])
+        && request.resource.data.k in ['error','rejection','boot','sw']
+        && request.resource.data.m is string && request.resource.data.m.size() <= 300
+        && request.resource.data.p is string && request.resource.data.p.size() <= 800
+        && request.resource.data.v is string && request.resource.data.v.size() <= 40
+        && request.resource.data.e is string && request.resource.data.e.size() <= 40
+        && request.resource.data.n is string && request.resource.data.n.size() <= 120
+        && request.resource.data.natif is bool
+        && request.resource.data.t == request.time;
       allow update: if false;
       allow delete: if isAdmin();
     }

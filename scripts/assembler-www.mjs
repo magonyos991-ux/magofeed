@@ -27,10 +27,25 @@ if (existsSync(bouteilles)) cpSync(bouteilles, "www/" + bouteilles, { recursive:
    version, donc jamais renouvele. On fait ici la meme substitution. */
 var build = "local";
 try { build = execSync("git rev-parse --short=7 HEAD", { encoding: "utf8" }).trim() || "local"; } catch (e) {}
+/* L'EMPREINTE DANS L'URL DES FICHIERS DE LA COQUILLE (?v=<commit>), comme
+   pages.yml : les balises <script src="data/…"> et <link app.css> d'index.html,
+   et les memes entrees dans APP_SHELL de sw.js — les deux doivent parler de la
+   MEME URL. En natif c'est sans effet (pas de service worker sur capacitor://,
+   et le serveur local de Capacitor ignore la chaine de requete : url.path cote
+   iOS, uri.getPath() cote Android) ; on le fait pour que www/ soit, a l'octet
+   pres, ce que le web recoit — une difference entre les deux est une source de
+   « ca marche sur le site mais pas dans l'app » qu'on ne veut pas chercher. */
+function estampillerURL(f, src) {
+  if (f.endsWith("sw.js"))
+    return src.replace(/^(  "\.\/(?:data\/[A-Za-z0-9_.-]+\.js|app\.css))",/gm, '$1?v=' + build + '",');
+  return src
+    .replace(/(<script src="data\/[A-Za-z0-9_.-]+\.js)"/g, '$1?v=' + build + '"')
+    .replace(/(<link rel="stylesheet" href="app\.css)"/, '$1?v=' + build + '"');
+}
 for (const f of ["www/index.html", "www/sw.js"]) {
   if (!existsSync(f)) continue;
   const avant = readFileSync(f, "utf8");
-  const apres = avant.split("__BUILD_ID__").join(build);
+  const apres = estampillerURL(f, avant.split("__BUILD_ID__").join(build));
   if (apres !== avant) writeFileSync(f, apres);
 }
 

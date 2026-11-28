@@ -5,7 +5,20 @@
 # construit Magofeed, et depose le resultat sur TestFlight — d'ou tu l'installes
 # sur ton iPhone comme n'importe quelle app. Tu n'as jamais besoin d'un Mac.
 #
-# Declenchement MANUEL depuis l'onglet Actions, bouton « Run workflow ».
+# DECLENCHEMENT : automatique a chaque push sur main qui touche l'app (filtre
+# « paths » ci-dessous), et toujours possible a la main depuis l'onglet
+# Actions, bouton « Run workflow ».
+#
+# Pourquoi automatique : pages.yml met le site en ligne a chaque push, mais
+# l'app iPhone EMBARQUE le site (www/, pas d'URL distante). Un correctif pousse
+# sur main etait donc en ligne en quelques minutes et n'atteignait l'iPhone
+# qu'apres un build lance a la main — oublie, le fondateur testait sur son
+# telephone des bugs deja corriges et concluait « ca crash toujours ». Chaque
+# fusion produit desormais un build TestFlight interne (pas de Beta App Review).
+#
+# Pourquoi « cancel-in-progress » : jusqu'a 10 pushs sur main dans une journee,
+# a 25 minutes de macOS chacun. Sans annulation, c'est une file de builds, et
+# les testeurs noyes de notifications TestFlight. Seul le dernier compte.
 #
 # ─── CE QU'IL FAUT, UNE SEULE FOIS ───────────────────────────────────────────
 #
@@ -37,14 +50,40 @@ name: Construire l'app iPhone (TestFlight)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    # Ce que www/ embarque (scripts/assembler-www.mjs) + le projet natif.
+    # Un push qui ne touche que des notes, promo/ ou le code serveur ne
+    # reserve pas 25 minutes de Mac pour rien.
+    paths:
+      - index.html
+      - app.css
+      - sw.js
+      - manifest.json
+      - privacy.html
+      - terms.html
+      - "data/**"
+      - "icons/**"
+      - "promo/cards-src/bottles/**"
+      - capacitor.config.json
+      - "ios/**"
+      - "scripts/**"
+      - package.json
+      - package-lock.json
+      - .github/workflows/ios.yml
 
 concurrency:
   group: construire-ios
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   construire:
     name: IPA signé, déposé sur TestFlight
+    # Tant que les secrets Apple ne sont pas posés dans le dépôt (voir
+    # l'en-tête), le job est SAUTÉ, pas mis en échec : un push sur main ne
+    # doit pas réserver un Mac pour s'arrêter à la première ligne, ni envoyer
+    # un courriel d'échec à chaque fusion. Dès que la clé est là, il tourne.
+    if: ${{ secrets.APPSTORE_PRIVATE_KEY != '' }}
     runs-on: macos-15
     timeout-minutes: 60
     steps:

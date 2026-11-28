@@ -23,7 +23,7 @@
  */
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import { doc, setDoc, updateDoc, getDoc, getDocs, deleteDoc, collection, addDoc,
-         writeBatch, increment, arrayUnion, serverTimestamp, Timestamp, query, where, orderBy, limit,
+         writeBatch, increment, arrayUnion, arrayRemove, serverTimestamp, Timestamp, query, where, orderBy, limit,
          deleteField } from 'firebase/firestore';
 import fs from 'fs';
 
@@ -1091,6 +1091,51 @@ await doit('legitime : les horaires d un magasin NON certifie restent collaborat
 await doit('gerant : une confirmation de boisson passe toujours sur une fiche aux coordonnees longues',
   ()=>assertSucceeds(updateDoc(doc(a,'stores','s3'),{drinks:arrayUnion(9),'confirmations.9':increment(1)})));
 
+/* ── Journal des plantages (erreursClient) ──────────────────────────────────
+   L'app y depose une ligne par erreur : type, message et pile tronques,
+   version, ecran, navigateur. Tout le monde peut en AJOUTER une (c'est ce qui
+   fait que le fondateur sait enfin quel plantage, sur quel ecran, avec quelle
+   version), personne ne la relit sauf l'administrateur, personne ne la
+   modifie. Le client borne deja les tailles ; une ligne plus longue vient
+   d'une main, pas de l'app. */
+const ERR_OK={k:'error',m:'TypeError: x is undefined',p:'index.html:36129\nindex.html:35760',
+  v:'1.6.0 build abc1234',e:'s-search',n:'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
+  natif:false,t:serverTimestamp()};
+await doit('legitime : l app depose une ligne de plantage',
+  ()=>assertSucceeds(addDoc(collection(a,'erreursClient'),ERR_OK)));
+await doit('legitime : une promesse rejetee sans pile passe aussi',
+  ()=>assertSucceeds(addDoc(collection(a,'erreursClient'),{...ERR_OK,k:'rejection',p:''})));
+await doit('bloque : sans compte, pas de ligne de plantage',
+  ()=>assertFails(addDoc(collection(anon,'erreursClient'),ERR_OK)));
+await doit('bloque : une ligne de plantage qui porte un uid',
+  ()=>assertFails(addDoc(collection(a,'erreursClient'),{...ERR_OK,uid:ALICE})));
+await doit('bloque : un type de plantage inconnu',
+  ()=>assertFails(addDoc(collection(a,'erreursClient'),{...ERR_OK,k:'spam'})));
+await doit('bloque : un message de plantage de 301 caracteres',
+  ()=>assertFails(addDoc(collection(a,'erreursClient'),{...ERR_OK,m:'x'.repeat(301)})));
+await doit('bloque : une pile de 801 caracteres',
+  ()=>assertFails(addDoc(collection(a,'erreursClient'),{...ERR_OK,p:'x'.repeat(801)})));
+await doit('bloque : une date de plantage posee par le client',
+  ()=>assertFails(addDoc(collection(a,'erreursClient'),{...ERR_OK,t:Timestamp.fromMillis(0)})));
+await doit('bloque : le drapeau natif qui n est pas un booleen',
+  ()=>assertFails(addDoc(collection(a,'erreursClient'),{...ERR_OK,natif:'oui'})));
+await env.withSecurityRulesDisabled(async (c)=>{
+  const db=c.firestore();
+  await setDoc(doc(db,'erreursClient','e1'),{...ERR_OK,t:Timestamp.fromMillis(1)});
+});
+await doit('bloque : Alice relit le journal des plantages',
+  ()=>assertFails(getDocs(collection(a,'erreursClient'))));
+await doit('admin : l administrateur relit le journal des plantages',
+  ()=>assertSucceeds(getDocs(collection(ad,'erreursClient'))));
+await doit('bloque : Alice retouche une ligne de plantage',
+  ()=>assertFails(updateDoc(doc(a,'erreursClient','e1'),{m:'rien a voir'})));
+await doit('bloque : l administrateur non plus ne retouche pas une ligne de plantage',
+  ()=>assertFails(updateDoc(doc(ad,'erreursClient','e1'),{m:'rien a voir'})));
+await doit('bloque : Alice efface une ligne de plantage',
+  ()=>assertFails(deleteDoc(doc(a,'erreursClient','e1'))));
+await doit('admin : l administrateur efface une ligne de plantage',
+  ()=>assertSucceeds(deleteDoc(doc(ad,'erreursClient','e1'))));
+
 /* ══ meta/declarations : LES ANNONCES DE MARQUE ══════════════════════════
    Une annonce de marque fait dire a l'application « Annonce par Pales » sur
    des centaines de magasins. Tout tient donc a UNE ligne de regle, et ces
@@ -1142,6 +1187,35 @@ await doit('bloque : Alice ne peut pas s offrir des pts (l ancienne colonne)',
   ()=>assertFails(updateDoc(doc(a,'users',ALICE),{pts:9999})));
 await doit('bloque : Alice ne peut pas recreer son profil avec des pts',
   ()=>assertFails(setDoc(doc(a,'users',ALICE),{pseudo:'Alice',pts:9999})));
+
+/* ══ LE RAYON NE SE VIDE PAS DEPUIS UN TELEPHONE ═════════════════════════
+   La purge « Lidl / Aldi / Match » n'etait gardee que par l'interface : la
+   fonction, appelable depuis la console, reecrivait drinks sans les boissons
+   non confirmees. Un compte ordinaire peut ajouter, jamais retirer. */
+await doit('legitime : ajouter une boisson au rayon (arrayUnion)',
+  ()=>assertSucceeds(updateDoc(doc(m,'stores','s1'),{drinks:arrayUnion(77)})));
+await doit('bloque : Mallory retire une boisson du rayon (arrayRemove)',
+  ()=>assertFails(updateDoc(doc(m,'stores','s1'),{drinks:arrayRemove(2)})));
+await doit('bloque : Mallory vide le rayon (drinks:[])',
+  ()=>assertFails(updateDoc(doc(m,'stores','s1'),{drinks:[]})));
+await doit('bloque : Mallory reecrit le rayon en le reduisant (comme la purge)',
+  ()=>assertFails(updateDoc(doc(m,'stores','s1'),{drinks:[1]})));
+await doit('legitime : l administrateur peut purger',
+  ()=>assertSucceeds(updateDoc(doc(env.authenticatedContext(ADMIN).firestore(),'stores','s1'),{drinks:[1,2]})));
+/* Un magasin cree par l'import d'exploration n'a PAS de champ drinks
+   (fbImportStores n'ecrit pas une liste vide). Lire un champ absent est une
+   erreur en regles Firestore, donc un refus : le premier signalement sur
+   chacun de ces magasins etait rejete. */
+await env.withSecurityRulesDisabled(async (c)=>{
+  await setDoc(doc(c.firestore(),'stores','o111'),{name:'Epicerie importee',brand:'',lat:50.83,lng:4.36,
+      geohash:'u151',osmImport:true});
+});
+await doit('legitime : premier signalement sur un magasin sans champ drinks',
+  ()=>assertSucceeds(updateDoc(doc(m,'stores','o111'),{drinks:arrayUnion(42)})));
+await doit('legitime : la boisson y est bien',
+  async()=>{ const d=await getDoc(doc(ad,'stores','o111')); if(!(d.data().drinks||[]).includes(42))throw new Error('absente'); });
+await doit('bloque : sur ce magasin aussi, on ne retire pas',
+  ()=>assertFails(updateDoc(doc(m,'stores','o111'),{drinks:arrayRemove(42)})));
 
 R.forEach(r=>console.log(r[0],'|',r[1]));
 console.log('\n'+(R.length-ko)+'/'+R.length+' conformes');

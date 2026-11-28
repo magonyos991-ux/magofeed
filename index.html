@@ -21,7 +21,9 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
    Avant : la moindre exception au demarrage laissait un ecran NOIR muet (le
    splash #1a1714 n'est retire qu'a la fin de l'init), et le seul filet, tout
    en bas du fichier, ecrasait la page par une trace de pile illisible. Ici :
-   un message clair + un bouton Recharger. N'EFFACE RIEN. */
+   un message clair + un bouton Recharger. N'EFFACE RIEN.
+   Il porte aussi le JOURNAL DES PLANTAGES (magoJournal, plus bas) : c'est le
+   seul code deja la quand tout le reste echoue. */
 (function(){
   var SHOWN=false;
   function panel(msg){
@@ -39,15 +41,104 @@ window.__MAGOFEED_COPYRIGHT__ = "© 2026 Magofeed — Tous droits réservés";
     d.querySelector("#mago-retry").onclick=function(){location.reload();};
   }
   window.__magoPanel=panel;
+
+  /* ── JOURNAL DES PLANTAGES ───────────────────────────────────────────────
+     Jusqu'ici rien n'etait enregistre nulle part : un plantage ne vivait que
+     sur l'ecran du telephone, et on ne pouvait pas dire QUEL plantage, sur
+     QUEL ecran, avec QUELLE version. magoJournal(type,msg,pile) construit une
+     ligne ANONYME — type, message tronque a 300, pile reduite aux
+     fichier:ligne et tronquee a 800, version, identifiant d'ecran, navigateur,
+     natif ou pas — et la range dans une file locale (localStorage magoErrFile,
+     10 lignes, dedoublonnee sur message+ecran) pour qu'elle survive au
+     rechargement. Le module Firebase la vide (magoJournalVider) des que
+     l'identite est connue, dans la collection erreursClient (creation seule).
+     Jamais envoye : uid, pseudo, position, contenu tape, photos, e-mail.
+     Plafond : 20 lignes par jour et par appareil (magoErrJour), pour qu'une
+     boucle d'erreur ne remplisse ni le telephone ni la base. */
+  var FILE_MAX=10,JOUR_MAX=20,videT=null;
+  function lireFile(){try{var f=JSON.parse(localStorage.getItem("magoErrFile")||"[]");return Array.isArray(f)?f:[];}catch(e){return [];}}
+  function ecrireFile(f){try{if(f&&f.length)localStorage.setItem("magoErrFile",JSON.stringify(f));else localStorage.removeItem("magoErrFile");}catch(e){}}
+  /* La version lue dans l'ecran Reglages (« 1.6.0 · build abc1234 »), le seul
+     endroit que le deploiement estampille. Vide tant que la page n'est pas
+     construite : le vidage la complete alors. */
+  function version(){
+    try{
+      var sp=document.querySelectorAll(".set-val");
+      for(var i=0;i<sp.length;i++){var t=String(sp[i].textContent||"");if(t.indexOf("build")!==-1)return t.replace(/\s*\u00B7\s*/g," ").trim().slice(0,40);}
+    }catch(e){}
+    return "";
+  }
+  function ecran(){
+    try{var on=document.querySelector(".screen.on");if(on&&on.id)return String(on.id).slice(0,40);}catch(e){}
+    return "boot";
+  }
+  /* Fichiers et numeros de ligne seulement : ni URL complete (elle porterait
+     le hash d'un lien partage), ni message repete, ni variable locale. */
+  function pileCourte(p){
+    var out=[],lignes=String(p||"").split("\n");
+    for(var i=0;i<lignes.length&&out.length<24;i++){
+      var m=/([^\/\\\s(@]+):(\d+)(?::\d+)?\)?\s*$/.exec(lignes[i]);
+      if(m)out.push(m[1]+":"+m[2]);
+    }
+    return out.join("\n").slice(0,800);
+  }
+  function natif(){try{return !!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());}catch(e){return false;}}
+  window.magoJournal=function(type,msg,pile){
+    try{
+      var m=String(msg||"").replace(/\s+/g," ").trim().slice(0,300);
+      /* « Script error. » : un script d'un autre domaine a plante, le
+         navigateur ne dit rien de plus. Une ligne sans contenu n'aide personne. */
+      if(!m||/^Script error\.?$/.test(m))return;
+      var jour=new Date().toISOString().slice(0,10),cpt={j:jour,n:0};
+      try{var c=JSON.parse(localStorage.getItem("magoErrJour")||"null");if(c&&c.j===jour&&typeof c.n==="number")cpt=c;}catch(e){}
+      if(cpt.n>=JOUR_MAX)return;
+      var e=ecran(),f=lireFile();
+      for(var i=0;i<f.length;i++)if(f[i]&&f[i].m===m&&f[i].e===e)return;
+      f.push({k:/^(error|rejection|boot|sw)$/.test(type)?type:"error",m:m,p:pileCourte(pile),v:version(),e:e,
+              n:String(navigator.userAgent||"").slice(0,120),natif:natif()});
+      if(f.length>FILE_MAX)f=f.slice(f.length-FILE_MAX);
+      ecrireFile(f);
+      cpt.n++;try{localStorage.setItem("magoErrJour",JSON.stringify(cpt));}catch(e2){}
+      /* Apres le demarrage, l'envoi suit de pres : on groupe les erreurs d'une
+         meme seconde, puis le module vide la file. */
+      if(typeof window.magoJournalVider==="function"){clearTimeout(videT);videT=setTimeout(function(){try{window.magoJournalVider();}catch(e3){}},1500);}
+    }catch(e4){}
+  };
+  window.magoJournalFile=lireFile;
+  window.magoJournalEcrire=ecrireFile;
+  window.magoJournalVersion=version;
+
   window.addEventListener("error",function(e){
     if(e&&e.target&&e.target!==window)return;
+    try{window.magoJournal("error",e.message||"Erreur",(e.error&&e.error.stack)||((e.filename||"")+":"+(e.lineno||"")));}catch(_){}
     panel((e.message||"Erreur")+"\n"+(e.filename||"")+":"+(e.lineno||"")+"\n"+((e.error&&e.error.stack)||""));
   },true);
+  /* Un rejet de promesse n'est PAS un plantage. Firestore « unavailable »,
+     auth/network-request-failed, n'importe quel appel reseau en sous-sol :
+     tout arrivait ici et recouvrait un accueil qui marchait d'un panneau
+     « L'appli n'a pas reussi a demarrer ». On note, on n'affiche plus rien ;
+     les codes reseau ne sont meme pas notes, ils ne disent rien du code. */
   window.addEventListener("unhandledrejection",function(e){
-    var r=e.reason;panel("Promesse rejetee : "+((r&&(r.message||r.code))||r)+"\n"+((r&&r.stack)||""));
+    var r=e&&e.reason,code=String((r&&r.code)||""),msg=String((r&&r.message)||(typeof r==="string"?r:"")||"");
+    if(!code&&!msg)return;
+    if(/unavailable|network-request-failed|^Script error\.?$/.test(code+" "+msg))return;
+    try{window.magoJournal("rejection","Promesse rejetee : "+(code?code+" ":"")+msg.slice(0,260),r&&r.stack);}catch(_){}
   });
-  setTimeout(function(){if(!window.__MAGO_BOOTED__)panel("Demarrage bloque (20 s sans reponse).");},20000);
-  window.__magoBootOK=function(){window.__MAGO_BOOTED__=true;};
+  /* Le compte a rebours de 20 s partait au PREMIER octet de la page. Sur un
+     reseau lent (120 Ko/s, wifi de magasin, sous-sol), data/drinks.js arrivait
+     a 8-9 s, l'accueil marchait, et a 20 s le panneau recouvrait tout — pour
+     toujours, personne ne le retirait. Il part maintenant a DOMContentLoaded
+     (tout le code est arrive, il ne reste qu'a demarrer), et __magoBootOK le
+     desarme et retire le panneau. Le minuteur de 90 s qui precede ne vise que
+     la page vraiment bloquee avant meme d'avoir recu son code. */
+  function bloque(){if(!window.__MAGO_BOOTED__)panel("Demarrage bloque (20 s sans reponse).");}
+  var armT=setTimeout(bloque,90000);
+  document.addEventListener("DOMContentLoaded",function(){clearTimeout(armT);armT=setTimeout(bloque,20000);});
+  window.__magoBootOK=function(){
+    window.__MAGO_BOOTED__=true;
+    clearTimeout(armT);
+    try{var c=document.getElementById("mago-crash");if(c)c.remove();}catch(e){}
+  };
 })();
 </script>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
@@ -236,9 +327,12 @@ try{
         jamais atteindre le haut tout seul : c'est le chargement reel (donnees,
         gros script), dont la duree n'est pas connue d'avance.
      2. Quand l'app est prete, initSplash() appelle magoSplashPret() : le verre
-        finit de se remplir d'ou qu'il en soit (0,38 s), tient plein 0,3 s, puis
-        le splash s'efface. Avant, le splash attendait 1 400 ms FIXES apres que
-        l'app etait prete : une seconde et demie perdue a chaque lancement.
+        finit de se remplir d'ou qu'il en soit (0,2 s) et le splash s'efface
+        0,3 s apres l'appel. A chaud (app prete en moins de 0,6 s), rien n'est
+        anime : le verre saute plein et le splash part a l'image suivante.
+        Avant, le splash attendait 1 400 ms FIXES apres que l'app etait prete,
+        puis a garanti 1,1 s de remplissage visible : une seconde perdue a
+        chaque lancement, et davantage a chaud.
      Seul transform est anime : c'est ce qui continue de bouger pendant que le
      fil principal compile. La position courante est lue par la transition
      elle-meme, donc aucun saut quand « pret » arrive en plein remplissage. */
@@ -262,27 +356,36 @@ try{
        dans la premiere demi-seconde, c'est-a-dire derriere l'ecran natif) :
        ici ~60 % a 1,1 s, puis le ralenti vers le bord. */
     else regler(relance?"1.2s":"2.6s","cubic-bezier(.3,.2,.2,1)","24px");
-    /* LE REMPLISSAGE DOIT ETRE VU. Sur un telephone a cache chaud, l'app est
-       prete ~0,5 s apres T0 : le verre finissait de se remplir avant meme
-       d'etre visible, et l'on ne voyait qu'un verre deja plein qui s'efface
-       (constate sur enregistrement d'ecran). On garantit donc 1,1 s de
-       remplissage visible depuis T0 avant de finir. Sur un appareil lent, le
-       chargement reel depasse ce minimum et rien n'est ajoute. */
-    var MINIMUM=1100; window.__splashMinimum=MINIMUM;
+    /* LE DESSIN NE FAIT PLUS ATTENDRE L'ACCUEIL. On garantissait 1,1 s de
+       remplissage visible depuis T0 (pour qu'a cache chaud on ne voie pas un
+       verre deja plein qui s'efface), puis 0,38 s pour finir et 0,3 s plein :
+       l'accueil n'apparaissait JAMAIS avant T0 + 1,8 s. Mesure : prete a
+       T0 + 0,54-0,65 s, l'app restait cachee jusqu'a T0 + 1,86-1,89 s — 1,2 a
+       1,3 s d'attente pure, a chaque ouverture, pour un dessin. Et sur le
+       telephone, l'ecran de lancement natif couvre deja ~0,4 s de tout ca.
+       Decision du fondateur : plancher ramene a 600 ms (ce que couvre l'ecran
+       natif), fin de remplissage 0,2 s, et le splash part 0,3 s apres
+       « pret » (le verre est plein pendant le dernier dixieme). Lancement
+       CHAUD — le service worker vient de recharger la page, ou l'app est
+       prete avant le plancher — : aucune animation, le verre saute plein et
+       le splash s'efface a l'image suivante. Mouvement reduit : inchange, le
+       verre est plein d'emblee et tient 0,3 s. */
+    var MINIMUM=600; window.__splashMinimum=MINIMUM;
     window.magoSplashPret=function(fin){
       window.__splashPretAt=Date.now();
-      var attente=calme?0:Math.max(0,MINIMUM-(Date.now()-T0));
+      var ecoule=Date.now()-T0;
+      var chaud=relance||ecoule<MINIMUM;
+      var attente=(calme||chaud)?0:Math.max(0,MINIMUM-ecoule);
+      /* Une image de plus : l'accueil a eu sa passe de style sous le splash.
+         Mais l'app peut etre passee en arriere-plan pendant le remplissage :
+         la, requestAnimationFrame ne tourne pas, le minuteur si — fin() part
+         quand meme, et une seule fois quel que soit le premier arrive. */
+      var fait=false;function go(){if(fait)return;fait=true;try{fin();}catch(e){}}
+      function finir(){if(document.hidden){go();return;}requestAnimationFrame(go);setTimeout(go,120);}
+      if(chaud&&!calme){regler("0s","linear","9px");finir();return;}
       setTimeout(function(){
-      if(!calme)regler(".38s","cubic-bezier(.3,.7,.2,1)","9px");
-      setTimeout(function(){
-        /* Une image de plus : l'accueil a eu sa passe de style sous le splash.
-           Mais l'app peut etre passee en arriere-plan pendant le remplissage :
-           la, requestAnimationFrame ne tourne pas, le minuteur si — fin() part
-           quand meme, et une seule fois quel que soit le premier arrive. */
-        var fait=false;function go(){if(fait)return;fait=true;try{fin();}catch(e){}}
-        if(document.hidden){go();return;}
-        requestAnimationFrame(go);setTimeout(go,120);
-      },calme?300:680);
+        if(!calme)regler(".2s","cubic-bezier(.3,.7,.2,1)","9px");
+        setTimeout(finir,300);
       },attente);
     };
   }catch(e){}})();
@@ -1125,6 +1228,10 @@ try{
       <div id="admin-visibilite" style="margin-bottom:18px"></div>
       <div id="admin-points-rendus" style="margin-bottom:18px"></div>
       <div id="admin-offrir" style="margin-bottom:18px"></div>
+      <!-- Journal des plantages (erreursClient) : ce que l'app a envoye. -->
+      <div id="admin-erreurs" style="margin-bottom:18px"></div>
+      <!-- Actions qui touchent TOUTE la base : sorties de la fiche boisson. -->
+      <div id="admin-maintenance" style="margin-bottom:18px"></div>
       <div id="admin-list"></div>
     </div>
     </div>
@@ -1543,6 +1650,7 @@ try{
     <div id="img-zoom-name" style="font-size:15px;font-weight:800;color:#fff;text-align:center"></div>
     <div id="img-zoom-etat" style="display:none;font-size:12.5px;font-weight:500;color:rgba(255,255,255,.72);text-align:center;max-width:300px;line-height:1.4"></div>
     <div id="img-zoom-credit" style="font-size:10.5px;font-weight:500;color:rgba(255,255,255,.55)">Photo : Open Food Facts (CC-BY-SA)</div>
+    <div id="img-zoom-hd" role="button" tabindex="0" style="display:none;align-items:center;gap:6px;padding:8px 14px;border-radius:999px;background:rgba(255,255,255,.14);color:#fff;font-size:12px;font-weight:700;cursor:pointer">Voir en haute résolution</div>
     <div id="img-zoom-close" role="button" tabindex="0" aria-label="Fermer" onkeydown="if(event.key==='Enter'){closeDrinkZoom();}" style="position:absolute;top:18px;right:18px;width:40px;height:40px;border-radius:14px;background:rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;font-size:17px;color:#fff;cursor:pointer">✕</div>
   </div>
   <div class="toast" id="toast"></div>
@@ -1551,7 +1659,7 @@ try{
 <!-- Firebase SDK -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion, arrayRemove, deleteDoc, deleteField, startAt, endAt, startAfter, documentId, getCountFromServer, getDocFromServer, Timestamp, connectFirestoreEmulator } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, initializeFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, increment, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, limit, writeBatch, arrayUnion, arrayRemove, deleteDoc, deleteField, startAt, endAt, startAfter, documentId, getCountFromServer, getDocFromServer, Timestamp, connectFirestoreEmulator } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, browserPopupRedirectResolver, browserSessionPersistence, setPersistence, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, linkWithPopup, signInWithPopup, signInWithRedirect, linkWithRedirect, getRedirectResult, signInWithCredential, deleteUser, reauthenticateWithPopup, EmailAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, linkWithCredential, signOut, unlink, updatePassword, reauthenticateWithCredential, sendEmailVerification, fetchSignInMethodsForEmail, verifyBeforeUpdateEmail, connectAuthEmulator } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getMessaging, getToken, onMessage, isSupported } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
@@ -1568,7 +1676,24 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+/* TRANSPORT EN LONG POLLING : la fin du « l'appli redemarre toute seule ».
+   Mesure (Chromium, iPhone 13 emule, CPU x4, Firestore reel, 6 lancements) :
+   avec le canal streaming par defaut, la reception des ~3 400 magasins d'une
+   bande de latitude faisait monter le tas JavaScript a 1,1-1,6 Go — 87 % des
+   allocations dans le decoupage des trames du SDK (concatenation puis
+   substring, quadratique dans la taille de chaque reponse). iOS tue alors le
+   processus WebContent, Capacitor recharge, et la personne revoit l'accueil.
+   En long polling, les memes magasins arrivent en reponses HTTP ordinaires :
+   pic 100-108 Mo, residuel 19 Mo, pas plus lent (15-25 s pour 2 009 magasins).
+   Le try/catch couvre le rechargement a chaud : une instance existe deja, on
+   la reprend au lieu de planter le module entier. Si la persistance locale
+   est adoptee un jour, ses options se fusionnent dans ce meme objet. */
+let db;
+try {
+  db = initializeFirestore(app, { experimentalForceLongPolling: true });
+} catch (e) {
+  db = getFirestore(app);
+}
 /* PERSISTANCE DE SESSION — on l'ecrit noir sur blanc au lieu de la subir.
    getAuth() applique aujourd'hui cette meme chaine (IndexedDB, puis
    localStorage, puis sessionStorage) : ce bloc ne "repare" donc rien en soi,
@@ -2026,6 +2151,73 @@ window.fbDeleteAccount = async function(motDePasse) {
 var _authReadyResolve;
 window._fbAuthReady = new Promise(function(res) { _authReadyResolve = res; });
 
+/* ── VIDAGE DU JOURNAL DES PLANTAGES ──────────────────────────────────────
+   Le premier script de la page (window.magoJournal) range chaque erreur dans
+   une file locale (localStorage magoErrFile). Ici on l'envoie, une ligne par
+   document erreursClient, des que l'identite est connue : l'auth anonyme
+   suffit, les regles n'exigent qu'un compte. Creation seule ; rien d'autre
+   que type, message, pile, version, ecran, navigateur, natif ; l'horodatage
+   est celui du serveur (la regle l'exige). Tant que les regles ne sont pas
+   publiees, l'ecriture est refusee et avalee : la file reste sur place,
+   bornee a 10, et repart au prochain lancement. On passe par window.fbAddDoc
+   (le meme addDoc, expose plus haut) comme le font les signalements : c'est
+   aussi ce qui permet a outils/essai-amorcage.mjs d'observer l'envoi. */
+var _journalEnCours = false;
+window.magoJournalVider = async function() {
+  if (_journalEnCours) return;
+  _journalEnCours = true;
+  try {
+    var file = (window.magoJournalFile && window.magoJournalFile()) || [];
+    if (!file.length) return;
+    if (!auth.currentUser) { try { await ensureAuthed(); } catch (e) {} }
+    if (!auth.currentUser) return;
+    while (file.length) {
+      var d = file[0] || {};
+      var docu = {
+        k: /^(error|rejection|boot|sw)$/.test(String(d.k)) ? String(d.k) : "error",
+        m: String(d.m || "").slice(0, 300),
+        p: String(d.p || "").slice(0, 800),
+        v: String(d.v || (window.magoJournalVersion && window.magoJournalVersion()) || "").slice(0, 40),
+        e: String(d.e || "boot").slice(0, 40),
+        n: String(d.n || "").slice(0, 120),
+        natif: d.natif === true,
+        t: serverTimestamp()
+      };
+      try { await window.fbAddDoc(collection(db, "erreursClient"), docu); }
+      catch (e) {
+        /* Une ligne mal formee est jetee (elle ne passera jamais) ; tout le
+           reste — regles pas encore publiees, hors ligne — garde la file
+           pour un prochain essai. */
+        var code = String((e && (e.code || e.message)) || e);
+        if (!/invalid-argument/.test(code)) break;
+      }
+      file.shift();
+      if (window.magoJournalEcrire) window.magoJournalEcrire(file);
+    }
+  } catch (e) {} finally { _journalEnCours = false; }
+};
+window._fbAuthReady.then(function() { setTimeout(function() { try { window.magoJournalVider(); } catch (e) {} }, 2500); });
+/* Lecture pour l'ecran Administration : les 50 dernieres lignes, regroupees
+   par type+message (combien de fois, sur quels ecrans, avec quelles versions).
+   Un seul champ trie : aucun index composite a creer. */
+window.fbDernieresErreurs = async function() {
+  var snap = await getDocs(query(collection(db, "erreursClient"), orderBy("t", "desc"), limit(50)));
+  var groupes = {}, ordre = [];
+  snap.forEach(function(x) {
+    var v = x.data() || {}, cle = String(v.k || "") + "|" + String(v.m || "");
+    if (!groupes[cle]) {
+      groupes[cle] = { k: String(v.k || ""), m: String(v.m || ""), p: String(v.p || ""), n: 0, versions: {}, ecrans: {}, natif: 0,
+                       t: (v.t && typeof v.t.toMillis === "function") ? v.t.toMillis() : 0 };
+      ordre.push(cle);
+    }
+    var g = groupes[cle]; g.n++;
+    if (v.v) g.versions[String(v.v)] = 1;
+    if (v.e) g.ecrans[String(v.e)] = 1;
+    if (v.natif === true) g.natif++;
+  });
+  return ordre.map(function(c) { return groupes[c]; });
+};
+
 onAuthStateChanged(auth, async function(user) {
   if (_authReadyResolve) { _authReadyResolve(); _authReadyResolve = null; }
   if (!user) {
@@ -2149,12 +2341,16 @@ onAuthStateChanged(auth, async function(user) {
     var unread = (myNotifs || []).filter(function(n) { return !n.read; });
     if (unread.length) window.dispatchEvent(new CustomEvent("fbNotifsReady", { detail: unread }));
   } catch (e) { console.warn("Notifs load:", e); }
-  // Présence temps réel : un battement maintenant + toutes les 45 s si visible.
+  /* Présence temps réel : un battement maintenant, puis toutes les 5 min si
+     l'onglet est visible, et au retour au premier plan (juste dessous).
+     Avant : 45 s, soit 80 écritures par heure et par personne pour un seul
+     chiffre du tableau de bord ; la fenêtre « en ligne » de fbCountOnline
+     (6 min) est accordée à ce rythme, le compte reste honnête. */
   try {
     window.fbHeartbeat();
     if (!window._hbTimer) window._hbTimer = setInterval(function() {
       if (document.visibilityState === "visible") window.fbHeartbeat();
-    }, 45000);
+    }, 300000);
     // Retour sur l'app : on bat TOUT DE SUITE, sans attendre le prochain tic.
     if (!window._hbVis) {
       window._hbVis = true;
@@ -2368,6 +2564,7 @@ async function queryNearbyStoresByGeohash(lat, lng, radiusKm) {
   var snaps = await Promise.all(bounds.map(_plageGeohash));
   var out = [], seen = {};
   snaps.forEach(function(snap) {
+    _noterProvenance(snap);
     snap.forEach(function(docSnap) {
       if (seen[docSnap.id]) return;          // les plages peuvent se chevaucher
       seen[docSnap.id] = 1;
@@ -2411,9 +2608,32 @@ function applyMergesToStore(data) {
   }
   return data;
 }
+/* meta/drinkMerges et meta/drinkNames N'EXISTENT PAS encore en production
+   (la lecture REST repond 404) : chaque lancement payait pourtant deux
+   allers-retours pour apprendre qu'il n'y a rien. On memorise l'absence 24 h
+   par appareil ; une sauvegarde admin depuis cet appareil efface la note, et
+   un document cree ailleurs est vu au plus tard le lendemain. Une absence
+   constatee depuis le cache memoire (hors reseau) n'est pas memorisee. */
+var META_ABSENT_KEY = "magoMetaAbsent", META_ABSENT_TTL_MS = 24 * 60 * 60 * 1000;
+function _metaAbsent(nom) {
+  try {
+    var m = JSON.parse(localStorage.getItem(META_ABSENT_KEY) || "{}");
+    return typeof m[nom] === "number" && (Date.now() - m[nom]) < META_ABSENT_TTL_MS;
+  } catch (e) { return false; }
+}
+function _noterMetaAbsent(nom, absent, snap) {
+  if (absent && snap && snap.metadata && snap.metadata.fromCache) return;
+  try {
+    var m = JSON.parse(localStorage.getItem(META_ABSENT_KEY) || "{}");
+    if (absent) m[nom] = Date.now(); else delete m[nom];
+    localStorage.setItem(META_ABSENT_KEY, JSON.stringify(m));
+  } catch (e) {}
+}
 window.fbLoadDrinkMerges = async function() {
   try {
+    if (_metaAbsent("drinkMerges")) return;
     var snap = await getDoc(doc(db, "meta", "drinkMerges"));
+    _noterMetaAbsent("drinkMerges", !snap.exists(), snap);
     if (!snap.exists()) return;
     var m = snap.data() || {};
     Object.keys(m).forEach(function(k){ window.DRINK_MERGES[Number(k)] = Number(m[k]); });
@@ -2426,6 +2646,7 @@ window.fbSaveDrinkMerge = async function(oldId, newId) {
   var upd = {};
   upd[String(oldId)] = Number(newId);
   await setDoc(doc(db, "meta", "drinkMerges"), upd, { merge: true });
+  _noterMetaAbsent("drinkMerges", false);
   window.DRINK_MERGES[Number(oldId)] = Number(newId);
   (window.STORES || []).forEach(applyMergesToStore);
 };
@@ -2446,7 +2667,9 @@ window.applyDrinkNames = function() {
 };
 window.fbLoadDrinkNames = async function() {
   try {
+    if (_metaAbsent("drinkNames")) return;
     var snap = await getDoc(doc(db, "meta", "drinkNames"));
+    _noterMetaAbsent("drinkNames", !snap.exists(), snap);
     if (!snap.exists()) return;
     var m = snap.data() || {};
     Object.keys(m).forEach(function(k){ window.DRINK_NAMES[k] = m[k]; });
@@ -2460,6 +2683,7 @@ window.fbSaveDrinkRename = async function(id, newName, newBrand) {
   var upd = {};
   upd[String(id)] = ov;
   await setDoc(doc(db, "meta", "drinkNames"), upd, { merge: true });
+  _noterMetaAbsent("drinkNames", false);
   window.DRINK_NAMES[String(id)] = ov;
   window.applyDrinkNames();
 };
@@ -2638,6 +2862,16 @@ window.fbTouchCache = function() {
    QueryDocumentSnapshot retient les structures internes du SDK et pese
    plusieurs fois plus. Le vrai remede reste la requete par geohash
    (MAGO_GEOHASH_READY), deja ecrite : il ne manque que la migration. */
+/* D'OU VIENT LA REPONSE ? Hors reseau, le SDK ne rejette pas : il resout
+   depuis son cache memoire, c'est-a-dire VIDE (mesure : fbStoresLoaded a
+   2,9-5 s avec 0 magasin, firestore.googleapis.com coupe). Cette reponse-la
+   n'est pas « zero magasin ici », c'est « je n'ai pas pu demander ». On note
+   la provenance de chaque lot pour que fbLoadNearbyStores fasse la
+   difference : un vrai zero vient du serveur. */
+var _lectureDepuisCache = false;
+function _noterProvenance(snap) {
+  if (snap && snap.metadata && snap.metadata.fromCache) _lectureDepuisCache = true;
+}
 async function queryLatBand(latMin, latMax) {
   var docs = [], cur = null;
   for (var p = 0; p < 20; p++) {
@@ -2645,6 +2879,7 @@ async function queryLatBand(latMin, latMax) {
       ? query(collection(db, "stores"), where("lat", ">=", latMin), where("lat", "<=", latMax), orderBy("lat"), startAfter(cur), limit(2000))
       : query(collection(db, "stores"), where("lat", ">=", latMin), where("lat", "<=", latMax), orderBy("lat"), limit(2000));
     var snap = await getDocs(q);
+    _noterProvenance(snap);
     snap.forEach(function(d) { docs.push({ id: d.id, _d: d.data() }); });
     if (snap.size < 2000) break;
     cur = snap.docs[snap.docs.length - 1];
@@ -2652,6 +2887,7 @@ async function queryLatBand(latMin, latMax) {
   return docs;
 }
 async function queryNearbyStores(lat, lng, radiusKm) {
+  _lectureDepuisCache = false;
   /* Une fois la migration passee et le drapeau leve, on interroge par geohash.
      Si ca echoue (index absent, reseau), on retombe sur la bande de latitude
      plutot que de rendre une carte vide. */
@@ -2782,6 +3018,18 @@ window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
     if (banner && !servedFromCache && !(window.STORES && window.STORES.length)) { banner.style.display = "block"; banner.textContent = tr("Recherche des magasins à proximité…"); }
     var stores = await queryNearbyStores(lat, lng, radiusKm);
     if (mySeq !== window._fbQuerySeq) return stores; // une requête plus récente a pris la main
+    /* UNE REPONSE VIDE N'EST PAS UNE ABSENCE DE DONNEES. Servie par le cache
+       memoire du SDK (reseau coupe, tunnel, sous-sol), elle REMPLACAIT les
+       magasins affiches par rien du tout — « ✓ 0 magasins a proximite »,
+       fiche « Personne ne l'a signalee par ici » — et, entre 24 h et 48 h de
+       cache, elle EFFACAIT le cache local pour le lancement suivant. On la
+       traite comme l'echec reseau qu'elle est : le bloc catch garde STORES et
+       magoNearbyCache, et ressert le cache local s'il en existe un. */
+    if (!stores.length && _lectureDepuisCache) {
+      var videHorsLigne = new Error("reponse vide servie par le cache du SDK : reseau absent");
+      videHorsLigne.code = "magofeed/vide-hors-ligne";
+      throw videHorsLigne;
+    }
     window._fbLastQuery = { lat: lat, lng: lng, radiusKm: radiusKm };
     applyStores(stores, banner, false);
     saveStoresCache(lat, lng, radiusKm, now, stores);
@@ -2794,6 +3042,14 @@ window.fbLoadNearbyStores = async function(lat, lng, radiusKm, opts) {
     return stores;
   } catch (e) {
     console.warn("Firebase geo query error:", e);
+    /* Rafraichissement SILENCIEUX qui echoue (cache de 24-48 h deja a
+       l'ecran) : les magasins affiches sont les bons, on les garde tels quels
+       au lieu de les reappliquer — pas de second fbStoresLoaded, pas de
+       repeinture, et surtout aucune liste vide a leur place. */
+    if (servedFromCache && window.STORES && window.STORES.length) {
+      window._fbLoading = false;
+      return window.STORES;
+    }
     if (banner) { banner.textContent = "Mode local (Firebase indisponible)"; banner.style.background = "#b91c1c"; }
     window._fbDernierEchec = Date.now(); // le tirer-pour-rafraichir lit ce temoin pour ne pas mentir
     try {
@@ -2950,8 +3206,9 @@ window.fbSaveDrinkImage = async function(drinkId, url) {
       var data = { map: {}, v: 3 };
       data.map[drinkId] = url;
       await setDoc(doc(db, "meta", "drinkImages"), data, { merge: true });
-    } catch (e2) { console.warn("drinkImages save error:", e2); }
+    } catch (e2) { console.warn("drinkImages save error:", e2); return false; }
   }
+  return true;
 };
 
 window.fbLoadCatalog = async function() {
@@ -2959,21 +3216,48 @@ window.fbLoadCatalog = async function() {
     var snap = await getDocs(collection(db, "catalog"));
     var rows = [];
     snap.forEach(function(d) { var x = d.data(); x.docId = d.id; rows.push(x); });
+    /* Hors reseau, le SDK resout VIDE depuis son cache memoire, sans erreur.
+       L'ecouteur doit savoir si ce vide vient du serveur (le catalogue est
+       vraiment vide : rien a attendre) ou du cache (on n'a rien demande :
+       le repli IndexedDB catalog:last et le rechargement au retour du
+       reseau restent legitimes). */
+    window._fbCatalogDepuisServeur = !(snap.metadata && snap.metadata.fromCache);
     window.dispatchEvent(new CustomEvent("fbCatalogLoaded", { detail: rows }));
     return rows;
   } catch (e) {
     console.warn("Firestore catalog error:", e);
+    window._fbCatalogDepuisServeur = false;
     window.dispatchEvent(new CustomEvent("fbCatalogLoaded", { detail: [] }));
     return [];
   }
 };
 
-window.fbCheckAdmin = async function() {
+/* LE VERDICT « ADMIN » EST MEMORISE 24 H par appareil et par compte. Il ne
+   decide de rien (firestore.rules fait foi, il montre ou cache un menu), et il
+   ne change presque jamais : le relire a chaque lancement etait une lecture
+   Firestore payee par tout le monde pour rien. Le compte change -> l'entree
+   ne vaut plus ; fbCheckAdmin(true) force une relecture. */
+var ADMIN_MEMO_KEY = "magoAdminMemo", ADMIN_MEMO_TTL_MS = 24 * 60 * 60 * 1000;
+window.fbCheckAdmin = async function(force) {
   try {
     var user = auth.currentUser;
     if (!user) { window.dispatchEvent(new CustomEvent("fbAdminChecked", { detail: false })); return false; }
+    if (!force) {
+      try {
+        var memo = JSON.parse(localStorage.getItem(ADMIN_MEMO_KEY) || "null");
+        if (memo && memo.uid === user.uid && typeof memo.ok === "boolean" && (Date.now() - memo.ts) < ADMIN_MEMO_TTL_MS) {
+          window.dispatchEvent(new CustomEvent("fbAdminChecked", { detail: memo.ok }));
+          return memo.ok;
+        }
+      } catch (e0) { /* memo illisible : on relit */ }
+    }
     var snap = await getDoc(doc(db, "admins", user.uid));
     var ok = snap.exists();
+    /* Un verdict venu du cache memoire (hors reseau) n'est pas un verdict :
+       on ne le grave pas, la prochaine ouverture relira. */
+    if (!(snap.metadata && snap.metadata.fromCache)) {
+      try { localStorage.setItem(ADMIN_MEMO_KEY, JSON.stringify({ uid: user.uid, ok: ok, ts: Date.now() })); } catch (e1) {}
+    }
     window.dispatchEvent(new CustomEvent("fbAdminChecked", { detail: ok }));
     return ok;
   } catch (e) {
@@ -4507,7 +4791,7 @@ window.fbImportStores = async function(list, onProgress) {
         lat: Number(s.lat),
         lng: Number(s.lng),
         geohash: geohashForLocation(Number(s.lat), Number(s.lng)),
-        hours: s.hours ? String(s.hours).slice(0, 120) : null,
+        hours: s.hours ? String(s.hours).slice(0, 255) : null,
         osmImport: true,
         createdAt: serverTimestamp()
       };
@@ -5122,9 +5406,11 @@ window.fbFounderStats = async function() {
 
 /* ── Présence en temps réel (usage RÉEL, chiffres honnêtes) ──
    Chaque app ouverte écrit un "battement de cœur" (presence/{uid}.lastSeen)
-   toutes les ~45 s tant que l'onglet est visible. On compte "en ligne
-   maintenant" = battements de moins de 2 min. Aucune donnée inventée : ces
-   nombres viennent directement des vrais utilisateurs connectés. */
+   toutes les 5 min tant que l'onglet est visible, plus un au retour au
+   premier plan. On compte "en ligne maintenant" = battements de moins de
+   6 min (une fenêtre plus courte que le rythme oublierait des gens présents).
+   Aucune donnée inventée : ces nombres viennent directement des vrais
+   utilisateurs connectés. */
 /* ROBOT OU HUMAIN ? Les liens partages sur Instagram, Facebook et TikTok sont
    visites par les robots d'apercu de ces plateformes, qui executent le
    JavaScript de la page et creent donc de vraies sessions anonymes. Trois
@@ -5269,7 +5555,7 @@ window.fbPresenceAll = async function() {
 };
 window.fbCountOnline = async function() {
   try {
-    var since = Timestamp.fromMillis(Date.now() - 120000); // 2 min
+    var since = Timestamp.fromMillis(Date.now() - 360000); // 6 min : battement toutes les 5 min + marge
     var s = await getCountFromServer(query(collection(db, "presence"), where("lastSeen", ">=", since)));
     return s.data().count;
   } catch (e) { return null; }
@@ -6200,6 +6486,28 @@ window.fbSyncWatch = async function(add, drinkId, drinkName, lat, lng) {
     }
   } catch (e) { console.warn("Watch sync:", e); }
 };
+/* Horaires retrouves pour une zone : ecrits par lots, une fois pour tout le
+   monde. set+merge sur un magasin existant = la regle « update », qui laisse
+   les horaires collaboratifs sur un magasin non certifie. Un lot refuse (un
+   seul magasin protege suffit) retombe magasin par magasin. */
+window.fbSaveHoursBatch = async function(paires) {
+  var ecrits = 0;
+  for (var i = 0; i < (paires || []).length; i += 100) {
+    var lot = paires.slice(i, i + 100);
+    try {
+      var b = writeBatch(db);
+      lot.forEach(function(p) { b.set(doc(db, "stores", String(p[0])), { hours: String(p[1]).slice(0, 255) }, { merge: true }); });
+      await b.commit();
+      ecrits += lot.length;
+    } catch (e) {
+      for (var j = 0; j < lot.length; j++) {
+        try { await setDoc(doc(db, "stores", String(lot[j][0])), { hours: String(lot[j][1]).slice(0, 255) }, { merge: true }); ecrits++; }
+        catch (e2) {}
+      }
+    }
+  }
+  return ecrits;
+};
 window.fbSaveStore = async function(id, data) {
   /* Si la sauvegarde deplace le magasin, le geohash doit suivre : un geohash
      perime rendrait la fiche introuvable dans sa nouvelle zone. */
@@ -6394,66 +6702,11 @@ window.fbRemplirEnseignesServeur = async function(sets) {
   var r = await call({ sets: sets });
   return r.data;
 };
-window.fbFillEnseignes = async function(sets) {
-  const counts = {};
-  const norm = s => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  let lastDoc = null, processed = 0;
-  while (true) {
-    let q1 = lastDoc
-      ? query(collection(db, "stores"), orderBy(documentId()), startAfter(lastDoc), limit(400))
-      : query(collection(db, "stores"), orderBy(documentId()), limit(400));
-    const snap = await getDocs(q1);
-    if (snap.empty) break;
-    let batch = writeBatch(db), n = 0;
-    for (const d of snap.docs) {
-      const b = norm((d.data().brand || "") + " " + (d.data().name || ""));
-      let ids = null, key = null;
-      if (b.includes("carrefour")) { ids = sets.carrefour; key = "Carrefour"; }
-      else if (b.includes("delhaize")) { ids = sets.delhaize; key = "Delhaize"; }
-      else if (b.includes("colruyt")) { ids = sets.colruyt; key = "Colruyt"; }
-      else if (b.includes("auchan")) { ids = sets.auchan; key = "Auchan"; }
-      else if (b.includes("leclerc")) { ids = sets.leclerc; key = "Leclerc"; }
-      else if (b.includes("intermarch")) { ids = sets.intermarche; key = "Intermarch\u00e9"; }
-      else if (b.includes("monoprix") || b.includes("monop")) { ids = sets.monoprix; key = "Monoprix"; }
-      else if (b.includes("super u") || b.includes("hyper u") || b.includes("u express")) { ids = sets.coursesu; key = "U"; }
-      else if (b.includes("cora") || b.includes("houra")) { ids = sets.cora; key = "Cora"; }
-      else if (b.includes("franprix")) { ids = sets.franprix; key = "Franprix"; }
-      else if (b.includes("albert heijn") || b.includes("ah ") || b === "ah") { ids = sets.albertheijn; key = "Albert Heijn"; }
-      else if (b.includes("okay")) { ids = sets.okay; key = "OKay"; }
-      else if (b.includes("jumbo")) { ids = sets.jumbo; key = "Jumbo"; }
-      if (!ids || !ids.length) continue;
-      var nums = ids.map(Number);
-      /* ══ UN CATALOGUE D'ENSEIGNE NE CONSTATE RIEN ═══════════════════════
-         Ce repli ecrivait AUSSI drinksVerified et une provenance inventee,
-         « missions 1-5 (07/2026) ». drinksVerified est lu par
-         storeVerifiedFor, donc par magasinConfirmePour : chaque magasin
-         touche recevait la pastille VERTE et la phrase « quelqu'un l'y a
-         vue », sur tous les magasins de treize enseignes, alors que personne
-         n'etait entre dans aucun. Et ce n'etait pas un bouton a part : le
-         repli part tout seul des que l'erreur du serveur CONTIENT le mot
-         « internal » — c'est-a-dire a la moindre panne, au moindre delai
-         depasse, au moindre demarrage a froid rate de la Cloud Function.
-         La fonction serveur (functions-a-deployer/remplir-enseignes.js) a
-         deja ete corrigee pour exactement ca, et son commentaire affirme que
-         « tous les chemins d'import cote app avaient deja ete corriges ».
-         Celui-ci ne l'etait pas : le commentaire se trompait.
-         Un catalogue d'enseigne dit ce qu'on trouve D'HABITUDE ; il ne
-         constate rien. Il entre donc dans drinks — la voie « possible » — et
-         nulle part ailleurs, exactement comme cote serveur. */
-      batch.update(d.ref, {
-        drinks: arrayUnion.apply(null, nums)
-      });
-      counts[key] = (counts[key] || 0) + 1;
-      if (++n >= 150) { await batch.commit(); batch = writeBatch(db); n = 0; }
-    }
-    if (n) await batch.commit();
-    lastDoc = snap.docs[snap.docs.length - 1];
-    processed += snap.size;
-    if (typeof window.onFillProgress === "function") { try { window.onFillProgress(processed); } catch (e) {} }
-    if (snap.size < 400) break;
-  }
-  return counts;
-};
+/* window.fbFillEnseignes (remplissage des enseignes DEPUIS LE TELEPHONE)
+   est retiree : son seul appelant passe desormais par la fonction serveur
+   remplirEnseignes, et la laisser exposee permettait a n'importe quel compte
+   de verser des centaines de boissons dans tous les magasins de treize
+   enseignes depuis la console. */
 /* Purge des enseignes JAMAIS verifiees (Lidl/Aldi/Match : pas de boutique en
    ligne, aucune source catalogue) : on retire toute boisson sans confirmation
    communautaire positive. Les confirmations > 0 sont conservees. */
@@ -8049,10 +8302,27 @@ document.addEventListener("visibilitychange",function(){
   if(document.visibilityState==="visible")_fgRelocate();
 });
 window.addEventListener("pageshow",function(e){ if(e&&e.persisted)_fgRelocate(); });
+/* Le greffon @capacitor/app (package.json) : sans lui, Capacitor.Plugins.App
+   n'existe pas et ce bloc entier etait lettre morte. Sur Android, le coeur
+   6.2.2 ne traite pas le bouton Retour : AppCompatActivity.onBackPressed
+   terminait l'activite, chaque Retour QUITTAIT l'app. Avec le greffon, c'est
+   nous qui decidons : on recule dans l'app (navBack rend true quand il a
+   recule), sinon on revient a l'accueil, et on ne quitte que depuis l'accueil
+   — le geste que tout le monde attend d'une app. Sur iPhone, appStateChange
+   double visibilitychange sans rien casser. Tout est garde par typeof : en
+   web et en PWA, rien de ceci n'existe et rien ne s'execute. */
 try{
   if(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform()&&
-     Capacitor.Plugins&&Capacitor.Plugins.App){
+     Capacitor.Plugins&&Capacitor.Plugins.App&&typeof Capacitor.Plugins.App.addListener==="function"){
     Capacitor.Plugins.App.addListener("appStateChange",function(st){ if(st&&st.isActive)_fgRelocate(); });
+    Capacitor.Plugins.App.addListener("backButton",function(){
+      try{
+        if(typeof navBack==="function"&&navBack())return;
+        var cur=document.querySelector(".screen.on");
+        if(cur&&cur.id!=="s-home"&&typeof navTo==="function"){navTo("home");return;}
+        if(typeof Capacitor.Plugins.App.exitApp==="function")Capacitor.Plugins.App.exitApp();
+      }catch(e){}
+    });
   }
 }catch(e){}
 
@@ -8196,6 +8466,30 @@ function emptyStateHTML(icon,title,sub,btnLabel,onclick){
 function emptyGo(tab){
   navTo(tab);
 }
+/* ══ LE DEFILEMENT SURVIT AU RETOUR ══════════════════════════════════════
+   On lit une liste, on ouvre une boisson, on revient : la liste etait tout
+   en haut. Deux causes : renderList() la rebatissait (voir show("search")),
+   et un ecran qui perd .on passe en display:none — WebKit remet alors son
+   defilement a zero. Chaque ecran note donc ou il en etait AVANT de perdre
+   .on, et le retour (navBack, donc _navRecul) le repose une image apres que
+   .on est reposee, quand le conteneur a de nouveau une hauteur. Seulement au
+   retour : en avancant (onglet, fiche fraichement calculee), le contenu est
+   neuf et l'ancienne position n'aurait aucun sens. */
+var _defilements={};
+function _defileurDe(ecran){
+  if(!ecran||!ecran.querySelector)return null;
+  return ecran.querySelector(".scroll")||ecran.querySelector('[style*="overflow-y:auto"],[style*="overflow-y: auto"]');
+}
+function _memoriserDefilement(ecran){
+  try{ var sc=_defileurDe(ecran); if(sc)_defilements[ecran.id]=sc.scrollTop; }catch(e){}
+}
+function _restaurerDefilement(ecran){
+  var y=_defilements[ecran.id];
+  if(y==null)return;
+  requestAnimationFrame(function(){
+    try{ var sc=_defileurDe(ecran); if(sc&&ecran.classList.contains("on"))sc.scrollTop=y; }catch(e){}
+  });
+}
 function show(s){
   /* Le menu du pin est en position fixe sur le document : sans ca il suivrait
      la personne d'ecran en ecran. C'est exactement ce qui s'est produit. */
@@ -8223,6 +8517,7 @@ function show(s){
   _showRaw(s);
 }
 function _showRaw(s){
+  var recul=_navRecul;   /* lu tout de suite : navBack le rabaisse avant que les minuteurs ci-dessous ne partent */
   try{donMomentRetirer();}catch(e){}   /* la demande de soutien ne suit pas la personne d'ecran en ecran */
   /* Le fil de messagerie est plein ecran : la barre d'onglets se retire et
      le composeur prend sa place. Quitter le fil coupe son ecouteur Firestore ;
@@ -8238,11 +8533,14 @@ function _showRaw(s){
   if(s==="discover"){try{window._huntsCache=null;}catch(e){}}
   if(s==="profile"){try{majLigneAmis();}catch(e){}try{updateProfileStats();}catch(e){}try{adopterScoreServeur();majBlocParrainage();}catch(e){}try{renderDonCard();}catch(e){}}
   if(s==="rewards"){try{renderRewards();}catch(e){}}
-  if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}try{renderCompte();}catch(e){}try{peindreVerres();}catch(e){}try{renderCommercantRow();}catch(e){}}
+  /* La ligne Notifications se rafraîchit ICI, à l'ouverture de l'écran (et au
+     retour au premier plan) : avant, un setInterval de 1,5 s tournait à vie
+     pour une ligne invisible la plupart du temps. */
+  if(s==="settings"){try{renderGeoRow();}catch(e){}try{renderDonRow();}catch(e){}try{renderCompte();}catch(e){}try{peindreVerres();}catch(e){}try{renderCommercantRow();}catch(e){}try{refreshNotifState();}catch(e){}}
   if(s==="home"){try{updateGreeting();}catch(e){}try{renderMissions();}catch(e){}try{renderChasseCodes();}catch(e){}try{renderWantedDrink();}catch(e){}try{checkWatches();renderAlertsCard();}catch(e){}try{_verifierAides();}catch(e){}try{renderChasse();}catch(e){}    // Retour a l'accueil = repartir a zero : on vide la recherche et on neutralise
     // le filtre boisson de la carte (sinon la carte rouvrait toujours sur la derniere
     // boisson cherchee, ex. "Red Bull", au lieu de montrer tous les magasins).
-    try{var _q=document.getElementById("q");if(_q)_q.value="";var _sl=document.getElementById("search-list");if(_sl)_sl.innerHTML="";exploreFilter=null;window._exploreFromDrink=false;}catch(e){}
+    try{var _q=document.getElementById("q");if(_q)_q.value="";var _sl=document.getElementById("search-list");if(_sl)_sl.innerHTML="";_listCache=null;exploreFilter=null;window._exploreFromDrink=false;}catch(e){}
   }
   try{renderChasse();}catch(e){}
   /* Retour a un onglet racine : la fiche boisson est definitivement quittee
@@ -8270,6 +8568,7 @@ function _showRaw(s){
   var current=document.querySelector(".screen.on");
   var transitioning=!!(target&&current&&target!==current);
   if(transitioning){
+    _memoriserDefilement(current);   /* avant display:none, qui l'effacerait sur WebKit */
     current.classList.add("s-leave");
     setTimeout(function(){
       // Retire "on" de TOUS les écrans (pas seulement `current`) : si show() a été rappelé
@@ -8277,6 +8576,7 @@ function _showRaw(s){
       // et sinon laisser deux écrans "on" en même temps.
       NAV_SCREENS.forEach(function(id){var el=document.getElementById("s-"+id);if(el&&el!==target)el.classList.remove("on","s-leave");});
       target.classList.add("on","s-enter");
+      if(recul)_restaurerDefilement(target);
       try{majCouleurStatut();}catch(e){}
       requestAnimationFrame(function(){requestAnimationFrame(function(){target.classList.remove("s-enter");});});
     },140);
@@ -8304,7 +8604,22 @@ function _showRaw(s){
   }
   try{moveNavPill(true);}catch(e){}
   try{showCoach(s);}catch(e){}
-  if(s==="search"){try{renderList();}catch(e){}setTimeout(function(){var q=document.getElementById("q");if(q&&document.querySelector("#s-search.on"))q.focus();},transitioning?260:120);}
+  if(s==="search"){
+    /* RETOUR SUR LA LISTE : ON NE LA REBATIT PAS. renderList() partait ici a
+       chaque passage, puis le champ reprenait le focus. Au retour d'une fiche
+       ca voulait dire : 0,3 s de gel (CPU x4) pour reconstruire 120 lignes
+       identiques, la liste remise tout en haut, le clavier qui remonte alors
+       qu'on venait de LIRE. On ne relance que si la liste est vide ou perimee
+       (requete, categorie, marque ou taille du catalogue changees, voir
+       _listeRechercheAReconstruire), et le focus n'est donne qu'en allant
+       VERS la recherche, jamais en y revenant. */
+    var reconstruite=false;
+    try{ if(_listeRechercheAReconstruire()){renderList();reconstruite=true;} }catch(e){}
+    if(reconstruite)_defilements["s-search"]=0;   /* liste neuve : on repart du haut */
+    /* ... et seulement si l ecran de recherche est encore celui qu on voit
+       (main : un retour rapide ailleurs ne doit pas rappeler le clavier). */
+    if(!recul)setTimeout(function(){var q=document.getElementById("q");if(q&&document.querySelector("#s-search.on"))q.focus();},transitioning?260:120);
+  }
   if(s==="discover"){renderDiscoveries();try{renderChasse();}catch(e){}}
   if(s==="scan"){
     // Camera coupee en quittant l'onglet, et aucun resultat en cours : on
@@ -8606,7 +8921,7 @@ function enregistrerStock(sid,did,price){
   if(price>=0.20&&price<=25){
     if(!storePrices[sid])storePrices[sid]={};
     storePrices[sid][did]=price;
-    localStorage.setItem("magoPrices",JSON.stringify(storePrices));
+    ecrire("magoPrices",storePrices);
     if(!s.prices)s.prices={};
     s.prices[did]=price;
     // Historique de prix : releve horodate garde en local et reflete sur le magasin en memoire
@@ -11241,7 +11556,7 @@ function renderPriceAfterTag(s,did,ctx){
     var sid=String(s.id);
     if(!storePrices[sid])storePrices[sid]={};
     storePrices[sid][did]=v;
-    try{localStorage.setItem("magoPrices",JSON.stringify(storePrices));}catch(e){}
+    ecrire("magoPrices",storePrices);
     if(!s.prices)s.prices={};
     s.prices[did]=v;
     trackLocalPrice(sid,did,v);
@@ -14528,6 +14843,26 @@ function mergeCatalog(rows){
   DRINKS.forEach(function(d){
     (d.barcodes||[]).forEach(function(c){ var k=codeNu(c); if(k)_codesConnus[k]=d; });
   });
+  /* UN INDEX, PAS UN BALAYAGE PAR LIGNE.
+     Pour chaque ligne du lot, la recherche du « meme nom » parcourait DRINKS
+     en normalisant le nom de chaque fiche, et celle de la « soeur » refaisait
+     pareil avec la marque : 108 lignes x 4 450 fiches x 2, pres d'un demi-
+     million de normTxt. Mesure : 0,3-0,4 s de gel sur ordinateur, plus d'une
+     seconde a CPU x4, sept a dix secondes apres l'ouverture — pendant qu'on
+     commence a se servir de l'app. Trois index construits une fois (un seul
+     passage sur DRINKS, comme _codesConnus) rendent exactement la meme
+     reponse en lecture directe. Ils retiennent l'INDICE de la premiere fiche
+     qui porte un nom ou un identifiant : c'etait l'ordre de DRINKS qui
+     tranchait, il continue de trancher. */
+  var _parNom=new Map(),_parId=new Map(),_parMarque=new Map();
+  function _indexer(d,i){
+    var kn=nameKey(d.name); if(!_parNom.has(kn))_parNom.set(kn,i);
+    if(!_parId.has(d.id))_parId.set(d.id,i);
+    var kb=normTxt(d.brand||""),l=_parMarque.get(kb);
+    if(!l){l=[];_parMarque.set(kb,l);}
+    l.push(d);
+  }
+  DRINKS.forEach(_indexer);
   rows.forEach(function(r){
     if(!r||!r.name)return;
     var rid=Number(r.id)||r.id;
@@ -14558,10 +14893,12 @@ function mergeCatalog(rows){
        designent la meme boisson doivent se retrouver REUNIS sur une seule
        fiche, pas se perdre. */
     var memeNom=null;
-    for(var iE=0;iE<DRINKS.length&&!memeNom;iE++){
-      var de=DRINKS[iE];
-      if(de.id===rid||nameKey(de.name)===nn)memeNom=de;
-    }
+    /* La premiere fiche de DRINKS qui porte cet identifiant OU ce nom : c'est
+       ce que trouvait la boucle, et quand les deux existent et different,
+       l'ordre de DRINKS reste l'arbitre. */
+    var iId=_parId.get(rid),iNom=_parNom.get(nn);
+    if(iId!==undefined&&(iNom===undefined||iId<iNom))memeNom=DRINKS[iId];
+    else if(iNom!==undefined)memeNom=DRINKS[iNom];
     if(memeNom){
       if(!memeNom.barcodes)memeNom.barcodes=[];
       (r.barcodes||[]).forEach(function(c){
@@ -14600,9 +14937,12 @@ function mergeCatalog(rows){
        categorie manque d'un cote, on ne fusionne pas. */
     if(mqR){
       var soeur=null;
-      for(var iS=0;iS<DRINKS.length&&!soeur;iS++){
-        var dd=DRINKS[iS];
-        if(normTxt(dd.brand||"")!==mqR)continue;
+      /* Seules les fiches de la meme marque sont candidates : on ne parcourt
+         que celles-la (_parMarque, dans l'ordre de DRINKS) au lieu de
+         normaliser la marque des 4 450 fiches pour chaque ligne du lot. */
+      var memeMarque=_parMarque.get(mqR)||[];
+      for(var iS=0;iS<memeMarque.length&&!soeur;iS++){
+        var dd=memeMarque[iS];
         var rd=_motsDeRecette(dd.name,dd.brand,dd.cat);
         if(!recette||!rd){
           /* L'un des deux se reduit a la marque seule. Ce n'est la meme
@@ -14652,8 +14992,11 @@ function mergeCatalog(rows){
     };
     DRINKS.push(_nouvelle);
     /* La fiche qui vient d'entrer prend ses codes dans l'index : sans ca, deux
-       lignes du MEME lot portant le meme code creeraient deux fiches. */
+       lignes du MEME lot portant le meme code creeraient deux fiches. Meme
+       chose pour son nom, son identifiant et sa marque : la boucle d'avant
+       voyait les fiches ajoutees en cours de lot, les index doivent aussi. */
     (_nouvelle.barcodes||[]).forEach(function(c){ var k=codeNu(c); if(k)_codesConnus[k]=_nouvelle; });
+    _indexer(_nouvelle,DRINKS.length-1);
     added++;
   });
   if(added){
@@ -14669,7 +15012,16 @@ function mergeCatalog(rows){
   }
   return added;
 }
+/* Memorise : 15-25 ms par appel (CPU x4), et il etait appele a chaque rendu
+   de liste et du rail des marques. La cle est la taille du catalogue : tout
+   ce qui ajoute ou retire une fiche (mergeCatalog, fusions du serveur) la
+   change. Les renommages de l'admin (fbNamesLoaded) et le catalogue
+   communautaire (fbCatalogLoaded) l'invalident aussi explicitement, parce
+   qu'ils peuvent changer une marque sans changer le nombre de fiches. Les
+   appelants (rail des marques, banniere de recherche) ne font que lire. */
+var _BRAND_GROUPS=null,_BRAND_GROUPS_CLE=-1;
 function getBrandGroups(){
+  if(_BRAND_GROUPS&&_BRAND_GROUPS_CLE===DRINKS.length)return _BRAND_GROUPS;
   /* Regroupement par cle ECRASEE (minuscules, accents, espaces et
      ponctuation retires) : « MayTea » et « May Tea » sont un seul groupe,
      affiche sous la graphie la plus repandue. Le catalogue natif est
@@ -14698,7 +15050,51 @@ function getBrandGroups(){
     if(b.brand==="Autre")return -1;
     return b.drinks.length-a.drinks.length||a.brand.localeCompare(b.brand);
   });
+  _BRAND_GROUPS=groups;_BRAND_GROUPS_CLE=DRINKS.length;
   return groups;
+}
+/* Ce que le serveur change apres coup dans le catalogue (fiches de la
+   communaute, fusions, renommages de l'admin) rend faux ce qui a ete calcule
+   avant : les groupes de marques, les mots de marque, et les formes des fiches
+   renommees. On jette juste ca ; le reste des formes (4 450 fiches, 137 ms)
+   est garde, et ce qui manque se recalcule a la demande comme avant. Sans
+   cette invalidation, le prechauffage ci-dessous — qui tourne AVANT que
+   Firestore reponde — aurait fige les mots de marque sans les marques de la
+   communaute, la ou une premiere recherche tardive les voyait. */
+["fbCatalogLoaded","fbMergesLoaded","fbNamesLoaded"].forEach(function(ev){
+  window.addEventListener(ev,function(){
+    _BRAND_GROUPS=null;_MOTS_MARQUE=null;
+    try{Object.keys(window.DRINK_NAMES||{}).forEach(function(id){delete _FORMES[id];});}catch(e){}
+  });
+});
+/* ── PRECHAUFFAGE DES CACHES DE RECHERCHE ─────────────────────────────────
+   La toute premiere lettre tapee — celle qui fait juger l'app — etait la plus
+   lente : 536 ms contre 225-305 ensuite (CPU x4), parce qu'elle payait seule
+   les formes normalisees des 4 450 fiches (137 ms), les mots de marque et le
+   regroupement par marque. On les calcule une fois le splash parti, dans les
+   temps morts (requestIdleCallback ; sans lui, 1,5 s apres, par minuteur),
+   par tranches de 500 fiches pour ne jamais retenir un geste. Le catalogue
+   natif est deja final a ce moment (le filtre DRINK_MERGES tourne au
+   chargement) ; chaque tranche relit DRINKS, et une fiche arrivee entre deux
+   est simplement traitee a la demande, comme avant. */
+var _prechauffeFait=false;
+function prechaufferRecherche(){
+  if(_prechauffeFait)return;_prechauffeFait=true;
+  var i=0;
+  function plusTard(fn,delai){
+    if(typeof window.requestIdleCallback==="function")window.requestIdleCallback(fn,{timeout:2000});
+    else setTimeout(fn,delai);
+  }
+  function tranche(){
+    try{
+      var liste=window.DRINKS||[],fin=Math.min(i+500,liste.length);
+      for(;i<fin;i++)formesFiche(liste[i]);
+      if(i<liste.length){plusTard(tranche,40);return;}
+      motsDeMarque();
+      getBrandGroups();
+    }catch(e){}
+  }
+  plusTard(tranche,1500);
 }
 /* Logos officiels des grandes marques (service Clearbit, usage nominatif :
    identifier la marque de ses propres produits). Marque absente de la carte
@@ -15784,7 +16180,7 @@ function renderWantedDrink(){
   var img=getCachedDrinkImage(d);
   host.innerHTML='<div id="wanted-inner" role="button" tabindex="0" style="background:var(--bg2);border:1.5px solid #f0b840;border-radius:18px;padding:14px 16px;cursor:pointer;position:relative;overflow:hidden">'+
     '<div style="display:flex;align-items:center;gap:12px">'+
-      '<div style="width:46px;height:46px;border-radius:12px;overflow:hidden;background:'+d.light+';display:flex;align-items:center;justify-content:center;flex-shrink:0">'+(img?'<img src="'+img+'" alt="" style="width:100%;height:100%;object-fit:cover">':drinkIconHTML(d))+'</div>'+
+      '<div style="width:46px;height:46px;border-radius:12px;overflow:hidden;background:'+d.light+';display:flex;align-items:center;justify-content:center;flex-shrink:0">'+(img?'<img src="'+offTaille(img,200)+'" alt=""'+imgOFF(img)+' style="width:100%;height:100%;object-fit:cover">':drinkIconHTML(d))+'</div>'+
       '<div style="flex:1;min-width:0">'+
         '<div style="font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#e67e22">Boisson recherchée</div>'+
         '<div style="font-size:15px;font-weight:800;color:var(--s1);line-height:1.15">'+sanitize(d.name)+'</div>'+
@@ -15821,7 +16217,7 @@ function renderTopRail(){
     tile.setAttribute("aria-label",d.name);
     tile.style.cssText="flex:none;width:104px;border-radius:16px;overflow:hidden;background:var(--bg2);border:1px solid var(--border);cursor:pointer;box-shadow:0 3px 10px rgba(12,10,8,.06)";
     tile.innerHTML='<div style="height:64px;background:'+d.light+';display:flex;align-items:center;justify-content:center;overflow:hidden">'+
-        (img?'<img src="'+img+'" alt="" style="width:100%;height:100%;object-fit:cover">':drinkCanSVG(d))+
+        (img?'<img src="'+offTaille(img,200)+'" alt=""'+imgOFF(img)+' style="width:100%;height:100%;object-fit:cover">':drinkCanSVG(d))+
       '</div>'+
       '<div style="padding:7px 9px 9px">'+
         '<div style="font-size:11px;font-weight:700;color:var(--s1);line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+d.name+'</div>'+
@@ -16357,6 +16753,9 @@ function setSearchMode(mode){
     playSound("pop");
     return;
   }
+  /* Meme onglet et liste encore juste (changement de langue, double tap) :
+     les etiquettes se mettent a jour, la liste n'est pas rebatie pour rien. */
+  var dejaLa=(mode===searchMode)&&!_listeRechercheAReconstruire();
   searchMode=mode;
   document.querySelectorAll(".search-mode-btn").forEach(function(b){b.classList.toggle("on",b.dataset.mode===mode);});
   var catsEl=document.getElementById("cats-search");if(catsEl)catsEl.style.display=mode==="drinks"?"flex":"none";
@@ -16364,10 +16763,101 @@ function setSearchMode(mode){
   var q=document.getElementById("q");
   var TT=LANGS[curLang]||LANGS.fr;
   if(q)q.placeholder=mode==="drinks"?(TT.placeholder||"Rechercher…"):(mode==="users"?(TT.modePlayers?TT.modePlayers.replace(/^[^ ]+ /,"")+"…":"Pseudo…"):(TT.modeStores?TT.modeStores.replace(/^[^ ]+ /,"")+"…":"Magasins…"));
-  renderList();
+  if(!dejaLa)renderList();
   playSound("pop");
 }
 var _listLimit=120,_listSig="\u0000";
+/* ══ LA LISTE TRIEE EST GARDEE : « VOIR PLUS » N'AJOUTE QUE LA SUITE ══════
+   « Voir plus » relancait renderList() en entier : vider les lignes,
+   refiltrer et retrier les 4 450 fiches, reconstruire 320 puis 520 lignes de
+   3 Ko de SVG chacune. Mesure a CPU x4 : 0,5-0,6 s au premier clic,
+   0,75-1,05 s au deuxieme, 0,8-1,1 s au troisieme (37 844 noeuds), l'ecran
+   fige a chaque fois. On garde donc le tableau trie du dernier rendu avec sa
+   signature (requete, categorie, marque, taille du catalogue) ; un clic
+   n'ajoute que les 200 lignes suivantes, d'un seul bloc (DocumentFragment),
+   sans toucher a celles qui sont a l'ecran. renderList() remplace le cache a
+   chaque passage : il ne survit ni a une lettre tapee, ni a un filtre, ni a
+   l'arrivee du catalogue communautaire (DRINKS.length est dans la signature).
+   La meme signature dit a show("search") si la liste a l'ecran est encore
+   juste : au retour d'une fiche elle l'est, et on ne la rebatit pas. */
+var _listCache=null;
+function _sigListe(){
+  var qEl=document.getElementById("q");
+  return (qEl?qEl.value.toLowerCase():"")+"|"+curCat+"|"+(curBrandFilter||"")+"|"+DRINKS.length;
+}
+function _listeRechercheAReconstruire(){
+  if(searchMode!=="drinks")return true;
+  var el=document.getElementById("search-list");
+  /* Vide, ou vue d'accueil (pas de cache : « tes dernieres boissons » vient
+     peut-etre de changer) : on rebatit. */
+  if(!el||!el.firstChild||!_listCache)return true;
+  return _listCache.sig!==_sigListe();
+}
+/* Les lignes de resultats de `debut` a `fin` (exclu), dans un fragment : une
+   seule insertion, une seule mise en page pour tout le lot. */
+function _lignesListe(f,debut,fin){
+  var frag=document.createDocumentFragment();
+  f.slice(debut,fin).forEach(function(d){
+    queueImageFetch(d);
+    var isFav=favorites.indexOf(d.id)!==-1;
+    var div=document.createElement("div");div.className="ritem";
+    div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
+      '<div style="flex:1"><div class="rname">'+sanitize(desechapper(d.name))+'</div><div class="rsub">'+sanitize(desechapper(d.brand||""))+' · '+d.cat+starSuffix(d)+'</div></div>'+
+      '<span class="rfav" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();toggleFav('+d.id+',this);}" style="display:flex;align-items:center;padding:6px 4px;cursor:pointer">'+heartSVG(isFav,20)+'</span>';
+    div.onclick=function(){pick(d);};a11yCard(div,d.name+", "+d.brand);frag.appendChild(div);
+    bindPhotoTap(div,d);
+  });
+  return frag;
+}
+/* La queue de la liste : le bouton « Voir plus » puis les suggestions de la
+   communaute, dans un conteneur a part pour qu'un « Voir plus » la retire et
+   la repose apres le lot ajoute sans toucher aux lignes. */
+function _queueListe(f,matchingDiscoveries){
+  var fin=document.createElement("div");fin.className="search-list-fin";
+  if(f.length>_listLimit){
+    var moreBtn=document.createElement("div");moreBtn.className="ritem";
+    moreBtn.style.cssText="justify-content:center;text-align:center;font-weight:700;color:var(--s1);cursor:pointer";
+    moreBtn.innerHTML='<div style="flex:1;text-align:center">Voir plus ('+(f.length-_listLimit)+')</div>';
+    moreBtn.onclick=_voirPlusListe;
+    a11yCard(moreBtn,"Voir plus de boissons");
+    fin.appendChild(moreBtn);
+  }
+  if(matchingDiscoveries.length){
+    var hdr=document.createElement("div");
+    hdr.style.cssText="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin:"+(f.length?"16px":"0")+" 0 10px";
+    hdr.textContent=tr("Suggestions de la communauté");
+    fin.appendChild(hdr);
+    matchingDiscoveries.forEach(function(d){
+      var div=document.createElement("div");div.className="ritem";
+      div.innerHTML='<div class="rphoto" style="background:var(--bg2)">'+discGlyph(22)+'</div>'+
+        '<div style="flex:1"><div class="rname">'+sanitize(d.name)+'</div><div class="rsub">Pas encore au catalogue · ★ '+(d.votes||0)+' vote'+(d.votes>1?"s":"")+'</div></div>'+
+        '<span class="c3" style="font-size:18px">›</span>';
+      div.onclick=function(){show("discover");};
+      a11yCard(div,d.name+", suggestion de la communauté");
+      fin.appendChild(div);
+    });
+  }
+  return fin;
+}
+function _voirPlusListe(){
+  var el=document.getElementById("search-list"),c=_listCache;
+  /* Le cache ne decrit plus ce qui est a l'ecran : on rebatit, comme avant. */
+  if(!el||!c||c.sig!==_sigListe()){_listLimit+=200;renderList();return;}
+  var ancien=_listLimit;_listLimit+=200;
+  var queue=el.querySelector(".search-list-fin");if(queue)queue.remove();
+  /* D'un seul bloc, et pas par paquets dans des requestAnimationFrame
+     successifs : essaye, et mesure a CPU x4. Le JavaScript des 200 lignes
+     (3 Ko de SVG a analyser chacune) coute ~0,2 s, mais la mise en page qui
+     suit coute autant et CROIT avec la liste (85 ms a 170 lignes, 170 ms a
+     470), parce que chaque insertion remet en page la colonne entiere. Par
+     paquets de 50, on la payait quatre fois : plus de travail au total et une
+     seconde de saccades a la place d'un seul temps d'arret, plus court.
+     Descendre encore demande de ne plus mettre en page ce qui est hors
+     ecran (content-visibility sur les lignes) ou de fenetrer la liste :
+     c'est le chantier de la recherche (B2), pas celui-ci. */
+  el.appendChild(_lignesListe(c.f,ancien,_listLimit));
+  el.appendChild(_queueListe(c.f,c.disc));
+}
 /* Ecran de recherche au repos (categorie "Tous" + champ vide) : plutot que de
    deverser les ~600 boissons du catalogue d'un coup (mur illisible), on montre
    un etat d'accueil utile — les recherches recentes + les boissons qui montent.
@@ -16396,7 +16886,7 @@ function renderSearchDefault(el){
       t.setAttribute("role","button");t.setAttribute("tabindex","0");t.setAttribute("aria-label",d.name);
       t.style.cssText="flex:none;width:86px;cursor:pointer;-webkit-tap-highlight-color:transparent";
       t.innerHTML='<div style="width:86px;height:86px;border-radius:18px;overflow:hidden;background:'+d.light+';display:flex;align-items:center;justify-content:center">'+
-          (img?'<img src="'+img+'" alt="" style="width:100%;height:100%;object-fit:cover">':drinkIconHTML(d))+
+          (img?'<img src="'+offTaille(img,200)+'" alt=""'+imgOFF(img)+' style="width:100%;height:100%;object-fit:cover">':drinkIconHTML(d))+
         '</div>'+
         '<div style="margin-top:6px;font-size:11px;font-weight:700;color:var(--s1);line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-align:center">'+sanitize(d.name)+'</div>';
       t.onclick=function(){pick(d);};
@@ -16455,6 +16945,7 @@ function renderSearchDefault(el){
   });
 }
 function renderList(){
+  _listCache=null;   /* tout ce qui suit remplace l'ecran */
   if(searchMode==="stores"){renderStoreSearchList();return;}
   if(searchMode==="users"){renderUserSearchList();return;}
   var qEl=document.getElementById("q"),el=document.getElementById("search-list");if(!el)return;
@@ -16536,6 +17027,9 @@ function renderList(){
   // Les découvertes suggérées par la communauté (via scan) ne sont pas encore au catalogue officiel,
   // mais on les fait quand même remonter en recherche pour qu'elles restent trouvables.
   var matchingDiscoveries=q?DISCOVERIES.filter(function(d){return d.name&&d.name.toLowerCase().includes(q);}):[];
+  /* Ce que l'ecran montre desormais : « Voir plus » et le retour d'une fiche
+     s'en servent pour ne rien recalculer. */
+  _listCache={sig:_sigListe(),f:f,disc:matchingDiscoveries};
   if(!f.length&&!matchingDiscoveries.length){
     var empty=document.createElement("div");
     empty.innerHTML=curBrandFilter
@@ -16549,39 +17043,8 @@ function renderList(){
     fzHdr.textContent=tr("R\u00E9sultats proches de \u00AB {q} \u00BB").replace("{q}",q);
     el.appendChild(fzHdr);
   }
-  f.slice(0,_listLimit).forEach(function(d){
-    queueImageFetch(d);
-    var isFav=favorites.indexOf(d.id)!==-1;
-    var div=document.createElement("div");div.className="ritem";
-    div.innerHTML='<div class="rphoto" style="background:'+d.light+'">'+drinkIconHTML(d)+'</div>'+
-      '<div style="flex:1"><div class="rname">'+sanitize(desechapper(d.name))+'</div><div class="rsub">'+sanitize(desechapper(d.brand||""))+' · '+d.cat+starSuffix(d)+'</div></div>'+
-      '<span class="rfav" onclick="event.stopPropagation();toggleFav('+d.id+',this)" role="button" tabindex="0" aria-label="Ajouter ou retirer des favoris" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();event.stopPropagation();toggleFav('+d.id+',this);}" style="display:flex;align-items:center;padding:6px 4px;cursor:pointer">'+heartSVG(isFav,20)+'</span>';
-    div.onclick=function(){pick(d);};a11yCard(div,d.name+", "+d.brand);el.appendChild(div);
-    bindPhotoTap(div,d);
-  });
-  if(f.length>_listLimit){
-    var moreBtn=document.createElement("div");moreBtn.className="ritem";
-    moreBtn.style.cssText="justify-content:center;text-align:center;font-weight:700;color:var(--s1);cursor:pointer";
-    moreBtn.innerHTML='<div style="flex:1;text-align:center">Voir plus ('+(f.length-_listLimit)+')</div>';
-    moreBtn.onclick=function(){_listLimit+=200;renderList();};
-    a11yCard(moreBtn,"Voir plus de boissons");
-    el.appendChild(moreBtn);
-  }
-  if(matchingDiscoveries.length){
-    var hdr=document.createElement("div");
-    hdr.style.cssText="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--s3);margin:"+(f.length?"16px":"0")+" 0 10px";
-    hdr.textContent=tr("Suggestions de la communauté");
-    el.appendChild(hdr);
-    matchingDiscoveries.forEach(function(d){
-      var div=document.createElement("div");div.className="ritem";
-      div.innerHTML='<div class="rphoto" style="background:var(--bg2)">'+discGlyph(22)+'</div>'+
-        '<div style="flex:1"><div class="rname">'+sanitize(d.name)+'</div><div class="rsub">Pas encore au catalogue · ★ '+(d.votes||0)+' vote'+(d.votes>1?"s":"")+'</div></div>'+
-        '<span class="c3" style="font-size:18px">›</span>';
-      div.onclick=function(){show("discover");};
-      a11yCard(div,d.name+", suggestion de la communaut\u00E9");
-      el.appendChild(div);
-    });
-  }
+  el.appendChild(_lignesListe(f,0,_listLimit));
+  el.appendChild(_queueListe(f,matchingDiscoveries));
 }
 // Catalogue d'enseignes : évite d'afficher d'un coup tous les magasins (trop de place), on parcourt par enseigne d'abord.
 function renderStoreBrandCatalog(el){
@@ -16749,22 +17212,14 @@ function renderMap(){
      (markercluster) est un BONUS : s'il n'arrive pas, la carte doit quand meme
      s'afficher — avant, son onload manquant bloquait toute la carte. */
   ensureLeaflet(function(){
-    if(window.L&&window.L.markerClusterGroup){ initLeafletMap(lat,lng); return; }
-    if(!document.getElementById("leaflet-cluster-css")){
-      var lc=document.createElement("link");
-      lc.id="leaflet-cluster-css"; lc.rel="stylesheet";
-      lc.href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css";
-      lc.integrity="sha512-fYyZwU1wU0QWB4Yutd/Pvhy5J1oWAwFXun1pt+Bps04WSe4Aq6tyHlT4+MHSJhD8JlLfgLuC4CbCnX5KHSjyCg=="; lc.crossOrigin="anonymous";
-      document.head.appendChild(lc);
-    }
-    var done=false;
-    var go=function(){ if(done)return; done=true; initLeafletMap(lat,lng); };
-    var sc=document.createElement("script");
-    sc.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js";
-    sc.integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg=="; sc.crossOrigin="anonymous";
-    sc.onload=go; sc.onerror=go;          // sans regroupement, mais avec une carte
-    document.head.appendChild(sc);
-    setTimeout(go,6000);                  // et jamais d'attente infinie
+    /* Et c'est LE MEME chargeur que la carte Explorer, pas une copie : la fiche
+       posait ici sa propre balise markercluster pendant que la carte Explorer
+       (ouverte 60 ms plus tard par pick) posait la sienne. Deux executions du
+       greffon, deux classes L.MarkerClusterGroup, et une carte Explorer sur
+       deux figee a un seul pin. ensureCluster tient l'etat et la file
+       d'attente ; il rappelle toujours, avec ou sans regroupement, et jamais
+       apres une attente infinie (voir sa definition). */
+    ensureCluster(function(){ initLeafletMap(lat,lng); });
   }, function(){
     try{ toast("Carte indisponible \u2014 v\u00e9rifie ta connexion"); }catch(e){}
   });
@@ -16950,6 +17405,133 @@ function drinkCanSVG(d,emojiSize){
     '<rect x="13" y="14" width="5" height="60" rx="2.5" fill="rgba(255,255,255,.28)"/>'+
   '</svg>';
 }
+/* ══ VIGNETTES OPEN FOOD FACTS : LES BONS ATTRIBUTS, À UN SEUL ENDROIT ═══════
+   crossorigin="anonymous" : sans lui, l'<img> envoie une requête no-cors et la
+   réponse est OPAQUE — le service worker ne peut ni la lire ni la ranger (le
+   cache magofeed-img-v1 restait vide par construction, donc aucune photo déjà
+   vue ne survivait hors ligne). OFF renvoie access-control-allow-origin: *,
+   la requête CORS passe. JAMAIS sur une data: ni sur une photo communautaire :
+   le navigateur n'y gagnerait rien, et une origine qui ne répond pas CORS
+   ferait échouer l'image.
+   loading="lazy" decoding="async" : une recherche créait 110 à 164 <img> d'un
+   coup, les vignettes visibles attendaient derrière cent invisibles ; avec
+   lazy, une vingtaine partent. fetchpriority="high" sur les 8 premières d'une
+   même salve : les lignes sous le doigt d'abord. */
+function estUrlOFF(url){return typeof url==="string"&&url.indexOf("https://images.openfoodfacts.org/")===0;}
+/* OFF publie chaque photo en .100, .200, .400 et .full (vérifié sur 78 URL du
+   catalogue : la .200 existe pour toutes, 3 fois moins d'octets que la .400).
+   Une vignette de 48 px (144 px physiques) n'a pas besoin de 400 px ; la
+   fiche (72 px) non plus. Toute autre URL ressort telle quelle. */
+function offTaille(url,n){
+  if(!estUrlOFF(url))return url;
+  return url.replace(/\.(100|200|400)\.jpg(\?|$)/,"."+n+".jpg$2");
+}
+var _imgRangSalve=0;
+function imgOFF(url){
+  /* Compteur de salve remis à zéro par micro-tâche : « 8 premières » veut dire
+     8 premières d'un même rendu synchrone (renderList, renderTrends…), sans que
+     ces fonctions aient à le savoir. */
+  if(_imgRangSalve===0)Promise.resolve().then(function(){_imgRangSalve=0;});
+  var rang=_imgRangSalve++;
+  var a=' loading="lazy" decoding="async"';
+  if(rang<8)a+=' fetchpriority="high"';
+  if(estUrlOFF(url))a=' crossorigin="anonymous"'+a;
+  return a;
+}
+/* ══ ÉCRIRE DANS localStorage SANS PERDRE EN SILENCE ═════════════════════════
+   Neuf écritures (favoris, notes, avis, prix, votes, scans, historique,
+   géocodage) étaient des setItem nus : au quota atteint, l'exception remontait,
+   la suite de la fonction (renderFavs, le son, le toast) n'était jamais
+   exécutée, et la donnée ne vivait plus qu'en mémoire — perdue au prochain
+   lancement, sans un mot. Le quota EST atteint en production (voir le cache
+   magasins) : sur iPhone, ~2,5 M de caractères pour toute l'origine.
+   Ici : on écrit ; au quota, on fait de la place dans le seul stock qu'on sait
+   reconstruire (le cache photo : OFF et Firestore le regarnissent), on
+   réessaie ; si vraiment rien ne passe, on le DIT. */
+function _quotaDepasse(e){
+  return !!(e&&(e.name==="QuotaExceededError"||e.name==="NS_ERROR_DOM_QUOTA_REACHED"||e.code===22||e.code===1014));
+}
+var _stockagePleinDit=0;
+function ecrire(cle,val){
+  var s=typeof val==="string"?val:JSON.stringify(val);
+  try{localStorage.setItem(cle,s);return true;}
+  catch(e){if(!_quotaDepasse(e))return false;}
+  for(var i=0;i<16&&purgerImgCache();i++){
+    try{localStorage.setItem(cle,s);return true;}catch(e2){}
+  }
+  /* Un seul avertissement par minute : une rafale de prix refusés ne doit pas
+     devenir une rafale de toasts. */
+  if(Date.now()-_stockagePleinDit>60000){
+    _stockagePleinDit=Date.now();
+    try{toast("Stockage plein : ce changement n'a pas pu être enregistré");}catch(e3){}
+  }
+  return false;
+}
+/* Les photos communautaires (data:, jusqu'à 250 Ko l'une) restent en mémoire
+   pour la session mais ne sont plus sérialisées : 6 à 12 d'entre elles
+   suffisaient à remplir le quota iOS, et chaque écriture du cache coûtait
+   60 à 200 ms de gel. Au prochain lancement, l'entrée est simplement absente :
+   fetchVerifiedOFFImage la redemande à fbLoadDrinkPhoto, comme pour une
+   boisson jamais vue. IndexedDB prendra le relais plus tard (plan C3). */
+function serialiserImgCache(){
+  var leger={};
+  Object.keys(imgCache).forEach(function(k){
+    var e=imgCache[k];
+    if(!e)return;
+    if(typeof e.url==="string"&&e.url.slice(0,5)==="data:")return;
+    leger[k]=e;
+  });
+  return JSON.stringify(leger);
+}
+/* Une étape de purge : d'abord les échecs mémorisés (url:null — ils se
+   retentent de toute façon après 24 h), puis la moitié la plus ancienne. Le
+   cache réduit est réécrit tout de suite : c'est cette réécriture qui libère
+   la place. Rend false quand il n'y a plus rien à retirer. Les photos data:
+   ne comptent pas : elles ne sont pas dans le stockage, les retirer ne
+   libérerait rien. */
+function purgerImgCache(){
+  var cles=Object.keys(imgCache).filter(function(k){
+    var e=imgCache[k];return !(e&&typeof e.url==="string"&&e.url.slice(0,5)==="data:");
+  });
+  if(!cles.length){
+    var restait=null;
+    try{restait=localStorage.getItem(IMG_CACHE_KEY);localStorage.removeItem(IMG_CACHE_KEY);}catch(e){}
+    return !!restait;
+  }
+  var nulles=cles.filter(function(k){var e=imgCache[k];return !e||!e.url;});
+  var aRetirer=nulles.length?nulles:cles.sort(function(a,b){return (imgCache[a].ts||0)-(imgCache[b].ts||0);}).slice(0,Math.ceil(cles.length/2));
+  aRetirer.forEach(function(k){delete imgCache[k];});
+  try{localStorage.setItem(IMG_CACHE_KEY,serialiserImgCache());}
+  catch(e){try{localStorage.removeItem(IMG_CACHE_KEY);}catch(e2){}}
+  return true;
+}
+/* UNE écriture du cache photo, 1,5 s après la dernière modification — au lieu
+   d'une réécriture complète par photo trouvée (jusqu'à 40 par session, une
+   toutes les 2,5 s, sous le doigt pendant le défilement). L'écriture en attente
+   part quand la page se cache ou se ferme : rien n'est perdu si iOS tue
+   l'onglet en arrière-plan. */
+var _imgCacheMinuteur=null;
+function sauverImgCache(){
+  if(_imgCacheMinuteur)clearTimeout(_imgCacheMinuteur);
+  _imgCacheMinuteur=setTimeout(_imgCacheEcrireMaintenant,1500);
+}
+function _imgCacheEcrireMaintenant(){
+  if(_imgCacheMinuteur){clearTimeout(_imgCacheMinuteur);_imgCacheMinuteur=null;}
+  try{localStorage.setItem(IMG_CACHE_KEY,serialiserImgCache());}
+  catch(e){if(_quotaDepasse(e))purgerImgCache();}
+}
+function _imgCacheVider(){if(_imgCacheMinuteur)_imgCacheEcrireMaintenant();}
+window.addEventListener("pagehide",_imgCacheVider);
+document.addEventListener("visibilitychange",function(){
+  if(document.visibilityState==="hidden"){_imgCacheVider();return;}
+  /* Retour au premier plan sur les Réglages : la permission de notification a
+     pu changer dans les réglages du téléphone pendant l'absence. C'est le seul
+     cas que le minuteur de 1,5 s (retiré) couvrait et que l'ouverture de
+     l'écran ne couvre pas. */
+  try{var s=document.getElementById("s-settings");if(s&&s.classList.contains("on"))refreshNotifState();}catch(e){}
+});
+/* Exposés pour le module Firebase (script séparé) et les autres caches. */
+window.ecrire=ecrire;window.sauverImgCache=sauverImgCache;
 function getCachedDrinkImage(d){
   if(d.img)return d.img;
   var e=imgCache[String(d.id)];
@@ -16979,7 +17561,7 @@ function drinkIconHTML(d){
     ?'<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:6%;box-sizing:border-box">'+artFond+'</span>'
     :'<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">'+drinkCanSVG(d,15)+'</span>';
   return '<span style="position:relative;display:block;width:100%;height:100%;border-radius:inherit;overflow:hidden">'+fond+
-    '<img src="'+url+'" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent;padding:7%;box-sizing:border-box;border-radius:inherit" '+
+    '<img src="'+offTaille(url,200)+'" alt=""'+imgOFF(url)+' style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent;padding:7%;box-sizing:border-box;border-radius:inherit" '+
     'onload="if(!this.naturalWidth)this.remove();else this.style.background=\'#fff\'" onerror="this.remove()">'+
     '</span>';
 }
@@ -17111,13 +17693,13 @@ function fetchVerifiedOFFImage(d,prioritaire){
           }else{
             imgCache[key]={url:null,ts:Date.now()};
           }
-          try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+          sauverImgCache();
           refreshDrinkVisual(d);
           if(userPhoto)renderTrends();
         });
       }
       imgCache[key]=best?{url:best.image_front_url||best.image_front_small_url,ts:Date.now()}:{url:null,ts:Date.now()};
-      try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){/* quota */}
+      sauverImgCache();
       delete imgFetchInFlight[key];
       // Repeint dans tous les cas : la visionneuse ouverte sur cette boisson
       // doit dire « pas de photo » plutot que « je la cherche » pour toujours.
@@ -17218,7 +17800,7 @@ function _zoomPeindre(d){
   var credit=document.getElementById("img-zoom-credit");
   if(!pic)return;
   var url=getCachedDrinkImage(d);
-  if(!url){_zoomSansPhoto(d);return;}
+  if(!url){_zoomHdCacher();_zoomSansPhoto(d);return;}
   var key=String(d.id);
   var entree=imgCache[key];
   pic.onerror=function(){
@@ -17229,8 +17811,11 @@ function _zoomPeindre(d){
     pic.onerror=null;
     if(entree&&!entree.manual&&!d.img){
       delete imgCache[key];
-      try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+      sauverImgCache();
     }
+    /* Plus de photo : plus de bouton « haute résolution » pour une adresse
+       morte. */
+    _zoomHdCacher();
     _zoomSansPhoto(d);
   };
   pic.src=url;
@@ -17242,18 +17827,45 @@ function _zoomPeindre(d){
     credit.textContent=tr(off?"Photo : Open Food Facts (CC-BY-SA)":"Photo partagée par la communauté");
     credit.style.display="block";
   }
-  /* La haute resolution, en arriere-plan : posee seulement quand elle est
-     vraiment chargee, et seulement si on regarde encore cette boisson. */
+  /* La haute résolution (.full : 300 à 740 Ko, 2 000 px pour un écran de
+     390) ne part plus toute seule : la .400 suffit à regarder la photo, et sur
+     un réseau de rayon la .full arrivait deux secondes plus tard, pour rien,
+     à chaque ouverture. Un bouton la demande. */
+  _zoomHdProposer(d,url);
+}
+function _zoomHdBouton(){return document.getElementById("img-zoom-hd");}
+function _zoomHdCacher(){var b=_zoomHdBouton();if(b)b.style.display="none";}
+function _zoomHdProposer(d,url){
+  var b=_zoomHdBouton();if(!b)return;
+  if(offFullResURL(url)===url){b.style.display="none";return;}
+  b.textContent=tr("Voir en haute résolution");
+  b.style.display="inline-flex";
+  /* Le tap sur le bouton ne doit pas fermer la visionneuse (l'overlay se
+     ferme d'un tap n'importe où). */
+  b.onclick=function(e){e.stopPropagation();_zoomHdCharger(d,url);};
+  b.onkeydown=function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();e.stopPropagation();_zoomHdCharger(d,url);}};
+}
+function _zoomHdCharger(d,url){
+  var b=_zoomHdBouton(),pic=document.getElementById("img-zoom-pic");
   var full=offFullResURL(url);
-  if(full!==url){
-    var hd=new Image();
-    hd.onload=function(){
-      if(!hd.naturalWidth||!_zoomOuvertSur(d))return;
-      pic.onerror=null;
-      pic.src=full;
-    };
-    hd.src=full;
-  }
+  if(b)b.textContent=tr("Haute résolution…");
+  var hd=new Image();
+  /* crossOrigin AVANT src : la requête part en CORS, donc le service worker
+     peut ranger la réponse (voir imgOFF). Posée seulement quand elle est
+     vraiment chargée, et seulement si on regarde encore cette boisson. */
+  hd.crossOrigin="anonymous";
+  hd.onload=function(){
+    if(!hd.naturalWidth||!_zoomOuvertSur(d)||!pic)return;
+    pic.onerror=null;
+    pic.src=full;
+    if(b)b.style.display="none";
+  };
+  hd.onerror=function(){
+    if(!b||!_zoomOuvertSur(d))return;
+    b.textContent=tr("Haute résolution indisponible");
+    setTimeout(function(){if(_zoomOuvertSur(d))b.style.display="none";},1800);
+  };
+  hd.src=full;
 }
 function _zoomSansPhoto(d){
   var pic=document.getElementById("img-zoom-pic");
@@ -17629,7 +18241,7 @@ function adminRemoveDrink(){
   var idx=DRINKS.findIndex(function(x){return x.id===d.id;});
   if(idx!==-1)DRINKS.splice(idx,1);
   delete imgCache[String(d.id)];
-  try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+  sauverImgCache();
   if(window.fbRemoveCatalogDrink)window.fbRemoveCatalogDrink(d.id).catch(function(e){console.warn(e);toast("Suppression distante \u00E9chou\u00E9e");});
   playSound("pop");
   toast("\u00AB "+d.name+" \u00BB retir\u00E9e du catalogue");
@@ -17651,6 +18263,34 @@ function packDrinkIds(){
   return DRINKS.filter(function(d){return !d.imp&&PACK_BRANDS.indexOf(normTxt(d.brand))!==-1;})
     .map(function(d){return d.id;});
 }
+/* Le PACK grande surface sur toute une enseigne : action GLOBALE, lancee
+   depuis l'ecran Administration (plus depuis la fiche d'une boisson). */
+function adminAssignPack(){
+  if(!isAdmin)return;
+  var brands={};
+  (STORES||[]).forEach(function(s){if(s.brand)brands[s.brand]=(brands[s.brand]||0)+1;});
+  var names=Object.keys(brands).sort();
+  if(!names.length){toast("Aucune enseigne connue par ici");return;}
+  var listing=names.map(function(b,i){return (i+1)+". "+b;}).join("\n");
+  var pick=prompt("Pack grande surface \u2192 toute une enseigne.\n\n"+listing+"\n\nTape le NUM\u00C9RO de l'enseigne (v\u00E9rifie d'abord son site !) :");
+  if(pick===null)return;
+  var idx=parseInt(pick.trim(),10)-1;
+  if(isNaN(idx)||idx<0||idx>=names.length){toast("Num\u00E9ro invalide");playSound("err");return;}
+  var brand=names[idx];
+  var packIds=packDrinkIds();
+
+    if(!confirm("Assigner les "+packIds.length+" boissons du pack \u00E0 TOUS les magasins "+brand+" ?"))return;
+    toast("Pack "+brand+" en cours\u2026");
+    window.fbAssignPackToBrand(packIds,brand).then(function(total){
+      (STORES||[]).forEach(function(s){
+        if(s.brand===brand){s.drinks=s.drinks||[];packIds.forEach(function(id){if(s.drinks.indexOf(id)===-1)s.drinks.push(id);});}
+        if(window.fbTouchCache)window.fbTouchCache();
+      });
+      try{renderStoreList();}catch(e){}
+      playSound("win");
+      toast("\u2713 "+packIds.length+" boissons assign\u00E9es \u00E0 "+total+" magasins "+brand);
+    }).catch(function(e){playSound("err");toast("\u00C9chec ("+(e&&e.message||"erreur")+")");});
+}
 function adminAssignBrand(){
   if(!isAdmin||!curSel)return;
   var d=curSel;
@@ -17664,25 +18304,6 @@ function adminAssignBrand(){
   var idx=parseInt(pick.trim(),10)-1;
   if(isNaN(idx)||idx<0||idx>=names.length){toast("Num\u00E9ro invalide");playSound("err");return;}
   var brand=names[idx];
-  var packIds=packDrinkIds();
-  var mode=prompt("Assigner \u00E0 "+brand+" :\n\n1. Seulement \u00AB "+d.name+" \u00BB\n2. LE PACK v\u00E9rifi\u00E9 grande surface ("+packIds.length+" boissons : Coca, Fanta, Monster, Red Bull, Lipton, Mogu Mogu...)\n\nTape 1 ou 2 :");
-  if(mode===null)return;
-  mode=mode.trim();
-  if(mode==="2"){
-    if(!confirm("Assigner les "+packIds.length+" boissons du pack \u00E0 TOUS les magasins "+brand+" ?"))return;
-    toast("Pack "+brand+" en cours\u2026");
-    window.fbAssignPackToBrand(packIds,brand).then(function(total){
-      (STORES||[]).forEach(function(s){
-        if(s.brand===brand){s.drinks=s.drinks||[];packIds.forEach(function(id){if(s.drinks.indexOf(id)===-1)s.drinks.push(id);});}
-        if(window.fbTouchCache)window.fbTouchCache();
-      });
-      try{renderStoreList();}catch(e){}
-      playSound("win");
-      toast("\u2713 "+packIds.length+" boissons assign\u00E9es \u00E0 "+total+" magasins "+brand);
-    }).catch(function(e){playSound("err");toast("\u00C9chec ("+(e&&e.message||"erreur")+")");});
-    return;
-  }
-  if(mode!=="1"){toast("Tape 1 ou 2");playSound("err");return;}
   if(!confirm("Assigner \u00AB "+d.name+" \u00BB \u00E0 TOUS les magasins "+brand+" de la base ?"))return;
   toast("Assignation "+brand+" en cours\u2026");
   window.fbAssignDrinkToBrand(d.id,brand).then(function(total){
@@ -17722,54 +18343,6 @@ var M4_CATS={
 /* Fusion admin : la fiche OUVERTE (curSel) est le doublon a absorber. On cherche
    la fiche a GARDER, on ecrit oldId->newId dans meta/drinkMerges, et le remap
    s'applique partout (magasins, confirmations, catalogue) sans migration. */
-function adminBatchAssign(){
-  if(!isAdmin)return;
-  var q=prompt("Rayon par photos \u2014 tape le NOM du magasin :");
-  if(q===null||!q.trim())return;
-  var qn=normTxt(q.trim());
-  var hits=(STORES||[]).filter(function(s){return normTxt(s.name||"").indexOf(qn)!==-1;}).slice(0,6);
-  if(!hits.length){toast("Magasin introuvable (charge sa zone d'abord)");playSound("err");return;}
-  var target=hits[0];
-  if(hits.length>1){
-    var listing=hits.map(function(s,i){return (i+1)+". "+s.name;}).join("\n");
-    var p2=prompt("Quel magasin ? (1 \u00e0 "+hits.length+")\n\n"+listing);
-    if(p2===null)return;
-    var n=parseInt(String(p2).replace(/[^0-9]/g,""),10);
-    if(isNaN(n)||n<1||n>hits.length){toast("Num\u00e9ro invalide");playSound("err");return;}
-    target=hits[n-1];
-  }
-  var raw=prompt("Colle la liste d'ids (s\u00e9par\u00e9s par des virgules) :");
-  if(raw===null)return;
-  var ids=raw.split(/[\s,;]+/).map(Number).filter(function(x){return !isNaN(x)&&x>0;});
-  if(!ids.length){toast("Aucun id valide");playSound("err");return;}
-  /* Meme remarque qu'au-dessus : cette action pose aussi la pastille bleue.
-     Et ici le magasin a ete choisi par une recherche floue qui prend le
-     premier resultat sans rien demander quand il n'y en a qu'un — raison de
-     plus pour afficher son nom une derniere fois avant d'ecrire. */
-  actionSensible({
-    titre:"Marquer ce rayon comme vu sur place",
-    quoi:"Les "+ids.length+" boissons passent en rayon v\u00e9rifi\u00e9 (pins verts) chez "
-        +"\u00ab "+target.name+" \u00bb, ET ce magasin re\u00e7oit la PASTILLE BLEUE de "
-        +"certification \u2014 celle que les visiteurs croient, et qui donne acc\u00e8s au "
-        +"tableau de bord commer\u00e7ant. V\u00e9rifie bien que c'est le bon magasin.",
-    compte:ids.length, unite:"boisson", niveau:"destructif", mot:"VERIFIE", reversible:true
-  }).then(function(ok){ if(ok)_lancerAssignationSur(target,ids); });
-}
-function _lancerAssignationSur(target,ids){
-  toast("Assignation\u2026");
-  window.fbAssignListToStore(target.fbId||target.id,ids).then(function(n){
-    journaliserAction("Rayon verifie + certification",{etat:"terminee",compte:ids.length});
-    target.drinks=target.drinks||[];target.drinksVerified=target.drinksVerified||[];
-    ids.forEach(function(id){
-      if(target.drinks.indexOf(id)===-1)target.drinks.push(id);
-      if(target.drinksVerified.indexOf(id)===-1)target.drinksVerified.push(id);
-    });
-    if(window.fbTouchCache)window.fbTouchCache();
-    try{renderStoreList();}catch(e){}
-    playSound("win");
-    toast("\u2713 "+n+" boissons v\u00e9rifi\u00e9es chez "+sanitize(target.name));
-  }).catch(function(e){playSound("err");toast("\u00c9chec ("+(e&&e.message||"erreur")+")");});
-}
 function adminMergeDrink(){
   if(!isAdmin||!curSel)return;
   var old=curSel;
@@ -18208,7 +18781,13 @@ window.rayonProbableForStore=function(name,brand,type){
 var _setsRayon={};
 window.rayonProbableCle=function(s){
   if(!s)return "";
-  if(s._cleRayon!==undefined)return s._cleRayon;
+  /* La cle memorisee ne vaut que si l'ENSEMBLE qu'elle nomme existe dans
+     cette page. Les 300 magasins de l'instantane hors ligne (stores:last)
+     arrivent avec leur _cleRayon persistee d'une session precedente, mais
+     _setsRayon est vide au demarrage : faire confiance a la cle seule
+     repondait « non » a chaque magasin, et les « probables » disparaissaient
+     hors ligne. Une cle vide ("" : aucun rayon) reste fiable telle quelle. */
+  if(s._cleRayon!==undefined&&(s._cleRayon===""||_setsRayon[s._cleRayon]))return s._cleRayon;
   var r=null;
   try{ r=window.rayonProbableForStore(s.name,s.brand,s.type); }catch(e){ r=null; }
   var cle=r&&r.ids&&r.ids.length?((r.parType?"t:":"e:")+r.key+(r.petit?":p":"")):"";
@@ -18381,25 +18960,20 @@ function adminFillEnseignes(){
       toast("\u2713 "+r.modifies+" magasins remplis ("+r.parcourus+" parcourus) \u2014 "+det);
     }).catch(function(e){
       var code=String((e&&(e.code||e.message))||e);
-      if(code.indexOf("not-found")!==-1||code.indexOf("internal")!==-1){
-        toast("Fonction serveur absente \u2014 parcours local\u2026 garde l'\u00e9cran allum\u00e9");
-        window.onFillProgress=function(p){toast("Remplissage\u2026 "+p+" magasins parcourus");};
-        window.fbFillEnseignes(sets).then(function(counts){
-          window.onFillProgress=null;
-          var msg=Object.keys(counts).map(function(k){return counts[k]+" "+k;}).join(", ");
-          playSound("win");toast("\u2713 Rempli : "+(msg||"aucun magasin trouv\u00e9"));
-        }).catch(function(e2){playSound("err");toast("\u00c9chec : "+((e2&&e2.message)||e2));});
-      } else { playSound("err"); toast("\u00c9chec : "+code); }
+      /* Plus de repli « parcours local » : il reecrivait toute la collection
+         depuis le telephone, sous l'identite du client — exactement le chemin
+         qu'un compte ordinaire pouvait emprunter depuis la console. La
+         fonction serveur verifie que l'appelant est admin ; si elle manque,
+         on le dit et on n'improvise rien. */
+      playSound("err");
+      toast(code.indexOf("not-found")!==-1
+        ?"Fonction serveur absente \u2014 relance le bouton \u00ab D\u00e9ployer le serveur \u00bb"
+        :"\u00c9chec : "+code);
     });
     return;
   }
-  window.onFillProgress=function(p){toast("Remplissage\u2026 "+p+" magasins parcourus");};
-  window.fbFillEnseignes(sets).then(function(counts){
-    window.onFillProgress=null;
-    var msg=Object.keys(counts).map(function(k){return counts[k]+" "+k;}).join(", ");
-    playSound("win");
-    toast("\u2713 Rempli : "+(msg||"aucun magasin trouv\u00E9"));
-  }).catch(function(e){playSound("err");toast("\u00C9chec ("+(e&&e.message||"erreur")+")");});
+  playSound("err");
+  toast("Fonction serveur indisponible \u2014 r\u00e9essaie dans un instant");
 }
 function openAdminSheet(){
   if(!isAdmin||!curSel)return;
@@ -18410,19 +18984,17 @@ function openAdminSheet(){
   wrap.id="admin-sheet";
   wrap.style.cssText="position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center";
   var canRemove=Number(d.id)>100000000000;
-  wrap.innerHTML='<div style="width:100%;max-width:480px;background:var(--bg2);border-radius:22px 22px 0 0;padding:16px 16px 26px">'+
+  /* max-height + defilement : a douze lignes, le panneau depassait l'ecran
+     d'un petit telephone et son haut devenait inatteignable. */
+  wrap.innerHTML='<div style="width:100%;max-width:480px;max-height:86vh;overflow-y:auto;-webkit-overflow-scrolling:touch;background:var(--bg2);border-radius:22px 22px 0 0;padding:16px 16px calc(26px + env(safe-area-inset-bottom,0px))">'+
     '<div style="width:38px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 12px"></div>'+
     '<div style="font-size:13px;font-weight:700;color:var(--s2);margin-bottom:10px;text-align:center">Admin \u00B7 '+sanitize(d.name)+'</div>'+
     '<div id="ash-photo" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Corriger la photo</div>'+
-    '<div id="ash-zone" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Importer magasins de la zone (monde entier)</div>'+
-    '<div id="ash-fill" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Remplissage enseignes (auto)</div>'+
-    '<div id="ash-clean" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Purger Lidl / Aldi / Match</div>'+
-    '<div id="ash-dedup" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Nettoyer doublons classement</div>'+
     '<div id="ash-rename" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Renommer / corriger le nom</div>'+
     '<div id="ash-merge" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Fusionner cette fiche avec\u2026</div>'+
-    '<div id="ash-batch" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Rayon par photos (lot \u2192 magasin)</div>'+
     '<div id="ash-brand" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Assigner \u00E0 une enseigne</div>'+
     '<div id="ash-codes" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">G\u00E9rer les codes-barres</div>'+
+    '<div id="ash-outils" role="button" tabindex="0" style="text-align:center;padding:10px;margin:2px 0 6px;font-size:12px;font-weight:700;color:var(--s2);cursor:pointer;text-decoration:underline">Actions sur toute la base : \u00e9cran Administration</div>'+
     (canRemove?'<div id="ash-remove" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:#b91c1c">Retirer du catalogue</div>':'')+
     '<div id="ash-cancel" role="button" tabindex="0" style="text-align:center;padding:12px;font-size:13px;font-weight:700;color:var(--s3);cursor:pointer">Annuler</div></div>';
   document.body.appendChild(wrap);
@@ -18430,8 +19002,13 @@ function openAdminSheet(){
   wrap.onclick=function(e){if(e.target===wrap)close();};
   function bind(id,fn){var el=document.getElementById(id);if(!el)return;el.onclick=function(){close();fn();};el.onkeydown=function(ev){if(ev.key==="Enter"){close();fn();}};}
   bind("ash-photo",adminFixPhoto);
-  bind("ash-zone",function(){var sheet=document.getElementById("admin-sheet");if(sheet)sheet.remove();openOsmImport();});
-  bind("ash-fill",adminFillEnseignes);
+  /* LES ACTIONS GLOBALES ONT QUITTE LA FICHE (import de zone, remplissage
+     des enseignes, purge Lidl/Aldi/Match, doublons du classement, pack par
+     enseigne). Elles touchent TOUTE la base, sans rapport avec la boisson
+     ouverte, et un doigt qui glisse sur une fiche ne doit pas pouvoir les
+     lancer. Elles vivent dans l'ecran Administration (renderMaintenance).
+     « Rayon par photos » existe deja sur la fiche du magasin. */
+  bind("ash-outils",function(){try{showAdmin();}catch(e){}});
   /* Le bouton « Importer les horaires (OSM) » a ete RETIRE, pas desactive.
      Il promettait d'ecrire « sur tous les magasins qui n'en ont pas » alors
      que la fonction serveur ecrivait des que la valeur differait : un clic
@@ -18439,11 +19016,8 @@ function openAdminSheet(){
      Il ne servait a rien par ailleurs, parce que l'application lit deja le
      fichier d'horaires A L'AFFICHAGE (chargerHorairesOSM / horairesReels).
      Tout est raconte en tete de functions-a-deployer/importer-horaires.js. */
-  bind("ash-clean",adminCleanUnverified);
-  bind("ash-dedup",adminCleanDuplicateUsers);
   bind("ash-rename",adminRenameDrink);
   bind("ash-merge",adminMergeDrink);
-  bind("ash-batch",adminBatchAssign);
   bind("ash-brand",adminAssignBrand);
   bind("ash-codes",adminManageBarcodes);
   if(canRemove)bind("ash-remove",adminRemoveDrink);
@@ -18475,7 +19049,7 @@ function adminFixPhoto(){
   var key=String(d.id);
   if(/^x$/i.test(input)){
     imgCache[key]={url:null,ts:Date.now(),manual:true};
-    try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+    sauverImgCache();
     refreshDrinkVisual(d);
     toast("Photo retir\u00E9e (canette stylis\u00E9e) \u2014 sur cet appareil");
     return;
@@ -18486,11 +19060,13 @@ function adminFixPhoto(){
       playSound("err");return;
     }
     imgCache[key]={url:url,ts:Date.now(),manual:true};
-    try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+    sauverImgCache();
     refreshDrinkVisual(d);
     renderTrends();
-    if(window.fbSaveDrinkImage)window.fbSaveDrinkImage(key,url);
-    playSound("win");toast("\u2713 Photo corrig\u00E9e et partag\u00E9e");
+    playSound("win");toast("\u2713 Photo corrig\u00E9e");
+    if(window.fbSaveDrinkImage)Promise.resolve(window.fbSaveDrinkImage(key,url)).then(function(ok){
+      if(ok===false)toast("Photo gard\u00e9e sur cet appareil \u2014 le partage a \u00e9chou\u00e9");
+    });
   }
   // URL d'image directe
   if(input.indexOf("https://images.openfoodfacts.org/")===0){applyUrl(input.split("?")[0]);return;}
@@ -18549,7 +19125,9 @@ function drinkCardPhotoHTML(d){
     return '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">'+drinkCanSVG(d,16)+'</div>';
   }
   var canLayer='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:1">'+drinkCanSVG(d,16)+'</div>';
-  return canLayer+'<img src="'+url+'" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#fff;padding:10px;box-sizing:border-box;z-index:2" onerror="this.remove()">';
+  /* Grande carte : on garde la .400 (la .200 serait floue sur 3 pixels
+     physiques par pixel CSS), mais avec les mêmes attributs que les vignettes. */
+  return canLayer+'<img src="'+url+'" alt=""'+imgOFF(url)+' style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#fff;padding:10px;box-sizing:border-box;z-index:2" onerror="this.remove()">';
 }
 function centerMapOnUser(){
   if(!window._leafletMap)return;
@@ -21037,10 +21615,37 @@ function ensureLeaflet(onReady, onFail){
 
    Ce chargeur rappelle TOUJOURS, meme si le CDN ne repond pas : dans ce cas on
    retombe sur une carte sans regroupement, ce qui etait le comportement
-   d'avant. Une carte sans regroupement vaut mieux que pas de carte. */
+   d'avant. Une carte sans regroupement vaut mieux que pas de carte.
+
+   ══ UN SEUL CHARGEUR, UNE SEULE BALISE — LA CARTE « BLOQUEE A 1 PIN » ═══════
+   Ouvrir une boisson construit deux cartes a 60 ms d'ecart : l'apercu de la
+   fiche et la carte Explorer. Chacune posait SA balise <script> markercluster,
+   sans etat partage : le greffon s'executait deux fois (~200 ms d'ecart) et
+   redefinissait L.MarkerClusterGroup. Si exploreLayer naissait entre les deux
+   executions, son constructeur n'etait plus la classe en vigueur et le groupe
+   restait fige a UN marqueur sous « 720 magasins vendent » — mesure : 14
+   ouvertures sur 30 (4 sur 6 sur le banc du contradicteur).
+   Meme recette que ensureLeaflet : un etat (loading / ready / failed), une
+   file d'attente (_clusterWaiters) et UNE balise identifiee. Un second appel
+   pendant le chargement s'inscrit et attend ; il ne pose jamais de seconde
+   balise. Une balise qui a expire sans repondre (requete suspendue) reste en
+   place et le prochain appel s'y raccroche : si elle arrive enfin, le greffon
+   ne s'execute qu'une fois. Seule une balise en ERREUR est retiree, pour
+   qu'un retour du reseau puisse retenter. */
 function ensureCluster(onDone){
   if(!window.L){ onDone&&onDone(); return; }
-  if(window.L.markerClusterGroup){ onDone&&onDone(); return; }
+  if(window.L.markerClusterGroup){ window._clusterState="ready"; onDone&&onDone(); return; }
+  window._clusterWaiters=window._clusterWaiters||[];
+  window._clusterWaiters.push(onDone);
+  if(window._clusterState==="loading")return;
+  window._clusterState="loading";
+  var fini=false;
+  function finish(){
+    if(fini)return; fini=true;
+    window._clusterState=(window.L&&window.L.markerClusterGroup)?"ready":"failed";
+    var list=window._clusterWaiters||[]; window._clusterWaiters=[];
+    list.forEach(function(w){ try{ w&&w(); }catch(e){} });
+  }
   if(!document.getElementById("leaflet-cluster-css")){
     var lc=document.createElement("link");
     lc.id="leaflet-cluster-css"; lc.rel="stylesheet";
@@ -21048,13 +21653,21 @@ function ensureCluster(onDone){
     lc.integrity="sha512-fYyZwU1wU0QWB4Yutd/Pvhy5J1oWAwFXun1pt+Bps04WSe4Aq6tyHlT4+MHSJhD8JlLfgLuC4CbCnX5KHSjyCg=="; lc.crossOrigin="anonymous";
     document.head.appendChild(lc);
   }
-  var fini=false, go=function(){ if(fini)return; fini=true; onDone&&onDone(); };
-  var sc=document.createElement("script");
-  sc.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js";
-  sc.integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg=="; sc.crossOrigin="anonymous";
-  sc.onload=go; sc.onerror=go;
-  document.head.appendChild(sc);
-  setTimeout(go,6000);   // jamais d'attente infinie
+  var sc=document.getElementById("leaflet-cluster-js");
+  if(sc){
+    /* Un essai precedent a expire sans reponse : on se raccroche a sa balise
+       au lieu d'en poser une seconde (deux executions = carte a 1 pin). */
+    sc.addEventListener("load",finish); sc.addEventListener("error",finish);
+  }else{
+    sc=document.createElement("script");
+    sc.id="leaflet-cluster-js";
+    sc.src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js";
+    sc.integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg=="; sc.crossOrigin="anonymous";
+    sc.onload=finish;
+    sc.onerror=function(){ try{ sc.remove(); }catch(e){} finish(); };
+    document.head.appendChild(sc);
+  }
+  setTimeout(finish,6000);   // jamais d'attente infinie
 }
 
 /* ── RAYON DE REGROUPEMENT, PALIER PAR PALIER ─────────────────────────────
@@ -21080,10 +21693,23 @@ function ensureCluster(onDone){
 /* ZOOM_DETAIL : le zoom a partir duquel la carte arrete de compter et se met
    a MONTRER. En dessous, on regroupe et la bulle annonce le vrai nombre ;
    a partir de la, plus une seule bulle — chaque magasin a son point, et deux
-   magasins au meme endroit s'ecartent en rosace (voir etalerMarqueurs). La
-   carte s'ouvre au zoom 13/14 : au premier coup d'oeil on voit donc des
-   magasins, pas des « 2 ». */
-var ZOOM_DETAIL=13;
+   magasins au meme endroit s'ecartent en rosace (voir etalerMarqueurs).
+   ══ 16, PAS 13 ═══════════════════════════════════════════════════════════
+   A 13 (« au premier coup d'oeil on voit des magasins, pas des 2 »), la
+   carte Explorer dessinait 1 096 marqueurs DOM d'un coup sur une ville :
+   2,4 a 5,7 s de gel au zoom 13 (iPhone 13 emule, CPU x4), 0,4 s par
+   micro-glissement au zoom 14, et le depot notait lui-meme que ce motif
+   « faisait chauffer puis crasher les iPhone ». Au zoom 13 un ecran de
+   390 px couvre 5 km : on ne lit pas des magasins, on lit une ville. Les
+   bulles y annoncent le VRAI nombre (le greffon ne perd personne), et le
+   rayon de regroupement est deja etroit a 14-15 (42 puis 30 px), donc les
+   magasins isoles ont leur point propre bien avant le zoom 16. Mesure (meme
+   banc, CPU x4, 1 200 magasins, avec etalerMarqueurs corrige) : taches
+   longues du zoom 13 de 1,9-2,6 s a 0,16-0,29 s (40 bulles au lieu de 1 096
+   marqueurs DOM), glissement de 80 px au zoom 14 de 0,33 s a aucune tache
+   longue. La carte Explorer s'ouvre au zoom 17 sur une boisson : rien n'y
+   change. */
+var ZOOM_DETAIL=16;
 /* ══ JUSQU'OU L'APERCU A LE DROIT DE DEZOOMER ══════════════════════════════
    Calcul, a la latitude de Bruxelles : un pixel vaut 98 770 m au zoom 0, donc
    48,2 m au zoom 11. La boite fait 362 x 150 px, dont environ 330 x 82 px
@@ -21108,7 +21734,41 @@ var APERCU_ZOOM_MIN=11;
    Le rayon est calcule EN PIXELS puis reprojete, donc l'ecart reste lisible au
    doigt a tous les zooms, et les positions d'origine sont restaurees des qu'on
    dezoome (le greffon, lui, regroupe toujours d'apres les vraies positions). */
+/* ══ UN SEUL ETALEMENT PAR GESTE, ET PLUS DE CYCLES removeLayer/addLayer ════
+   Mesure (iPhone 13 emule, CPU x4, 1 200 magasins) : un seul cran de zoom
+   declenchait TROIS etalements (zoomend, puis la peinture apres addLayers,
+   puis le rappel differe) de 714 / 1 208 / 2 758 ms, et un glissement de
+   80 px au zoom 14 coutait 387-467 ms sans rien recharger. Deux causes :
+     - chaque appelant etalait tout de suite ; on coalesce desormais dans une
+       trame d'animation par carte (le dernier appel du geste gagne), et les
+       appelants n'ont rien a changer ;
+     - chaque setLatLng faisait partir « move », que le greffon transforme en
+       _moveChild = removeLayer + addLayer (2 174 cycles par zoom, 80-85 % du
+       gel). Le greffon possede un drapeau pour ses PROPRES deplacements,
+       _ignoreMove : on le leve pendant la rosace. Le regroupement continue de
+       se faire sur les vraies positions (il ne les a jamais vues bouger), et
+       c'est exactement ce qu'on veut : l'etalement est un habillage.
+   Resultat mesure (CPU x4, 1 200 magasins, avec le seuil 16) : taches longues
+   du zoom 13 de 1,9-2,6 s a 0,16-0,29 s, glissement de 80 px au zoom 14 de
+   334 ms a aucune tache longue, _moveChild de 2 174 a 0 par cran de zoom. */
 function etalerMarqueurs(map,groupe){
+  if(!map||!groupe)return;
+  try{ if(map._etalerRaf)cancelAnimationFrame(map._etalerRaf); }catch(e){}
+  map._etalerRaf=requestAnimationFrame(function(){
+    map._etalerRaf=null;
+    try{ etalerMarqueursMaintenant(map,groupe); }catch(e){}
+  });
+}
+/* Le seuil d'etalement est celui ou le GROUPE arrete de regrouper : en
+   dessous, les magasins superposes sont dans une bulle, il n'y a rien a
+   ecarter ; au-dessus, ils sont tous dessines et c'est la qu'il faut les
+   separer. La carte Explorer coupe a ZOOM_DETAIL ; l'apercu d'une fiche ne
+   regroupe jamais (disableClusteringAtZoom:0) et s'etale donc a tout zoom. */
+function seuilEtalement(groupe){
+  var o=groupe&&groupe.options;
+  return (o&&typeof o.disableClusteringAtZoom==="number")?o.disableClusteringAtZoom:ZOOM_DETAIL;
+}
+function etalerMarqueursMaintenant(map,groupe){
   if(!map||!groupe||!map._loaded||!groupe.getLayers)return;
   /* _loaded reste VRAI apres map.remove() : ce n'est donc pas un test de vie.
      L'etalement est declenche par zoomend/moveend et par un rappel differe ;
@@ -21116,6 +21776,8 @@ function etalerMarqueurs(map,groupe){
   if(!carteEncoreLa(map))return;
   if(map._etalementEnCours)return;
   map._etalementEnCours=true;
+  var ignoreAvant=groupe._ignoreMove;
+  groupe._ignoreMove=true;
   try{
     var fils=map._eventailFils;
     if(!fils){fils=map._eventailFils=L.layerGroup().addTo(map);}
@@ -21123,8 +21785,9 @@ function etalerMarqueurs(map,groupe){
     var tous=groupe.getLayers(),i,m;
     for(i=0;i<tous.length;i++){m=tous[i];if(!m._llOrig&&m.getLatLng)m._llOrig=m.getLatLng();}
     var z=map.getZoom();
-    if(z<ZOOM_DETAIL){
-      for(i=0;i<tous.length;i++){m=tous[i];if(m._llOrig&&m.setLatLng)m.setLatLng(m._llOrig);}
+    if(z<seuilEtalement(groupe)){
+      // Repli de la rosace au dezoom : chacun retrouve sa vraie position.
+      for(i=0;i<tous.length;i++){m=tous[i];if(m._llOrig&&m.setLatLng&&!m._llOrig.equals(m.getLatLng()))m.setLatLng(m._llOrig);}
       return;
     }
     /* On ne calcule que ce qui est a l'ecran (marge de 30 %) : projeter des
@@ -21164,7 +21827,7 @@ function etalerMarqueurs(map,groupe){
       paquets.push(g);
     }
     paquets.forEach(function(g){
-      if(g.length<2){ if(vus[g[0]]._llOrig)vus[g[0]].setLatLng(vus[g[0]]._llOrig); return; }
+      if(g.length<2){ var seul=vus[g[0]]; if(seul._llOrig&&!seul._llOrig.equals(seul.getLatLng()))seul.setLatLng(seul._llOrig); return; }
       var sx=0,sy=0;
       g.forEach(function(ix){sx+=pts[ix].x;sy+=pts[ix].y;});
       var bx=sx/g.length, by=sy/g.length;
@@ -21187,7 +21850,7 @@ function etalerMarqueurs(map,groupe){
       }
     });
   }catch(e){}
-  finally{map._etalementEnCours=false;}
+  finally{map._etalementEnCours=false;groupe._ignoreMove=ignoreAvant;}
 }
 
 function rayonRegroupement(zoom){
@@ -21216,6 +21879,31 @@ function exploreClusterIcon(cluster){
   });
 }
 
+/* ── LA CARTE NE TOMBE PLUS EN « TAS DE PINS » ─────────────────────────────
+   Vu sur iPhone, Paris au zoom ville : 1200 pins individuels empiles. Cause
+   reproduite au banc : quand le greffon de regroupement ne se charge pas a
+   temps (6 s, reseau qui hoquette), la carte se construit avec une couche
+   SANS regroupement — et la gardait toute la session. Desormais, avant
+   chaque rendu : si le greffon est arrive depuis, on remplace la couche ;
+   sinon on retente son chargement (au plus une fois toutes les 20 s) ; et
+   en attendant, le rendu regroupe lui-meme par grille (voir exploreLoadStores). */
+function _assurerRegroupement(){
+  if(!exploreMap||!exploreLayer)return;
+  if(exploreLayer.getVisibleParent)return; // deja une couche regroupee
+  if(window.L&&L.markerClusterGroup&&window._creerCoucheExplore){
+    try{exploreMap.removeLayer(exploreLayer);}catch(e){}
+    exploreLayer=window._creerCoucheExplore();
+    exploreLayer.addTo(exploreMap);
+    return;
+  }
+  if(window._clusterState!=="loading"&&Date.now()-(window._clusterRetenteT||0)>20000){
+    window._clusterRetenteT=Date.now();
+    window._clusterState=null;
+    try{ensureCluster(function(){
+      if(window.L&&L.markerClusterGroup&&exploreMap){try{exploreLoadStores(true);}catch(e){}}
+    });}catch(e){}
+  }
+}
 /* Nouvel essai apres un echec : on repart de zero. */
 function retryLeaflet(){
   window._leafletState=null;
@@ -21959,10 +22647,34 @@ function openStoreDetail(storeId){
    Sans cette traduction, le gerant enregistrait un texte que l'app ne savait
    pas relire : la fiche affichait ses horaires, mais le filtre « Ouvert » les
    ignorait completement et le magasin restait invisible. */
+/* UNE CHAINE DEJA EN SYNTAXE OPENSTREETMAP NE SE RETRADUIT PAS.
+   La traduction ci-dessous passe tout en minuscules puis remet les jours en
+   forme ; or « tu », « we », « th » et « su » n'y sont pas (ce sont des mots
+   ordinaires dans d'autres langues), et elle change chaque virgule en « ; ».
+   Relire « Mo-Sa 08:00-21:00; Su 09:00-20:00 » rendait donc « su » muet
+   (le magasin « Ferme » tout le dimanche, comme un fait), et
+   « Mo-Fr 09:00-13:00,13:30-17:00 » creait une plage SANS jour, valable les
+   sept jours (« Ouvert » le dimanche a 15 h). Mesure sur le fichier belge :
+   20 048 horaires sur 40 696 lus autrement par ce detour. Ca touchait les
+   horaires importes d'OpenStreetMap, ceux que la carte va rechercher, et meme
+   ceux qu'un gerant avait saisis — puisqu'on les enregistre deja traduits.
+   Est en syntaxe OSM une chaine dont CHAQUE morceau (hors jours feries PH)
+   se lit tel quel. « Lun-Sam 8h-20h » ne se lit pas : traduite comme avant.
+   « Mo-Sa 9:00-18:00; So 10:00-12:00 » (un gerant germanophone) non plus,
+   a cause de « So » : traduite aussi, et « So » devient bien dimanche. */
+function _formeOSM(txt){
+  var x=String(txt||"").trim(); if(!x)return false;
+  if(/^24\s*\/\s*7$/.test(x))return true;
+  if(!/\d{1,2}:\d{2}/.test(x))return false;
+  var morceaux=_reparerSeparateur(x).split(";").map(function(m){return m.trim();})
+    .filter(function(m){return m&&!/^PH\b/i.test(m);});
+  return morceaux.length>0&&morceaux.every(function(m){return !!parseOSMHours(m);});
+}
 function normaliserHoraires(txt){
+  if(_formeOSM(txt))return _reparerSeparateur(String(txt).trim());
   var t=" "+String(txt||"").toLowerCase()
     .normalize("NFD").replace(/[\u0300-\u036f]/g,"")+" ";
-  if(/24\s*[\/h]\s*(24|7)|non.?stop/.test(t))return "24/7";
+  if(/24\s*[\/h]\s*(24|7)|24\s*h\s*\/\s*24|non.?stop/.test(t))return "24/7";
   /* Les jours dans les langues des gerants de Bruxelles — pas seulement en
      francais. Une epiciere qui ecrit « Pzt-Cmt 8-20 » ou « ma-za 8-20 » se
      faisait refuser ses horaires avec un modele... en francais. Les noms
@@ -22089,7 +22801,7 @@ function enrichStoreHours(s){
         });
         if(!hit&&els.length===1&&els[0].tags)hit=els[0].tags.opening_hours||null;
         if(!hit)return;
-        hit=String(hit).slice(0,120);
+        hit=String(hit).slice(0,255);
         s.hours=hit;
         if(window.fbSaveStore)window.fbSaveStore(sid,{hours:hit}).catch(function(){});
         try{if(window.fbTouchCache)window.fbTouchCache();}catch(e){}
@@ -22329,7 +23041,7 @@ function resolveStoreAddress(s){
       var full=[street,city].filter(Boolean).join(", ");
       if(!full)return;
       geocodeCache[key]=full;
-      localStorage.setItem("magoGeocodeCache",JSON.stringify(geocodeCache));
+      ecrire("magoGeocodeCache",geocodeCache);
       s.address=full;
       if(curStoreDetail===s){
         var subEl=document.getElementById("sd-sub");
@@ -22357,7 +23069,7 @@ function reverseGeocodeAddr(lat,lng,cb){
       var street=(a.house_number?a.house_number+" ":"")+(a.road||a.street||a.pedestrian||"");
       var city=a.city||a.town||a.village||a.municipality||"";
       var full=[street,city].filter(Boolean).join(", ");
-      if(full){geocodeCache[key]=full;try{localStorage.setItem("magoGeocodeCache",JSON.stringify(geocodeCache));}catch(e){}}
+      if(full){geocodeCache[key]=full;ecrire("magoGeocodeCache",geocodeCache);}
       cb&&cb(full||"");
     }).catch(function(){if(!done){done=true;clearTimeout(to);cb&&cb("");}});
 }
@@ -24196,7 +24908,7 @@ function hasVotedDiscovery(id){return votedDiscoveries.indexOf(String(id))!==-1;
 function markVotedDiscovery(id){
   if(hasVotedDiscovery(id))return;
   votedDiscoveries.push(String(id));
-  localStorage.setItem("magoVotedDisc",JSON.stringify(votedDiscoveries));
+  ecrire("magoVotedDisc",votedDiscoveries);
 }
 /* Apres l'ajout d'une decouverte scannee : proposer la photo tout de suite.
    La photo part chez l'admin (discoveryPhotos) et suivra la boisson si elle
@@ -24429,7 +25141,7 @@ function drinkPhotoBtn(){
       var save=window.fbApplyDrinkPhoto?window.fbApplyDrinkPhoto(d.id,data):Promise.reject(new Error("hors-ligne"));
       save.then(function(){
         imgCache[key]={url:data,ts:Date.now(),community:true};
-        try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+        sauverImgCache();
         refreshDrinkVisual(d);
         try{renderTrends();}catch(e){}
         try{renderResults();}catch(e){}
@@ -24892,14 +25604,59 @@ var AUTO_OSM=true;
 var _autoOsmBusy=false;
 var _autoOsmSeen=(function(){try{return JSON.parse(localStorage.getItem("magoAutoOsmSeen")||"{}");}catch(e){return {};}})();
 var _autoOsmEchec={};
+var AUTO_OSM_SEMAINE=7*24*3600*1000;
+/* ══ UNE REPONSE MARQUE TOUTE LA BOITE INTERROGEE, PAS UNE CELLULE ═════════
+   La memoire « zone deja vue » etait une cellule de 0,01° (~1 km) autour du
+   centre, alors que la requete couvre une boite de 5 km. Glisser la carte de
+   1 km posait donc une NOUVELLE question a Overpass sur une zone a 80 % deja
+   lue : mesure, 1 requete par cellule nouvelle, 5 sur une rafale de 5
+   glissements. On note desormais toutes les cellules de 0,01° entierement
+   couvertes par la boite (une vingtaine), au meme format que l'ancienne cle
+   (« lat,lng » arrondis a deux decimales), donc les entrees deja ecrites
+   restent valables. Les entrees de plus d'une semaine sont purgees au
+   passage, pour que la cle localStorage ne grossisse pas a vie. */
+function autoOsmMarquerBoite(lat,lng,dLat,dLng,ts){
+  var i0=Math.ceil((lat-dLat+0.005)*100-1e-6), i1=Math.floor((lat+dLat-0.005)*100+1e-6);
+  var j0=Math.ceil((lng-dLng+0.005)*100-1e-6), j1=Math.floor((lng+dLng-0.005)*100+1e-6);
+  for(var i=i0;i<=i1;i++)for(var j=j0;j<=j1;j++)_autoOsmSeen[(i/100).toFixed(2)+","+(j/100).toFixed(2)]=ts;
+  _autoOsmSeen[lat.toFixed(2)+","+lng.toFixed(2)]=ts;
+  for(var k in _autoOsmSeen){ if(!(ts-_autoOsmSeen[k]<AUTO_OSM_SEMAINE))delete _autoOsmSeen[k]; }
+  try{localStorage.setItem("magoAutoOsmSeen",JSON.stringify(_autoOsmSeen));}catch(e){}
+}
+/* ══ DEUX SECONDES D'IMMOBILITE AVANT D'INTERROGER OVERPASS ════════════════
+   L'appel partait a CHAQUE moveend : un panoramique en trois coups de pouce,
+   c'etait trois chances de lancer une requete de 45 s vers un service
+   partage. On attend que la carte soit immobile deux secondes ; movestart
+   annule le compte a rebours. La carte Explorer est le seul appelant. */
+var _autoOsmTimer=null;
+function autoOsmAnnuler(){ if(_autoOsmTimer){clearTimeout(_autoOsmTimer);_autoOsmTimer=null;} }
+function autoOsmPlanifier(map){
+  autoOsmAnnuler();
+  if(!AUTO_OSM||!map)return;
+  _autoOsmTimer=setTimeout(function(){
+    _autoOsmTimer=null;
+    try{
+      if(!carteEncoreLa(map))return;
+      /* La carte a ete refermee pendant l'attente : la zone qu'on regardait
+         n'interesse plus personne. */
+      var h=document.getElementById("explore-map-host");
+      if(h&&!h.classList.contains("in"))return;
+      var c=map.getCenter(); autoOsmForArea(c.lat,c.lng,map.getZoom());
+    }catch(e){}
+  },2000);
+}
 function autoOsmForArea(lat,lng,zoom){
   try{
     if(!AUTO_OSM||_autoOsmBusy)return;
     if(typeof lat!=="number"||!lat)return;
-    if(zoom!=null&&zoom<12)return;                 // évite les bbox trop larges (pas de requête "monde")
+    /* Zoom 14 au moins : en dessous, l'ecran montre deja plus que la boite de
+       5 km interrogee, et chaque cran de dezoom relancait une requete pour
+       une zone qu'on ne regarde pas en detail. autoImportZone (zones a moins
+       de 8 magasins) continue de couvrir le reste. */
+    if(zoom!=null&&zoom<14)return;
     var key=lat.toFixed(2)+","+lng.toFixed(2);     // ~1 km
     var now=Date.now();
-    if(_autoOsmSeen[key]&&(now-_autoOsmSeen[key])<7*24*3600*1000)return; // 1×/semaine/zone
+    if(_autoOsmSeen[key]&&(now-_autoOsmSeen[key])<AUTO_OSM_SEMAINE)return; // 1×/semaine/zone
     /* La zone n'est notee qu'a la REPONSE (voir plus bas), plus avant la
        requete : un echec d'Overpass ne doit pas rendre une zone « vide » pour
        une semaine. Entre deux echecs, on laisse dix minutes. */
@@ -24911,8 +25668,7 @@ function autoOsmForArea(lat,lng,zoom){
     fetchWithTimeout("https://overpass-api.de/api/interpreter?data="+encodeURIComponent(q),45000)
       .then(function(r){return r.json();})
       .then(function(data){
-        _autoOsmSeen[key]=Date.now();
-        try{localStorage.setItem("magoAutoOsmSeen",JSON.stringify(_autoOsmSeen));}catch(e){}
+        autoOsmMarquerBoite(lat,lng,dLat,dLng,Date.now());
         var els=(data&&data.elements)||[];
         var found=els.map(function(e){
           var la=e.lat!=null?e.lat:(e.center&&e.center.lat);
@@ -24940,12 +25696,24 @@ function autoOsmForArea(lat,lng,zoom){
         if(!news.length){_autoOsmBusy=false;return;}
         var persist=window.fbImportStores?window.fbImportStores(news,function(){}):Promise.resolve(0);
         persist.then(function(){
+          /* La carte Explorer ne lit pas STORES : elle repeint
+             window._exploreRawList, la liste de sa derniere requete. Les
+             nouveaux y entrent aussi, et exploreLoadStores(true) repeint cette
+             liste sans retourner a Firestore — avant, l'appel sans argument
+             relancait toute la requete de zone pour montrer dix magasins de
+             plus. Le meme objet sert aux deux listes : _stripAutoDrinks les
+             traite de la meme facon (identifiant « o… »), et une confirmation
+             posee sur l'un vaut pour l'autre. */
+          var raw=window._exploreRawList;
           news.forEach(function(c){
-            if(!(STORES||[]).some(function(s){return String(s.id)===c.id;})){
-              STORES.push({id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,brand:c.brand||"",type:c.type||"",drinks:(c.drinks||[]).slice(),drinksVerified:(c.drinksVerified||[]).slice(),verifiedSource:c.verifiedSource||null,confirmations:{}});
+            var entry=(STORES||[]).filter(function(s){return String(s.id)===c.id;})[0];
+            if(!entry){
+              entry={id:c.id,fbId:c.id,name:c.name,emoji:c.emoji,lat:c.lat,lng:c.lng,brand:c.brand||"",type:c.type||"",drinks:(c.drinks||[]).slice(),drinksVerified:(c.drinksVerified||[]).slice(),verifiedSource:c.verifiedSource||null,confirmations:{}};
+              STORES.push(entry);
             }
+            if(raw&&!raw.some(function(s){return String(s.fbId||s.id)===c.id;}))raw.push(entry);
           });
-          try{if(typeof exploreLoadStores==="function")exploreLoadStores();}catch(e){}
+          try{if(typeof exploreLoadStores==="function")exploreLoadStores(true);}catch(e){}
           _autoOsmBusy=false;
         }).catch(function(e){console.warn("autoOsm persist",e);_autoOsmBusy=false;});
       })
@@ -25596,7 +26364,7 @@ function submitProposal(){
       try{mergeCatalog([res.entry]);}catch(e){console.warn(e);}
       if(photoData){
         imgCache[String(res.entry.id)]={url:photoData,ts:Date.now(),community:true,manual:true};
-        try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+        sauverImgCache();
         var dr=DRINKS.find(function(x){return String(x.id)===String(res.entry.id);});
         if(dr){try{refreshDrinkVisual(dr);}catch(e){}}
       }
@@ -26457,6 +27225,8 @@ function exploreApplyChips(list){
   if(c.open){
     var _tri=trierParOuverture(arr);
     window._exploreInconnus=_tri.inconnus.length;
+    // garde la liste : exploreLoadStores recompte sur le CADRE VISIBLE
+    window._exploreInconnusListe=_tri.inconnus;
     arr=_tri.ouverts;
     try{window._exploreHorsBoisson=trierParOuverture(window._exploreHorsBoisson).ouverts;}catch(eHB){}
   }
@@ -26549,7 +27319,7 @@ function quickPrice(storeId,drinkId){
   if(!v||v<=0||v>50){toast("Prix invalide");return;}
   if(!storePrices[storeId])storePrices[storeId]={};
   storePrices[storeId][drinkId]=v;
-  try{localStorage.setItem("magoPrices",JSON.stringify(storePrices));}catch(e){}
+  ecrire("magoPrices",storePrices);
   if(s){if(!s.prices)s.prices={};s.prices[drinkId]=v;}
   try{if(typeof trackLocalPrice==="function")trackLocalPrice(storeId,drinkId,v);}catch(e){}
   /* ══ « PRIX ENREGISTRE » ALORS QU'IL NE QUITTAIT PAS LE TELEPHONE ═══════
@@ -26933,7 +27703,10 @@ function openExploreMap(opts){
       exploreFond=fondMago();exploreFond.addTo(exploreMap);
       /* Regroupement si le greffon est la, sinon simple couche : la carte
          s'affiche dans les deux cas. */
-      exploreLayer=(window.L&&L.markerClusterGroup)
+      /* Fabrique de la couche : appelee a la construction, ET plus tard si
+         le greffon de regroupement arrive en retard (voir
+         _assurerRegroupement). */
+      window._creerCoucheExplore=function(){ return (window.L&&L.markerClusterGroup)
         ? L.markerClusterGroup({
             chunkedLoading:true,          // ajout par paquets : l'interface ne gele pas
             // Voir rayonRegroupement() : large de loin, etroit dans la rue.
@@ -26952,11 +27725,12 @@ function openExploreMap(opts){
                zoomer dans le vide : c'est ce que fait spiderfyOnMaxZoom, qui
                etait desactive. Chaque magasin redevient donc atteignable au
                doigt, meme empile sur un autre. */
-            /* Plus AUCUNE bulle de comptage des le zoom de detail : « 2 »
-               n'apprend rien a qui regarde sa rue, il veut voir les deux
-               magasins. Ce reglage cachait autrefois les magasins superposes ;
-               etalerMarqueurs les ecarte desormais en rosace a chaque zoom,
-               donc couper le regroupement ne perd plus personne. */
+            /* Plus AUCUNE bulle de comptage des le zoom de detail (16, voir
+               ZOOM_DETAIL : a 13, mille marqueurs DOM gelaient l'ecran 2 a
+               6 s) : « 2 » n'apprend rien a qui regarde sa rue, il veut voir
+               les deux magasins. Ce reglage cachait autrefois les magasins
+               superposes ; etalerMarqueurs les ecarte desormais en rosace a
+               chaque zoom, donc couper le regroupement ne perd plus personne. */
             disableClusteringAtZoom:ZOOM_DETAIL,
             spiderfyOnMaxZoom:true,
             /* Un pin fait 30 px de large : l'ecartement par defaut collait les
@@ -26967,11 +27741,12 @@ function openExploreMap(opts){
             showCoverageOnHover:false,
             iconCreateFunction:exploreClusterIcon
           })
-        : L.layerGroup();
+        : L.layerGroup(); };
+      exploreLayer=window._creerCoucheExplore();
       exploreLayer.addTo(exploreMap);
       /* Si la carte bouge, le geste n'a plus de sens : la carte va se
          redessiner et detruire le marqueur sous le doigt. On referme avant. */
-      exploreMap.on("movestart zoomstart",function(){ try{fermerMenuPin();}catch(e){} });
+      exploreMap.on("movestart zoomstart",function(){ try{fermerMenuPin();}catch(e){} try{autoOsmAnnuler();}catch(e){} });
       exploreMap.on("moveend zoomend",function(){
         try{etalerMarqueurs(exploreMap,exploreLayer);}catch(e){}
         try{renderInStockArrows();}catch(e){}
@@ -26994,7 +27769,9 @@ function openExploreMap(opts){
           }
         }catch(e){}
         if(_bouge)_exploreTimer=setTimeout(function(){exploreLoadStores();},350);
-        try{var _c=exploreMap.getCenter();autoOsmForArea(_c.lat,_c.lng,exploreMap.getZoom());}catch(e){}
+        /* Overpass seulement apres deux secondes d'immobilite (voir
+           autoOsmPlanifier) : l'appel direct partait a chaque coup de pouce. */
+        try{autoOsmPlanifier(exploreMap);}catch(e){}
       });
       exploreMap.on("click",exploreHideCard);
       // Panoramique a la main : le lieu cherche n'est plus ce qu'on regarde, et
@@ -27013,7 +27790,9 @@ function openExploreMap(opts){
     else exploreMap.setView([typeof userLat==="number"&&userLat?userLat:50.8466,typeof userLng==="number"&&userLng?userLng:4.3528],14);
     try{appliquerRepere();}catch(e){}
     setTimeout(function(){try{exploreMap.invalidateSize();}catch(e){}exploreLoadStores();
-      try{var _cc=exploreMap.getCenter();autoOsmForArea(_cc.lat,_cc.lng,exploreMap.getZoom());}catch(e){}
+      // Meme compte a rebours qu'au moveend : l'ouverture n'a pas a interroger
+      // Overpass avant que la carte soit posee et immobile.
+      try{autoOsmPlanifier(exploreMap);}catch(e){}
       try{appliquerRepere();}catch(e){}
     },120);
   }
@@ -27457,11 +28236,17 @@ function armerMenuPin(mk,s){
     el.addEventListener("mousedown",function(e){demarrer(e,false);});
   });
 }
+function _exploreChargeEnVol(){
+  return !!window._exploreReseauEnVol&&Date.now()-(window._exploreReseauDepuis||0)<8000;
+}
 function exploreLoadStores(useCache){
   /* La reconstruction detruit les marqueurs. Si un menu est ouvert, le pin
      qu'il designe n'existera plus dans un instant : le laisser serait montrer
      un menu sans objet. */
-  try{ if(document.getElementById("pin-menu"))fermerMenuPin(); }catch(e){}
+  /* Si le menu est ferme ICI, au milieu du geste, la fin du geste (g.fin) ne
+     s'executera jamais : c'est elle qui remet _pinMenuVientDeSOuvrir a faux.
+     Le drapeau restait leve et le tap suivant sur un pin etait avale. */
+  try{ if(document.getElementById("pin-menu")){ var _enGeste=!!_geste; fermerMenuPin(); if(_enGeste)window._pinMenuVientDeSOuvrir=false; } }catch(e){}
   if(!exploreMap)return;
   var status=document.getElementById("explore-status");
   var b=exploreMap.getBounds();
@@ -27490,6 +28275,13 @@ function exploreLoadStores(useCache){
   /* Un panoramique en trois coups de pouce mettait trois requetes en vol, et
      les trois repeignaient la carte. Le motif du jeton existe deja pour les
      requetes Firestore (window._fbQuerySeq) : on l'applique au rendu. */
+  /* Un chargement reseau de CETTE question est en route : il peindra la
+     carte avec l'etat courant (filtres, horaires, regroupement). Repeindre
+     maintenant depuis le cache montrerait l'ANCIENNE zone decoupee au
+     nouveau cadre — « Aucun magasin » pendant une seconde ou deux.
+     Borne a 8 s : un chargement qui pend (reseau mort, aucune minuterie
+     dans la requete) ne doit pas figer la carte pour la session. */
+  if(useCache&&_exploreChargeEnVol()&&window._exploreQuestionEnVol===String((exploreFilter&&exploreFilter.drinkId)||""))return;
   var _seq = (window._exploreSeq = (window._exploreSeq || 0) + 1);
   // Memo de la vue peinte : le moveend s'en sert pour ignorer les
   // micro-deplacements (voir le garde dans l'ecouteur moveend/zoomend).
@@ -27503,7 +28295,18 @@ function exploreLoadStores(useCache){
   if(useCache&&exploreFilter&&window._exploreRawList&&window._exploreRawList.some(function(s){
     return s&&s._pins&&!(s._boissonSue&&s._boissonSue[Number(exploreFilter.drinkId)]);
   }))useCache=false;
-  if(useCache&&window._exploreRawList){q=Promise.resolve(window._exploreRawList);}
+  /* UN REPEINT EN CACHE NE JETTE PAS UN CHARGEMENT RESEAU EN VOL.
+     Repeindre depuis le cache (un filtre, des horaires arrives, le greffon de
+     regroupement) prenait un nouveau jeton : la reponse de la NOUVELLE zone,
+     encore en route, arrivait avec un jeton perime et partait a la poubelle,
+     avant meme d'etre gardee dans _exploreRawList. L'ecran gardait l'ancienne
+     zone decoupee au nouveau cadre — « Aucun magasin » au-dessus de 171.
+     Un chargement reseau ne cede donc plus qu'a un chargement reseau plus
+     recent, ou a un changement de la question posee (la boisson ciblee). */
+  var _reseau=!(useCache&&window._exploreRawList);
+  var _question=String((exploreFilter&&exploreFilter.drinkId)||"");
+  if(_reseau){window._exploreDernierReseau=_seq;window._exploreReseauEnVol=_seq;window._exploreQuestionEnVol=_question;window._exploreReseauDepuis=Date.now();}
+  if(!_reseau){q=Promise.resolve(window._exploreRawList);}
   else{
     if(status)status.innerHTML=ondeHTML(3)+'<span style="margin-left:8px">'+tr("Chargement\u2026")+'</span>';
     /* On ne demande JAMAIS les assortiments complets : 39 Mo sur Paris, contre
@@ -27514,7 +28317,11 @@ function exploreLoadStores(useCache){
     q=window.fbQueryZone?magoAttendre(window.fbQueryZone(cLat,cLng,Math.min(radiusKm,12),_boissonCiblee)):Promise.resolve(STORES||[]);
   }
   q.then(function(list){
-    if(_seq!==window._exploreSeq)return;      // un mouvement plus recent a pris la main
+    if(_reseau&&window._exploreReseauEnVol===_seq)window._exploreReseauEnVol=0;
+    if(_seq!==window._exploreSeq){
+      // un mouvement plus recent a pris la main — sauf un simple repeint en cache
+      if(!_reseau||window._exploreDernierReseau!==_seq||_question!==String((exploreFilter&&exploreFilter.drinkId)||""))return;
+    }
     list=list||[];
     list.forEach(_stripAutoDrinks);           // retire les inventaires inventés
     /* Distance recalculee depuis MA position pour chaque magasin. Sans ca,
@@ -27626,10 +28433,29 @@ function exploreLoadStores(useCache){
        glissement. */
     try{
       var _cadre=exploreMap.getBounds().pad(0.25);
-      list=list.filter(function(s){
-        return typeof s.lat==="number" && typeof s.lng==="number" && _cadre.contains([s.lat,s.lng]);
-      });
+      var _dansCadre=function(s){return typeof s.lat==="number" && typeof s.lng==="number" && _cadre.contains([s.lat,s.lng]);};
+      list=list.filter(_dansCadre);
+      /* Mode boisson : l'en-tete et le bandeau comptaient encore le cercle
+         charge (115) pendant que la feuille et la carte montraient le cadre
+         (99). Meme zone, deux chiffres. On recompte sur le cadre. */
+      if(exploreFilter){
+        withDrink=list.filter(function(s){
+          return _placable(s)&&(s._hasDrink||(s.drinks||[]).some(function(id){return Number(id)===Number(_did2);}));
+        }).length;
+        _sureCount=list.filter(function(s){
+          return _placable(s)&&(storeVerifiedFor(s,_did2)||((s.confirmations||{})[_did2]||0)>0);
+        }).length;
+      }
+      /* « N ouverts · M inconnus » : les ouverts etaient comptes sur l'ecran,
+         les inconnus sur tout le cercle charge (jusqu'a 12 km). Deux zones
+         pour une meme phrase. On recompte les inconnus sur le meme cadre. */
+      if(window._exploreChips&&window._exploreChips.open&&window._exploreInconnusListe)
+        window._exploreInconnus=window._exploreInconnusListe.filter(_dansCadre).length;
+      /* Les magasins de la zone affichee qui n'ont pas d'horaires : on va les
+         chercher (y compris ceux que la puce « Ouvert » vient d'ecarter). */
+      comblerHorairesBientot((window._exploreRawList||list).filter(_dansCadre));
     }catch(eB){}
+    _assurerRegroupement();
     exploreLayer.clearLayers();
     var shown=0;
     /* Le plafond de 400 etait un pansement : il evitait le blocage en JETANT
@@ -27678,6 +28504,33 @@ function exploreLoadStores(useCache){
        sont visuellement identiques (les bulles absorbent), et quand le
        plafond mord, le bandeau du bas le DIT au lieu de faire semblant
        (jamais de coupe silencieuse). */
+    /* Sans greffon (pas encore arrive, ou injoignable), on ne pose JAMAIS
+       des centaines de pins les uns sur les autres : on regroupe par grille
+       au meme rayon que le greffon (rayonRegroupement). Une case qui
+       contient plusieurs magasins devient une bulle avec le VRAI nombre ;
+       la toucher zoome dessus. Au zoom de detail, comme le greffon, on
+       montre chaque magasin. */
+    var _bullesGrille=[];
+    if(!exploreLayer.getVisibleParent){
+      try{
+        var _zg=exploreMap.getZoom();
+        if(_zg<ZOOM_DETAIL){
+          /* x1,5 : le greffon regroupe dans un RAYON autour d'un centre, une
+             case de grille de la meme taille serait deux fois plus dense. */
+          var _cellule=Math.round(1.5*(rayonRegroupement(_zg)||40)),_grille={},_ordreG=[];
+          _pourCarte.forEach(function(s){
+            if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
+            var _p=exploreMap.project([s.lat,s.lng],_zg);
+            var _k=Math.floor(_p.x/_cellule)+":"+Math.floor(_p.y/_cellule);
+            if(!_grille[_k]){_grille[_k]=[];_ordreG.push(_k);}
+            _grille[_k].push(s);
+          });
+          var _seuls=[];
+          _ordreG.forEach(function(k){var g=_grille[k];if(g.length===1)_seuls.push(g[0]);else _bullesGrille.push(g);});
+          _pourCarte=_seuls;
+        }
+      }catch(eG){_bullesGrille=[];}
+    }
     var _tronque=_pourCarte.length>1200;
     _pourCarte.slice(0,1200).forEach(function(s){
       if(typeof s.lat!=="number"||typeof s.lng!=="number")return;
@@ -27763,13 +28616,24 @@ function exploreLoadStores(useCache){
     /* addLayers (au pluriel) : le greffon calcule les groupes UNE fois pour
        tout le lot. Ajouter les marqueurs un par un le forcerait a tout
        recalculer a chaque ajout — c'est le piege classique. */
+    _bullesGrille.forEach(function(g){
+      var la=0,ln=0;g.forEach(function(s){la+=s.lat;ln+=s.lng;});
+      var mkB=L.marker([la/g.length,ln/g.length],{icon:exploreClusterIcon({getChildCount:function(){return g.length;}}),zIndexOffset:700});
+      mkB.on("click",function(){
+        try{exploreMap.fitBounds(L.latLngBounds(g.map(function(s){return [s.lat,s.lng];})).pad(0.2),{maxZoom:ZOOM_DETAIL});}catch(eF){}
+      });
+      _lot.push(mkB);
+    });
     if(exploreLayer.addLayers)exploreLayer.addLayers(_lot);
     else _lot.forEach(function(m){exploreLayer.addLayer(m);});
     // Les marqueurs viennent de changer : on refait la rosace tout de suite,
     // sinon deux magasins superposes resteraient l'un sur l'autre jusqu'au
     // prochain geste de l'utilisateur.
     try{etalerMarqueurs(exploreMap,exploreLayer);}catch(eE){}
-    try{renderExploreChips();exploreSetHeader(exploreFilter?withDrink:shown,_sureCount);}catch(eHdr){}
+    /* L'en-tete annoncait le nombre DESSINE (« 1200 magasins dans cette
+       zone ») pendant que la feuille du bas comptait le vrai total (1760) :
+       deux chiffres pour la meme zone. On annonce le vrai total partout. */
+    try{renderExploreChips();exploreSetHeader(exploreFilter?withDrink:list.length,_sureCount);}catch(eHdr){}
     try{renderExploreSheet(exploreFilter?list.filter(function(s){return s._hasDrink;}):list);}catch(eSheet){console.warn("exploreSheet:",eSheet);}
     try{renderInStockArrows();}catch(eArr){}
     if(status){
@@ -27801,13 +28665,17 @@ function exploreLoadStores(useCache){
           status.textContent=trh("Personne ne vend {b} par ici",{b:exploreFilter.name})+" \u00B7 "+_suite;
         }
       }else{
-        status.textContent=shown
-          ?(_tronque?trh("Les {n} magasins les plus proches · zoome pour les autres",{n:shown})
-                    :(shown+" magasin"+(shown>1?"s":"")+" ici"))
+        /* Le vrai total de la zone, toujours (les bulles portent le reste).
+           Quand le plafond de dessin mord, on le dit sans changer le chiffre. */
+        var _nZone=list.length;
+        status.textContent=_nZone
+          ?(_tronque?trh("{n} magasins ici · zoome pour tous les voir",{n:_nZone})
+                    :(_nZone+" magasin"+(_nZone>1?"s":"")+" ici"))
           :exploreStatutHonnete(true);
       }
     }
   }).catch(function(e){
+    if(_reseau&&window._exploreReseauEnVol===_seq)window._exploreReseauEnVol=0;
     console.warn("explore:",e);
     if(status)status.textContent=tr("Chargement impossible, r\u00E9essaie");
   });
@@ -28906,7 +29774,6 @@ function wipeTestHunts(){
     }
   });
 }
-setInterval(function(){var el=document.getElementById("notif-state");if(el)refreshNotifState();},1500);
 function showOnboarding(){
   if(localStorage.getItem("magoOnboard")==="1")return;
   // Visiteur arrivé par un lien partagé (#drink=/#store=) : il vient voir OÙ
@@ -29467,7 +30334,7 @@ function _offImageParCode(code){
     var p=data&&data.status===1&&data.product;
     var url=(p&&(p.image_front_small_url||p.image_front_url))||null;
     imgCache[k]={url:url,ts:Date.now()};
-    try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(err){}
+    sauverImgCache();
     return url;
   }).catch(function(){return null;});
 }
@@ -29919,7 +30786,7 @@ function showRouteToStore(lat,lng,store,sansCompter){
 /* ================================
    SCAN COUNTS & RATINGS
 ================================ */
-function incrementScan(id){scanCounts[id]=(scanCounts[id]||0)+1;localStorage.setItem("magoscans",JSON.stringify(scanCounts));if(!isAdmin&&window.fbIncrementScanCount)window.fbIncrementScanCount(id);}
+function incrementScan(id){scanCounts[id]=(scanCounts[id]||0)+1;ecrire("magoscans",scanCounts);if(!isAdmin&&window.fbIncrementScanCount)window.fbIncrementScanCount(id);}
 function renderTopScanned(){
   var el=document.getElementById("top-scanned");if(!el)return;
   var sorted=DRINKS.slice().sort(function(a,b){return(scanCountsGlobal[b.id]||0)-(scanCountsGlobal[a.id]||0);}).slice(0,5);
@@ -30059,7 +30926,7 @@ function setRating(val){
   if(!curSel)return;
   var prev=userRatings[curSel.id];
   if(prev===val){toast("★ D\u00e9j\u00e0 not\u00e9 "+val+"/5");playSound("pop");return;}
-  userRatings[curSel.id]=val;localStorage.setItem("mago_ratings",JSON.stringify(userRatings));
+  userRatings[curSel.id]=val;ecrire("mago_ratings",userRatings);
   var agg=drinkRatingsAgg[curSel.id]||{sum:0,count:0};
   if(prev){agg.sum+=val-prev;} // re-note : on REMPLACE, on n'empile pas
   else{agg.sum+=val;agg.count+=1;}
@@ -30265,7 +31132,7 @@ function setRec(val){
   if(!curSel)return;
   var prev=userRecs[curSel.id];
   if(prev===val){toast(val==="yes"?"D\u00e9j\u00e0 recommand\u00e9e par toi":"Avis d\u00e9j\u00e0 enregistr\u00e9");playSound("pop");return;}
-  userRecs[curSel.id]=val;localStorage.setItem("mago_recs",JSON.stringify(userRecs));
+  userRecs[curSel.id]=val;ecrire("mago_recs",userRecs);
   /* PLUS DE POINTS POUR UN AVIS. Payer une opinion, c'est financer la
      fabrication d'un faux classement : avec le plafond de 60 points par jour
      et 3 points par signalement, un rayon entier scanne puis recommande
@@ -31058,48 +31925,104 @@ var HORAIRES_OSM=null, _horairesEtat=0;   // 0 rien, 1 en cours, 2 pret, 3 echec
    le jour de la compilation. Un rafraichissement hebdomadaire du depot ne les
    atteindrait donc JAMAIS — elles afficheraient les horaires du jour de
    l'envoi sur les magasins, pendant des mois.
-   En coquille native, on tente donc d'abord la copie publiee avec le site, et
-   on retombe sur la copie embarquee a la moindre erreur. Meme donnee, meme
-   source, aucune devinette ajoutee : le repli garantit qu'une coupure reseau
-   ne degrade rien. Sur le web et en PWA, rien ne change — le chemin relatif
-   EST la copie publiee. */
+   En coquille native, la copie publiee avec le site sert donc a RAFRAICHIR
+   la copie embarquee (voir le bloc suivant : lecture locale d'abord, puis
+   comparaison des dates). Meme donnee, meme source, aucune devinette ajoutee :
+   une coupure reseau ne degrade rien. Sur le web et en PWA, rien ne change —
+   le chemin relatif EST la copie publiee. */
+/* LA COPIE EMBARQUEE D'ABORD, LE RESEAU ENSUITE ET EN SILENCE. La premiere
+   version de ce detour demandait la copie publiee AVANT la copie embarquee :
+   un aller-retour de 2,1 Mo a chaque lancement, jusqu'a 6 s d'attente en 4G
+   faible, pour un fichier qui ne change qu'une fois par semaine — alors que la
+   meme donnee dormait sur le telephone. Desormais la copie embarquee est lue
+   tout de suite (disque, pas de reseau), puis on compare les DATES : le
+   meta.json publie (12 Ko) contre le meta.json embarque et la derniere copie
+   gardee en IndexedDB. Seulement si le site est plus recent, on telecharge le
+   fichier complet, on repeint, et on le garde en IndexedDB pour les lancements
+   suivants. Rien de tout ceci ne s'execute sur le web ni en PWA : la, le
+   chemin relatif EST la copie publiee. */
 var URL_HORAIRES_PUBLIEE="https://magonyos991-ux.github.io/magofeed/data/horaires-osm-be.json";
+var URL_HORAIRES_META_PUBLIEE="https://magonyos991-ux.github.io/magofeed/data/horaires-osm-be.meta.json";
+var CHEMIN_HORAIRES="data/horaires-osm-be.json", CHEMIN_HORAIRES_META="data/horaires-osm-be.meta.json";
+var IDB_HORAIRES_CLE="horaires:osm";
+function _horairesNatif(){ return !!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform()); }
 function _cheminsHoraires(){
-  var natif=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-  return natif?[URL_HORAIRES_PUBLIEE,"data/horaires-osm-be.json"]:["data/horaires-osm-be.json"];
+  /* En natif, la copie publiee reste un REPLI : seulement si la copie
+     embarquee manquait (bundle abime), jamais avant elle. */
+  return _horairesNatif()?[CHEMIN_HORAIRES,URL_HORAIRES_PUBLIEE]:[CHEMIN_HORAIRES];
+}
+function _appliquerHoraires(j){
+  HORAIRES_OSM=j; _horairesEtat=2;
+  /* Les ecrans deja peints affichaient « Ouvert » selon l'heuristique :
+     on les repeint pour qu'ils disent la verite. */
+  try{ if(typeof renderStoreList==="function"&&curSel)renderStoreList(); }catch(e){}
+  try{ if(typeof renderNearby==="function")renderNearby(); }catch(e){}
+  try{ if(window.exploreMap&&typeof exploreLoadStores==="function")exploreLoadStores(true); }catch(e){}
+  try{ if(curStoreDetail&&typeof renderStoreDetail==="function")renderStoreDetail(); }catch(e){}
 }
 function chargerHorairesOSM(){
   if(_horairesEtat===1||_horairesEtat===2)return; // echec (3) : on a le droit de retenter
   _horairesEtat=1;
   var chemins=_cheminsHoraires();
   var essayer=function(i){
-    /* Delai maximal sur le chemin RESEAU seulement. Sans lui, une connexion
+    /* Delai maximal sur les chemins RESEAU seulement. Sans lui, une connexion
        qui traine laisserait _horairesEtat a 1 indefiniment, et l'accueil
        afficherait « Horaires en cours de chargement… » pour toujours au lieu
-       de retomber sur la copie embarquee. Le dernier chemin est local : il n'a
-       pas besoin de delai, et lui en imposer un casserait le repli sur un
-       telephone lent. */
+       de retomber sur la copie embarquee. Un chemin local n'a pas besoin de
+       delai, et lui en imposer un casserait la lecture sur un telephone lent. */
     var dernier=(i+1>=chemins.length);
-    /* Le « dernier chemin » n'est local QU'EN coquille native : sur le web
-       c'est le reseau, et un fetch nu qui pend laissait « Horaires en cours
-       de chargement… » pour toute la session (audit personas). 12 s large
-       pour un telephone lent, mais une fin garantie. */
-    var p=fetchWithTimeout(chemins[i],dernier?12000:6000);
+    /* Un delai PARTOUT (audit personas : sur le web le dernier chemin est le
+       reseau, et un fetch nu qui pend laissait « Horaires en cours de
+       chargement… » pour toute la session) : 6 s, 12 s pour le dernier chemin
+       reseau, et 20 s pour la copie EMBARQUEE de la coquille native, qu'un
+       telephone lent ne doit pas voir expirer mais qui doit finir. */
+    var reseau=/^https?:/i.test(chemins[i])||!_horairesNatif();
+    var p=fetchWithTimeout(chemins[i],reseau?(dernier?12000:6000):20000);
     return p
       .then(function(r){ if(!r.ok)throw 0; return r.json(); })
       .catch(function(e){ if(!dernier)return essayer(i+1); throw e; });
   };
   essayer(0)
     .then(function(j){
-      HORAIRES_OSM=j; _horairesEtat=2;
-      /* Les ecrans deja peints affichaient « Ouvert » selon l'heuristique :
-         on les repeint pour qu'ils disent la verite. */
-      try{ if(typeof renderStoreList==="function"&&curSel)renderStoreList(); }catch(e){}
-      try{ if(typeof renderNearby==="function")renderNearby(); }catch(e){}
-      try{ if(window.exploreMap&&typeof exploreLoadStores==="function")exploreLoadStores(true); }catch(e){}
-      try{ if(curStoreDetail&&typeof renderStoreDetail==="function")renderStoreDetail(); }catch(e){}
+      _appliquerHoraires(j);
+      if(_horairesNatif())_rafraichirHorairesNatif();
     })
     .catch(function(){ _horairesEtat=3; });
+}
+/* Le rafraichissement silencieux de la coquille native. Tout echec est
+   avale : la copie embarquee reste a l'ecran, c'est exactement le repli voulu. */
+var _horairesRafraichi=false;
+function _rafraichirHorairesNatif(){
+  if(_horairesRafraichi)return;
+  _horairesRafraichi=true;
+  var lireJson=function(p){ return p.then(function(r){ if(!r||!r.ok)throw 0; return r.json(); }); };
+  var dateDe=function(meta){ return (meta&&typeof meta.date==="string")?meta.date:""; };
+  var dateLocale="";
+  lireJson(fetch(CHEMIN_HORAIRES_META)).catch(function(){ return null; })
+    .then(function(metaLocal){
+      dateLocale=dateDe(metaLocal);
+      return new Promise(function(res){
+        if(typeof idbGet!=="function"){res(null);return;}
+        try{ idbGet(IDB_HORAIRES_CLE,res); }catch(e){ res(null); }
+      });
+    })
+    .then(function(garde){
+      /* Une copie gardee lors d'un lancement precedent, plus recente que le
+         bundle : on la prend tout de suite, avant meme de parler au reseau. */
+      var dateGardee=(garde&&garde.data&&typeof garde.date==="string")?garde.date:"";
+      if(dateGardee&&dateGardee>dateLocale)_appliquerHoraires(garde.data);
+      var connue=dateGardee>dateLocale?dateGardee:dateLocale;
+      return lireJson(fetchWithTimeout(URL_HORAIRES_META_PUBLIEE,6000)).then(function(metaPub){
+        var datePub=dateDe(metaPub);
+        if(!datePub||datePub<=connue)return;   // le site n'a rien de plus recent
+        return lireJson(fetchWithTimeout(URL_HORAIRES_PUBLIEE,30000)).then(function(j){
+          if(!j||typeof j!=="object")return;
+          _appliquerHoraires(j);
+          try{ if(typeof idbSet==="function")idbSet(IDB_HORAIRES_CLE,{date:datePub,data:j}); }catch(e){}
+        });
+      });
+    })
+    .catch(function(){ /* silencieux : la copie embarquee reste */ });
 }
 /* L'identifiant OpenStreetMap d'un magasin : champ osm, champ osmId, ou
    identifiant « o12345 ».
@@ -31134,10 +32057,208 @@ function _reparerSeparateur(t){
 }
 function horairesReels(s){
   if(_horairesEtat===0)chargerHorairesOSM();
-  if(!HORAIRES_OSM)return null;
   var k=osmIdDe(s);
-  return k?(_reparerSeparateur(HORAIRES_OSM[k])||null):null;
+  if(HORAIRES_OSM&&k&&HORAIRES_OSM[k])return _reparerSeparateur(HORAIRES_OSM[k])||null;
+  var z=_hzTrouve(s);
+  return z?(_reparerSeparateur(z)||null):null;
 }
+/* ══ LES HORAIRES QUE L'IMPORT AVAIT PERDUS ════════════════════════════════
+   Mesure sur la production, Paris : 18 % des magasins avaient des horaires.
+   Pourtant 976 des magasins parisiens SANS horaires en ont dans
+   OpenStreetMap, sous leur propre identifiant : l'import de juillet 2026 les
+   a perdus en route, et le fichier d'horaires embarque s'arrete a la
+   frontiere belge. Le filtre « Ouvert » ecartait donc l'immense majorite de
+   Paris comme « horaire inconnu ».
+   Ici, quand une zone s'affiche, on demande a OpenStreetMap les horaires des
+   magasins qui n'en ont pas — PAR IDENTIFIANT EXACT, une seule requete pour
+   toute la zone. Correspondance stricte : meme identifiant ET a moins de
+   250 m (un numero de noeud et un numero de chemin peuvent coincider) ;
+   aucune devinette. Ce qui est trouve est garde sur l'appareil, et reecrit
+   sur la fiche du magasin dans la base : le premier qui regarde une zone la
+   repare pour tout le monde.
+   Le serveur Overpass principal sature parfois (« at capacity ») : on
+   essaie ses miroirs dans l'ordre, chacun avec son delai. */
+var _HZ_MIROIRS=["https://overpass-api.de/api/interpreter",
+                 "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+                 "https://overpass.kumi.systems/api/interpreter"];
+var _hzEnCours=false,_hzRepos=0,_hzT=null,_HZ=null;
+function _hzCharger(){
+  if(_HZ)return _HZ;
+  _HZ={trouves:{},essayes:{}};
+  try{var o=JSON.parse(localStorage.getItem("magoHorairesZone")||"null");if(o&&o.trouves)_HZ=o;}catch(e){}
+  if(!_HZ.essayes)_HZ.essayes={};
+  return _HZ;
+}
+function _hzSauver(){
+  var h=_hzCharger(),now=Date.now(),MOIS=30*864e5;
+  /* Bornes : les essais de plus d'un mois tombent, et le cache ne garde que
+     les 6000 horaires les plus recents (le reste est dans la base). */
+  Object.keys(h.essayes).forEach(function(k){if(now-h.essayes[k]>MOIS)delete h.essayes[k];});
+  var cles=Object.keys(h.trouves);
+  if(cles.length>6000){cles.sort(function(a,b){return (h.trouves[a].t||0)-(h.trouves[b].t||0);});cles.slice(0,cles.length-6000).forEach(function(k){delete h.trouves[k];});}
+  try{localStorage.setItem("magoHorairesZone",JSON.stringify(h));}catch(e){}
+}
+function _hzTrouve(s){
+  if(!s)return null;
+  var e=_hzCharger().trouves[String(s.fbId||s.id||"")];
+  return e?e.h:null;
+}
+function _hzMetre(la1,lo1,la2,lo2){
+  var dLa=(la1-la2)*111320,dLo=(lo1-lo2)*111320*Math.cos(la1*Math.PI/180);
+  return Math.sqrt(dLa*dLa+dLo*dLo);
+}
+function _hzLireCSV(txt){
+  var idx={};
+  String(txt||"").split(/\r?\n/).forEach(function(l){
+    var c=l.split("\t"); if(c.length<5)return;
+    var tp=c[0],id=c[1],la=parseFloat(c[2]),lo=parseFloat(c[3]),oh=c.slice(4).join("\t").trim();
+    if(!/^(node|way)$/.test(tp)||!/^\d+$/.test(id)||!oh||isNaN(la)||isNaN(lo))return;
+    // une valeur contenant une virgule arrive entre guillemets CSV
+    if(oh.charAt(0)==='"'&&oh.charAt(oh.length-1)==='"')oh=oh.slice(1,-1).replace(/""/g,'"');
+    (idx[id]=idx[id]||[]).push({la:la,lo:lo,oh:oh});
+  });
+  return idx;
+}
+function _hzPoster(url,corps,ms){
+  return new Promise(function(ok,ko){
+    var ctrl=("AbortController" in window)?new AbortController():null,fini=false;
+    var t=setTimeout(function(){if(fini)return;fini=true;try{ctrl&&ctrl.abort();}catch(e){}ko(new Error("delai"));},ms);
+    fetch(url,{method:"POST",body:"data="+encodeURIComponent(corps),
+      headers:{"Content-Type":"application/x-www-form-urlencoded"},signal:ctrl?ctrl.signal:undefined})
+      .then(function(r){return r.text().then(function(t2){return {ok:r.ok,t:t2};});})
+      .then(function(r){if(fini)return;fini=true;clearTimeout(t);
+        /* Un serveur sature repond 200 avec un texte d'erreur : on exige des
+           lignes au bon format, sinon c'est un echec et on passe au miroir. */
+        if(!r.ok||/^\s*(#|<)/.test(r.t))ko(new Error("refus"));else ok(r.t);})
+      .catch(function(e){if(fini)return;fini=true;clearTimeout(t);ko(e);});
+  });
+}
+/* Le fichier belge couvre cette boite (outils/recolter-horaires.mjs). Tant
+   qu'il n'est pas arrive, un magasin qui s'y trouve n'est PAS candidat :
+   sinon on allait chercher sur le reseau, et on ecrivait dans la base, un
+   horaire que l'app avait deja dans sa poche. */
+function _hzDansBoiteBE(s){ return s.lat>=49.49&&s.lat<=51.51&&s.lng>=2.54&&s.lng<=6.41; }
+var _hzEnAttente=null;
+/* Repeindre APRES une trouvaille, sans abimer ce que l'utilisateur fait :
+   - un chargement de zone est en vol : il peindra lui-meme des donnees
+     fraiches (et les horaires trouves s'y lisent via _hzTrouve) ;
+   - un doigt est pose sur un pin ou son menu est ouvert : on attend qu'il
+     le relache plutot que de lui arracher le menu sous le doigt. */
+var _hzRepeintT=null;
+function _hzRepeindre(n){
+  try{clearTimeout(_hzRepeintT);}catch(e){}
+  _hzRepeintT=setTimeout(function(){
+    try{
+      var hh=document.getElementById("explore-map-host");
+      if(window.exploreMap&&hh&&hh.style.display!=="none"&&!_exploreChargeEnVol()){
+        if(_geste||document.getElementById("pin-menu")){ if((n||0)<20)return _hzRepeindre((n||0)+1); }
+        else exploreLoadStores(true);
+      }
+    }catch(e){}
+    try{if(curSel)renderStoreList();}catch(e){}
+    try{renderNearby();}catch(e){}
+  },n?700:250);
+}
+function comblerHorairesZone(liste){
+  if(!liste||!liste.length)return;
+  /* Une requete est deja en vol : on garde la demande, elle repartira a la
+     fin au lieu d'etre perdue. */
+  if(_hzEnCours){_hzEnAttente=liste;return;}
+  try{
+    if(Date.now()<_hzRepos)return;
+    var h=_hzCharger(),now=Date.now(),MOIS=30*864e5,beAttendu=(_horairesEtat===0||_horairesEtat===1);
+    var cand=[];
+    for(var i=0;i<liste.length&&cand.length<1200;i++){
+      var s=liste[i]; if(!s||typeof s.lat!=="number")continue;
+      if(s.hours&&String(s.hours).trim())continue;
+      var k=osmIdDe(s); if(!k)continue;
+      if(horairesReels(s))continue;
+      if(beAttendu&&_hzDansBoiteBE(s))continue;
+      var sid=String(s.fbId||s.id||""); if(!sid)continue;
+      if(h.essayes[sid]&&now-h.essayes[sid]<MOIS)continue;
+      try{ if(storeCertifie(s))continue; }catch(e){}
+      cand.push(s);
+    }
+    /* Deux ou trois magasins : la fiche s'en charge a l'ouverture
+       (enrichStoreHours). La requete de zone vaut pour un lot. */
+    if(cand.length<5)return;
+    /* Par lots de 300, l'un APRES l'autre (les serveurs Overpass limitent
+       les requetes simultanees), et UN seul repeint par trouvaille, differe.
+       Avant, chaque lot repeignait toute la carte puis relancait le suivant
+       par ce repeint : jusqu'a treize reconstructions d'affilee sur Paris. */
+    var lots=[];
+    for(var j=0;j<cand.length;j+=300)lots.push(cand.slice(j,j+300));
+    _hzEnCours=true;
+    var unLot=function(lot){
+      var ids=lot.map(function(s){return osmIdDe(s);}).filter(function(v,j2,a2){return a2.indexOf(v)===j2;}).join(",");
+      var q='[out:csv(::type,::id,::lat,::lon,opening_hours;false;"\t")][timeout:40];'+
+            '(node(id:'+ids+')["opening_hours"];way(id:'+ids+')["opening_hours"];);out center;';
+      var essai=function(n){
+        if(n>=_HZ_MIROIRS.length)return Promise.reject(new Error("aucun miroir"));
+        return _hzPoster(_HZ_MIROIRS[n],q,25000).catch(function(){return essai(n+1);});
+      };
+      return essai(0).then(function(txt){
+        var idx=_hzLireCSV(txt),ecrire=[],t=Date.now();
+        lot.forEach(function(s){
+          var sid=String(s.fbId||s.id||"");
+          h.essayes[sid]=t;
+          /* Revérifie a l'arrivee : le fichier belge a pu arriver, ou
+             quelqu'un a pu saisir l'horaire, pendant la requete. */
+          if(s.hours&&String(s.hours).trim())return;
+          if(horairesReels(s))return;
+          var meilleurs=(idx[osmIdDe(s)]||[]).filter(function(e){return _hzMetre(s.lat,s.lng,e.la,e.lo)<=250;});
+          if(!meilleurs.length)return;
+          meilleurs.sort(function(a2,b2){return _hzMetre(s.lat,s.lng,a2.la,a2.lo)-_hzMetre(s.lat,s.lng,b2.la,b2.lo);});
+          /* 255 et non 120 : couper « …; Sa 09:00-16:00 » en « …; Sa 09 »
+             effacait le samedi — un « Ferme » ecrit pour tout le monde. */
+          var oh=meilleurs[0].oh.slice(0,255);
+          h.trouves[sid]={h:oh,t:t};
+          s.hours=oh;
+          try{(window.STORES||[]).forEach(function(x){if(String(x.fbId||x.id)===sid&&!x.hours)x.hours=oh;});}catch(e){}
+          ecrire.push([sid,oh]);
+        });
+        _hzSauver();
+        if(ecrire.length){
+          if(window.fbSaveHoursBatch)window.fbSaveHoursBatch(ecrire).then(function(){try{if(window.fbTouchCache)window.fbTouchCache();}catch(e){}}).catch(function(){});
+          _hzRepeindre(0);
+        }
+      });
+    };
+    var chaine=Promise.resolve();
+    lots.forEach(function(lot){ chaine=chaine.then(function(){return unLot(lot);}); });
+    chaine.catch(function(){
+      /* Tous les serveurs refusent : on ne marque RIEN comme essaye (ce n'est
+         pas un « pas d'horaire »), et on se tait dix minutes. Les lots
+         suivants ne partent pas. */
+      _hzRepos=Date.now()+10*60*1000;
+    }).then(function(){
+      _hzEnCours=false;
+      var suite=_hzEnAttente; _hzEnAttente=null;
+      if(suite)comblerHorairesBientot(suite);
+    });
+  }catch(e){_hzEnCours=false;}
+}
+/* Appel differe : la carte se redessine a chaque deplacement, la requete ne
+   part qu'une fois la vue posee. Deux demandeurs partagent la minuterie (la
+   carte, et l'arrivee des magasins autour de soi) : on FUSIONNE leurs listes
+   au lieu que la derniere efface l'autre. La plus recente passe devant. */
+var _hzListeAttente=null;
+function comblerHorairesBientot(liste){
+  try{clearTimeout(_hzT);}catch(e){}
+  if(!liste||!liste.length)return;
+  if(_hzListeAttente&&_hzListeAttente!==liste){
+    var vu={},fus=[];
+    liste.concat(_hzListeAttente).forEach(function(s){
+      var k=s&&String(s.fbId||s.id||""); if(!k||vu[k])return; vu[k]=1; fus.push(s);
+    });
+    _hzListeAttente=fus;
+  } else _hzListeAttente=liste;
+  _hzT=setTimeout(function(){var l=_hzListeAttente;_hzListeAttente=null;comblerHorairesZone(l);},1200);
+}
+/* Les magasins autour de soi (accueil, fiches boisson) : meme comblement,
+   des que la zone est chargee. STORES est trie par distance : les 300
+   premiers sans horaires sont les plus proches. */
+window.addEventListener("fbStoresLoaded",function(){ try{comblerHorairesBientot(window.STORES||[]);}catch(e){} });
 /* On ne renvoie plus seulement OUVERT ou FERME : on renvoie aussi D'OU on le
    tient. Trois sources, et elles ne se valent pas du tout.
 
@@ -31156,10 +32277,21 @@ function horairesReels(s){
    plus quinze remplacements. Les chaines distinctes se comptent par
    centaines, les magasins par milliers. */
 var _NORM_SAISI={};
+/* A la RELECTURE, on va plus loin : toute saisie humaine passe par
+   normaliserHoraires AVANT d'etre enregistree (fiche, gerant), donc une
+   chaine stockee qui commence par un jour OSM (Mo..Su, PH, ou un mois) est de la syntaxe
+   OSM — importee d'OpenStreetMap, retrouvee par la carte, ou deja traduite.
+   Si elle se lit telle quelle, on la lit telle quelle, meme quand un morceau
+   echappe a la lecture (« Feb-Jul: Sa 09:00-14:00 », « 2026 Dec 25 off ») :
+   la retraduire abimait le reste. C'est exactement la lecture du fichier
+   d'horaires embarque pour la meme chaine. */
 function _horaireSaisi(s){
   var h=(s&&s.hours)?String(s.hours):"";
   if(!h)return "";
-  if(_NORM_SAISI[h]===undefined)_NORM_SAISI[h]=normaliserHoraires(h);
+  if(_NORM_SAISI[h]===undefined){
+    var brut=/^\s*(Mo|Tu|We|Th|Fr|Sa|Su|PH|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/.test(h)?_reparerSeparateur(h.trim()):"";
+    _NORM_SAISI[h]=(brut&&parseOSMHours(brut))?brut:normaliserHoraires(h);
+  }
   return _NORM_SAISI[h];
 }
 window._horaireSaisi=_horaireSaisi;
@@ -31455,6 +32587,15 @@ function obCablerComptes(){
   var inp=document.getElementById("ob-pseudo");
   var err=document.getElementById("ob-err");
   var des=document.getElementById("ob-des");
+  /* En coquille native (Capacitor), la connexion Google est impossible : la
+     fenetre part dans Safari et revient vide, puis le SDK refuse le schema
+     capacitor:// a la redirection (voir signInGoogle). On ne montre pas un
+     bouton qui echoue a coup sur : le compte Magofeed par e-mail, deja cable
+     juste dessous, est LE chemin. Le web et la PWA ne changent pas. */
+  if(g&&window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform()){
+    g.style.display="none";
+    if(m)m.style.marginTop="0";
+  }
   /* Le champ arrivait vide avec un minimum de deux lettres : un mur pour
      entrer dans l'application, alors qu'un pseudo presentable est deja tire au
      hasard ailleurs dans le code. On le propose, et le de en relance un autre.
@@ -31657,6 +32798,12 @@ function initSplash(){
     // garde anti-intro) et rien ne la recalculait apres : elle n'apparaissait
     // qu'au premier changement d'onglet. On la reevalue des que le splash part.
     try{renderChasse();}catch(e){}
+    /* L'accueil est visible et vivant : le filet de demarrage n'a plus rien
+       a dire. Sans ca, sur reseau lent, son panneau « L'appli n'a pas reussi
+       a demarrer » recouvrait un accueil qui marchait, a 20 s. */
+    try{window.__magoBootOK();}catch(e){}
+    /* Et la premiere lettre tapee ne paie plus les caches de recherche. */
+    try{prechaufferRecherche();}catch(e){}
   };
   if(typeof window.magoSplashPret==="function")window.magoSplashPret(fermer);
   else setTimeout(fermer,0);
@@ -32359,8 +33506,80 @@ function renderDeclarationsMarque(){
 }
 window.renderDeclarationsMarque=renderDeclarationsMarque;
 
+/* ── DERNIERES ERREURS (journal des plantages) ────────────────────────────
+   Les lignes deposees par magoJournal, regroupees par message : combien de
+   fois, sur quels ecrans, avec quelles versions. C'est ce qui permet enfin de
+   repondre a « ca plante » par « ou, et avec quel build ». Reste en francais,
+   comme tout l'ecran d'administration : une seule personne le lit. */
+function renderDernieresErreurs(){
+  if(!isAdmin)return;
+  var host=document.getElementById("admin-erreurs");if(!host)return;
+  if(!window.fbDernieresErreurs){host.innerHTML="";return;}
+  function carte(corps){return '<div class="cl-card"><div class="cl-name">Derni\u00E8res erreurs</div>'+corps+'</div>';}
+  host.innerHTML=carte('<div class="cl-line">Lecture du journal\u2026</div>');
+  window.fbDernieresErreurs().then(function(rows){
+    if(!rows||!rows.length){
+      host.innerHTML=carte('<div class="cl-line">Aucune erreur enregistr\u00E9e : les lignes appara\u00EEtront au fil des plantages que l\u2019app signale d\u2019elle-m\u00EAme.</div>');
+      return;
+    }
+    var h="";
+    rows.forEach(function(g){
+      var quand="";
+      try{quand=g.t?new Date(g.t).toLocaleString("fr-BE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"";}catch(e){}
+      h+='<div style="padding:8px 0;border-top:1px solid var(--border)">'+
+        '<div style="display:flex;gap:8px;align-items:baseline">'+
+          '<span style="font-size:10.5px;font-weight:800;color:var(--s3);text-transform:uppercase;flex:none">'+sanitize(g.k)+'</span>'+
+          '<span style="flex:1;min-width:0;font-size:12.5px;font-weight:700;color:var(--s1);word-break:break-word">'+sanitize(g.m)+'</span>'+
+          '<span class="cl-line" style="margin:0;flex:none;font-weight:800">'+g.n+'\u00D7</span>'+
+        '</div>'+
+        '<div class="cl-line" style="margin:2px 0 0">'+sanitize(Object.keys(g.ecrans).join(", ")||"\u00E9cran inconnu")+' \u00B7 '+
+          sanitize(Object.keys(g.versions).join(", ")||"version inconnue")+(g.natif?' \u00B7 natif':'')+(quand?' \u00B7 '+sanitize(quand):'')+'</div>'+
+        (g.p?'<pre style="margin:4px 0 0;font-size:10px;color:var(--s3);white-space:pre-wrap;word-break:break-word;max-height:72px;overflow:hidden">'+sanitize(g.p.slice(0,240))+'</pre>':'')+
+      '</div>';
+    });
+    host.innerHTML=carte(h);
+  }).catch(function(e){
+    var c=String((e&&(e.code||e.message))||e);
+    host.innerHTML=carte('<div class="cl-line">'+(c.indexOf("permission")!==-1
+      ?"Publie les nouvelles r\u00E8gles Firestore (erreursClient) pour lire le journal."
+      :"Indisponible pour le moment.")+'</div>');
+  });
+}
+/* ── ACTIONS GLOBALES ──────────────────────────────────────────────────────
+   Elles vivaient dans la feuille « Admin » de CHAQUE fiche boisson, a un
+   doigt d'une correction de photo : importer une zone, remplir les
+   enseignes, purger Lidl/Aldi/Match, nettoyer le classement, poser le pack
+   sur une enseigne. Aucune ne concerne la boisson ouverte. Elles sont
+   regroupees ici, repliees par defaut, chacune avec ses confirmations. */
+function renderMaintenance(){
+  var el=document.getElementById("admin-maintenance");if(!el)return;
+  if(!isAdmin){el.innerHTML="";return;}
+  var lignes=[
+    ["adm-zone","Importer les magasins d'une zone (OSM)","ajoute, ne d\u00e9truit rien"],
+    ["adm-fill","Remplissage des enseignes (auto)","ajoute le rayon probable sur toutes les enseignes"],
+    ["adm-pack","Pack grande surface \u2192 une enseigne","ajoute les "+packDrinkIds().length+" boissons des "+PACK_BRANDS.length+" marques du pack \u00e0 tous ses magasins"],
+    ["adm-clean","Purger Lidl / Aldi / Match","IRR\u00c9VERSIBLE \u2014 retire les boissons non confirm\u00e9es"],
+    ["adm-dedup","Nettoyer les doublons du classement","IRR\u00c9VERSIBLE \u2014 supprime des comptes vides"]
+  ];
+  el.innerHTML='<details style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:12px 14px">'+
+    '<summary style="cursor:pointer;font-size:14px;font-weight:800;color:var(--s1)">Actions sur toute la base</summary>'+
+    '<div style="font-size:12px;color:var(--s2);margin:8px 0 10px;line-height:1.45">Elles touchent tous les magasins ou tous les comptes, pas une fiche. Chacune demande confirmation.</div>'+
+    lignes.map(function(l){
+      return '<div id="'+l[0]+'" role="button" tabindex="0" style="padding:11px 12px;border-radius:12px;background:var(--bg3);margin-bottom:7px;cursor:pointer">'+
+        '<div style="font-size:13.5px;font-weight:700;color:'+(/IRR/.test(l[2])?'#b91c1c':'var(--s1)')+'">'+l[1]+'</div>'+
+        '<div style="font-size:11.5px;color:var(--s2);margin-top:2px">'+l[2]+'</div></div>';
+    }).join("")+'</details>';
+  var lier=function(id,fn){var b=document.getElementById(id);if(!b)return;b.onclick=fn;b.onkeydown=function(ev){if(ev.key==="Enter")fn();};};
+  lier("adm-zone",function(){try{openOsmImport();}catch(e){}});
+  lier("adm-fill",adminFillEnseignes);
+  lier("adm-pack",adminAssignPack);
+  lier("adm-clean",adminCleanUnverified);
+  lier("adm-dedup",adminCleanDuplicateUsers);
+}
 function renderAdmin(){
+  try{ renderMaintenance(); }catch(e){ console.warn("maintenance:",e); }
   try{ renderDeclarationsMarque(); }catch(e){ console.warn("declarations marque:",e); }
+  try{ renderDernieresErreurs(); }catch(e){ console.warn("dernieres erreurs:",e); }
   try{ renderOffrirPoints(); }catch(e){}
   try{ renderRejouerSignalements(); }catch(e){}
   try{ renderReparerVisibilite(); }catch(e){}
@@ -34067,7 +35286,7 @@ function renderPhotoSuggestions(){
         var did=String(r.drinkId);
         if(window.fbApplyDrinkPhoto)window.fbApplyDrinkPhoto(did,r.data).catch(function(e){console.warn(e);});
         imgCache[did]={url:r.data,ts:Date.now(),community:true,manual:true};
-        try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(e){}
+        sauverImgCache();
         var dr=DRINKS.find(function(x){return Number(x.id)===Number(r.drinkId);});
         if(dr)refreshDrinkVisual(dr);
         renderTrends();
@@ -34243,6 +35462,19 @@ var ICO_SORTIE='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stro
 var ICO_PERSONNE='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="display:block"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>';
 
 function signInGoogle(){
+  /* En coquille native, la fenetre Google ne peut pas s'ouvrir : WKWebView
+     envoie la fenetre dans Safari et rend nil (auth/popup-blocked), puis la
+     redirection est refusee parce que capacitor:// n'est pas un domaine
+     autorise — « Domaine non autorisé dans Firebase » a chaque essai, et la
+     personne restait en invite. Plutot qu'un echec garanti, on ouvre le compte
+     Magofeed par e-mail (deja cable), connexion si une adresse est connue. */
+  if(pushNatif()){
+    var adresseConnue="";
+    try{adresseConnue=localStorage.getItem("magoAuthEmail")||"";}catch(e){}
+    toast(tr("Dans l'app, connecte-toi avec ton e-mail et un mot de passe"));
+    openAuthSheet(adresseConnue?"in":"up",adresseConnue);
+    return;
+  }
   if(!window.fbSignInWithGoogle){toast(tr("Connexion indisponible pour le moment"));return;}
   var m=(window.fbMesMethodes?window.fbMesMethodes():null)||{};
   toast(m.connecte&&!m.google?tr("Liaison à Google…"):tr("Connexion à Google…"));
@@ -34766,15 +35998,124 @@ function registerServiceWorker(){
       location.reload();
     });
   }
+  /* ── UNE NOUVELLE VERSION ATTEND UN GESTE ──
+     sw.js ne prend plus la main des son installation (plus de skipWaiting a
+     l'install) : la version neuve reste « en attente » tant qu'on ne lui
+     envoie pas SKIP_WAITING. Avant, elle prenait la main toute seule et
+     l'ecouteur controllerchange ci-dessus rechargeait la page 4 a 15 s apres
+     l'ouverture — en pleine recherche, en plein prix, en plein message
+     (mesure : « coca » tape, puis retour a l'accueil, champ vide). Avec 178
+     mises en ligne en 66 jours, chaque testeur le subissait presque a chaque
+     ouverture. Desormais : un toast « touche pour redemarrer » ; et sans
+     geste, la bascule se fait quand l'app passe en arriere-plan, donc sans
+     saisie en cours. Le controllerchange existant fait le rechargement. */
+  var MSG_MAJ_PRETE="Nouvelle version prête · touche pour redémarrer";
+  function appliquerMaj(){
+    /* TOUJOURS le worker en attente DU MOMENT, pas celui qu'on a retenu.
+       Avec jusqu'a 21 mises en ligne par jour, une version peut attendre
+       (B) quand la suivante arrive (C) : B devient « redundant », C prend sa
+       place, et un SKIP_WAITING envoye a B partirait dans le vide — pas de
+       bascule, et le toast qu'on vient de toucher n'aurait rien fait. On
+       retombe sur _majPrete seulement s'il est encore vivant (un autre
+       onglet a pu installer sans que notre enregistrement l'ait encore vu).
+       Rien d'applicable (la version se telecharge encore) : on rend false,
+       l'appelant retient l'intention et annoncerMaj basculera a la fin. */
+    var reg=window._swReg;
+    var w=(reg&&reg.waiting)||null;
+    if(!w&&window._majPrete&&window._majPrete.state==="installed")w=window._majPrete;
+    window._majPrete=null;
+    if(!w)return false;
+    window._majVoulue=false;
+    /* Le verrou anti-boucle de controllerchange est leve : ce rechargement
+       est voulu (geste ou arriere-plan), comme dans chercherMiseAJour. */
+    try{sessionStorage.removeItem("mago_sw_reloaded");}catch(e){}
+    try{w.postMessage({type:"SKIP_WAITING"});}catch(e){return false;}
+    return true;
+  }
+  function annoncerMaj(w){
+    window._majPrete=w;
+    /* La personne a demande la mise a jour elle-meme (bouton des Reglages,
+       ou toast touche pendant que la version se telechargeait encore) : pas
+       de toast a toucher, on bascule. Pareil si l'app est DEJA en
+       arriere-plan : le visibilitychange est passe pendant le telechargement
+       (mesure : 5 Mo de coquille, plusieurs secondes sur un mauvais reseau),
+       personne ne tape, et sans ceci la bascule attendrait la prochaine mise
+       en arriere-plan. */
+    if(window._majVoulue||document.visibilityState==="hidden"){appliquerMaj();return;}
+    var t=document.getElementById("toast");
+    if(!t){return;}
+    /* Pas toast() : il efface au bout de 2,5 s, trop court pour un geste
+       qu'on ne guette pas, et .toast est en pointer-events:none (un message
+       qu'on ne touche pas). Pour celui-ci, le doigt compte : on rend la main
+       le temps de l'afficher, 8 s. La traduction passe par la meme table que
+       toast() (le texte francais est la cle, data/textes.js). */
+    var texte=(typeof tr==="function")?tr(MSG_MAJ_PRETE):MSG_MAJ_PRETE;
+    t.textContent=texte;
+    t.classList.add("show");
+    t.style.pointerEvents="auto";
+    t.onclick=function(){
+      /* L'element est partage avec toast() : un autre message a pu le
+         remplacer entre-temps. On ne redemarre que sur le notre. */
+      if(t.textContent!==texte)return;
+      t.onclick=null;t.style.pointerEvents="";t.classList.remove("show");
+      /* Rien d'applicable a l'instant (la version annoncee a ete remplacee
+         par une plus recente qui se telecharge encore) : on retient le
+         geste, annoncerMaj basculera des l'installation finie. */
+      if(!appliquerMaj())window._majVoulue=true;
+      /* Le navigateur n'active la version neuve qu'une fois l'ancienne sans
+         requete en vol (une vignette qui traine sur un mauvais reseau) :
+         le rechargement peut prendre quelques secondes. On le dit. */
+      try{toast(_tr("updateFound"));}catch(e){}
+    };
+    clearTimeout(window._majToastT);
+    window._majToastT=setTimeout(function(){t.classList.remove("show");t.style.pointerEvents="";t.onclick=null;},8000);
+  }
+  function surveillerMaj(reg){
+    function guetter(w){
+      if(!w)return;
+      w.addEventListener("statechange",function(){
+        /* « installed » avec un controleur en place = une version neuve qui
+           attend. Sans controleur (tout premier lancement), elle s'active
+           d'elle-meme : rien a annoncer. */
+        if(w.state==="installed"&&navigator.serviceWorker.controller)annoncerMaj(w);
+        else if(w.state==="redundant"){
+          /* Mort : remplace par une version plus recente (un autre worker
+             est en route, il sera annonce a son tour) ou installation
+             echouee (reseau coupe en plein telechargement). Dans les deux
+             cas on ne garde pas un pointeur vers lui ; et sans remplacant,
+             l'intention de redemarrer n'a plus de cible : une version
+             trouvee des heures plus tard ne doit pas s'appliquer sans
+             toast, en pleine saisie. */
+          if(window._majPrete===w)window._majPrete=null;
+          if(!reg.installing&&!reg.waiting)window._majVoulue=false;
+        }
+      });
+    }
+    /* Une version deja en attente (trouvee a un lancement precedent, jamais
+       appliquee) se propose tout de suite. */
+    if(reg.waiting&&navigator.serviceWorker.controller)annoncerMaj(reg.waiting);
+    guetter(reg.installing);
+    /* updatefound couvre aussi le reg.update() ci-dessous et celui de
+       chercherMiseAJour : c'est le meme enregistrement. */
+    reg.addEventListener("updatefound",function(){guetter(reg.installing);});
+  }
+  document.addEventListener("visibilitychange",function(){
+    if(document.visibilityState==="hidden")appliquerMaj();
+  });
   navigator.serviceWorker.register("sw.js").then(function(reg){
+    window._swReg=reg;
+    surveillerMaj(reg);
     /* Vérifie tout de suite s'il existe une version plus récente en ligne.
        update() renvoie une PROMESSE : le try/catch n'attrapait pas son rejet.
        Sur un réseau qui flanche pendant la seconde de démarrage — un magasin,
        un sous-sol — la vérification échouait, la promesse était rejetée sans
        gestionnaire, et l'écran de plantage « L'appli n'a pas réussi à
        démarrer » recouvrait une app qui marchait très bien. Une mise à jour
-       qu'on ne peut pas vérifier maintenant se vérifiera la prochaine fois. */
-    try{var p=reg.update();if(p&&p.catch)p.catch(function(){});}catch(e){}
+       qu'on ne peut pas vérifier maintenant se vérifiera la prochaine fois.
+       Pas si register() vient DEJA de trouver une version (reg.installing,
+       mesure : Chromium verifie sw.js a chaque register) : la refaire
+       pendant ce telechargement ne trouverait rien de plus. */
+    try{if(!reg.installing){var p=reg.update();if(p&&p.catch)p.catch(function(){});}}catch(e){}
   }).catch(function(e){console.warn("SW registration failed:",e);});
   setTimeout(function(){try{handleDeepLink();}catch(e){}},400);
   /* Bouton « Chercher une mise à jour » (Réglages) : force la vérification du
@@ -34791,8 +36132,33 @@ function registerServiceWorker(){
       if(!reg){toast(_tr("msgOfflineT"));return;}
       return reg.update().then(function(){
         var w=reg.installing||reg.waiting;
-        if(w){toast(_tr("updateFound"));setTimeout(function(){location.reload();},2500);}
-        else toast(_tr("updateNone"));
+        if(!w){toast(_tr("updateNone"));return;}
+        toast(_tr("updateFound"));
+        /* La version neuve n'avance plus toute seule (sw.js attend
+           SKIP_WAITING) : on le lui envoie des qu'elle est installee, et le
+           controllerchange recharge sur la NOUVELLE version. Avant, un
+           rechargement aveugle partait a 2,5 s : sur un reseau lent, les
+           5 Mo de la coquille n'etaient pas encore telecharges, la page
+           repartait sur l'ANCIEN worker, et le toast « redemarrage »
+           mentait. Ici on attend l'installation, quelle que soit sa duree. */
+        window._majVoulue=true;
+        var appliquer=function(){window._majPrete=w;appliquerMaj();};
+        if(w.state==="installed")appliquer();
+        w.addEventListener("statechange",function(){
+          if(w.state==="installed")appliquer();
+          /* Page jamais pilotee (premier lancement : aucun ecouteur
+             controllerchange) : on recharge nous-memes a l'activation. */
+          else if(w.state==="activated"&&!alreadyControlled)location.reload();
+          else if(w.state==="redundant"){
+            /* Remplace par une version plus recente arrivee entre-temps :
+               rien a dire, surveillerMaj l'annonce et _majVoulue la fait
+               basculer. Sans remplacant, l'installation a vraiment echoue
+               (reseau coupe en plein telechargement) : on le dit, le prochain
+               lancement reessaiera. */
+            if(reg.installing||reg.waiting)return;
+            window._majVoulue=false;toast(_tr("msgOfflineT"));
+          }
+        });
       });
       /* La verification a ECHOUE — reseau coupe le plus souvent. Elle affichait
          « Tu as deja la derniere version » : une confirmation rassurante et
@@ -34830,7 +36196,7 @@ function enhanceA11y(){
 function toggleFav(id,el){
   var idx=favorites.indexOf(id);var adding=(idx===-1);
   if(adding){favorites.push(id);if(el)el.innerHTML=heartSVG(true,el.className==="dcard-fav"?18:20);}else{favorites.splice(idx,1);if(el)el.innerHTML=heartSVG(false,el.className==="dcard-fav"?18:20);}
-  localStorage.setItem("magofavs",JSON.stringify(favorites));renderFavs();playSound("pop");
+  ecrire("magofavs",favorites);renderFavs();playSound("pop");
   if(el){el.style.animation="none";void el.offsetWidth;el.style.animation="heartPop .35s cubic-bezier(.34,1.56,.64,1)";}
   // Favori = veille automatique : on te previent (push) quand cette boisson est
   // signalee pres de toi. Reutilise l'infra notifyWatchers deja deployee.
@@ -34862,7 +36228,7 @@ function renderFavs(){
 /* ================================
    SEARCH HISTORY
 ================================ */
-function addToHistory(term){if(!term||term.length<2)return;searchHistory=searchHistory.filter(function(h){return h!==term;});searchHistory.unshift(term);searchHistory=searchHistory.slice(0,5);localStorage.setItem("magosearchhist",JSON.stringify(searchHistory));}
+function addToHistory(term){if(!term||term.length<2)return;searchHistory=searchHistory.filter(function(h){return h!==term;});searchHistory.unshift(term);searchHistory=searchHistory.slice(0,5);ecrire("magosearchhist",searchHistory);}
 /* Recherche de joueurs : carte avec avatar, points, et ses boissons
    preferees en miniatures cliquables — tap sur son Fanta Citron et
    l'app t'emmene droit sur la fiche de la boisson. */
@@ -36786,6 +38152,9 @@ document.getElementById("q").addEventListener("blur",function(){var v=document.g
    promesse, un flux asynchrone) ne doit JAMAIS figer toute l'app ni donner
    l'impression qu'elle "redémarre toute seule". On l'attrape, on la note en
    console pour le débogage, et l'app continue de tourner normalement. */
+/* Le journal des plantages (erreursClient) est nourri par le PREMIER script
+   de la page, qui ecoute les memes evenements : rien a ajouter ici, une
+   seconde ligne serait un doublon. */
 window.addEventListener("error",function(e){
   try{console.warn("[Magofeed] erreur interceptée:",(e&&(e.message||(e.error&&e.error.message)))||e);}catch(_){}
 });
@@ -37043,7 +38412,7 @@ try{
       if(!imgCache[k]||!imgCache[k].url){imgCache[k]={url:url,ts:Date.now()};applied++;}
     });
     if(applied){
-      try{localStorage.setItem(IMG_CACHE_KEY,JSON.stringify(imgCache));}catch(err){}
+      sauverImgCache();
       /* Le lot de photos communautaires vient d'arriver : on REPEINT la
          vitrine, on ne la retire pas. La selection du jour ne depend plus du
          cache d'images (voir _aPhotoFiche) : la remettre a zero ici ferait
@@ -37057,7 +38426,12 @@ try{
   // Catalogue vivant : fusion des boissons promues par la communaute
   window.addEventListener("fbCatalogLoaded", function(e) {
     var rows=e.detail||[];
-    communityCatalogLoaded=true;
+    /* « Charge » seulement si on a VRAIMENT lu quelque chose : des fiches, ou
+       un zero venu du serveur. Un tableau vide servi par le cache memoire du
+       SDK (hors reseau) posait ce drapeau et bloquait du meme coup le repli
+       IndexedDB catalog:last ET le rechargement au retour du reseau : les
+       boissons de la communaute disparaissaient jusqu'au prochain lancement. */
+    if(rows.length||window._fbCatalogDepuisServeur===true)communityCatalogLoaded=true;
     var n=mergeCatalog(rows);
     // Les fiches communautaires viennent d'etre ajoutees a DRINKS : on (re)applique
     // les renommages admin (meta/drinkNames), sinon un nom corrige sur une fiche
@@ -37149,30 +38523,94 @@ try{
      fbEstSoutien n'a personne a regarder. */
   setTimeout(function(){try{donRetour();}catch(e){}},3000);
   enhanceA11y();
-  // Si Firebase ne repond jamais (SDK bloque), l'app tourne quand meme en mode
-  // degrade : on met le filet en veille pour ne pas afficher le panneau a tort.
-  setTimeout(function(){try{window.__magoBootOK();}catch(_e){}},15000);
+  /* L'app a demarre : le filet du premier script n'a plus rien a dire (il
+     attendait fbStoresLoaded ou 15 s, et recouvrait entre-temps un accueil
+     qui marchait), et la serie d'erreurs de demarrage consecutives, qui
+     decide de ce que la recuperation a le droit de jeter, repart de zero. */
+  try{window.__magoBootOK();}catch(_e){}
+  try{localStorage.removeItem("magoBootErreurs");}catch(_e){}
   // Le reset dev de l'onboarding (removeItem magoob/magotuto a chaque ouverture) a ete retire :
   // en production il relançait l'onboarding a chaque visite. Pour le revoir en dev,
   // utiliser le bouton "Revoir l'introduction" dans les parametres (resetOnboarding).
 }catch(e){
   try{console.error("[Magofeed] erreur de démarrage:",e);}catch(_){}
+  /* Au journal d'abord : c'est la seule trace qui survit au rechargement. */
+  try{window.magoJournal&&window.magoJournal("boot",(e&&(e.message||String(e)))||String(e),e&&e.stack);}catch(_){}
   // Plutôt qu'un mur de texte rouge (illisible et effrayant pour un utilisateur),
-  // on affiche un écran doux et on tente UNE récupération automatique : vider le
-  // cache puis recharger. Verrou de session -> jamais de boucle de rechargement.
+  // on affiche un écran doux et on tente UNE récupération automatique.
+  // Verrou de session -> jamais de boucle de rechargement.
   var _triedRecover=false;try{_triedRecover=sessionStorage.getItem("mago_boot_recover")==="1";}catch(_){}
-  document.body.innerHTML='<div style="position:fixed;inset:0;background:#151210;color:#f4f0e9;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px;font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;z-index:99999">'+
-    '<div style="margin-bottom:14px;color:var(--s1);display:flex;justify-content:center">'+icoTarget(44)+'</div>'+
+  /* Erreurs de demarrage CONSECUTIVES (remis a zero des que l'app demarre) :
+     c'est ce compteur qui decide de ce que la recuperation a le droit de
+     jeter. La premiere fois, rien ; la deuxieme, nos caches de code. */
+  var _nbErr=0;try{_nbErr=Number(localStorage.getItem("magoBootErreurs")||0)||0;}catch(_){}
+  _nbErr++;try{localStorage.setItem("magoBootErreurs",String(_nbErr));}catch(_){}
+  /* Le texte de l'erreur reste a l'ecran, en gris : avant, le panneau du
+     premier script etait efface par cet ecran, et il ne restait que « un
+     petit souci » a se mettre sous la dent. */
+  var _diag="";try{_diag=String((e&&(e.stack||e.message))||e).slice(0,600);}catch(_){}
+  var _ico="";try{_ico=icoTarget(44);}catch(_){}
+  document.body.innerHTML='<div style="position:fixed;inset:0;background:#151210;color:#f4f0e9;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px;font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;z-index:99999;overflow:auto">'+
+    '<div style="margin-bottom:14px;color:var(--s1);display:flex;justify-content:center">'+_ico+'</div>'+
     '<div style="font-size:18px;font-weight:800;margin-bottom:8px">Un instant…</div>'+
     '<div style="font-size:14px;color:#9a8f80;max-width:300px;line-height:1.5;margin-bottom:24px">Magofeed a rencontré un petit souci au démarrage. On repart proprement, tes données sont en sécurité.</div>'+
-    '<button id="mago-recover" style="background:#f4f0e9;color:#151210;border:none;border-radius:14px;padding:13px 28px;font-size:15px;font-weight:800;cursor:pointer">Recharger l\'app</button></div>';
+    '<button id="mago-recover" style="background:#f4f0e9;color:#151210;border:none;border-radius:14px;padding:13px 28px;font-size:15px;font-weight:800;cursor:pointer">Recharger l\'app</button>'+
+    /* Deuxieme passage dans la meme session : recharger n'a pas suffi. On
+       offre alors de repartir des donnees locales — sans que ce soit le
+       premier geste propose, parce qu'il coute les points et favoris
+       locaux non synchronises. */
+    (_triedRecover?'<button id="mago-reset" style="margin-top:12px;background:transparent;color:#9a8f80;border:1.5px solid #3a332c;border-radius:14px;padding:11px 22px;font-size:13px;font-weight:700;cursor:pointer">Réinitialiser les données locales</button>':'')+
+    '<pre id="mago-diag" style="margin-top:22px;max-width:320px;text-align:left;white-space:pre-wrap;word-break:break-word;font-size:10px;line-height:1.4;color:#6f675c"></pre></div>';
+  try{document.getElementById("mago-diag").textContent=_diag;}catch(_){}
   var _doRecover=function(){
     try{sessionStorage.setItem("mago_boot_recover","1");}catch(_){}
-    if(window.caches&&caches.keys){
-      caches.keys().then(function(ks){return Promise.all(ks.map(function(k){return caches.delete(k);}));}).catch(function(){}).then(function(){location.reload();});
-    }else{location.reload();}
+    /* Hors ligne, les caches du service worker sont la SEULE copie de l'app :
+       les vider, c'etait la page d'erreur du navigateur (« site inaccessible »)
+       a la place d'une app qui demarrait tres bien avec eux. On recharge, et
+       rien d'autre. */
+    var enLigne=true;try{enLigne=navigator.onLine!==false;}catch(_){}
+    if(!enLigne||!window.caches||!caches.keys){location.reload();return;}
+    var fini=false;function go(){if(fini)return;fini=true;location.reload();}
+    setTimeout(go,4000);
+    /* Premiere erreur : le code en cache est peut-etre simplement perime. On
+       demande au service worker de se mettre a jour, puis on recharge. */
+    if(_nbErr<2){
+      var p=Promise.resolve();
+      try{if(navigator.serviceWorker&&navigator.serviceWorker.getRegistration)p=navigator.serviceWorker.getRegistration().then(function(r){return r&&r.update();});}catch(_){}
+      p.catch(function(){}).then(go);
+      return;
+    }
+    /* Deuxieme erreur consecutive : on jette nos caches de CODE (magofeed-*),
+       jamais les vignettes (magofeed-img-v1 : ~1 Mo a retelecharger, et
+       elles n'ont rien a voir avec un plantage), ni ceux d'un autre site.
+       Et seulement si le serveur REPOND : le navigateur se dit « en ligne »
+       des que le wifi est accroche, meme sans internet derriere (sous-sol,
+       portail captif), et jeter le code sans pouvoir le retelecharger, c'est
+       la page d'erreur du navigateur. La sonde porte une cle unique pour que
+       le service worker ne la serve pas depuis son cache. */
+    var sonde=Promise.resolve(false);
+    try{sonde=fetch("./sw.js?sonde="+Date.now(),{cache:"no-store"}).then(function(r){return !!(r&&r.ok);},function(){return false;});}catch(_){}
+    sonde.then(function(joignable){
+      if(!joignable){go();return;}
+      caches.keys().then(function(ks){
+        return Promise.all(ks.filter(function(k){return k.indexOf("magofeed-")===0&&k!=="magofeed-img-v1";}).map(function(k){return caches.delete(k);}));
+      }).catch(function(){}).then(go);
+    });
   };
   var _rb=document.getElementById("mago-recover");if(_rb)_rb.onclick=_doRecover;
+  var _rz=document.getElementById("mago-reset");if(_rz)_rz.onclick=function(){
+    /* Seulement NOS cles (mago*, mago_*) : jamais firebase:authUser, qui porte
+       la session du compte, ni magoAuth* (le souvenir qu'un vrai compte existe
+       ici, sans lequel l'app risquerait de poser un anonyme a sa place). Le
+       journal des plantages (magoErr*) reste : il raconte justement ce qui
+       vient de se passer. */
+    try{
+      var cles=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("mago")===0&&k.indexOf("magoErr")!==0&&k.indexOf("magoAuth")!==0)cles.push(k);}
+      cles.forEach(function(k){try{localStorage.removeItem(k);}catch(_){}});
+    }catch(_){}
+    try{sessionStorage.removeItem("mago_boot_recover");}catch(_){}
+    location.reload();
+  };
   // Récupération auto UNE seule fois (si pas déjà tentée dans cette session).
   if(!_triedRecover)setTimeout(_doRecover,1300);
 }

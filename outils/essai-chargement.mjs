@@ -4,9 +4,12 @@
      1. LE VERRE, a l'ouverture. Il se remplit des la premiere image, puis
         FINIT de se remplir quand l'app est prete (initSplash -> magoSplashPret),
         et le splash s'efface. Avant, le splash attendait 1 400 ms FIXES apres
-        que l'app etait prete. Ce controle mesure l'ecart « pret -> cache » :
-        il doit etre d'environ 0,7 s (0,38 s pour finir + 0,3 s plein + une
-        image), jamais 1,4 s.
+        que l'app etait prete ; ensuite il a garanti 1,1 s de remplissage puis
+        0,68 s de fin, soit un accueil jamais visible avant T0 + 1,8 s. Ce
+        controle mesure l'ecart « pret -> cache » : 0,3 s a froid (le verre
+        finit en 0,2 s, le splash part 0,3 s apres l'appel, plus une image),
+        et a chaud (app prete avant le plancher de 0,6 s, ou page rechargee
+        par le service worker) l'image suivante, sans animation.
 
      2. LE SONAR, partout ailleurs. ondeHTML(taille) garde son nom (une
         quinzaine d'appels en dependent, directs ou via magoLoader) mais rend
@@ -81,27 +84,46 @@ const ecart=(pg)=>pg.evaluate(()=>(window.__splashCacheAt&&window.__splashPretAt
   const e=await ecart(pg);
   verifier("le splash s'efface une fois l'app prete", ok, ok?"hidden":"TOUJOURS VISIBLE");
   verifier("le verre est plein (9 px) quand le splash part", y==="9px", "--y = "+y);
-  verifier("pret -> cache : ~0,7 s (0,38 + 0,3 + une image), plus jamais 1,4 s", e!==null&&e>=650&&e<=800, e+" ms");
+  /* 300 ms de minuteur, une image, et ce que le fil principal finit encore
+     de faire quand « pret » arrive (mesure : 310-360 ms) : on tolere 400. */
+  verifier("pret -> cache : 0,3 s (0,2 pour finir, le splash part a 0,3 + une image), plus jamais 0,7 s", e!==null&&e>=290&&e<=400, e+" ms");
   await ctx.close(); LENT=0;
 }
 
-/* ─── 1 bis. Lancement RAPIDE : le remplissage reste visible ─────────────── */
+/* ─── 1 bis. Lancement CHAUD : plus d'attente artificielle ───────────────── */
 {
-  /* Constate sur un enregistrement d'ecran : cache chaud, app prete en 0,5 s,
-     le verre finissait de se remplir derriere l'ecran de lancement natif et
-     n'apparaissait que plein. On garantit 1,1 s de remplissage depuis T0. */
+  /* Servie en local, l'app est prete en ~0,5 s : c'est le lancement a cache
+     chaud du telephone. Le splash garantissait alors 1,1 s de remplissage puis
+     0,68 s de fin : l'accueil n'arrivait jamais avant T0 + 1,8 s (mesure :
+     1,86 s), soit 1,2 s d'attente pure pour un dessin. Desormais, prete avant
+     le plancher (600 ms), l'app saute l'animation : le verre saute plein et le
+     splash part a l'image suivante. Quand la machine est trop lente pour
+     passer sous le plancher, la regle « a froid » (0,3 s) s'applique, et le
+     controle le dit. */
   const {ctx,pg}=await ouvrir(null,"commit");
   await pg.waitForFunction(()=>typeof window.__splashT0==="number",undefined,{timeout:20000,polling:100});
-  await pg.waitForFunction(()=>Date.now()-window.__splashT0>=500,undefined,{timeout:5000,polling:100});
-  const mi=await pg.evaluate(()=>{const liq=document.querySelector("#splash-verre .verre-liq");
-    const m=/matrix\(([^)]+)\)/.exec(getComputedStyle(liq).transform);
-    return {y:liq.style.getPropertyValue("--y").trim(),ty:m?Number(m[1].split(",")[5]):null,
-      fade:getComputedStyle(document.getElementById("splash-verre")).animationDelay};});
-  verifier("lancement rapide : a 0,5 s le verre n'est pas encore fini (encore en phase 1)", mi.y==="24px"&&mi.ty!==null&&mi.ty>24, "--y = "+mi.y+", translateY = "+mi.ty);
-  verifier("le verre apparait avec le logo (pas de retard de 0,3 s)", /^0?\.0[0-9]*s$|^0s$/.test(mi.fade), "animation-delay = "+mi.fade);
+  const fade=await pg.evaluate(()=>getComputedStyle(document.getElementById("splash-verre")).animationDelay);
+  verifier("le verre apparait avec le logo (pas de retard de 0,3 s)", /^0?\.0[0-9]*s$|^0s$/.test(fade), "animation-delay = "+fade);
   await cache(pg);
-  const t=await pg.evaluate(()=>({depuisT0:window.__splashCacheAt-window.__splashT0,min:window.__splashMinimum}));
-  verifier("lancement rapide : au moins 1,1 s de remplissage visible avant de fermer", t.depuisT0>=t.min+600&&t.depuisT0<=t.min+1400, t.depuisT0+" ms depuis T0 (minimum "+t.min+" + 0,38 + 0,3 + une image)");
+  const t=await pg.evaluate(()=>({pret:window.__splashPretAt-window.__splashT0,depuisT0:window.__splashCacheAt-window.__splashT0,
+    ecart:window.__splashCacheAt-window.__splashPretAt,min:window.__splashMinimum,
+    y:document.querySelector("#splash-verre .verre-liq").style.getPropertyValue("--y").trim()}));
+  const chaud=t.pret<t.min;
+  verifier("lancement rapide : le splash part "+(chaud?"a l'image suivante (≤ 100 ms apres pret)":"0,3 s apres pret (prete apres le plancher)")+", plus jamais 1,2 s",
+    chaud?t.ecart<=100:(t.ecart>=290&&t.ecart<=400), "prete a T0 + "+t.pret+" ms, cachee a T0 + "+t.depuisT0+" ms ("+t.ecart+" ms apres pret, plancher "+t.min+")");
+  verifier("lancement rapide : le verre est plein quand le splash part", t.y==="9px", "--y = "+t.y);
+  await ctx.close();
+}
+
+/* ─── 1 ter. Page rechargee par le service worker : lancement chaud garanti ─ */
+{
+  /* Le second splash qui suit une mise a jour ne doit rien faire attendre :
+     le drapeau mago_sw_reloaded vaut « chaud » quelle que soit la machine. */
+  const {ctx,pg}=await ouvrir(null,"commit",()=>{try{sessionStorage.setItem("mago_sw_reloaded","1");}catch(e){}});
+  await cache(pg);
+  const t=await pg.evaluate(()=>({ecart:window.__splashCacheAt-window.__splashPretAt,
+    y:document.querySelector("#splash-verre .verre-liq").style.getPropertyValue("--y").trim()}));
+  verifier("page rechargee par le service worker : splash parti ≤ 100 ms apres pret, verre plein", t.ecart<=100&&t.y==="9px", t.ecart+" ms, --y = "+t.y);
   await ctx.close();
 }
 
@@ -134,7 +156,7 @@ const ecart=(pg)=>pg.evaluate(()=>(window.__splashCacheAt&&window.__splashPretAt
 {
   const {ctx,pg}=await ouvrir(null,"load",()=>{window.requestAnimationFrame=function(){return 0;};});
   await pg.waitForFunction(()=>window.DRINKS&&DRINKS.length>100,undefined,{timeout:40000,polling:100});
-  const ok=await cache(pg,4000);   /* 1,1 s de remplissage garanti + 0,68 s + le minuteur de secours */
+  const ok=await cache(pg,4000);   /* au plus : plancher 0,6 s + 0,3 s + le minuteur de secours de 120 ms */
   verifier("arriere-plan (rAF muet) : le splash se ferme quand meme en moins de 3 s", ok, ok?"hidden":"TOUJOURS VISIBLE");
   await ctx.close();
 }
