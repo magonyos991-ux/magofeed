@@ -962,6 +962,19 @@ service cloud.firestore {
             && !changed().hasAny(['addedBy','createdAt','community'])
             && sourceHonnete()
             && coordonneesMagasinValides()
+            /* LE RAYON D'UN MAGASIN NE SE VIDE PAS DEPUIS UN TELEPHONE.
+               Aucun geste d'utilisateur ne retire une boisson de drinks :
+               confirmer, scanner, importer ne font qu'AJOUTER (arrayUnion).
+               Seule la purge de l'administrateur retire — et elle n'etait
+               protegee que par l'interface : n'importe quel compte pouvait,
+               depuis la console du navigateur, appeler la fonction et vider
+               le rayon de tous les Lidl, Aldi et Match de la base. Un compte
+               ordinaire peut donc toujours ajouter, jamais retirer. Un ancien
+               document dont drinks n'est pas une liste n'est pas bloque. */
+            && (!changed().hasAny(['drinks'])
+                || !(resource.data.drinks is list)
+                || (request.resource.data.drinks is list
+                    && request.resource.data.drinks.hasAll(resource.data.drinks)))
             && (!changed().hasAny(['phone','website','description']) || gereLeMagasin(id))
             /* Les horaires restent collaboratifs sur un magasin ordinaire ;
                sur un magasin CERTIFIE, ils sont la parole de son gerant, et

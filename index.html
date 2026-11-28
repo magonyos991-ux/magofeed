@@ -1230,6 +1230,8 @@ try{
       <div id="admin-offrir" style="margin-bottom:18px"></div>
       <!-- Journal des plantages (erreursClient) : ce que l'app a envoye. -->
       <div id="admin-erreurs" style="margin-bottom:18px"></div>
+      <!-- Actions qui touchent TOUTE la base : sorties de la fiche boisson. -->
+      <div id="admin-maintenance" style="margin-bottom:18px"></div>
       <div id="admin-list"></div>
     </div>
     </div>
@@ -3204,8 +3206,9 @@ window.fbSaveDrinkImage = async function(drinkId, url) {
       var data = { map: {}, v: 3 };
       data.map[drinkId] = url;
       await setDoc(doc(db, "meta", "drinkImages"), data, { merge: true });
-    } catch (e2) { console.warn("drinkImages save error:", e2); }
+    } catch (e2) { console.warn("drinkImages save error:", e2); return false; }
   }
+  return true;
 };
 
 window.fbLoadCatalog = async function() {
@@ -18293,6 +18296,34 @@ function packDrinkIds(){
   return DRINKS.filter(function(d){return !d.imp&&PACK_BRANDS.indexOf(normTxt(d.brand))!==-1;})
     .map(function(d){return d.id;});
 }
+/* Le PACK grande surface sur toute une enseigne : action GLOBALE, lancee
+   depuis l'ecran Administration (plus depuis la fiche d'une boisson). */
+function adminAssignPack(){
+  if(!isAdmin)return;
+  var brands={};
+  (STORES||[]).forEach(function(s){if(s.brand)brands[s.brand]=(brands[s.brand]||0)+1;});
+  var names=Object.keys(brands).sort();
+  if(!names.length){toast("Aucune enseigne connue par ici");return;}
+  var listing=names.map(function(b,i){return (i+1)+". "+b;}).join("\n");
+  var pick=prompt("Pack grande surface \u2192 toute une enseigne.\n\n"+listing+"\n\nTape le NUM\u00C9RO de l'enseigne (v\u00E9rifie d'abord son site !) :");
+  if(pick===null)return;
+  var idx=parseInt(pick.trim(),10)-1;
+  if(isNaN(idx)||idx<0||idx>=names.length){toast("Num\u00E9ro invalide");playSound("err");return;}
+  var brand=names[idx];
+  var packIds=packDrinkIds();
+
+    if(!confirm("Assigner les "+packIds.length+" boissons du pack \u00E0 TOUS les magasins "+brand+" ?"))return;
+    toast("Pack "+brand+" en cours\u2026");
+    window.fbAssignPackToBrand(packIds,brand).then(function(total){
+      (STORES||[]).forEach(function(s){
+        if(s.brand===brand){s.drinks=s.drinks||[];packIds.forEach(function(id){if(s.drinks.indexOf(id)===-1)s.drinks.push(id);});}
+        if(window.fbTouchCache)window.fbTouchCache();
+      });
+      try{renderStoreList();}catch(e){}
+      playSound("win");
+      toast("\u2713 "+packIds.length+" boissons assign\u00E9es \u00E0 "+total+" magasins "+brand);
+    }).catch(function(e){playSound("err");toast("\u00C9chec ("+(e&&e.message||"erreur")+")");});
+}
 function adminAssignBrand(){
   if(!isAdmin||!curSel)return;
   var d=curSel;
@@ -18306,25 +18337,6 @@ function adminAssignBrand(){
   var idx=parseInt(pick.trim(),10)-1;
   if(isNaN(idx)||idx<0||idx>=names.length){toast("Num\u00E9ro invalide");playSound("err");return;}
   var brand=names[idx];
-  var packIds=packDrinkIds();
-  var mode=prompt("Assigner \u00E0 "+brand+" :\n\n1. Seulement \u00AB "+d.name+" \u00BB\n2. LE PACK v\u00E9rifi\u00E9 grande surface ("+packIds.length+" boissons : Coca, Fanta, Monster, Red Bull, Lipton, Mogu Mogu...)\n\nTape 1 ou 2 :");
-  if(mode===null)return;
-  mode=mode.trim();
-  if(mode==="2"){
-    if(!confirm("Assigner les "+packIds.length+" boissons du pack \u00E0 TOUS les magasins "+brand+" ?"))return;
-    toast("Pack "+brand+" en cours\u2026");
-    window.fbAssignPackToBrand(packIds,brand).then(function(total){
-      (STORES||[]).forEach(function(s){
-        if(s.brand===brand){s.drinks=s.drinks||[];packIds.forEach(function(id){if(s.drinks.indexOf(id)===-1)s.drinks.push(id);});}
-        if(window.fbTouchCache)window.fbTouchCache();
-      });
-      try{renderStoreList();}catch(e){}
-      playSound("win");
-      toast("\u2713 "+packIds.length+" boissons assign\u00E9es \u00E0 "+total+" magasins "+brand);
-    }).catch(function(e){playSound("err");toast("\u00C9chec ("+(e&&e.message||"erreur")+")");});
-    return;
-  }
-  if(mode!=="1"){toast("Tape 1 ou 2");playSound("err");return;}
   if(!confirm("Assigner \u00AB "+d.name+" \u00BB \u00E0 TOUS les magasins "+brand+" de la base ?"))return;
   toast("Assignation "+brand+" en cours\u2026");
   window.fbAssignDrinkToBrand(d.id,brand).then(function(total){
@@ -19029,25 +19041,20 @@ function adminFillEnseignes(){
       toast("\u2713 "+r.modifies+" magasins remplis ("+r.parcourus+" parcourus) \u2014 "+det);
     }).catch(function(e){
       var code=String((e&&(e.code||e.message))||e);
-      if(code.indexOf("not-found")!==-1||code.indexOf("internal")!==-1){
-        toast("Fonction serveur absente \u2014 parcours local\u2026 garde l'\u00e9cran allum\u00e9");
-        window.onFillProgress=function(p){toast("Remplissage\u2026 "+p+" magasins parcourus");};
-        window.fbFillEnseignes(sets).then(function(counts){
-          window.onFillProgress=null;
-          var msg=Object.keys(counts).map(function(k){return counts[k]+" "+k;}).join(", ");
-          playSound("win");toast("\u2713 Rempli : "+(msg||"aucun magasin trouv\u00e9"));
-        }).catch(function(e2){playSound("err");toast("\u00c9chec : "+((e2&&e2.message)||e2));});
-      } else { playSound("err"); toast("\u00c9chec : "+code); }
+      /* Plus de repli « parcours local » : il reecrivait toute la collection
+         depuis le telephone, sous l'identite du client — exactement le chemin
+         qu'un compte ordinaire pouvait emprunter depuis la console. La
+         fonction serveur verifie que l'appelant est admin ; si elle manque,
+         on le dit et on n'improvise rien. */
+      playSound("err");
+      toast(code.indexOf("not-found")!==-1
+        ?"Fonction serveur absente \u2014 relance le bouton \u00ab D\u00e9ployer le serveur \u00bb"
+        :"\u00c9chec : "+code);
     });
     return;
   }
-  window.onFillProgress=function(p){toast("Remplissage\u2026 "+p+" magasins parcourus");};
-  window.fbFillEnseignes(sets).then(function(counts){
-    window.onFillProgress=null;
-    var msg=Object.keys(counts).map(function(k){return counts[k]+" "+k;}).join(", ");
-    playSound("win");
-    toast("\u2713 Rempli : "+(msg||"aucun magasin trouv\u00E9"));
-  }).catch(function(e){playSound("err");toast("\u00C9chec ("+(e&&e.message||"erreur")+")");});
+  playSound("err");
+  toast("Fonction serveur indisponible \u2014 r\u00e9essaie dans un instant");
 }
 function openAdminSheet(){
   if(!isAdmin||!curSel)return;
@@ -19058,19 +19065,17 @@ function openAdminSheet(){
   wrap.id="admin-sheet";
   wrap.style.cssText="position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center";
   var canRemove=Number(d.id)>100000000000;
-  wrap.innerHTML='<div style="width:100%;max-width:480px;background:var(--bg2);border-radius:22px 22px 0 0;padding:16px 16px 26px">'+
+  /* max-height + defilement : a douze lignes, le panneau depassait l'ecran
+     d'un petit telephone et son haut devenait inatteignable. */
+  wrap.innerHTML='<div style="width:100%;max-width:480px;max-height:86vh;overflow-y:auto;-webkit-overflow-scrolling:touch;background:var(--bg2);border-radius:22px 22px 0 0;padding:16px 16px calc(26px + env(safe-area-inset-bottom,0px))">'+
     '<div style="width:38px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 12px"></div>'+
     '<div style="font-size:13px;font-weight:700;color:var(--s2);margin-bottom:10px;text-align:center">Admin \u00B7 '+sanitize(d.name)+'</div>'+
     '<div id="ash-photo" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Corriger la photo</div>'+
-    '<div id="ash-zone" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Importer magasins de la zone (monde entier)</div>'+
-    '<div id="ash-fill" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Remplissage enseignes (auto)</div>'+
-    '<div id="ash-clean" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Purger Lidl / Aldi / Match</div>'+
-    '<div id="ash-dedup" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Nettoyer doublons classement</div>'+
     '<div id="ash-rename" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Renommer / corriger le nom</div>'+
     '<div id="ash-merge" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Fusionner cette fiche avec\u2026</div>'+
-    '<div id="ash-batch" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Rayon par photos (lot \u2192 magasin)</div>'+
     '<div id="ash-brand" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">Assigner \u00E0 une enseigne</div>'+
     '<div id="ash-codes" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:var(--s1)">G\u00E9rer les codes-barres</div>'+
+    '<div id="ash-outils" role="button" tabindex="0" style="text-align:center;padding:10px;margin:2px 0 6px;font-size:12px;font-weight:700;color:var(--s2);cursor:pointer;text-decoration:underline">Actions sur toute la base : \u00e9cran Administration</div>'+
     (canRemove?'<div id="ash-remove" role="button" tabindex="0" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;background:var(--bg3);cursor:pointer;margin-bottom:8px;font-size:14px;font-weight:600;color:#b91c1c">Retirer du catalogue</div>':'')+
     '<div id="ash-cancel" role="button" tabindex="0" style="text-align:center;padding:12px;font-size:13px;font-weight:700;color:var(--s3);cursor:pointer">Annuler</div></div>';
   document.body.appendChild(wrap);
@@ -19078,8 +19083,13 @@ function openAdminSheet(){
   wrap.onclick=function(e){if(e.target===wrap)close();};
   function bind(id,fn){var el=document.getElementById(id);if(!el)return;el.onclick=function(){close();fn();};el.onkeydown=function(ev){if(ev.key==="Enter"){close();fn();}};}
   bind("ash-photo",adminFixPhoto);
-  bind("ash-zone",function(){var sheet=document.getElementById("admin-sheet");if(sheet)sheet.remove();openOsmImport();});
-  bind("ash-fill",adminFillEnseignes);
+  /* LES ACTIONS GLOBALES ONT QUITTE LA FICHE (import de zone, remplissage
+     des enseignes, purge Lidl/Aldi/Match, doublons du classement, pack par
+     enseigne). Elles touchent TOUTE la base, sans rapport avec la boisson
+     ouverte, et un doigt qui glisse sur une fiche ne doit pas pouvoir les
+     lancer. Elles vivent dans l'ecran Administration (renderMaintenance).
+     « Rayon par photos » existe deja sur la fiche du magasin. */
+  bind("ash-outils",function(){try{showAdmin();}catch(e){}});
   /* Le bouton « Importer les horaires (OSM) » a ete RETIRE, pas desactive.
      Il promettait d'ecrire « sur tous les magasins qui n'en ont pas » alors
      que la fonction serveur ecrivait des que la valeur differait : un clic
@@ -19087,11 +19097,8 @@ function openAdminSheet(){
      Il ne servait a rien par ailleurs, parce que l'application lit deja le
      fichier d'horaires A L'AFFICHAGE (chargerHorairesOSM / horairesReels).
      Tout est raconte en tete de functions-a-deployer/importer-horaires.js. */
-  bind("ash-clean",adminCleanUnverified);
-  bind("ash-dedup",adminCleanDuplicateUsers);
   bind("ash-rename",adminRenameDrink);
   bind("ash-merge",adminMergeDrink);
-  bind("ash-batch",adminBatchAssign);
   bind("ash-brand",adminAssignBrand);
   bind("ash-codes",adminManageBarcodes);
   if(canRemove)bind("ash-remove",adminRemoveDrink);
@@ -19137,8 +19144,10 @@ function adminFixPhoto(){
     sauverImgCache();
     refreshDrinkVisual(d);
     renderTrends();
-    if(window.fbSaveDrinkImage)window.fbSaveDrinkImage(key,url);
-    playSound("win");toast("\u2713 Photo corrig\u00E9e et partag\u00E9e");
+    playSound("win");toast("\u2713 Photo corrig\u00E9e");
+    if(window.fbSaveDrinkImage)Promise.resolve(window.fbSaveDrinkImage(key,url)).then(function(ok){
+      if(ok===false)toast("Photo gard\u00e9e sur cet appareil \u2014 le partage a \u00e9chou\u00e9");
+    });
   }
   // URL d'image directe
   if(input.indexOf("https://images.openfoodfacts.org/")===0){applyUrl(input.split("?")[0]);return;}
@@ -33335,7 +33344,39 @@ function renderDernieresErreurs(){
       :"Indisponible pour le moment.")+'</div>');
   });
 }
+/* ── ACTIONS GLOBALES ──────────────────────────────────────────────────────
+   Elles vivaient dans la feuille « Admin » de CHAQUE fiche boisson, a un
+   doigt d'une correction de photo : importer une zone, remplir les
+   enseignes, purger Lidl/Aldi/Match, nettoyer le classement, poser le pack
+   sur une enseigne. Aucune ne concerne la boisson ouverte. Elles sont
+   regroupees ici, repliees par defaut, chacune avec ses confirmations. */
+function renderMaintenance(){
+  var el=document.getElementById("admin-maintenance");if(!el)return;
+  if(!isAdmin){el.innerHTML="";return;}
+  var lignes=[
+    ["adm-zone","Importer les magasins d'une zone (OSM)","ajoute, ne d\u00e9truit rien"],
+    ["adm-fill","Remplissage des enseignes (auto)","ajoute le rayon probable sur toutes les enseignes"],
+    ["adm-pack","Pack grande surface \u2192 une enseigne","ajoute 19 boissons \u00e0 tous ses magasins"],
+    ["adm-clean","Purger Lidl / Aldi / Match","IRR\u00c9VERSIBLE \u2014 retire les boissons non confirm\u00e9es"],
+    ["adm-dedup","Nettoyer les doublons du classement","IRR\u00c9VERSIBLE \u2014 supprime des comptes vides"]
+  ];
+  el.innerHTML='<details style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;padding:12px 14px">'+
+    '<summary style="cursor:pointer;font-size:14px;font-weight:800;color:var(--s1)">Actions sur toute la base</summary>'+
+    '<div style="font-size:12px;color:var(--s2);margin:8px 0 10px;line-height:1.45">Elles touchent tous les magasins ou tous les comptes, pas une fiche. Chacune demande confirmation.</div>'+
+    lignes.map(function(l){
+      return '<div id="'+l[0]+'" role="button" tabindex="0" style="padding:11px 12px;border-radius:12px;background:var(--bg3);margin-bottom:7px;cursor:pointer">'+
+        '<div style="font-size:13.5px;font-weight:700;color:'+(/IRR/.test(l[2])?'#b91c1c':'var(--s1)')+'">'+l[1]+'</div>'+
+        '<div style="font-size:11.5px;color:var(--s2);margin-top:2px">'+l[2]+'</div></div>';
+    }).join("")+'</details>';
+  var lier=function(id,fn){var b=document.getElementById(id);if(!b)return;b.onclick=fn;b.onkeydown=function(ev){if(ev.key==="Enter")fn();};};
+  lier("adm-zone",function(){try{openOsmImport();}catch(e){}});
+  lier("adm-fill",adminFillEnseignes);
+  lier("adm-pack",adminAssignPack);
+  lier("adm-clean",adminCleanUnverified);
+  lier("adm-dedup",adminCleanDuplicateUsers);
+}
 function renderAdmin(){
+  try{ renderMaintenance(); }catch(e){ console.warn("maintenance:",e); }
   try{ renderDeclarationsMarque(); }catch(e){ console.warn("declarations marque:",e); }
   try{ renderDernieresErreurs(); }catch(e){ console.warn("dernieres erreurs:",e); }
   try{ renderOffrirPoints(); }catch(e){}

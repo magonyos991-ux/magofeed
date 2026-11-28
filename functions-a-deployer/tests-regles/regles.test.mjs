@@ -23,7 +23,7 @@
  */
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import { doc, setDoc, updateDoc, getDoc, getDocs, deleteDoc, collection, addDoc,
-         writeBatch, increment, arrayUnion, serverTimestamp, Timestamp, query, where, orderBy, limit,
+         writeBatch, increment, arrayUnion, arrayRemove, serverTimestamp, Timestamp, query, where, orderBy, limit,
          deleteField } from 'firebase/firestore';
 import fs from 'fs';
 
@@ -1187,6 +1187,21 @@ await doit('bloque : Alice ne peut pas s offrir des pts (l ancienne colonne)',
   ()=>assertFails(updateDoc(doc(a,'users',ALICE),{pts:9999})));
 await doit('bloque : Alice ne peut pas recreer son profil avec des pts',
   ()=>assertFails(setDoc(doc(a,'users',ALICE),{pseudo:'Alice',pts:9999})));
+
+/* ══ LE RAYON NE SE VIDE PAS DEPUIS UN TELEPHONE ═════════════════════════
+   La purge « Lidl / Aldi / Match » n'etait gardee que par l'interface : la
+   fonction, appelable depuis la console, reecrivait drinks sans les boissons
+   non confirmees. Un compte ordinaire peut ajouter, jamais retirer. */
+await doit('legitime : ajouter une boisson au rayon (arrayUnion)',
+  ()=>assertSucceeds(updateDoc(doc(m,'stores','s1'),{drinks:arrayUnion(77)})));
+await doit('bloque : Mallory retire une boisson du rayon (arrayRemove)',
+  ()=>assertFails(updateDoc(doc(m,'stores','s1'),{drinks:arrayRemove(2)})));
+await doit('bloque : Mallory vide le rayon (drinks:[])',
+  ()=>assertFails(updateDoc(doc(m,'stores','s1'),{drinks:[]})));
+await doit('bloque : Mallory reecrit le rayon en le reduisant (comme la purge)',
+  ()=>assertFails(updateDoc(doc(m,'stores','s1'),{drinks:[1]})));
+await doit('legitime : l administrateur peut purger',
+  ()=>assertSucceeds(updateDoc(doc(env.authenticatedContext(ADMIN).firestore(),'stores','s1'),{drinks:[1,2]})));
 
 R.forEach(r=>console.log(r[0],'|',r[1]));
 console.log('\n'+(R.length-ko)+'/'+R.length+' conformes');
