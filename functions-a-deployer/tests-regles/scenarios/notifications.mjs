@@ -108,15 +108,23 @@ async function fbMarkNotifRead(db, docId) {
   return updateDoc(doc(db, "userNotifs", String(docId)), { read: true });
 }
 
-// index.html:4700-4736 — fbEnablePush, sa seule ecriture Firestore
-async function fbEnablePush(db, uid, token, lat, lng) {
-  const _payload = { token: token, updatedAt: serverTimestamp() };
+/* fbEnablePush, sa seule ecriture Firestore. UNE ENTREE PAR APPAREIL en plus
+   du champ « token » historique : ce champ-la etait reecrit a chaque ouverture
+   de l'app, donc le dernier appareil ouvert prenait la place de tous les
+   autres, et les notifications ne partaient plus que vers lui. */
+async function fbEnablePush(db, uid, token, lat, lng, idAppareil, nomAppareil) {
+  const _payload = { token: token, updatedAt: serverTimestamp(),
+                     appareil: nomAppareil || "Appareil",
+                     jetons: { [idAppareil || "app1"]: { token: token, appareil: nomAppareil || "Appareil", at: serverTimestamp() } } };
   if (lat != null && lng != null) { _payload.lat = lat; _payload.lng = lng; }
   return setDoc(doc(db, "pushTokens", uid), _payload, { merge: true });
 }
-// index.html:4746 — fbDisablePush
-async function fbDisablePush(db, uid) {
-  return setDoc(doc(db, "pushTokens", uid), { token: null, updatedAt: serverTimestamp() }, { merge: true });
+/* fbDisablePush : n'eteint QUE cet appareil. Couper les notifications sur
+   l'ordinateur ne doit pas faire taire le telephone. */
+async function fbDisablePush(db, uid, idAppareil) {
+  return setDoc(doc(db, "pushTokens", uid),
+    { token: null, updatedAt: serverTimestamp(),
+      jetons: { [idAppareil || "app1"]: { token: null, at: serverTimestamp() } } }, { merge: true });
 }
 // index.html:4755 — fbUpdatePushRayon
 async function fbUpdatePushRayon(db, uid, km) {
@@ -201,13 +209,23 @@ function rayonVeilleServeur(wd) {
 function rayonChasseServeur(t) {
   return Math.max(1, Math.min(50, Number(t.rayon) || 15));
 }
-/* notifications-push.js:38-63 — pushToUser. Sans jeton, elle sort en silence
-   et n'ecrit RIEN (« pas de token = pas de push, tant pis, l'in-app suffit »). */
+/* pushToUser passe desormais par envoyerPush (outils-admin.js), qui envoie a
+   TOUS les appareils de la personne — « token » historique plus chaque entree
+   de la carte « jetons », sans doublon. Sans aucun jeton, elle sort en silence
+   et n'ecrit RIEN. */
 async function pushToUserServeur(db, uid) {
   const snap = await db.collection("pushTokens").doc(String(uid)).get();
-  const token = snap.exists && snap.data().token;
-  if (!token) return { envoye: false, raison: "pas-de-jeton" };
-  return { envoye: true, token: token };
+  if (!snap.exists) return { envoye: false, raison: "pas-de-jeton" };
+  const d = snap.data() || {};
+  const vus = new Set(), jetons = [];
+  if (d.token) { vus.add(d.token); jetons.push(d.token); }
+  const carte = (d.jetons && typeof d.jetons === "object") ? d.jetons : {};
+  for (const k of Object.keys(carte)) {
+    const e = carte[k] || {};
+    if (e.token && !vus.has(e.token)) { vus.add(e.token); jetons.push(e.token); }
+  }
+  if (!jetons.length) return { envoye: false, raison: "pas-de-jeton" };
+  return { envoye: true, token: jetons[0], jetons: jetons };
 }
 /* notifications-push.js:314-360 — notifyStockToWatchers, sa boucle de decision. */
 async function notifyStockToWatchers(db, drinkId, sLat, sLng) {

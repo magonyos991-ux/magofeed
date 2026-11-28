@@ -68,14 +68,20 @@ const faux = {
   "app.js": `module.exports={getApps:()=>[1],initializeApp:()=>{}};`,
   "firestore.js": `module.exports={
     getFirestore:()=>globalThis.__LAB.db,
-    FieldValue:{serverTimestamp:()=>"T"}};`,
+    FieldValue:{serverTimestamp:()=>"T",delete:()=>"__EFFACE__"}};`,
   "messaging.js": `module.exports={getMessaging:()=>({send:(m)=>globalThis.__LAB.envoyer(m)})};`,
   "auth.js": `module.exports={getAuth:()=>({getUser:(u)=>globalThis.__LAB.user(u)})};`
 };
 for (const [n, c] of Object.entries(faux)) await writeFile(join(LAB, "node_modules", "firebase-admin", n), c);
 
-function monterLab({ admins, jetons, envoyer, adresses, brevoOk = true }) {
-  const efface = [], courriels = [], traces = [];
+/* `jetons` : le champ « token » historique, un par compte (forme d'avant).
+   `appareils` : la carte « jetons » — une entree par appareil (forme neuve).
+   Les deux peuvent coexister, et c'est meme le cas NORMAL pour l'appareil qui
+   vient d'ecrire : il est a la fois dans « token » et dans sa propre entree.
+   `maj` retient les mises a jour : c'est la preuve qu'on retire l'appareil mort
+   SANS supprimer le document (qui porte aussi la position et le rayon de zone). */
+function monterLab({ admins, jetons, appareils = {}, envoyer, adresses, brevoOk = true }) {
+  const efface = [], courriels = [], traces = [], maj = [];
   let trace = null;
   const db = {
     collection(nom) {
@@ -91,8 +97,12 @@ function monterLab({ admins, jetons, envoyer, adresses, brevoOk = true }) {
           return {
             async get() {
               if (nom !== "pushTokens") return { exists: false, data: () => ({}) };
-              return { exists: id in jetons, data: () => ({ token: jetons[id] }) };
+              const carte = {};
+              for (const a of (appareils[id] || [])) carte[a.id] = { token: a.token, appareil: a.nom || "" };
+              const existe = (id in jetons) || !!(appareils[id] || []).length;
+              return { exists: existe, data: () => ({ token: jetons[id], jetons: carte }) };
             },
+            async update(u) { maj.push({ id, u }); },
             async delete() { efface.push(id); }
           };
         }
@@ -106,7 +116,7 @@ function monterLab({ admins, jetons, envoyer, adresses, brevoOk = true }) {
   };
   globalThis.fetch = async (u, o) => { courriels.push(JSON.parse(o.body)); return { ok: brevoOk, status: brevoOk ? 201 : 401 }; };
   process.env.BREVO_API_KEY = "cle-de-labo";
-  return { efface, courriels, get trace() { return trace; } };
+  return { efface, courriels, maj, get trace() { return trace; } };
 }
 
 const req = createRequire(join(LAB, "x.js"));
@@ -141,7 +151,100 @@ function neuf() { delete req.cache[req.resolve(join(LAB, "outils-admin.js"))]; r
   });
   const r = await neuf().sendToAdmins("Nouvel utilisateur", "corps");
   ok("jeton mort : le secours part", r.courriel === true && lab.courriels.length === 1, "");
-  ok("jeton mort : le jeton est efface", lab.efface.length === 1 && lab.efface[0] === "ilias", lab.efface.join(","));
+  /* LE DOCUMENT NE DOIT PLUS ETRE SUPPRIME. Il porte aussi la position, le
+     rayon de zone et le choix du secours : un seul appareil remplace rendait
+     les notifications « pres de toi » muettes pour une raison sans rapport. */
+  ok("jeton mort : le document pushTokens SURVIT", lab.efface.length === 0,
+     lab.efface.length ? "position et rayon de zone perdus avec lui" : "");
+  ok("jeton mort : seul le champ du jeton est retire",
+     lab.maj.length === 1 && lab.maj[0].id === "ilias" && lab.maj[0].u.token === "__EFFACE__",
+     JSON.stringify(lab.maj));
+}
+
+/* F. DEUX APPAREILS, DEUX ENVOIS. LE COEUR DE LA PANNE DU 28 NOVEMBRE.
+      pushTokens/{uid} ne portait qu'un champ « token », reecrit a chaque
+      ouverture de l'app : ouvrir Magofeed sur le PC effacait le jeton de
+      l'iPhone, et toutes les alertes suivantes partaient vers le PC. Google
+      acceptait, « poussees » valait 1, le journal ecrivait « notification
+      envoyee », et l'iPhone ne sonnait plus jamais. */
+{
+  const recus = [];
+  const lab = monterLab({
+    admins: ["ilias"],
+    jetons: { ilias: "jeton-du-pc" },
+    appareils: { ilias: [{ id: "pc1", token: "jeton-du-pc", nom: "Windows \u00B7 Chrome" },
+                         { id: "tel1", token: "jeton-de-l-iphone", nom: "iPhone \u00B7 Safari" }] },
+    adresses: { ilias: "admin@exemple.test" },
+    envoyer: async (m) => { recus.push(m.token); return { name: "ok" }; }
+  });
+  const r = await neuf().sendToAdmins("Nouvel utilisateur", "corps", "ilias");
+  ok("deux appareils : DEUX envois partent", r.parties === 2 && recus.length === 2, `parties=${r.parties}`);
+  ok("deux appareils : l'iPhone est servi lui aussi",
+     recus.indexOf("jeton-de-l-iphone") !== -1, recus.join(","));
+  ok("un meme jeton present deux fois n'est envoye qu'une fois",
+     new Set(recus).size === recus.length, recus.join(","));
+  ok("le compte de l'appelant est rendu a part du total",
+     r.moi && r.moi.appareils === 2 && r.moi.parties === 2, JSON.stringify(r.moi));
+  ok("deux appareils servis : aucun courriel de doublon", lab.courriels.length === 0, "");
+}
+
+/* G. UN APPAREIL MORT PARMI DEUX : l'autre recoit, et seule l'entree morte
+      disparait. C'est la difference entre « un telephone remplace » et « plus
+      aucune notification ». */
+{
+  const lab = monterLab({
+    admins: ["ilias"],
+    jetons: {},
+    appareils: { ilias: [{ id: "pc1", token: "mort", nom: "Windows \u00B7 Chrome" },
+                         { id: "tel1", token: "vivant", nom: "iPhone \u00B7 Safari" }] },
+    adresses: { ilias: "admin@exemple.test" },
+    envoyer: async (m) => {
+      if (m.token === "mort") { const e = new Error("gone"); e.code = "messaging/registration-token-not-registered"; throw e; }
+      return { name: "ok" };
+    }
+  });
+  const r = await neuf().sendToAdmins("Nouvel utilisateur", "corps", "ilias");
+  ok("un appareil mort sur deux : l'autre recoit quand meme", r.parties === 1, `parties=${r.parties}`);
+  ok("un appareil mort sur deux : seule SON entree est retiree",
+     lab.maj.length === 1 && lab.maj[0].u["jetons.pc1"] === "__EFFACE__", JSON.stringify(lab.maj));
+  ok("un appareil mort sur deux : le document survit", lab.efface.length === 0, "");
+  ok("un appareil mort sur deux : pas de courriel, la personne a bien recu",
+     r.courriel === false && lab.courriels.length === 0, "");
+}
+
+/* H. DEUX ADMINISTRATEURS, UN SEUL SERVI. L'ancien code faisait
+      « if (!parties) » : des qu'UN administrateur recevait la poussee, tous
+      les autres perdaient leur alerte en silence. */
+{
+  const lab = monterLab({
+    admins: ["ilias", "autre"],
+    jetons: { autre: "jeton-de-l-autre" },
+    appareils: {},
+    adresses: { ilias: "ilias@exemple.test", autre: "autre@exemple.test" },
+    envoyer: async () => ({ name: "ok" })
+  });
+  const r = await neuf().sendToAdmins("Nouvel utilisateur", "corps", "ilias");
+  ok("un admin servi, l'autre non : le courriel part pour celui qui n'a rien",
+     r.courriel === true && lab.courriels.length === 1, `courriels=${lab.courriels.length}`);
+  ok("le courriel part a la bonne adresse",
+     lab.courriels.length === 1 && JSON.stringify(lab.courriels[0]).indexOf("ilias@exemple.test") !== -1,
+     "l'ecran annoncait l'adresse de celui qui cliquait, meme quand le courriel partait ailleurs");
+  ok("l'appelant sait que SON courriel est parti", r.moi && r.moi.courriel === true, JSON.stringify(r.moi));
+  ok("l'appelant sait qu'aucun de ses appareils n'a recu",
+     r.moi && r.moi.parties === 0 && r.moi.appareils === 0, JSON.stringify(r.moi));
+}
+
+/* I. LA TRACE DIT QU'ELLE EST TERMINEE. Sans ce drapeau, une fonction tuee en
+      cours de route laissait une trace a 0/0/false, que le journal lisait
+      comme « aucun appareil enregistre » — une conclusion qu'il n'avait aucun
+      moyen de tirer. */
+{
+  const lab = monterLab({
+    admins: ["ilias"], jetons: { ilias: "bon" }, adresses: { ilias: "a@b.test" },
+    envoyer: async () => ({ name: "ok" })
+  });
+  await neuf().sendToAdmins("Nouvel utilisateur", "corps", "ilias");
+  ok("la trace porte le drapeau « fini »", lab.trace.fini === true, JSON.stringify(lab.trace.fini));
 }
 
 /* C. La poussee part : on ne sonne jamais deux fois. */
@@ -257,7 +360,13 @@ const dom = await pg.evaluate(async () => {
               poussees: 0, jetons: 1, courriel: true, echecs: ["messaging/mismatched-credential"] }]; };
 
   /* Cas 1 : aucun appareil enregistre. */
-  window.fbTesterAlerteAdmin = async () => ({ admins: 1, jetons: 0, jaiUnJeton: false,
+  /* LES REPONSES DOIVENT AVOIR LA FORME NEUVE. L'ancienne ne distinguait pas
+     mes appareils de ceux des autres administrateurs : c'est precisement ce
+     que le panneau a maintenant le devoir de separer. Une reponse a l'ancienne
+     forme doit, elle, faire dire a l'ecran que le serveur n'est pas deploye —
+     c'est le dernier cas de ce bloc. */
+  window.fbTesterAlerteAdmin = async () => ({ admins: 1, lectureAdmins: true, jetons: 0, jaiUnJeton: false,
+    mesAppareils: [], mesPoussees: 0, mesJetons: 0, monCourriel: false, courriels: 0,
     adresseSecours: "a@b.test", poussees: 0, courriel: true, echecs: [] });
   window.renderAlertes();
   await attendre(200);
@@ -275,32 +384,93 @@ const dom = await pg.evaluate(async () => {
   let o = sortie();
   out.push(["LE VERDICT SURVIT au rafraichissement du journal", o.style.display === "block" && o.textContent.length > 20,
     `display=${o.style.display || "absent"} len=${o.textContent.length}`]);
-  out.push(["0 jeton : le verdict nomme les Reglages", /Aucun appareil enregistre/.test(o.textContent), o.textContent.slice(0, 60)]);
+  out.push(["0 appareil : le verdict dit que c'est MON compte qui n'en a pas",
+    /Aucun appareil enregistre pour TON compte/.test(o.textContent), o.textContent.slice(0, 70)]);
+  out.push(["0 appareil : il dit d'autoriser sur CET appareil-ci",
+    /SUR CET APPAREIL-CI/.test(o.textContent), ""]);
   out.push(["le journal a bien ete relu apres le test", lectures >= 2, `lectures=${lectures}`]);
 
   /* Cas 2 : la poussee part. Verdict vert, et pas de promesse de courriel. */
-  window.fbTesterAlerteAdmin = async () => ({ admins: 1, jetons: 1, jaiUnJeton: true,
-    adresseSecours: "a@b.test", poussees: 1, courriel: false, echecs: [] });
+  window.fbTesterAlerteAdmin = async () => ({ admins: 1, lectureAdmins: true, jetons: 3, jaiUnJeton: true,
+    mesAppareils: ["iPhone \u00B7 Safari", "Windows \u00B7 Chrome"], mesPoussees: 2, mesJetons: 2,
+    monCourriel: false, courriels: 0,
+    adresseSecours: "a@b.test", poussees: 3, courriel: false, echecs: [] });
   window.renderAlertes(); await attendre(150);
   await cliquer(400); o = sortie();
-  out.push(["poussee partie : verdict vert", o.style.color === "rgb(21, 128, 61)", o.style.color]);
-  out.push(["poussee partie : ne promet aucun e-mail", !/secours envoye/.test(o.textContent), o.textContent.slice(0, 70)]);
+  out.push(["envoi accepte : verdict vert", o.style.color === "rgb(21, 128, 61)", o.style.color]);
+  out.push(["envoi accepte : ne promet aucun e-mail", !/secours envoye/.test(o.textContent), o.textContent.slice(0, 70)]);
+  /* LA LIGNE QUI A COUTE DES SEMAINES. Elle disait « le blocage est dans les
+     reglages de notification de l'appareil, pas dans l'app » — une affirmation
+     que ces chiffres ne contiennent pas, et qui etait fausse le jour ou elle
+     s'est affichee. */
+  out.push(["envoi accepte : l'ecran n'accuse PLUS les reglages de l'appareil",
+    !/pas dans l'app/.test(o.textContent) && !/pas dans l.app/.test(o.textContent), o.textContent.slice(0, 90)]);
+  out.push(["envoi accepte : l'ecran dit que ce n'est pas une preuve d'affichage",
+    /PAS UNE PREUVE QUE TON TELEPHONE/.test(o.textContent), ""]);
+  out.push(["envoi accepte : MES appareils sont nommes",
+    /iPhone/.test(o.textContent) && /Windows/.test(o.textContent), ""]);
+  out.push(["envoi accepte : les appareils des autres ne sont pas comptes comme miens",
+    /2 de tes 2 appareil/.test(o.textContent), o.textContent.slice(0, 70)]);
 
-  /* Cas 3 : pas administrateur cote serveur. */
-  window.fbTesterAlerteAdmin = async () => ({ admins: 0, jetons: 0, jaiUnJeton: false,
+  /* Cas 3 : la LECTURE de la collection admins a echoue.
+     L'ancien ecran affichait « ton compte n'est pas dans la liste des
+     administrateurs » — faux par construction, puisque la fonction serveur
+     refuse de repondre a qui n'est pas administrateur. Le zero ne voulait
+     jamais dire « tu n'en es pas », mais « je n'ai pas pu lire ». */
+  window.fbTesterAlerteAdmin = async () => ({ admins: 0, lectureAdmins: false, jetons: 0, jaiUnJeton: false,
+    mesAppareils: [], mesPoussees: 0, mesJetons: 0, monCourriel: false, courriels: 0,
     adresseSecours: "", poussees: 0, courriel: false, echecs: [] });
   window.renderAlertes(); await attendre(150);
   await cliquer(400); o = sortie();
-  out.push(["0 administrateur : le verdict le dit, et ne parle pas de jeton",
-    /liste des administrateurs/.test(o.textContent) && !/Aucun appareil/.test(o.textContent), o.textContent.slice(0, 70)]);
+  out.push(["lecture impossible : l'ecran ne pretend PAS que je ne suis pas administrateur",
+    /pas pu LIRE/.test(o.textContent) && /tu es bien administrateur/.test(o.textContent), o.textContent.slice(0, 80)]);
 
   /* Cas 4 : refus de Google. Le code exact doit etre montre. */
-  window.fbTesterAlerteAdmin = async () => ({ admins: 1, jetons: 1, jaiUnJeton: true,
+  window.fbTesterAlerteAdmin = async () => ({ admins: 1, lectureAdmins: true, jetons: 1, jaiUnJeton: true,
+    mesAppareils: ["iPhone \u00B7 Safari"], mesPoussees: 0, mesJetons: 1, monCourriel: true, courriels: 1,
     adresseSecours: "a@b.test", poussees: 0, courriel: true, echecs: ["messaging/mismatched-credential"] });
   window.renderAlertes(); await attendre(150);
   await cliquer(400); o = sortie();
   out.push(["refus Google : le code exact est affiche", /mismatched-credential/.test(o.textContent), o.textContent.slice(0, 80)]);
   out.push(["refus Google : le secours est annonce avec l'adresse", /a@b\.test/.test(o.textContent), ""]);
+
+  /* Cas 4bis : le courriel est parti, mais A UN AUTRE administrateur.
+     L'ecran annoncait quand meme l'adresse de celui qui cliquait : il
+     fouillait ses indesirables pour un message qui n'y etait pas. */
+  window.fbTesterAlerteAdmin = async () => ({ admins: 2, lectureAdmins: true, jetons: 1, jaiUnJeton: false,
+    mesAppareils: [], mesPoussees: 0, mesJetons: 0, monCourriel: false, courriels: 1,
+    adresseSecours: "a@b.test", poussees: 0, courriel: true, echecs: [] });
+  window.renderAlertes(); await attendre(150);
+  await cliquer(400); o = sortie();
+  out.push(["courriel parti ailleurs : l'ecran ne donne PAS mon adresse",
+    !/a@b\.test/.test(o.textContent) && /AUTRE administrateur/.test(o.textContent), o.textContent.slice(0, 90)]);
+
+  /* Cas 4ter : l'ANCIENNE fonction repond encore. L'ecran doit dire qu'il
+     manque le deploiement, et non interpreter ses chiffres comme s'ils
+     parlaient de moi. */
+  window.fbTesterAlerteAdmin = async () => ({ admins: 1, jetons: 1, jaiUnJeton: true,
+    adresseSecours: "a@b.test", poussees: 1, courriel: false, echecs: [] });
+  window.renderAlertes(); await attendre(150);
+  await cliquer(400); o = sortie();
+  out.push(["ancienne fonction : l'ecran dit que le serveur n'est pas deploye",
+    /pas encore deployee/.test(o.textContent), o.textContent.slice(0, 70)]);
+
+  /* Cas 4quater : LE JOURNAL. Trois lignes, trois etats, et aucun qui promette
+     un affichage que personne n'a constate. */
+  window.fbLireAlertesAdmin = async () => { lectures++; await attendre(10);
+    return [{ titre: "acceptee", corps: "", at: Date.now(), poussees: 2, jetons: 2, courriel: false, fini: true, echecs: [] },
+            { titre: "refusee", corps: "", at: Date.now(), poussees: 0, jetons: 1, courriel: false, fini: true, echecs: ["x"] },
+            { titre: "sans appareil", corps: "", at: Date.now(), poussees: 0, jetons: 0, courriel: false, fini: true, echecs: [] },
+            { titre: "interrompue", corps: "", at: Date.now(), poussees: 0, jetons: 0, courriel: false, fini: false, echecs: [] }]; };
+  window.renderAlertes(); await attendre(200);
+  const jrn = txtDe("alertes-liste");
+  out.push(["le journal ne dit plus « notification envoyee »", !/notification envoy/.test(jrn), jrn.slice(0, 80)]);
+  out.push(["le journal dit « envoi accepte par Google »", /envoi accept\u00E9 par Google \(2\)/.test(jrn), ""]);
+  out.push(["le journal distingue une trace jamais terminee",
+    /envoi interrompu avant la fin/.test(jrn), ""]);
+  out.push(["le journal ne dit PAS « interrompu » pour une ligne terminee",
+    (jrn.match(/envoi interrompu avant la fin/g) || []).length === 1,
+    `${(jrn.match(/envoi interrompu avant la fin/g) || []).length} fois`]);
 
   /* Cas 5 : fonction pas deployee. Il doit lire quoi deployer, pas un code. */
   window.fbTesterAlerteAdmin = async () => { const e = new Error("not found"); e.code = "functions/not-found"; throw e; };

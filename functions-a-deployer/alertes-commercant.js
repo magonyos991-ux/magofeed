@@ -35,7 +35,6 @@
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
-const { getMessaging } = require("firebase-admin/messaging");
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
@@ -58,33 +57,20 @@ async function gerantsDe(storeId) {
   }
 }
 
-/* La poussée seule. Renvoie true si un téléphone a vraiment reçu quelque
-   chose ; un jeton mort est effacé pour ne plus réessayer. */
+/* ══ TOUS LES APPAREILS, ET PLUS SEULEMENT LE DERNIER OUVERT ═══════════════
+   pushTokens/{uid} ne portait qu'un champ « token », reecrit a chaque
+   ouverture de l'app : le dernier appareil ouvert ecrasait celui des autres.
+   envoyerPush lit la carte « jetons » — une entree par appareil — envoie a
+   chacun, et ne supprime jamais le document entier (il porte aussi la
+   position, le rayon de zone et le choix du secours). Bloc complet dans
+   outils-admin.js. */
+const { envoyerPush, message } = require("./outils-admin");
+
+/* La poussée seule. Renvoie true si AU MOINS un appareil a reçu quelque chose :
+   c'est ce booléen qui décide si la trace dans la cloche est marquée lue. */
 async function pousser(uid, titre, corps, data, lien) {
-  if (!uid) return false;
-  try {
-    const snap = await db.collection("pushTokens").doc(String(uid)).get();
-    const token = snap.exists && snap.data().token;
-    if (!token) return false;
-    await getMessaging().send({
-      token: token,
-      notification: { title: titre, body: corps },
-      data: data || {},
-      webpush: {
-        notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png" },
-        fcmOptions: { link: lien || APP_URL }
-      }
-    });
-    return true;
-  } catch (e) {
-    if (e && (e.code === "messaging/registration-token-not-registered" ||
-              e.code === "messaging/invalid-registration-token")) {
-      try { await db.collection("pushTokens").doc(String(uid)).delete(); } catch (_) {}
-    } else {
-      console.warn("alertes gérant : poussée :", e && e.message);
-    }
-    return false;
-  }
+  const r = await envoyerPush(uid, message(titre, corps, data, lien));
+  return r.parties > 0;
 }
 
 /* La trace dans la cloche, à identifiant stable : une clé par magasin et par

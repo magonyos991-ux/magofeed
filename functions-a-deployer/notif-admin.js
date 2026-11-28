@@ -27,7 +27,7 @@ const { getFirestore } = require("firebase-admin/firestore");
 const { getAuth } = require("firebase-admin/auth");
 if (!getApps().length) initializeApp();
 const db = getFirestore();
-const { sendToAdmins } = require("./outils-admin");
+const { sendToAdmins, jetonsDe } = require("./outils-admin");
 
 /* RECONNAITRE UN PSEUDO TIRE AU SORT. Le generateur de l'app compose
    « Animal Adjectif NNN » a partir de deux listes fermees de douze mots. On
@@ -116,13 +116,26 @@ exports.testerAlerteAdmin = onCall(
        « 0 administrateur » demandent deux reparations differentes. */
     let nbAdmins = 0, nbJetons = 0;
     let jaiUnJeton = false;
+    /* MES APPAREILS, NOMMES. C'est l'information qui manquait et qui a coute
+       des semaines : pushTokens/{uid} ne portait qu'un jeton, sans dire a quel
+       appareil il appartenait. Ouvrir Magofeed sur son ordinateur suffisait a
+       prendre la place du telephone, et l'ecran annoncait « poussee partie »
+       en toute bonne foi. Desormais chaque appareil a son entree, et on les
+       montre : « iPhone · Safari, vu le 28/11 » dit tout de suite si le
+       telephone qu'on tient dans la main est encore dans la liste. */
+    let mesAppareils = [];
+    let lectureAdmins = false;
     try {
       const admins = await db.collection("admins").get();
       nbAdmins = admins.size;
+      lectureAdmins = true;
       for (const a of admins.docs) {
-        const t = await db.collection("pushTokens").doc(a.id).get();
-        const tok = t.exists ? (t.data() || {}).token : null;
-        if (tok) { nbJetons++; if (a.id === uid) jaiUnJeton = true; }
+        const liste = await jetonsDe(a.id);
+        nbJetons += liste.length;
+        if (a.id === uid) {
+          jaiUnJeton = liste.length > 0;
+          mesAppareils = liste.map((j) => String(j.appareil || "appareil non nomme")).slice(0, 8);
+        }
       }
     } catch (e) { /* on envoie quand meme : le resultat reel vaut mieux qu'un compte */ }
 
@@ -135,15 +148,28 @@ exports.testerAlerteAdmin = onCall(
     catch (e) {}
 
     const r = await sendToAdmins("Test d'alerte Magofeed",
-      "Si tu lis ceci, la chaine d'alerte fonctionne de bout en bout.");
+      "Si tu lis ceci, la chaine d'alerte fonctionne de bout en bout.", uid);
 
+    /* CE QUE L'ECRAN A LE DROIT D'AFFIRMER, ET RIEN DE PLUS.
+       « poussees » comptait les envois acceptes par Google POUR TOUS LES
+       ADMINISTRATEURS CONFONDUS. Le 28 novembre il valait 1, l'ecran a conclu
+       « ta poussee est partie, va voir tes reglages iOS », et c'etait faux :
+       l'envoi concernait un autre appareil. On separe donc ce qui m'est arrive
+       (« mesPoussees ») de ce qui est arrive en tout, et on dit lequel. */
+    const m = (r && r.moi) || { appareils: 0, parties: 0, courriel: false };
     return {
       admins: nbAdmins,
+      lectureAdmins: lectureAdmins,
       jetons: nbJetons,
       jaiUnJeton: jaiUnJeton,
+      mesAppareils: mesAppareils,
+      mesPoussees: m.parties || 0,
+      mesJetons: m.appareils || 0,
+      monCourriel: !!m.courriel,
       adresseSecours: adresseSecours,
       poussees: (r && r.parties) || 0,
       courriel: !!(r && r.courriel),
+      courriels: (r && r.courriels) || 0,
       echecs: (r && r.echecs) || []
     };
   }

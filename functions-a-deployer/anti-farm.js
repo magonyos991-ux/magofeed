@@ -37,7 +37,6 @@
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
-const { getMessaging } = require("firebase-admin/messaging");
 const { getAuth } = require("firebase-admin/auth");
 
 if (!getApps().length) initializeApp();
@@ -57,7 +56,14 @@ const FENETRE_JOURS = 10;     // au-delà, une rupture n'est plus une contradict
    sanction s'ajoute a la perte du gain, et se cumule a chaque incident — sans
    punir dix fois le prix d'une erreur de bonne foi. */
 const POINTS_RETIRES = 3;
-const APP_URL = "https://magonyos991-ux.github.io/magofeed/";
+/* ══ TOUS LES APPAREILS, ET PLUS SEULEMENT LE DERNIER OUVERT ═══════════════
+   pushTokens/{uid} ne portait qu'un champ « token », reecrit a chaque
+   ouverture de l'app : le dernier appareil ouvert ecrasait celui des autres.
+   envoyerPush lit la carte « jetons » — une entree par appareil — envoie a
+   chacun, et ne supprime jamais le document entier (il porte aussi la
+   position, le rayon de zone et le choix du secours). Bloc complet dans
+   outils-admin.js. */
+const { envoyerPush, message } = require("./outils-admin");
 
 /* Clé de verrou : une annonce = un auteur + un magasin + une boisson.
    Les identifiants peuvent contenir n'importe quoi, on les nettoie pour
@@ -91,24 +97,11 @@ async function prevenir(uid, perdus) {
       createdAt: FieldValue.serverTimestamp()
     });
   } catch (e) { console.warn("anti-farm notif:", e && e.message); }
-  // Push si la personne a un token (sinon on n'insiste pas).
-  try {
-    const snap = await db.collection("pushTokens").doc(String(uid)).get();
-    const token = snap.exists && snap.data().token;
-    if (!token) return;
-    await getMessaging().send({
-      token: token,
-      notification: {
-        title: "-" + perdus + " points sur Magofeed",
-        body: "Un stock que tu avais annoncé n'y était pas. Signale ce que tu vois vraiment."
-      },
-      data: { type: "penalty" },
-      webpush: {
-        notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png" },
-        fcmOptions: { link: APP_URL }
-      }
-    });
-  } catch (e) { console.warn("anti-farm push:", e && e.message); }
+  // Push sur chacun de ses appareils (silence si elle n'en a aucun).
+  await envoyerPush(uid, message(
+    "-" + perdus + " points sur Magofeed",
+    "Un stock que tu avais annoncé n'y était pas. Signale ce que tu vois vraiment.",
+    { type: "penalty" }));
 }
 
 /**

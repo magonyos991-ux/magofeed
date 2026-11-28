@@ -40,6 +40,16 @@ const SECOURS_MAX_PERSONNES = 10; // ADAPTE si ton projet est ailleurs
    si l'utilisateur n'a pas de token : on ne casse jamais le flux. */
 const APP_URL = "https://magonyos991-ux.github.io/magofeed/";
 
+/* ══ TOUS LES APPAREILS, ET PLUS SEULEMENT LE DERNIER OUVERT ═══════════════
+   pushTokens/{uid} ne portait qu'un champ « token », reecrit a chaque
+   ouverture de l'app : le dernier appareil ouvert ecrasait celui des autres,
+   et les notifications ne partaient plus que vers lui. envoyerPush lit la
+   carte « jetons » — une entree par appareil — et envoie a chacun. Il ne
+   supprime jamais le document entier : effacer pushTokens/{uid} emportait la
+   position, le rayon de zone et le choix du secours de la personne, pour un
+   seul appareil remplace. Voir le bloc complet dans outils-admin.js. */
+const { envoyerPush, jetonsDuDoc, message } = require("./outils-admin");
+
 /* Le lien profond d'une notification de chasse. La route de l'app est
    /#drink=(\d+)/ (index.html:26833) : elle n'accepte que des chiffres, et les
    4455 ids de data/drinks.js comme les ids du catalogue communautaire (des
@@ -50,36 +60,13 @@ function lienChasse(drinkId) {
   return /^[0-9]+$/.test(id) ? APP_URL + "#drink=" + id : APP_URL;
 }
 
+/* Le tap ouvre l'app SUR la bonne fiche (ex: #store=ID -> magasin + carte).
+   Ce lien ne vaut que si le client le LIT : FCM le livre sous fcmOptions.link,
+   et sw.js le recupere dans destinationDuTap(). Pendant un temps il cherchait
+   une cle « url » que FCM ne remplit jamais, et tous les taps retombaient sur
+   l'accueil. Si tu touches a l'un des deux cotes, verifie l'autre. */
 async function pushToUser(uid, title, body, data, link) {
-  if (!uid) return;
-  try {
-    const snap = await db.collection("pushTokens").doc(String(uid)).get();
-    const token = snap.exists && snap.data().token;
-    if (!token) return; // pas de token = pas de push, tant pis, l'in-app suffit
-    await getMessaging().send({
-      token: token,
-      notification: { title: title, body: body },
-      data: data || {},
-      webpush: {
-        notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png" },
-        /* Le tap ouvre l'app SUR la bonne fiche (ex: #store=ID -> magasin + carte).
-           Ce lien ne vaut que si le client le LIT : FCM le livre sous
-           fcmOptions.link, et sw.js le recupere dans destinationDuTap(). Pendant
-           un temps il cherchait une cle « url » que FCM ne remplit jamais, et
-           tous les taps retombaient sur l'accueil -- ce commentaire etait faux.
-           Si tu touches a l'un des deux cotes, verifie l'autre. */
-        fcmOptions: { link: link || APP_URL }
-      }
-    });
-  } catch (e) {
-    // Token périmé -> on le supprime pour ne pas ré-essayer indéfiniment
-    if (e && (e.code === "messaging/registration-token-not-registered" ||
-              e.code === "messaging/invalid-registration-token")) {
-      try { await db.collection("pushTokens").doc(String(uid)).delete(); } catch (_) {}
-    } else {
-      console.warn("push error:", e && e.message);
-    }
-  }
+  await envoyerPush(uid, message(title, body, data, link));
 }
 
 /* ══ UNE ALERTE QUI NE LAISSE AUCUNE TRACE EST UNE ALERTE PERDUE ═══════════
@@ -106,30 +93,9 @@ async function pushToUser(uid, title, body, data, link) {
       pour celui qui n'a rien reçu. */
 async function prevenir(uid, titre, corps, data, lien, cle) {
   if (!uid) return;
-  let pousse = false;
-  try {
-    const snap = await db.collection("pushTokens").doc(String(uid)).get();
-    const token = snap.exists && snap.data().token;
-    if (token) {
-      await getMessaging().send({
-        token: token,
-        notification: { title: titre, body: corps },
-        data: data || {},
-        webpush: {
-          notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png" },
-          fcmOptions: { link: lien || APP_URL }
-        }
-      });
-      pousse = true;
-    }
-  } catch (e) {
-    if (e && (e.code === "messaging/registration-token-not-registered" ||
-              e.code === "messaging/invalid-registration-token")) {
-      try { await db.collection("pushTokens").doc(String(uid)).delete(); } catch (_) {}
-    } else {
-      console.warn("push error:", e && e.message);
-    }
-  }
+  /* « read: pousse » n'est vrai que si AU MOINS un appareil a recu la poussee. */
+  const _r = await envoyerPush(uid, message(titre, corps, data, lien));
+  const pousse = _r.parties > 0;
   /* La trace s'écrit MÊME si la poussée a échoué — c'est tout l'intérêt. */
   try {
     const doc = Object.assign({
@@ -148,31 +114,21 @@ async function prevenir(uid, titre, corps, data, lien, cle) {
 exports.sendTestPush = onCall({ region: REGION }, async (req) => {
   const uid = req.auth && req.auth.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Connecte-toi d'abord.");
-  const snap = await db.collection("pushTokens").doc(String(uid)).get();
-  const token = snap.exists && snap.data().token;
-  if (!token) return { ok: false, reason: "no-token" };
-  try {
-    await getMessaging().send({
-      token: token,
-      notification: {
-        title: "Ca marche",
-        body: "Tu recois bien les notifications Magofeed, meme app fermee. Bonne chasse."
-      },
-      data: { type: "test" },
-      webpush: {
-        notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png" },
-        fcmOptions: { link: APP_URL }
-      }
-    });
-    return { ok: true };
-  } catch (e) {
-    if (e && (e.code === "messaging/registration-token-not-registered" ||
-              e.code === "messaging/invalid-registration-token")) {
-      try { await db.collection("pushTokens").doc(String(uid)).delete(); } catch (_) {}
-      return { ok: false, reason: "stale-token" };
-    }
-    throw new HttpsError("internal", (e && e.message) || "push failed");
+  /* LE TEST DOIT DIRE SUR COMBIEN D'APPAREILS, et non « ok ».
+     « Ca a marche » alors que la notification est partie vers un autre
+     appareil que celui qu'on tient dans la main, c'est le mensonge qui a
+     coute des semaines au fondateur. On renvoie donc le nombre d'appareils
+     enregistres et le nombre d'envois acceptes, et l'app le dit. */
+  const r = await envoyerPush(uid, message(
+    "Ca marche",
+    "Tu recois bien les notifications Magofeed, meme app fermee. Bonne chasse.",
+    { type: "test" }));
+  if (!r.appareils) return { ok: false, reason: "no-token", appareils: 0, parties: 0 };
+  if (!r.parties) {
+    return { ok: false, reason: r.echecs.join(" / ").indexOf("not-registered") >= 0 ? "stale-token" : "refuse",
+             appareils: r.appareils, parties: 0, echecs: r.echecs.slice(0, 3) };
   }
+  return { ok: true, appareils: r.appareils, parties: r.parties, echecs: r.echecs.slice(0, 3) };
 });
 
 /* Découverte promue au catalogue -> push "🎉 Ta découverte est dans Magofeed".
@@ -382,7 +338,11 @@ exports.notifyHuntNearby = onDocumentWritten(
     tokensSnap.forEach(function(d){
       if (seekerUids.has(d.id)) return;         // pas le(s) chercheur(s)
       const t = d.data();
-      if (!t.token) return;
+      /* TOUS SES APPAREILS. Lire « t.token » seul ne reveillait que le dernier
+         appareil ouvert, et laissait muet le telephone de quelqu'un qui avait
+         ouvert l'app sur son ordinateur depuis. */
+      const _tks = jetonsDuDoc(t);
+      if (!_tks.length) return;
       /* LE RAYON EST CELUI DU DESTINATAIRE, PAS UN CHIFFRE EN DUR.
          C'etait 15 km pour tout le monde, decide ici, et le reglage « Ta zone »
          de chaque personne ne pesait sur rien. Desormais chacun ecrit son
@@ -402,15 +362,16 @@ exports.notifyHuntNearby = onDocumentWritten(
         /* HORS DE SA ZONE — mais peut-etre le seul a portee. On le met de cote
            pour un second tour, qui ne servira QUE si personne, absolument
            personne, n'est dans sa propre zone. */
-        secours.push({ token: t.token, km: Math.round(dKm), rayon: rayon, ouvert: t.secours === true });
+        secours.push({ jetons: _tks, km: Math.round(dKm), rayon: rayon, ouvert: t.secours === true });
         return;
       }
-      msgs.push({
-        token: t.token,
-        notification: { title: "Chasse pres de toi", body: "Quelqu'un cherche « " + name + " ». Si tu la vois en magasin, signale-la et gagne des points." },
-        data: { type: "hunt", drinkId: String(after.drinkId || "") },
-        webpush: { fcmOptions: { link: lienChasse(after.drinkId) } }
-      });
+      for (const _j of _tks) {
+        msgs.push(Object.assign(message(
+          "Chasse pres de toi",
+          "Quelqu'un cherche \u00ab " + name + " \u00bb. Si tu la vois en magasin, signale-la et gagne des points.",
+          { type: "hunt", drinkId: String(after.drinkId || "") },
+          lienChasse(after.drinkId)), { token: _j.token }));
+      }
     });
 
     /* ── LE SECOND TOUR : LA CAMPAGNE ────────────────────────────────────
@@ -432,16 +393,12 @@ exports.notifyHuntNearby = onDocumentWritten(
         .sort((a2, b2) => a2.km - b2.km)
         .slice(0, SECOURS_MAX_PERSONNES);
       for (const x of eligibles) {
-        msgs.push({
-          token: x.token,
-          notification: {
-            title: "Personne n'est plus pres",
-            body: "Quelqu'un cherche \u00ab " + name + " \u00bb \u00e0 " + x.km + " km de toi. "
-                  + "Tu es la personne la plus proche a pouvoir aider."
-          },
-          data: { type: "hunt", drinkId: String(after.drinkId || ""), secours: "1" },
-          webpush: { fcmOptions: { link: lienChasse(after.drinkId) } }
-        });
+        for (const _j of x.jetons) msgs.push(Object.assign(message(
+          "Personne n'est plus pres",
+          "Quelqu'un cherche \u00ab " + name + " \u00bb \u00e0 " + x.km + " km de toi. "
+            + "Tu es la personne la plus proche a pouvoir aider.",
+          { type: "hunt", drinkId: String(after.drinkId || ""), secours: "1" },
+          lienChasse(after.drinkId)), { token: _j.token }));
       }
       aideLointaine = eligibles.length;
     }

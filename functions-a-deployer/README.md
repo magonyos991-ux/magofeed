@@ -286,3 +286,46 @@ sur son PC ne peut PAS declencher l'alerte « nouvel utilisateur ». Elle ne
 part qu'a la CREATION du document de profil, et une session deja connectee
 n'en cree aucun. Pour eprouver une vraie arrivee, il faut une fenetre de
 navigation privee.
+
+## Un jeton push par APPAREIL (28/11/2026) — deployer TOUT
+
+C'est la cause reelle du « je ne recois toujours pas de notification ».
+
+`pushTokens/{uid}` ne portait **qu'un seul champ `token`**, et l'app le
+reecrivait a chaque ouverture ou la permission etait deja accordee. Le
+**dernier appareil ouvert ecrasait donc le jeton de tous les autres**, et rien
+nulle part ne disait a quel appareil ce jeton appartenait. Ouvrir Magofeed sur
+le PC pour consulter le journal des alertes suffisait a faire taire l'iPhone,
+definitivement. Google acceptait l'envoi, `poussees` valait 1, le journal
+ecrivait « notification envoyee », et l'ecran concluait « le blocage est dans
+les reglages de notification de l'appareil, pas dans l'app » — une phrase
+fausse, qui interdisait de soupconner la seule cause vraie.
+
+Ce qui change, cote serveur :
+- `outils-admin.js` gagne `envoyerPush()`, la **seule porte de sortie** des
+  poussees : elle envoie a **tous** les appareils de la personne, et n'efface
+  que le jeton mort — plus jamais le document entier, qui porte aussi la
+  position, le rayon de zone et le choix du secours ;
+- `notifications-push.js`, `messages-push.js`, `anti-farm.js`,
+  `alertes-commercant.js`, `recap-fondateur.js` passent tous par elle. Onze
+  endroits construisaient chacun leur message : c'est ainsi qu'un seul d'entre
+  eux a pu partir des mois dans une forme differente ;
+- le secours par courriel part pour **chaque** administrateur qui n'a rien
+  recu, et non seulement quand personne n'a rien recu (`if (!parties)`) ;
+- `testerAlerteAdmin` separe ce qui est arrive a **mes** appareils de ce qui
+  est arrive en tout, et les nomme.
+
+**Deploie TOUT, pas une liste ciblee.** `outils-admin.js` est maintenant exige
+par sept fichiers : une mise a jour partielle laisserait des fonctions appeler
+une version du module qu'elles n'ont pas. C'est la commande du paragraphe
+« Remettre tout en ordre — une seule commande ».
+
+Ensuite, sur le telephone : **ferme completement Magofeed** (balaye-la hors du
+selecteur d'apps) puis rouvre-la, pour que le nouveau service worker
+s'installe et que l'appareil ecrive sa propre entree. Puis Administration,
+« Journal des alertes », « Envoyer une alerte de test » : le verdict doit
+nommer tes appareils.
+
+Ce que l'ecran ne dira plus jamais, et c'est volontaire : que la poussee est
+arrivee. Le serveur sait seulement que Google a accepte le message. Personne,
+dans cette architecture, ne peut savoir qu'une notification a ete affichee.

@@ -5813,6 +5813,81 @@ window.fbApproveFormat = async function(sug) {
    (Parametres du projet > Cloud Messaging). Vide = push desactive, veille
    locale inchangee. */
 window.MAGO_VAPID_KEY = "BAD8RGLIfKqzp0E1VDki9TGwoCPDT_wzVzaUrfP86WW4CbtF7WWO2269SekrDkhMxR9Y8WY7yD7ntGRA8sEYZ8A";
+/* ══ UN JETON PAR APPAREIL, ET CHACUN SE NOMME ═════════════════════════════
+   LA PANNE QUE CE BLOC REPARE. pushTokens/{uid} ne portait QU'UN champ
+   « token ». Cette fonction est rappelee a chaque ouverture ou la permission
+   est deja accordee (restauration silencieuse du jeton, plus haut dans ce
+   fichier) : le DERNIER appareil ouvert ecrasait donc le jeton de tous les
+   autres, sans que rien ne l'indique nulle part. Ouvrir Magofeed sur son
+   ordinateur pour regarder le journal des alertes suffisait a faire taire son
+   telephone pour de bon. Le serveur acceptait, l'ecran annoncait « poussee
+   partie », et le telephone ne sonnait plus jamais.
+
+   Deux consequences a ce correctif, et les deux comptent :
+     - chaque appareil ecrit SA propre entree dans la carte « jetons », et le
+       serveur envoie a tous (voir functions-a-deployer/outils-admin.js) ;
+     - chaque entree porte un nom lisible, pour qu'on puisse VOIR si le
+       telephone qu'on tient dans la main est encore dans la liste.
+
+   LE NOM NE DIT RIEN DE PERSONNEL : la sorte d'appareil et le navigateur,
+   rien d'autre. Pas de modele precis, pas de version, pas d'adresse. Et il ne
+   sort jamais du document de la personne elle-meme. */
+window.magoNomAppareil = function() {
+  try {
+    var ua = String(navigator.userAgent || "");
+    var sys = "Appareil";
+    if (/iPhone/i.test(ua)) sys = "iPhone";
+    else if (/iPad/i.test(ua)) sys = "iPad";
+    else if (/Android/i.test(ua)) sys = "Android";
+    else if (/Macintosh|Mac OS X/i.test(ua)) sys = "Mac";
+    else if (/Windows/i.test(ua)) sys = "Windows";
+    else if (/Linux/i.test(ua)) sys = "Linux";
+    /* L'ORDRE COMPTE : Edge et Opera annoncent aussi « Chrome », et Chrome sur
+       iOS annonce aussi « Safari ». Le plus specifique d'abord, sinon tout le
+       monde s'appelle Chrome. */
+    var nav = "Navigateur";
+    if (/Edg\//i.test(ua)) nav = "Edge";
+    else if (/OPR\/|Opera/i.test(ua)) nav = "Opera";
+    else if (/SamsungBrowser/i.test(ua)) nav = "Samsung Internet";
+    else if (/CriOS/i.test(ua)) nav = "Chrome";
+    else if (/FxiOS|Firefox/i.test(ua)) nav = "Firefox";
+    else if (/Chrome/i.test(ua)) nav = "Chrome";
+    else if (/Safari/i.test(ua)) nav = "Safari";
+    var nom = sys + " \u00B7 " + nav;
+    try {
+      if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform()) nom = sys + " \u00B7 app installee";
+      else if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) nom += " \u00B7 ecran d'accueil";
+      else if (navigator.standalone) nom += " \u00B7 ecran d'accueil";
+    } catch (e) {}
+    return nom.slice(0, 48);
+  } catch (e) { return "Appareil"; }
+};
+/* L'identifiant de l'appareil vit en local et ne vaut que pour ce navigateur :
+   c'est exactement ce qu'on veut, puisqu'un jeton push ne vaut que pour lui.
+   Donnees effacees = nouvel identifiant, et l'ancienne entree finira effacee
+   par le serveur au premier refus de Google. */
+window.magoIdAppareil = function() {
+  try {
+    var id = localStorage.getItem("magoAppareilId");
+    if (!id || !/^[a-z0-9]{6,24}$/.test(id)) {
+      id = (Math.random().toString(36).slice(2, 8) + Math.random().toString(36).slice(2, 8));
+      localStorage.setItem("magoAppareilId", id);
+    }
+    return id;
+  } catch (e) {
+    /* Navigation privee, stockage refuse : un identifiant de session suffit.
+       On n'empile pas d'entrees pour autant, Firestore ecrase la meme cle. */
+    if (!window._idAppareilVolatile) window._idAppareilVolatile = "tmp" + Math.random().toString(36).slice(2, 10);
+    return window._idAppareilVolatile;
+  }
+};
+/* La charge ecrite dans pushTokens/{uid} pour CET appareil, en plus du champ
+   « token » historique que le serveur lit toujours. */
+function _chargeAppareil(jeton) {
+  var m = {};
+  m[window.magoIdAppareil()] = { token: jeton, appareil: window.magoNomAppareil(), at: serverTimestamp() };
+  return m;
+}
 window.fbEnablePush = async function(lat, lng, silencieux) {
   try {
     // GARDE-FOU DE CONSENTEMENT. Plusieurs endroits de l'app rallument le push
@@ -5860,7 +5935,8 @@ window.fbEnablePush = async function(lat, lng, silencieux) {
       } catch (eF) { console.warn("Push natif : conversion FCM iOS", eF); }
       if (!jeton) return { ok: false, reason: "notoken" };
       var userN = await ensureAuthed();
-      var chargeN = { token: jeton, updatedAt: serverTimestamp(), natif: true };
+      var chargeN = { token: jeton, updatedAt: serverTimestamp(), natif: true,
+                      appareil: window.magoNomAppareil(), jetons: _chargeAppareil(jeton) };
       if (lat != null && lng != null) { chargeN.lat = lat; chargeN.lng = lng; }
       await setDoc(doc(db, "pushTokens", userN.uid), chargeN, { merge: true });
       window._pushToken = jeton;
@@ -5884,7 +5960,8 @@ window.fbEnablePush = async function(lat, lng, silencieux) {
     // On n'ecrit la position QUE si on l'a. Ecrire null en fusion effacait la
     // position deja connue du serveur : un simple OFF/ON avant que le GPS ait
     // repondu suffisait a rendre les notifications de zone muettes.
-    var _payload = { token: token, updatedAt: serverTimestamp() };
+    var _payload = { token: token, updatedAt: serverTimestamp(),
+                     appareil: window.magoNomAppareil(), jetons: _chargeAppareil(token) };
     if (lat != null && lng != null) { _payload.lat = lat; _payload.lng = lng; }
     await setDoc(doc(db, "pushTokens", user.uid), _payload, { merge: true });
     onMessage(messaging, function(payload) {
@@ -5899,13 +5976,20 @@ window.fbEnablePush = async function(lat, lng, silencieux) {
    côté serveur. Sans ça, le serveur ne sait pas où tu es et ne peut pas te
    notifier "près de toi" (alors que le test direct, lui, marchait). Appelé dès
    que le GPS répond, si les notifs sont activées. */
-/* Extinction des notifications : on vide le jeton cote serveur. La fonction
-   d'envoi teste `snap.data().token` -> jeton vide = plus aucun envoi. On ne
-   supprime pas le document : sa position reste utile si la personne rallume. */
+/* Extinction des notifications : on vide le jeton cote serveur. On ne supprime
+   pas le document : sa position et son rayon de zone restent utiles si la
+   personne rallume.
+
+   ON N'ETEINT QUE CET APPAREIL-CI. Chaque appareil a son entree dans la carte
+   « jetons » : couper les notifications sur l'ordinateur ne doit pas faire
+   taire le telephone. Le champ « token » historique, lui, est partage par tous
+   les appareils — on le vide, et le telephone continue d'etre servi par son
+   entree propre. */
 window.fbDisablePush = async function() {
   try {
     var user = auth.currentUser; if (!user) return;
-    await setDoc(doc(db, "pushTokens", user.uid), { token: null, updatedAt: serverTimestamp() }, { merge: true });
+    await setDoc(doc(db, "pushTokens", user.uid),
+      { token: null, updatedAt: serverTimestamp(), jetons: _chargeAppareil(null) }, { merge: true });
   } catch (e) { console.warn("Push off:", e); }
 };
 /* App installee (Capacitor) : la permission se lit en asynchrone, on la met
@@ -6014,6 +6098,12 @@ window.fbLireAlertesAdmin = async function(n) {
         poussees: Number(x.pousseesEnvoyees) || 0,
         jetons: Number(x.jetonsTrouves) || 0,
         courriel: x.courrielEnvoye === true,
+        /* « fini » SEPARE DEUX PANNES QUI S'AFFICHAIENT PAREIL : une alerte qui
+           n'a trouve aucun appareil, et une fonction tuee avant d'avoir pu
+           mettre sa trace a jour. La trace naissant a 0/0/false, les deux
+           donnaient « aucun appareil enregistre ». Les lignes anterieures a ce
+           correctif n'ont pas le champ : on ne pretend rien pour elles. */
+        fini: x.fini === true,
         echecs: Array.isArray(x.echecs) ? x.echecs.map(String).slice(0, 3) : []
       };
     });
@@ -6061,7 +6151,21 @@ window.fbGetMyPushDoc = async function() {
     var s = await getDoc(doc(db, "pushTokens", user.uid));
     if (!s.exists()) return { exists: false, uid: user.uid };
     var d = s.data() || {};
-    return { exists: true, uid: user.uid, hasToken: !!d.token, lat: (d.lat != null ? d.lat : null), lng: (d.lng != null ? d.lng : null), updatedAt: (d.updatedAt && d.updatedAt.toMillis ? d.updatedAt.toMillis() : null) };
+    /* LA LISTE DES APPAREILS, et non un simple « oui / non ». « hasToken »
+       repondait oui alors que le jeton etait celui d'un autre appareil : c'est
+       cette reponse-la qui a fait chercher la panne dans les reglages iOS
+       pendant des semaines. */
+    var _m = (d.jetons && typeof d.jetons === "object") ? d.jetons : {};
+    var _app = [], _vus = {};
+    if (d.token) { _vus[d.token] = 1; _app.push({ nom: String(d.appareil || "appareil non nomme"), actuel: d.token === window._pushToken }); }
+    Object.keys(_m).forEach(function(k) {
+      var e = _m[k] || {};
+      if (!e.token || _vus[e.token]) return;
+      _vus[e.token] = 1;
+      _app.push({ nom: String(e.appareil || "appareil non nomme"), actuel: e.token === window._pushToken });
+    });
+    return { exists: true, uid: user.uid, hasToken: !!d.token, appareils: _app,
+             lat: (d.lat != null ? d.lat : null), lng: (d.lng != null ? d.lng : null), updatedAt: (d.updatedAt && d.updatedAt.toMillis ? d.updatedAt.toMillis() : null) };
   } catch (e) { return { exists: false, error: String(e && (e.code || e.message) || e) }; }
 };
 /* Diagnostic : combien de MES chasses ont une position enregistrée (sinon elles
@@ -34547,14 +34651,21 @@ function _dateCourte(v){
     return new Date(ms).toLocaleString("fr-BE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
   }catch(e){ return null; }
 }
-/* CE QUE MONTRE CE PANNEAU, ET POURQUOI. Trois chiffres par alerte, parce que
-   trois pannes differentes donnent le meme silence cote telephone :
-     jetons 0    aucun appareil enregistre — le canal est mort, il faut le
-                 reactiver dans Reglages puis « Verifier mes notifications »
+/* CE QUE MONTRE CE PANNEAU, ET CE QU'IL N'A PAS LE DROIT DE DIRE.
+     jetons 0    aucun appareil enregistre, OU fonction interrompue avant la fin
+                 (voir « fini » dans fbLireAlertesAdmin)
      jetons > 0, poussees 0   l'appareil existe mais Google a refuse l'envoi
-     poussees > 0             l'envoi est parti : le probleme est cote telephone
-   Sans ces chiffres, on ne pouvait que deviner, et le doute portait sur toute
-   la chaine a la fois. */
+     poussees > 0             Google a accepte le message. RIEN DE PLUS.
+
+   LA LIGNE QUI A COUTE DES SEMAINES. Le dernier cas disait : « l'envoi est
+   parti : le probleme est cote telephone ». C'etait faux, et c'etait la cause
+   du temps perdu. « Google a accepte » ne dit ni que l'appareil l'a recu, ni
+   que le systeme l'a affiche, ni meme a QUEL appareil le jeton appartenait —
+   et c'etait justement la : un seul jeton par compte, vole par le dernier
+   appareil ouvert. L'app affirmait l'innocence de l'app au moment precis ou
+   l'app etait coupable, et envoyait fouiller des reglages iOS deja corrects.
+   Aucun ecran de Magofeed n'a le droit de conclure « le probleme est chez toi »
+   a partir d'une information qui ne le contient pas. */
 /* LES SOUTIENS, EN HAUT DE L'ADMINISTRATION. Un don est la seule chose qui
    arrive de l'exterieur sans qu'on la provoque : elle merite d'etre visible
    sans aller la chercher. Et un tableau vide est une reponse, pas un manque —
@@ -34648,7 +34759,11 @@ function renderAlertes(){
       '<div style="font-size:13px;font-weight:700;color:var(--s1)">Tester la chaine d\'alerte</div>'+
       '<div style="font-size:11.5px;color:var(--s2);margin:2px 0 10px;line-height:1.5">'+
         'Envoie une vraie alerte par le meme chemin que « Nouvel utilisateur », et affiche '+
-        'les chiffres bruts du serveur.<br><br>'+
+        'les chiffres bruts du serveur, en nommant tes appareils.<br><br>'+
+        '<b>Un appareil, un jeton.</b> Avant, le dernier appareil ouvert prenait la place des '+
+        'autres : ouvrir l\'app sur l\'ordinateur suffisait a faire taire le telephone, et rien '+
+        'ne le disait nulle part. Chaque appareil a desormais son entree, le serveur envoie a '+
+        'tous, et le test te dit lesquels sont enregistres.<br><br>'+
         '<b>A savoir avant de douter de l\'app :</b> ouvrir Magofeed toi-meme sur ton PC ne peut '+
         'PAS declencher l\'alerte « nouvel utilisateur ». Elle ne part qu\'a la creation d\'un '+
         'profil, et une session deja connectee n\'en cree aucun. Pour un vrai test d\'arrivee, '+
@@ -34665,31 +34780,58 @@ function renderAlertes(){
     bt.disabled=true; bt.textContent="Envoi en cours\u2026";
     window.fbTesterAlerteAdmin().then(function(r){
       bt.disabled=false; bt.textContent="Envoyer une alerte de test";
-      /* LES CINQ CAUSES, DANS L'ORDRE, ET UNE SEULE AFFICHEE : celle qui bloque.
-         Chacune demande une reparation differente — ne pas les distinguer, c'est
-         ce qui faisait tourner en rond. */
+      /* CHAQUE CAUSE DEMANDE UNE REPARATION DIFFERENTE, ET L'ECRAN NE DOIT
+         AFFIRMER QUE CE QU'IL SAIT.
+         Ce que le serveur sait : Google a accepte le message, pour tel nombre
+         d'appareils, et lesquels sont les miens. Ce qu'il NE SAIT PAS, et ne
+         saura jamais : si le telephone l'a recu, et si le systeme l'a affiche.
+         La version precedente concluait « le blocage est dans les reglages de
+         l'appareil, pas dans l'app » — une affirmation que ces chiffres ne
+         contiennent pas, et qui etait fausse le jour ou elle s'est affichee. */
       var bon=false, txt;
-      if(!r.admins){
-        txt="Ton compte n\'est pas dans la liste des administrateurs cote serveur. Aucune alerte ne peut partir, pour personne.";
-      }else if(r.poussees>0){
+      if(r.mesPoussees===undefined){
+        /* L'ANCIENNE FONCTION REPOND ENCORE. Elle ne distingue pas mes
+           appareils de ceux des autres : plutot que d'interpreter ses chiffres
+           comme s'ils parlaient de moi, on dit ce qui manque. */
+        txt="La partie serveur n\'est pas encore deployee : cette reponse vient de l\'ancienne fonction, "+
+            "qui ne sait pas distinguer tes appareils de ceux des autres administrateurs. "+
+            "Lance la commande de deploiement (functions-a-deployer/README.md), puis reviens ici. "+
+            "Chiffres bruts de l\'ancienne version : "+(r.admins||0)+" administrateur(s), "+
+            (r.jetons||0)+" jeton(s), "+(r.poussees||0)+" envoi(s) accepte(s) par Google.";
+      }else if(r.lectureAdmins===false){
+        txt="Je n\'ai pas pu LIRE la liste des administrateurs cote serveur. Ce n\'est pas une reponse sur ton compte : "+
+            "tu es bien administrateur, sinon cette fonction aurait refuse de repondre. C\'est la lecture de la collection qui a echoue. "+
+            "Reessaie ; si ca persiste, envoie-moi cette capture.";
+      }else if(r.mesPoussees>0){
         bon=true;
-        txt="La poussee est partie ("+r.poussees+"). Ton telephone doit sonner dans quelques secondes. "+
-            "Si rien n\'arrive, le blocage est dans les reglages de notification de l\'appareil, pas dans l\'app. "+
-            "L\'e-mail de secours ne part pas dans ce cas : on ne sonne jamais deux fois.";
-      }else if(!r.jetons){
-        txt="Aucun appareil enregistre ("+r.admins+" administrateur"+(r.admins>1?"s":"")+", 0 jeton). "+
-            "Va dans Reglages puis « Notifications » et autorise-les. Sur iPhone, l\'app doit d\'abord etre sur l\'ecran d\'accueil.";
+        txt="Google a accepte l\'envoi pour "+r.mesPoussees+" de tes "+r.mesJetons+" appareil(s) enregistre(s)"+
+            ((r.mesAppareils&&r.mesAppareils.length)?" : "+r.mesAppareils.join(", "):"")+". "+
+            "CE N\'EST PAS UNE PREUVE QUE TON TELEPHONE L\'A AFFICHEE — le serveur ne peut pas le savoir, et aucun ecran ne te dira le contraire. "+
+            "Si rien n\'arrive sur l\'appareil que tu tiens en main, regarde d\'abord s\'il figure dans cette liste : "+
+            "un appareil absent de la liste ne recoit rien, quoi que disent les chiffres.";
+      }else if(!r.mesJetons){
+        txt="Aucun appareil enregistre pour TON compte"+
+            (r.jetons?(" ("+r.jetons+" appareil(s) enregistre(s) par d\'autres administrateurs)"):"")+". "+
+            "Va dans Reglages puis « Notifications » et autorise-les SUR CET APPAREIL-CI. "+
+            "Sur iPhone, l\'app doit d\'abord etre sur l\'ecran d\'accueil.";
       }else if(r.echecs&&r.echecs.length){
-        txt="Google a refuse l\'envoi. Code exact : "+r.echecs.join(" / ")+". "+
-            "« registration-token-not-registered » = jeton mort, reactive les notifications. Tout autre code = reglage a corriger dans la console Firebase.";
+        txt="Tes "+r.mesJetons+" appareil(s) sont enregistres, mais Google a refuse l\'envoi. Code exact : "+r.echecs.join(" / ")+". "+
+            "« registration-token-not-registered » = jeton mort, reactive les notifications sur l\'appareil concerne. "+
+            "Tout autre code = reglage a corriger dans la console Firebase.";
       }else{
-        txt="Jeton trouve mais aucune poussee partie, et aucun code d\'erreur rendu. Envoie-moi cette capture.";
+        txt="Appareil trouve mais aucun envoi accepte, et aucun code d\'erreur rendu. Envoie-moi cette capture.";
       }
-      if(r.courriel){
-        txt+=" E-mail de secours envoye"+(r.adresseSecours?(" a "+r.adresseSecours):"")+" : regarde aussi les indesirables.";
-      }else if(!r.poussees&&!r.adresseSecours){
+      if(r.monCourriel){
+        txt+=" E-mail de secours envoye a TON adresse"+(r.adresseSecours?(" ("+r.adresseSecours+")"):"")+" : regarde aussi les indesirables.";
+      }else if(r.courriels>0){
+        /* ON NE DIT PLUS « envoye a ton adresse » QUAND IL EST PARTI AILLEURS.
+           Le secours s'arretait au premier administrateur servi, et l'ecran
+           annoncait quand meme l'adresse de celui qui cliquait : il fouillait
+           ses indesirables pour un message qui n'y etait pas. */
+        txt+=" Un e-mail de secours est parti, mais a un AUTRE administrateur, pas a toi.";
+      }else if(!r.mesPoussees&&!r.adresseSecours){
         txt+=" Aucun secours possible : ton compte administrateur n\'a pas d\'adresse e-mail dans Firebase Auth.";
-      }else if(!r.poussees){
+      }else if(!r.mesPoussees){
         txt+=" Le secours par e-mail n\'est pas parti non plus : cle Brevo absente ou refusee.";
       }
       if(out){
@@ -34746,9 +34888,14 @@ window._rafraichirListeAlertes=function(){
     var t='<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:16px;overflow:hidden">';
     rows.forEach(function(a,i){
       var etat,coul;
-      if(a.poussees>0){ etat="notification envoy\u00E9e"; coul="var(--s2)"; }
+      /* « NOTIFICATION ENVOYEE » PROMETTAIT UN OBJET AFFICHE SUR UN ECRAN.
+         Le serveur ne sait qu'une chose : Google a accepte le message. Le
+         journal disait « notification envoyee » pour les deux arrivants du
+         28 novembre a 07h24, et rien n'est jamais apparu. */
+      if(a.poussees>0){ etat="envoi accept\u00E9 par Google ("+a.poussees+")"; coul="var(--s2)"; }
       else if(a.jetons>0){ etat="envoi refus\u00E9 par Google"; coul="#b45309"; }
-      else { etat="aucun appareil enregistr\u00E9"; coul="#b42318"; }
+      else if(a.fini){ etat="aucun appareil enregistr\u00E9"; coul="#b42318"; }
+      else { etat="aucun appareil enregistr\u00E9, ou envoi interrompu avant la fin"; coul="#b42318"; }
       if(a.courriel)etat+=" \u00B7 e-mail de secours envoy\u00E9";
       /* LE CODE D'ERREUR, PAS SEULEMENT « refuse ». Un jeton mort se reactive en
          deux gestes ; une cle VAPID fausse demande d'ouvrir la console Firebase.

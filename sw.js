@@ -357,12 +357,25 @@ function destinationDuTap(data, n) {
 self.addEventListener("push", function(event) {
   var data = {};
   try { data = event.data ? event.data.json() : {}; } catch (e) {}
-  /* ON REGARDE AUSSI DANS webpush.notification. Les alertes d'administration
-     etaient envoyees sans « notification » de premier niveau : le titre vivait
-     sous webpush.notification, qu'on ne lisait nulle part. */
-  var w = (data.webpush && data.webpush.notification) || {};
+  /* IL N'Y A PAS DE CLE « webpush » DANS CE QUI ARRIVE ICI, ET C'EST VERIFIE.
+     Une version de ce fichier lisait data.webpush.notification, en croyant que
+     le bloc « webpush » du serveur arrivait tel quel. Il n'arrive jamais : FCM
+     l'APLATIT avant la livraison. Trois sources, toutes relues :
+       - le service worker officiel de Google
+         (gstatic.com/firebasejs/10.12.2/firebase-messaging-sw.js) teste
+         « payload.notification » au premier niveau, et le mot « webpush »
+         n'apparait pas une seule fois dans tout le fichier ;
+       - l'interface MessagePayloadInternal du SDK ne connait que notification,
+         data, fcmOptions, from, collapse_key et fcmMessageId ;
+       - la reference REST de FCM dit que webpush.notification « override » les
+         champs de la notification commune : il les REMPLACE, il ne s'ajoute
+         pas a cote.
+     Ce qui arrive ici porte donc toujours son titre au premier niveau, et le
+     bloc webpush du serveur ne sert qu'a ajouter icone, badge et lien. Ne
+     remets pas cette lecture : elle a fait croire a une panne qui etait
+     ailleurs (un seul jeton push par compte, vole par le dernier appareil
+     ouvert — voir outils-admin.js). */
   var n = data.notification || data.data || {};
-  if (!n.title && !n.body) n = w;
 
   /* NE JAMAIS SORTIR SANS RIEN AFFICHER. L'ancienne ligne etait
        if (!n.title && !n.body) return;  // deja affiche par le navigateur
@@ -371,9 +384,11 @@ self.addEventListener("push", function(event) {
      Une poussee qui n'affiche rien est une « poussee silencieuse » : Safari
      sur iPhone et Chrome la comptent comme un abus et finissent par retirer
      l'abonnement — donc plus aucune notification, et plus rien pour le dire.
-     Mieux vaut une notification sobre qu'un silence qui casse le canal. */
-  var titre = n.title || w.title || "Magofeed";
-  var corps = n.body || w.body || "";
+     Les onze chemins d'envoi du projet portent tous un titre non vide, donc ce
+     repli ne devrait jamais s'afficher ; il existe pour qu'une charge
+     inattendue ne casse pas le canal. */
+  var titre = n.title || "Magofeed";
+  var corps = n.body || "";
   event.waitUntil(
     self.registration.showNotification(titre, {
       body: corps,

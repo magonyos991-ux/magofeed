@@ -19,45 +19,30 @@
 const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
-const { getMessaging } = require("firebase-admin/messaging");
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
 const REGION = "europe-west1";
 const APP_URL = "https://magonyos991-ux.github.io/magofeed/";
 
-/* Même mécanique que notifications-push.js : un token par utilisateur dans
-   pushTokens/{uid}, silence si absent, suppression si périmé. */
+/* ══ TOUS LES APPAREILS, ET PLUS SEULEMENT LE DERNIER OUVERT ═══════════════
+   pushTokens/{uid} ne portait qu'un champ « token », reecrit a chaque
+   ouverture de l'app : le dernier appareil ouvert ecrasait celui des autres.
+   envoyerPush lit la carte « jetons » — une entree par appareil — envoie a
+   chacun, et ne supprime jamais le document entier (il porte aussi la
+   position, le rayon de zone et le choix du secours). Bloc complet dans
+   outils-admin.js. */
+const { envoyerPush, message } = require("./outils-admin");
+
+/* UNE NOTIFICATION PAR CONVERSATION, ET PAR DEMANDE D'AMI.
+   Ce tag ne connaissait que `cid`. Les demandes d'ami n'en ont pas : elles
+   retombaient toutes sur « msg-x », donc la deuxieme effacait la premiere sur
+   le telephone. Deux personnes vous demandent en ami, vous n'en voyez qu'une —
+   en silence. On prend la premiere identite disponible, quelle que soit la
+   sorte de notification. */
 async function pushToUser(uid, title, body, data, link) {
-  if (!uid) return;
-  try {
-    const snap = await db.collection("pushTokens").doc(String(uid)).get();
-    const token = snap.exists && snap.data().token;
-    if (!token) return;
-    await getMessaging().send({
-      token: token,
-      notification: { title: title, body: body },
-      data: data || {},
-      webpush: {
-        /* UNE NOTIFICATION PAR CONVERSATION, ET PAR DEMANDE D'AMI.
-           Ce tag ne connaissait que `cid`. Les demandes d'ami n'en ont pas :
-           elles retombaient toutes sur « msg-x », donc la deuxieme effacait la
-           premiere sur le telephone. Deux personnes vous demandent en ami, vous
-           n'en voyez qu'une — en silence. On prend la premiere identite
-           disponible, quelle que soit la sorte de notification. */
-        notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png",
-          tag: String((data && (data.cid || data.pid)) || "magofeed") },
-        fcmOptions: { link: link || APP_URL }
-      }
-    });
-  } catch (e) {
-    if (e && (e.code === "messaging/registration-token-not-registered" ||
-              e.code === "messaging/invalid-registration-token")) {
-      try { await db.collection("pushTokens").doc(String(uid)).delete(); } catch (_) {}
-    } else {
-      console.warn("push message error:", e && e.message);
-    }
-  }
+  await envoyerPush(uid, message(title, body, data, link,
+    String((data && (data.cid || data.pid)) || "magofeed")));
 }
 
 function apercu(m) {

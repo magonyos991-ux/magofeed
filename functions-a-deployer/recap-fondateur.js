@@ -24,6 +24,9 @@ const db = getFirestore();
 const REGION = "europe-west1";              // ADAPTE si ton projet est ailleurs
 const APP_URL = "https://magonyos991-ux.github.io/magofeed/";
 
+/* Tous les appareils de chaque administrateur : voir le bloc d'outils-admin.js. */
+const { jetonsDe, message } = require("./outils-admin");
+
 // Comptage agrégé (≈1 lecture par tranche de 1000 docs) — silencieux si erreur.
 async function count(q) {
   try { const s = await q.count().get(); return s.data().count; }
@@ -58,28 +61,22 @@ exports.dailyFounderRecap = onSchedule(
 
     // Destinataires = tous les admins (collection "admins") qui ont un token push.
     const admins = await db.collection("admins").get();
+    /* TOUS LES APPAREILS DE CHAQUE ADMINISTRATEUR. En ne lisant que « token »,
+       le recap partait vers le dernier appareil ouvert — l'ordinateur ouvert
+       cinq minutes la veille — et pas vers le telephone. Voir outils-admin.js. */
     const tokens = [];
     for (const a of admins.docs) {
       try {
-        const tk = await db.collection("pushTokens").doc(a.id).get();
-        const token = tk.exists && tk.data().token;
-        if (token) tokens.push(token);
-      } catch (e) { /* admin sans token push : on saute */ }
+        for (const j of await jetonsDe(a.id)) tokens.push(j.token);
+      } catch (e) { /* admin sans jeton push : on saute */ }
     }
     if (!tokens.length) {
       console.log("Récap : aucun admin avec token push (active les notifs dans l'app).");
       return;
     }
 
-    const messages = tokens.map((token) => ({
-      token: token,
-      notification: { title: title, body: body },
-      data: { type: "founderRecap" },
-      webpush: {
-        notification: { icon: "icons/icon-192.png", badge: "icons/icon-192.png" },
-        fcmOptions: { link: APP_URL },
-      },
-    }));
+    const messages = tokens.map((token) => Object.assign(
+      message(title, body, { type: "founderRecap" }), { token: token }));
 
     try {
       const res = await getMessaging().sendEach(messages);
