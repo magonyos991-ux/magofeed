@@ -6486,6 +6486,28 @@ window.fbSyncWatch = async function(add, drinkId, drinkName, lat, lng) {
     }
   } catch (e) { console.warn("Watch sync:", e); }
 };
+/* Horaires retrouves pour une zone : ecrits par lots, une fois pour tout le
+   monde. set+merge sur un magasin existant = la regle « update », qui laisse
+   les horaires collaboratifs sur un magasin non certifie. Un lot refuse (un
+   seul magasin protege suffit) retombe magasin par magasin. */
+window.fbSaveHoursBatch = async function(paires) {
+  var ecrits = 0;
+  for (var i = 0; i < (paires || []).length; i += 100) {
+    var lot = paires.slice(i, i + 100);
+    try {
+      var b = writeBatch(db);
+      lot.forEach(function(p) { b.set(doc(db, "stores", String(p[0])), { hours: String(p[1]).slice(0, 120) }, { merge: true }); });
+      await b.commit();
+      ecrits += lot.length;
+    } catch (e) {
+      for (var j = 0; j < lot.length; j++) {
+        try { await setDoc(doc(db, "stores", String(lot[j][0])), { hours: String(lot[j][1]).slice(0, 120) }, { merge: true }); ecrits++; }
+        catch (e2) {}
+      }
+    }
+  }
+  return ecrits;
+};
 window.fbSaveStore = async function(id, data) {
   /* Si la sauvegarde deplace le magasin, le geohash doit suivre : un geohash
      perime rendrait la fiche introuvable dans sa nouvelle zone. */
@@ -27282,6 +27304,8 @@ function exploreApplyChips(list){
   if(c.open){
     var _tri=trierParOuverture(arr);
     window._exploreInconnus=_tri.inconnus.length;
+    // garde la liste : exploreLoadStores recompte sur le CADRE VISIBLE
+    window._exploreInconnusListe=_tri.inconnus;
     arr=_tri.ouverts;
     try{window._exploreHorsBoisson=trierParOuverture(window._exploreHorsBoisson).ouverts;}catch(eHB){}
   }
@@ -28460,9 +28484,16 @@ function exploreLoadStores(useCache){
        glissement. */
     try{
       var _cadre=exploreMap.getBounds().pad(0.25);
-      list=list.filter(function(s){
-        return typeof s.lat==="number" && typeof s.lng==="number" && _cadre.contains([s.lat,s.lng]);
-      });
+      var _dansCadre=function(s){return typeof s.lat==="number" && typeof s.lng==="number" && _cadre.contains([s.lat,s.lng]);};
+      list=list.filter(_dansCadre);
+      /* « N ouverts · M inconnus » : les ouverts etaient comptes sur l'ecran,
+         les inconnus sur tout le cercle charge (jusqu'a 12 km). Deux zones
+         pour une meme phrase. On recompte les inconnus sur le meme cadre. */
+      if(window._exploreChips&&window._exploreChips.open&&window._exploreInconnusListe)
+        window._exploreInconnus=window._exploreInconnusListe.filter(_dansCadre).length;
+      /* Les magasins de la zone affichee qui n'ont pas d'horaires : on va les
+         chercher (y compris ceux que la puce « Ouvert » vient d'ecarter). */
+      comblerHorairesBientot((window._exploreRawList||list).filter(_dansCadre));
     }catch(eB){}
     _assurerRegroupement();
     exploreLayer.clearLayers();
@@ -32065,10 +32096,146 @@ function _reparerSeparateur(t){
 }
 function horairesReels(s){
   if(_horairesEtat===0)chargerHorairesOSM();
-  if(!HORAIRES_OSM)return null;
   var k=osmIdDe(s);
-  return k?(_reparerSeparateur(HORAIRES_OSM[k])||null):null;
+  if(HORAIRES_OSM&&k&&HORAIRES_OSM[k])return _reparerSeparateur(HORAIRES_OSM[k])||null;
+  var z=_hzTrouve(s);
+  return z?(_reparerSeparateur(z)||null):null;
 }
+/* ══ LES HORAIRES QUE L'IMPORT AVAIT PERDUS ════════════════════════════════
+   Mesure sur la production, Paris : 18 % des magasins avaient des horaires.
+   Pourtant 976 des magasins parisiens SANS horaires en ont dans
+   OpenStreetMap, sous leur propre identifiant : l'import de juillet 2026 les
+   a perdus en route, et le fichier d'horaires embarque s'arrete a la
+   frontiere belge. Le filtre « Ouvert » ecartait donc l'immense majorite de
+   Paris comme « horaire inconnu ».
+   Ici, quand une zone s'affiche, on demande a OpenStreetMap les horaires des
+   magasins qui n'en ont pas — PAR IDENTIFIANT EXACT, une seule requete pour
+   toute la zone. Correspondance stricte : meme identifiant ET a moins de
+   250 m (un numero de noeud et un numero de chemin peuvent coincider) ;
+   aucune devinette. Ce qui est trouve est garde sur l'appareil, et reecrit
+   sur la fiche du magasin dans la base : le premier qui regarde une zone la
+   repare pour tout le monde.
+   Le serveur Overpass principal sature parfois (« at capacity ») : on
+   essaie ses miroirs dans l'ordre, chacun avec son delai. */
+var _HZ_MIROIRS=["https://overpass-api.de/api/interpreter",
+                 "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+                 "https://overpass.kumi.systems/api/interpreter"];
+var _hzEnCours=false,_hzRepos=0,_hzT=null,_HZ=null;
+function _hzCharger(){
+  if(_HZ)return _HZ;
+  _HZ={trouves:{},essayes:{}};
+  try{var o=JSON.parse(localStorage.getItem("magoHorairesZone")||"null");if(o&&o.trouves)_HZ=o;}catch(e){}
+  if(!_HZ.essayes)_HZ.essayes={};
+  return _HZ;
+}
+function _hzSauver(){
+  var h=_hzCharger(),now=Date.now(),MOIS=30*864e5;
+  /* Bornes : les essais de plus d'un mois tombent, et le cache ne garde que
+     les 6000 horaires les plus recents (le reste est dans la base). */
+  Object.keys(h.essayes).forEach(function(k){if(now-h.essayes[k]>MOIS)delete h.essayes[k];});
+  var cles=Object.keys(h.trouves);
+  if(cles.length>6000){cles.sort(function(a,b){return (h.trouves[a].t||0)-(h.trouves[b].t||0);});cles.slice(0,cles.length-6000).forEach(function(k){delete h.trouves[k];});}
+  try{localStorage.setItem("magoHorairesZone",JSON.stringify(h));}catch(e){}
+}
+function _hzTrouve(s){
+  if(!s)return null;
+  var e=_hzCharger().trouves[String(s.fbId||s.id||"")];
+  return e?e.h:null;
+}
+function _hzMetre(la1,lo1,la2,lo2){
+  var dLa=(la1-la2)*111320,dLo=(lo1-lo2)*111320*Math.cos(la1*Math.PI/180);
+  return Math.sqrt(dLa*dLa+dLo*dLo);
+}
+function _hzLireCSV(txt){
+  var idx={};
+  String(txt||"").split(/\r?\n/).forEach(function(l){
+    var c=l.split("\t"); if(c.length<5)return;
+    var tp=c[0],id=c[1],la=parseFloat(c[2]),lo=parseFloat(c[3]),oh=c.slice(4).join("\t").trim();
+    if(!/^(node|way)$/.test(tp)||!/^\d+$/.test(id)||!oh||isNaN(la)||isNaN(lo))return;
+    // une valeur contenant une virgule arrive entre guillemets CSV
+    if(oh.charAt(0)==='"'&&oh.charAt(oh.length-1)==='"')oh=oh.slice(1,-1).replace(/""/g,'"');
+    (idx[id]=idx[id]||[]).push({la:la,lo:lo,oh:oh});
+  });
+  return idx;
+}
+function _hzPoster(url,corps,ms){
+  return new Promise(function(ok,ko){
+    var ctrl=("AbortController" in window)?new AbortController():null,fini=false;
+    var t=setTimeout(function(){if(fini)return;fini=true;try{ctrl&&ctrl.abort();}catch(e){}ko(new Error("delai"));},ms);
+    fetch(url,{method:"POST",body:"data="+encodeURIComponent(corps),
+      headers:{"Content-Type":"application/x-www-form-urlencoded"},signal:ctrl?ctrl.signal:undefined})
+      .then(function(r){return r.text().then(function(t2){return {ok:r.ok,t:t2};});})
+      .then(function(r){if(fini)return;fini=true;clearTimeout(t);
+        /* Un serveur sature repond 200 avec un texte d'erreur : on exige des
+           lignes au bon format, sinon c'est un echec et on passe au miroir. */
+        if(!r.ok||/^\s*(#|<)/.test(r.t))ko(new Error("refus"));else ok(r.t);})
+      .catch(function(e){if(fini)return;fini=true;clearTimeout(t);ko(e);});
+  });
+}
+function comblerHorairesZone(liste){
+  try{
+    if(_hzEnCours||Date.now()<_hzRepos||!liste||!liste.length)return;
+    var h=_hzCharger(),now=Date.now(),MOIS=30*864e5;
+    var cand=[];
+    for(var i=0;i<liste.length&&cand.length<300;i++){
+      var s=liste[i]; if(!s||typeof s.lat!=="number")continue;
+      if(s.hours&&String(s.hours).trim())continue;
+      var k=osmIdDe(s); if(!k)continue;
+      if(horairesReels(s))continue;
+      var sid=String(s.fbId||s.id||""); if(!sid)continue;
+      if(h.essayes[sid]&&now-h.essayes[sid]<MOIS)continue;
+      try{ if(storeCertifie(s))continue; }catch(e){}
+      cand.push(s);
+    }
+    /* Deux ou trois magasins : la fiche s'en charge a l'ouverture
+       (enrichStoreHours). La requete de zone vaut pour un lot. */
+    if(cand.length<5)return;
+    var ids=cand.map(function(s){return osmIdDe(s);}).filter(function(v,j,a){return a.indexOf(v)===j;}).join(",");
+    var q='[out:csv(::type,::id,::lat,::lon,opening_hours;false;"\t")][timeout:40];'+
+          '(node(id:'+ids+')["opening_hours"];way(id:'+ids+')["opening_hours"];);out center;';
+    _hzEnCours=true;
+    var essai=function(n){
+      if(n>=_HZ_MIROIRS.length)return Promise.reject(new Error("aucun miroir"));
+      return _hzPoster(_HZ_MIROIRS[n],q,25000).catch(function(){return essai(n+1);});
+    };
+    essai(0).then(function(txt){
+      var idx=_hzLireCSV(txt),ecrire=[],t=Date.now();
+      cand.forEach(function(s){
+        var sid=String(s.fbId||s.id||"");
+        h.essayes[sid]=t;
+        var meilleurs=(idx[osmIdDe(s)]||[]).filter(function(e){return _hzMetre(s.lat,s.lng,e.la,e.lo)<=250;});
+        if(!meilleurs.length)return;
+        meilleurs.sort(function(a,b){return _hzMetre(s.lat,s.lng,a.la,a.lo)-_hzMetre(s.lat,s.lng,b.la,b.lo);});
+        var oh=meilleurs[0].oh.slice(0,120);
+        h.trouves[sid]={h:oh,t:t};
+        s.hours=oh;
+        try{(window.STORES||[]).forEach(function(x){if(String(x.fbId||x.id)===sid&&!x.hours)x.hours=oh;});}catch(e){}
+        ecrire.push([sid,oh]);
+      });
+      _hzSauver();
+      if(ecrire.length){
+        if(window.fbSaveHoursBatch)window.fbSaveHoursBatch(ecrire).then(function(){try{if(window.fbTouchCache)window.fbTouchCache();}catch(e){}}).catch(function(){});
+        try{var hh=document.getElementById("explore-map-host");if(window.exploreMap&&hh&&hh.style.display!=="none")exploreLoadStores(true);}catch(e){}
+        try{if(curSel)renderStoreList();}catch(e){}
+        try{renderNearby();}catch(e){}
+      }
+    }).catch(function(){
+      /* Tous les serveurs refusent : on ne marque RIEN comme essaye (ce n'est
+         pas un « pas d'horaire »), et on se tait dix minutes. */
+      _hzRepos=Date.now()+10*60*1000;
+    }).then(function(){_hzEnCours=false;});
+  }catch(e){_hzEnCours=false;}
+}
+/* Appel differe : la carte se redessine a chaque deplacement, la requete ne
+   part qu'une fois la vue posee. */
+function comblerHorairesBientot(liste){
+  try{clearTimeout(_hzT);}catch(e){}
+  _hzT=setTimeout(function(){comblerHorairesZone(liste);},1200);
+}
+/* Les magasins autour de soi (accueil, fiches boisson) : meme comblement,
+   des que la zone est chargee. STORES est trie par distance : les 300
+   premiers sans horaires sont les plus proches. */
+window.addEventListener("fbStoresLoaded",function(){ try{comblerHorairesBientot(window.STORES||[]);}catch(e){} });
 /* On ne renvoie plus seulement OUVERT ou FERME : on renvoie aussi D'OU on le
    tient. Trois sources, et elles ne se valent pas du tout.
 

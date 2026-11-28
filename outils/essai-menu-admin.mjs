@@ -27,7 +27,11 @@ const ctx=await nav.newContext({viewport:{width:375,height:667},serviceWorkers:"
 const pg=await ctx.newPage();
 const erreurs=[];
 pg.on("pageerror",e=>erreurs.push("ERREUR JS : "+String(e.message).slice(0,140)));
-await pg.route(/tile\.openstreetmap\.org|images\.openfoodfacts\.org|cdnjs\.cloudflare\.com/,r=>r.abort());
+/* Firebase coupe : sinon la VRAIE verification admin (« ce compte d'essai
+   n'est pas admin ») arrive apres l'interrupteur du controle et le remet a
+   faux, au hasard du temps de chargement — un controle qui depend de la
+   course n'est pas un controle. */
+await pg.route(/tile\.openstreetmap\.org|images\.openfoodfacts\.org|cdnjs\.cloudflare\.com|gstatic\.com|googleapis\.com/,r=>r.abort());
 await pg.addInitScript(()=>{try{localStorage.setItem("magoOnboard","1");}catch(e){}});
 await pg.goto(`http://127.0.0.1:${port}/index.html`);
 await pg.waitForFunction(()=>window.DRINKS&&DRINKS.length>100,{timeout:40000});
