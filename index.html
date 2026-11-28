@@ -29711,9 +29711,21 @@ function settingsTestPush(){
   if(!window.fbTestPush){toast("Indisponible ici");playSound("err");return;}
   toast("Envoi du test…");
   window.fbTestPush().then(function(r){
-    if(r&&r.ok){playSound("win");toast("Test envoyé ! Ferme l'app : la notif doit arriver dans quelques secondes");}
+    /* ON DIT CE QUE LE SERVEUR SAIT, ET SUR COMBIEN D'APPAREILS.
+       « Test envoyé ! la notif doit arriver dans quelques secondes » promettait
+       une arrivee que personne ne peut constater, et taisait le nombre
+       d'appareils — alors que le probleme etait justement que la notification
+       partait vers un AUTRE appareil que celui qu'on tient en main. */
+    if(r&&r.ok){
+      playSound("win");
+      var n=Number(r.parties)||0, m=Number(r.appareils)||0;
+      toast(m>1
+        ? ("Envoi accepté pour "+n+" de tes "+m+" appareils. Ferme l'app : si rien n'arrive ici, c'est qu'un autre appareil l'a reçue.")
+        : "Envoi accepté par Google. Ferme l'app : la notification devrait arriver.");
+    }
     else if(r&&r.reason==="no-token"){toast("Active d'abord les notifications");playSound("err");}
     else if(r&&r.reason==="stale-token"){toast("Jeton expiré — réactive les notifications");playSound("err");}
+    else if(r&&r.reason==="refuse"){toast("Google a refusé : "+String((r.echecs&&r.echecs.join(" / "))||"sans code"));playSound("err");}
     else if(r&&r.reason==="not-deployed"){toast("Fonction de test pas encore déployée côté serveur");playSound("err");}
     else{toast("Échec du test — réessaie");playSound("err");}
   });
@@ -29738,16 +29750,29 @@ async function runNotifDiagnostic(){
   try{if(window.fbGetMyPushDoc)pushDoc=await window.fbGetMyPushDoc();}catch(e){}
   try{if(window.fbGetMyHuntsInfo)hunts=await window.fbGetMyHuntsInfo();}catch(e){}
   var serverPos=!!(pushDoc&&pushDoc.exists&&pushDoc.lat!=null);
-  var tokenServer=!!(pushDoc&&pushDoc.exists&&pushDoc.hasToken);
+  /* LES APPAREILS, PAS UN OUI/NON. « serveur: oui » repondait oui alors que le
+     jeton enregistre etait celui d'un AUTRE appareil — le PC qu'on avait
+     ouvert la veille. C'est cette ligne-la qui a fait chercher la panne dans
+     les reglages iOS pendant des semaines. On liste maintenant les appareils
+     que le serveur connait, et on dit si CELUI-CI en fait partie. */
+  var apps=(pushDoc&&pushDoc.appareils)||[];
+  var tokenServer=apps.length>0||!!(pushDoc&&pushDoc.exists&&pushDoc.hasToken);
+  var ceTelInscrit=apps.some(function(a){return a.actuel;});
+  var nomsApps=apps.map(function(a){return a.nom+(a.actuel?" (celui-ci)":"");}).join(", ");
   var verdict,vcol;
   if(ios&&!installed){verdict="Installe d'abord l'app sur l'écran d'accueil (obligatoire sur iPhone), puis autorise les notifications.";vcol="#b45309";}
   else if(perm!=="granted"){verdict="Autorise les notifications : appuie sur « Notifications » juste au-dessus.";vcol="#b45309";}
   else if(!hasToken||!tokenServer){verdict="Jeton push manquant : rouvre l'app et réappuie sur « Notifications » pour le réactiver.";vcol="#b45309";}
+  /* LE CAS QU'AUCUN ECRAN NE SAVAIT NOMMER. Le serveur connait des appareils,
+     mais pas celui-ci : les notifications partent ailleurs, et ce téléphone
+     restera muet quoi qu'on change dans ses réglages. */
+  else if(apps.length&&!ceTelInscrit){verdict="C'EST ÇA LE BLOCAGE : le serveur connaît "+apps.length+" appareil(s) pour ton compte, mais PAS celui-ci. Les notifications partent ailleurs. Appuie sur « Notifications » juste au-dessus pour inscrire ce téléphone.";vcol="#b45309";}
   else if(!serverPos){verdict="C'EST ÇA LE BLOCAGE : ta position n'est pas enregistrée côté serveur, donc il ne peut pas te notifier par zone. Appuie sur « Enregistrer ma position » ci-dessous, laisse l'app ouverte 5 s, puis relance ce diagnostic.";vcol="#b45309";}
   else{verdict="Tout est bon côté téléphone. Si une notif de chasse n'arrive toujours pas, c'est la fonction serveur (notifyHuntNearby) — envoie-moi cette capture.";vcol="#15803d";}
   var rows=_diagRow(!ios||installed,"App sur l'écran d'accueil",installed?"Oui":(ios?"NON — indispensable sur iPhone":"Non applicable (Android/PC)"))+
     _diagRow(perm==="granted","Notifications autorisées","État : "+perm)+
-    _diagRow(hasToken&&tokenServer,"Jeton push actif",(hasToken?"local: oui":"local: non")+" · "+(tokenServer?"serveur: oui":"serveur: non")+(pushDoc&&pushDoc.error?(" · err: "+pushDoc.error):""))+
+    _diagRow(hasToken&&tokenServer&&(ceTelInscrit||!apps.length),"Jeton push actif",(hasToken?"local: oui":"local: non")+" · "+(tokenServer?"serveur: oui":"serveur: non")+(pushDoc&&pushDoc.error?(" · err: "+pushDoc.error):""))+
+    _diagRow(ceTelInscrit||!apps.length,"Appareils connus du serveur",apps.length?sanitize(nomsApps):"aucun — ce téléphone n'est inscrit nulle part")+
     _diagRow(serverPos,"Position enregistrée (serveur)",serverPos?("oui — "+Number(pushDoc.lat).toFixed(3)+", "+Number(pushDoc.lng).toFixed(3)):"NON — le serveur ne sait pas où tu es")+
     _diagRow(!!gps,"GPS actuel dans l'app",gps||"non détecté (active ta position)")+
     _diagRow((hunts&&hunts.mineTotal)?hunts.mineWithPos>0:true,"Tes chasses géolocalisées",(hunts&&hunts.mineTotal!=null)?(hunts.mineWithPos+"/"+hunts.mineTotal+" avec position · "+(hunts.totalHunts||0)+" chasses au total"):(hunts&&hunts.error?("err: "+hunts.error):"—"));

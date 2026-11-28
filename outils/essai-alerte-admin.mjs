@@ -487,6 +487,73 @@ const dom = await pg.evaluate(async () => {
   return out;
 });
 dom.forEach((x) => v.push(x));
+
+/* ── 5. LE DIAGNOSTIC DES NOTIFICATIONS, DANS LA MEME PAGE ─────────────────
+   L'ECRAN QU'IL OUVRE QUAND RIEN N'ARRIVE. Il affichait « Jeton push actif —
+   serveur: oui » alors que le jeton enregistre etait celui d'un AUTRE
+   appareil : le PC ouvert la veille. Il ne pouvait donc pas nommer la seule
+   cause vraie, et son verdict concluait « tout est bon cote telephone ».
+   On appelle le VRAI runNotifDiagnostic, avec une doublure de fbGetMyPushDoc,
+   et on lit ce que l'ecran dit. */
+/* LA PERMISSION EST ACCORDEE POUR DE VRAI, pas simulee : le verdict du
+   diagnostic s'arrete a la premiere cause qui bloque, et sans permission il
+   ne depasse jamais « Autorise les notifications » — l'essai n'aurait alors
+   rien controle du tout. */
+await ctx.grantPermissions(["notifications"], { origin: `http://127.0.0.1:${port}` });
+const diag = await pg.evaluate(async () => {
+  const out = [];
+  const attendre = (ms) => new Promise((r) => setTimeout(r, ms));
+  const txt = () => { const n = document.getElementById("notif-diag"); return n ? n.textContent : ""; };
+  if (typeof window.runNotifDiagnostic !== "function") {
+    out.push(["runNotifDiagnostic existe", false, "fonction absente"]);
+    return out;
+  }
+  out.push(["runNotifDiagnostic existe", true, ""]);
+  window._pushToken = "jeton-de-ce-telephone";
+  window.isAdmin = false;
+  window.fbGetMyHuntsInfo = async () => ({ mineTotal: 0, mineWithPos: 0, totalHunts: 0 });
+
+  /* Cas A : le serveur connait deux appareils, et CELUI-CI n'en fait pas
+     partie. C'est litteralement ce qu'a vecu le fondateur. */
+  window.fbGetMyPushDoc = async () => ({ exists: true, uid: "u", hasToken: true,
+    appareils: [{ nom: "Windows \u00B7 Chrome", actuel: false }, { nom: "iPad \u00B7 Safari", actuel: false }],
+    lat: 50.85, lng: 4.35, updatedAt: 1 });
+  await window.runNotifDiagnostic(); await attendre(120);
+  let s = txt();
+  out.push(["ce telephone absent de la liste : l'ecran le NOMME",
+    /mais PAS celui-ci/.test(s), s.slice(0, 120)]);
+  out.push(["ce telephone absent : l'ecran ne dit PAS que tout est bon",
+    !/Tout est bon c/.test(s), ""]);
+  out.push(["ce telephone absent : les appareils connus sont listes",
+    /Windows/.test(s) && /iPad/.test(s), ""]);
+
+  /* Cas B : ce telephone EST inscrit, avec un autre a cote. */
+  window.fbGetMyPushDoc = async () => ({ exists: true, uid: "u", hasToken: true,
+    appareils: [{ nom: "Windows \u00B7 Chrome", actuel: false }, { nom: "iPhone \u00B7 Safari", actuel: true }],
+    lat: 50.85, lng: 4.35, updatedAt: 1 });
+  await window.runNotifDiagnostic(); await attendre(120);
+  s = txt();
+  out.push(["ce telephone inscrit : l'ecran ne crie plus au blocage",
+    !/mais PAS celui-ci/.test(s), s.slice(0, 120)]);
+  out.push(["ce telephone inscrit : il est marque « celui-ci »",
+    /celui-ci\)/.test(s), s.slice(0, 160)]);
+
+  /* Cas C : aucun appareil cote serveur, et une reponse a l'ANCIENNE forme
+     (sans la liste). L'ecran ne doit pas s'effondrer ni inventer. */
+  window.fbGetMyPushDoc = async () => ({ exists: true, uid: "u", hasToken: true, lat: 50.85, lng: 4.35, updatedAt: 1 });
+  await window.runNotifDiagnostic(); await attendre(120);
+  s = txt();
+  out.push(["reponse a l'ancienne forme : l'ecran s'affiche quand meme", s.length > 50, String(s.length)]);
+  out.push(["reponse a l'ancienne forme : aucun blocage invente",
+    !/mais PAS celui-ci/.test(s), s.slice(0, 120)]);
+
+  out.push(["aucun emoji dans le diagnostic",
+    !/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/u.test(s), ""]);
+  const p = document.getElementById("notif-diag"); if (p) p.remove();
+  return out;
+});
+diag.forEach((x) => v.push(x));
+
 ok("aucune erreur JavaScript dans la page", errs.length === 0, errs.join(" | "));
 
 await nav.close(); await new Promise((r) => srv.close(r));
