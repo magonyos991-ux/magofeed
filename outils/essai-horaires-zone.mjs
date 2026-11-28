@@ -124,6 +124,36 @@ const avantRequetes=principal+miroir;
 await pg.evaluate(async()=>{exploreLoadStores(true);await new Promise(r=>setTimeout(r,3000));});
 verifier("une zone deja comblee ne redemande rien",principal+miroir===avantRequetes,(principal+miroir-avantRequetes)+" requete(s) de plus");
 
+/* Les horaires trouves se RELISENT comme OpenStreetMap les publie, a toute
+   heure. La relecture adversariale l'a montre : relus comme une saisie
+   humaine, « Su » devenait muet (dimanche « Ferme ») et une virgule entre
+   deux plages creait une plage sans jour (« Ouvert » le dimanche). Le samedi
+   10 h du controle ci-dessus ne pouvait pas le voir. */
+const relu=await pg.evaluate(()=>{
+  const moments=[new Date(2026,10,29,11,0),new Date(2026,10,29,15,0),new Date(2026,11,1,13,0),new Date(2026,11,1,15,0),new Date(2026,11,2,20,0)];
+  const ouvert=(rules,now)=>{if(!rules)return null;const day=now.getDay(),t=now.getHours()*60+now.getMinutes();let o=false;
+    rules.forEach(r=>r.ranges.forEach(([a,b])=>{if(b>a){if(r.days.includes(day)&&t>=a&&t<b)o=true;}else{if(r.days.includes(day)&&t>=a)o=true;if(r.days.includes((day+6)%7)&&t<b)o=true;}}));return o;};
+  let total=0,faux=0;const ex=[];
+  (window._exploreRawList||[]).filter(s=>/^o\d+$/.test(String(s.id))&&s.hours).forEach(s=>{
+    const vrai=parseOSMHours(_reparerSeparateur(s.hours));
+    moments.forEach(m=>{total++;const lu=openInfo(s,m).open;if(lu!==ouvert(vrai,m)){faux++;if(ex.length<2)ex.push(s.hours+" @"+m.toString().slice(0,10));}});
+  });
+  return {total,faux,ex};
+});
+verifier("relus comme OSM, dimanche et semaine",relu.total>0&&relu.faux===0,relu.faux+"/"+relu.total+" "+relu.ex.join(" | "));
+
+/* Le fichier belge n'est pas encore arrive : un magasin qui s'y trouve n'est
+   pas cherche sur le reseau (l'app a deja son horaire dans sa poche). */
+const avantBE=principal+miroir;
+await pg.evaluate(async()=>{
+  window.__horairesGardes=[HORAIRES_OSM,_horairesEtat];
+  HORAIRES_OSM=null;_horairesEtat=1;
+  const bxl=[];for(let i=0;i<12;i++)bxl.push({id:"o"+(880000000+i),fbId:"o"+(880000000+i),name:"Bruxelles "+i,lat:50.84+i*0.001,lng:4.35,drinks:[1],confirmations:{}});
+  comblerHorairesZone(bxl);await new Promise(r=>setTimeout(r,1500));
+  HORAIRES_OSM=window.__horairesGardes[0];_horairesEtat=window.__horairesGardes[1];
+});
+verifier("fichier belge en route : pas de requete en double",principal+miroir===avantBE,(principal+miroir-avantBE)+" requete(s)");
+
 console.log("\n  LES HORAIRES PERDUS A L'IMPORT REVIENNENT-ILS ?\n");
 let ko=0;
 for(const [nom,ok,det] of etapes){

@@ -1202,6 +1202,20 @@ await doit('bloque : Mallory reecrit le rayon en le reduisant (comme la purge)',
   ()=>assertFails(updateDoc(doc(m,'stores','s1'),{drinks:[1]})));
 await doit('legitime : l administrateur peut purger',
   ()=>assertSucceeds(updateDoc(doc(env.authenticatedContext(ADMIN).firestore(),'stores','s1'),{drinks:[1,2]})));
+/* Un magasin cree par l'import d'exploration n'a PAS de champ drinks
+   (fbImportStores n'ecrit pas une liste vide). Lire un champ absent est une
+   erreur en regles Firestore, donc un refus : le premier signalement sur
+   chacun de ces magasins etait rejete. */
+await env.withSecurityRulesDisabled(async (c)=>{
+  await setDoc(doc(c.firestore(),'stores','o111'),{name:'Epicerie importee',brand:'',lat:50.83,lng:4.36,
+      geohash:'u151',osmImport:true});
+});
+await doit('legitime : premier signalement sur un magasin sans champ drinks',
+  ()=>assertSucceeds(updateDoc(doc(m,'stores','o111'),{drinks:arrayUnion(42)})));
+await doit('legitime : la boisson y est bien',
+  async()=>{ const d=await getDoc(doc(ad,'stores','o111')); if(!(d.data().drinks||[]).includes(42))throw new Error('absente'); });
+await doit('bloque : sur ce magasin aussi, on ne retire pas',
+  ()=>assertFails(updateDoc(doc(m,'stores','o111'),{drinks:arrayRemove(42)})));
 
 R.forEach(r=>console.log(r[0],'|',r[1]));
 console.log('\n'+(R.length-ko)+'/'+R.length+' conformes');

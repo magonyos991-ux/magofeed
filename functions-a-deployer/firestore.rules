@@ -970,10 +970,16 @@ service cloud.firestore {
                depuis la console du navigateur, appeler la fonction et vider
                le rayon de tous les Lidl, Aldi et Match de la base. Un compte
                ordinaire peut donc toujours ajouter, jamais retirer. Un ancien
-               document dont drinks n'est pas une liste n'est pas bloque. */
+               document dont drinks n'est pas une liste n'est pas bloque.
+               Lu par get() et non par resource.data.drinks : un magasin cree
+               par l'import d'exploration n'a PAS de champ drinks (on n'ecrit
+               pas une liste vide), et lire un champ absent est une ERREUR en
+               regles Firestore — donc un refus. Le premier signalement sur
+               chacun de ces magasins etait rejete, avec « verifie ta
+               connexion » a l'ecran. */
             && (!changed().hasAny(['drinks'])
-                || !(resource.data.drinks is list)
-                || (request.resource.data.drinks is list
+                || !(resource.data.get('drinks', null) is list)
+                || (request.resource.data.get('drinks', null) is list
                     && request.resource.data.drinks.hasAll(resource.data.drinks)))
             && (!changed().hasAny(['phone','website','description']) || gereLeMagasin(id))
             /* Les horaires restent collaboratifs sur un magasin ordinaire ;
