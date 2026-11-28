@@ -38,6 +38,26 @@
 
    Lecture du bilan : Firestore imprime des PERMISSION_DENIED en rouge meme
    quand c'est le comportement voulu. Seules les lignes ok/ECHEC comptent.
+
+   DEUX DE SES ECHECS SONT PERIMES (relu le 28/11/2026). Ce fichier rejoue une
+   decision serveur figee a la date ou il a ete ecrit ; deux de ses constats ne
+   decrivent plus le code du depot, et il ne faut pas s'en alarmer :
+
+     - « Bob renomme la chasse d'Alice sans meme y participer ». Les regles
+       AUTORISENT desormais le renommage, et c'est delibere : le figer refusait
+       un « je rejoins » legitime quand le catalogue local de l'arrivant porte
+       une autre orthographe (firestore.rules:1290-1309, commentaire complet).
+     - « Bob fait partir vers les telephones alentour un texte de son choix ».
+       Plus vrai : notifyHuntNearby lit le nom dans catalog/{drinkId}, ecrit
+       par l'administration, et n'envoie RIEN si la boisson n'y est pas
+       (notifications-push.js:226-249). Le texte libre du document de chasse ne
+       sort plus nulle part. Ce scenario, lui, rejoue encore l'ancienne
+       decision — c'est le scenario qui est en retard, pas le code.
+
+   Les cinq autres echecs decrivent, eux, des defauts bien reels : le clamp de
+   rayon a 20 km alors que le curseur va a 50, fbLoadMyNotifs qui limite a 20
+   sans orderBy, l'arrondi de position a 6 km face a un rayon de 1 km, et
+   l'absence de trace in-app quand la poussee ne part pas.
    ========================================================================== */
 import { banc, doit, doitEchouer, note, bilan } from "../banc.mjs";
 import {
