@@ -9,9 +9,32 @@
 #
 # ─── CE QU'IL FAUT, UNE SEULE FOIS ───────────────────────────────────────────
 #
-# 1. Un compte Apple Developer Program : 99 $/an, sur developer.apple.com.
-#    C'est le seul cout, et il est incontournable — Apple n'autorise aucune
-#    autre voie pour mettre une app sur un iPhone de maniere durable.
+# 1. Un compte Apple Developer Program. Apple n'en publie le prix qu'en
+#    dollars : « 99 USD [...] in local currency where available. Prices may
+#    vary by region and are listed in local currency during the enrollment
+#    process. » (developer.apple.com/support/enrollment/, lu le 28/11/2026).
+#    Le montant en euros n'apparait qu'une fois connecte, pendant
+#    l'inscription — compte environ 99 €. Inscris-toi par le SITE et non par
+#    l'app iPhone : par le site le renouvellement est MANUEL, par l'app c'est
+#    un abonnement qui se reconduit tout seul.
+#
+#    CE QUE CES 99 ACHETENT VRAIMENT : la presence dans l'App Store, et les
+#    notifications push NATIVES (refusees a un compte gratuit). Ce qu'ils
+#    n'achetent PAS : les notifications sur iPhone tout court — la PWA de
+#    Magofeed, posee sur l'ecran d'accueil, les recoit deja gratuitement.
+#    L'ancien commentaire disait ici qu'Apple « n'autorise aucune autre voie
+#    pour mettre une app sur un iPhone de maniere durable ». C'etait faux.
+#
+#    REVERSIBLE : si l'adhesion expire, l'app sort du magasin mais continue de
+#    tourner chez ceux qui l'ont installee, et un simple renouvellement la
+#    remet en ligne sans nouvelle revue (« You don't need to resubmit your
+#    apps », 24 h pour une app gratuite). En revanche les push natives
+#    s'arretent : l'accord de licence interdit APNs apres expiration.
+#
+#    A SAVOIR AVANT DE S'INSCRIRE, et c'est irreversible : en tant que
+#    particulier, « your personal legal name will be listed as the seller on
+#    the App Store » — pas de nom commercial, celui-ci est reserve aux
+#    societes. Verifie-le a l'ecran avant de valider.
 #
 # 2. Dans App Store Connect, creer l'app une fois : identifiant com.magofeed.app
 #
@@ -45,9 +68,90 @@ concurrency:
 jobs:
   construire:
     name: IPA signé, déposé sur TestFlight
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
+      # On s'arrete net si un secret manque. Cette etape tournait APRES
+      # l'installation des dependances, l'assemblage du site et pod install :
+      # une dizaine de minutes de machine Apple pour apprendre qu'il manquait
+      # une variable. Elle ne lit aucun fichier, donc elle passe en tete.
+      - name: Vérifier les secrets
+        env:
+          ISSUER: ${{ secrets.APPSTORE_ISSUER_ID }}
+          KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          P8: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          manque=""
+          [ -z "$ISSUER" ] && manque="$manque APPSTORE_ISSUER_ID"
+          [ -z "$KEY_ID" ] && manque="$manque APPSTORE_KEY_ID"
+          [ -z "$P8" ]     && manque="$manque APPSTORE_PRIVATE_KEY"
+          [ -z "$TEAM" ]   && manque="$manque APPLE_TEAM_ID"
+          if [ -n "$manque" ]; then
+            echo "::error::Secret(s) absent(s) :$manque — voir l'en-tete de .github/workflows/ios.yml"
+            exit 1
+          fi
+          echo "Les quatre secrets sont en place."
+
+      # ── POURQUOI CETTE ETAPE EXISTE ────────────────────────────────
+      # Apple REFUSE tout envoi construit avec un SDK trop vieux. Exigence en
+      # vigueur depuis le 28 avril 2026, mot pour mot sur
+      # developer.apple.com/news/upcoming-requirements/ :
+      #   « must be built with Xcode 26 or later using an SDK for iOS 26 »
+      #
+      # LE PIEGE, MESURE LE 28/11/2026. Ce workflow disait « runs-on: macos-15 ».
+      # Le tableau officiel de GitHub place cette etiquette sur la ligne Arm64,
+      # qui renvoie a macos-15-arm64-Readme.md ; et dans ce fichier une seule
+      # ligne porte la mention defaut :
+      #   | 16.4 (default) | 16F6 | /Applications/Xcode_16.4.app | ... Xcode.app |
+      # Xcode 16.4 ne fournit que le SDK iOS 18.5 — huit majeures sous le
+      # minimum. Or l'etape « Archiver » plus bas ne choisit aucun Xcode : elle
+      # prenait donc le defaut. Le binaire aurait ete refuse A L'ENVOI, apres
+      # vingt minutes de build, et apres avoir paye l'adhesion.
+      #
+      # Cette etape ne corrige rien — c'est « macos-26 » plus haut qui corrige,
+      # dont le Xcode par defaut est 26.6 (SDK iOS 26.5). Elle MESURE ce que la
+      # machine donne vraiment et s'arrete avant de construire si c'est
+      # insuffisant, parce que le defaut d'une image change sans prevenir et
+      # qu'un refus d'Apple vingt minutes plus tard ne dit pas pourquoi.
+      #
+      # ECHEANCE SUIVANTE, deja annoncee sur developer.apple.com/ios/submit/ :
+      #   « Starting April 2027, apps and games uploaded to App Store Connect
+      #     need to meet the following minimum requirements. »
+      #   « iOS and iPadOS apps must be built with the iOS & iPadOS 27 SDK or
+      #     later, and target iOS 15 or later »
+      # Ce jour-la, un seul chiffre change ici : SDK_IOS_MINIMUM a 27. Il faudra
+      # aussi monter « platform :ios » dans ios/App/Podfile de 13.0 a 15.0 —
+      # aujourd'hui 13.0 satisfait tout juste l'exigence de cible en vigueur
+      # depuis le 9 septembre 2026 (« must target iOS 13 or later »).
+      - name: Vérifier que le SDK iOS est assez récent pour Apple
+        env:
+          SDK_IOS_MINIMUM: "26"
+        run: |
+          set -e
+          echo "Xcode selectionne : $(xcodebuild -version | head -1)  [$(xcode-select -p)]"
+
+          sdk=$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || true)
+          if [ -z "$sdk" ]; then
+            echo "::error::Impossible de lire la version du SDK iOS : xcrun n'a rien rendu."
+            echo "::error::Sans cette mesure, impossible de savoir si Apple acceptera l'envoi."
+            exit 1
+          fi
+
+          majeure=${sdk%%.*}
+          echo "SDK iOS present : $sdk (majeure $majeure) — minimum exige par Apple : $SDK_IOS_MINIMUM"
+
+          if [ "$majeure" -lt "$SDK_IOS_MINIMUM" ]; then
+            echo "::error::SDK iOS $sdk : Apple REFUSERA cet envoi. Depuis le 28 avril 2026 elle exige un SDK iOS $SDK_IOS_MINIMUM ou plus."
+            echo "::error::Le build n'est pas lance : un refus d'Apple apres vingt minutes ne dit pas pourquoi."
+            echo "::error::Remede, gratuit : verifie l'etiquette runs-on (macos-26 donne Xcode 26.6 par defaut),"
+            echo "::error::ou force un Xcode deja installe sur l'image via DEVELOPER_DIR. Xcode presents ici :"
+            ls -d /Applications/Xcode*.app 2>/dev/null || echo "  (aucun /Applications/Xcode*.app)"
+            exit 1
+          fi
+
+          echo "SDK iOS $sdk : conforme a l'exigence Apple en vigueur."
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -68,26 +172,6 @@ jobs:
       - name: Installer les pods
         working-directory: ios/App
         run: pod install --repo-update
-
-      # On s'arrete net si un secret manque : mieux vaut un message clair
-      # qu'un build de 20 minutes qui echoue a la derniere seconde.
-      - name: Vérifier les secrets
-        env:
-          ISSUER: ${{ secrets.APPSTORE_ISSUER_ID }}
-          KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
-          P8: ${{ secrets.APPSTORE_PRIVATE_KEY }}
-          TEAM: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          manque=""
-          [ -z "$ISSUER" ] && manque="$manque APPSTORE_ISSUER_ID"
-          [ -z "$KEY_ID" ] && manque="$manque APPSTORE_KEY_ID"
-          [ -z "$P8" ]     && manque="$manque APPSTORE_PRIVATE_KEY"
-          [ -z "$TEAM" ]   && manque="$manque APPLE_TEAM_ID"
-          if [ -n "$manque" ]; then
-            echo "::error::Secret(s) absent(s) :$manque — voir l'en-tete de .github/workflows/ios.yml"
-            exit 1
-          fi
-          echo "Les quatre secrets sont en place."
 
       # La cle vit le temps du build, dans le dossier ou Apple la cherche.
       # La machine est detruite juste apres le run.
